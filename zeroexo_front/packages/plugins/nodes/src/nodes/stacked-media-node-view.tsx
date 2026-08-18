@@ -14,7 +14,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Package, Upload } from 'lucide-react';
-import { UpdateNodeDataCommand } from '@zeroexo/core';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -22,7 +21,7 @@ import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView } from '../base-node-view.js';
 import { StackCollectToast } from './stacked-media-toast.js';
-import { activateStackCard, collectCard, mergeStacks, undoCollect as undoCollectModel } from './stacked-media-model.js';
+import { activateStackCard, appendCards, collectCard, mergeStacks, replaceCardContent, undoCollect as undoCollectModel } from './stacked-media-model.js';
 import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
 import {
   parseStackedMediaData,
@@ -281,14 +280,10 @@ export function StackedMediaNodeView({
       }
     }
     if (newCards.length > 0) {
-      const updatedCards = [...data.cards, ...newCards];
-      // 跳到本次上传的第一张
-      const nextActive = updatedCards.length - newCards.length;
-      commandQueue.execute(new UpdateNodeDataCommand(node.id, {
-        cards: updatedCards,
-        activeIndex: nextActive,
-      } as Record<string, unknown>));
-      setActiveIndex(nextActive);
+      // 统一走 model:追加卡片 + 跳到本次上传的第一张,保持视图不含数据变换规则
+      const result = appendCards(node.id, data.cards, newCards);
+      commandQueue.execute(result.command);
+      setActiveIndex(result.activeIndex);
     }
     setUploading(false);
   }, [commandQueue, uploading, fileToCard, data.cards, node.id]);
@@ -304,10 +299,8 @@ export function StackedMediaNodeView({
     try {
       const card = await fileToCard(file);
       if (card) {
-        const updatedCards = data.cards.map((c, i) => (i === activeIndex ? card : c));
-        commandQueue.execute(new UpdateNodeDataCommand(node.id, {
-          cards: updatedCards,
-        } as Record<string, unknown>));
+        const result = replaceCardContent(node.id, data.cards, activeIndex, card);
+        commandQueue.execute(result.command);
       }
     } catch (err) {
       console.warn('[StackNode] 替换失败:', file.name, err);

@@ -924,7 +924,10 @@
     "stackEjectTitle": "個別ノードとして取り出し自動接続",
     "stackOnlyAcceptsMedia": "リソースブラウザは画像/動画の接続のみ受け付けます",
     "stackConvertTo": "スタックに変換",
-    "stackCreateNew": "スタックノードを作成"
+    "stackCreateNew": "スタックノードを作成",
+    "stackSelected": "選択ノードをスタック",
+    "stackSelectedDone": "{{count}} 個のノードをスタックしました",
+    "stackSelectedResult": "{{collected}} 個のノードをスタック、{{skipped}} 個のサポート外ノードをスキップ"
   },
   "toolTitles": {
     "duplicate": "ノード複製",

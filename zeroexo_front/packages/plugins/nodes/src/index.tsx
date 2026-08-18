@@ -52,7 +52,7 @@ export { createAssetNode } from './asset-node-factory.js';
 // 图片替换 — 上传文件 → 替换节点图片(支持撤销/重做)
 export { replaceNodeImage } from './utils/replace-node-image.js';
 export { convertToStack, createStackNode } from './node-tools.js';
-
+export { stackSelectedNodes } from './nodes/stacked-media-model.js';
 // 视图组件 import(供 extension factory 使用)
 import { TextNodeView, getTextNodePins } from './nodes/text-node-view.js';
 import { GeneratorNodeView, getGeneratorNodePins } from './nodes/generator-node-view.js';

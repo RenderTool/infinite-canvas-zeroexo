@@ -18,7 +18,7 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, convertToStack, createStackNode } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, convertToStack, createStackNode, stackSelectedNodes } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -72,6 +72,23 @@ function htmlToPlainText(html: string): string {
     .replace(/&amp;/gi, '&')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** 计算节点列表包围盒(用于多选堆叠的新节点落点) */
+function computeNodesBounds(nodes: NodeRecord[]): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const x = n.position?.x ?? 0;
+    const y = n.position?.y ?? 0;
+    const w = n.size?.width ?? 200;
+    const h = n.size?.height ?? 80;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + w > maxX) maxX = x + w;
+    if (y + h > maxY) maxY = y + h;
+  }
+  if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  return { minX, minY, maxX, maxY };
 }
 
 /** 分镜生成提示词：指导 AI 将剧本拆解为结构化镜头 JSON */
@@ -604,6 +621,48 @@ export function useEditorInteractions({
               })();
             },
           });
+        }
+
+        // ===== 多选堆叠(选中≥2 且右键目标属于选择集,对整组选择生效) =====
+        const selection = refs.store?.getSelection();
+        const selectedIds = selection?.selectedNodeIds;
+        if (node && selectedIds && selectedIds.has(nodeId) && selectedIds.size >= 2) {
+          const isNodeStackable = (n: NodeRecord): boolean => {
+            if (n.type === 'group') return false;
+            const ext = state.extensions.get(n.type);
+            return Boolean(ext?.capabilities?.stackable);
+          };
+          const graphNow = refs.store?.getGraph();
+          const selectedNodes = (graphNow?.nodes ?? []).filter((n) => selectedIds.has(n.id));
+          const stackableCount = selectedNodes.filter(isNodeStackable).length;
+          if (stackableCount > 0) {
+            items.push({ key: 'divider-stack-selected', divider: true, label: '', onClick: () => {} });
+            items.push({
+              key: 'stackSelected',
+              label: t('nodes.stackSelected', { count: stackableCount }),
+              icon: createElement(Package, { size: 14 }),
+              onClick: () => {
+                const g = refs.store?.getGraph();
+                if (!g) return;
+                const sn = g.nodes.filter((n) => selectedIds.has(n.id));
+                const bounds = computeNodesBounds(sn);
+                const result = stackSelectedNodes(
+                  { x: bounds.maxX + 120, y: bounds.minY },
+                  sn,
+                  { edges: g.edges },
+                  isNodeStackable,
+                );
+                if (result) {
+                  refs.commandQueue?.execute(result.command);
+                  if (result.skippedCount > 0) {
+                    message.info(t('nodes.stackSelectedResult', { collected: result.collectedCount, skipped: result.skippedCount }));
+                  } else {
+                    message.success(t('nodes.stackSelectedDone', { count: result.collectedCount }));
+                  }
+                }
+              },
+            });
+          }
         }
 
         // ===== StackNode 操作组(仅图片/视频节点) =====

@@ -70,6 +70,121 @@ export function collectCard(
   };
 }
 
+export interface StackSelectedResult {
+  command: BatchCommand;
+  stackNodeId: string;
+  cards: StackCard[];
+  collectedCount: number;
+  skippedCount: number;
+  skippedIds: string[];
+}
+
+/** 各源类型的 output pin id(用于把源节点的下游边转移到新 StackNode) */
+const SOURCE_OUTPUT_PIN: Record<string, string> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  text: 'output',
+  'stacked-media': 'media',
+};
+
+/**
+ * 多选堆叠:将多个源节点原子收纳进一个新 StackNode。
+ * 仅收纳通过 isStackable 判定的节点(image/video/audio/text/stacked-media)。
+ * - stacked-media 源节点展平其卡片后并入
+ * - 源节点所有关联边显式删除(RemoveNodeCommand 不清理边,悬挂边会残留数据)
+ * - 源 Stack 的下游边转移到新 StackNode,避免静默丢失图关系
+ * 返回原子 BatchCommand 与跳过摘要,调用方负责 UI 提示。
+ */
+export function stackSelectedNodes(
+  position: { x: number; y: number },
+  sourceNodes: NodeRecord[],
+  graph: { edges: EdgeRecord[] },
+  isStackable: (node: NodeRecord) => boolean,
+): StackSelectedResult | null {
+  const stackable = sourceNodes.filter(isStackable);
+  if (stackable.length === 0) return null;
+
+  const stackNodeId = genId('stack-node');
+  const stackNode: NodeRecord = {
+    id: stackNodeId,
+    type: 'stacked-media',
+    position,
+    size: { width: 620, height: 348 },
+    title: '堆叠媒体',
+    data: { cards: [], activeIndex: 0 },
+  };
+
+  const commands: Command[] = [new AddNodeCommand(stackNode)];
+  const cards: StackCard[] = [];
+  const removedIds = new Set(stackable.map((n) => n.id));
+
+  for (const src of stackable) {
+    // 源 Stack:展平其卡片
+    if (src.type === 'stacked-media') {
+      const srcData = (src.data ?? {}) as Record<string, unknown>;
+      const srcCards = (srcData.cards as StackCard[] | undefined) ?? [];
+      for (const c of srcCards) {
+        cards.push({ ...c, id: genId('card') });
+      }
+      // 下游边转移到新 StackNode(output pin 换成 'media'),上游边删除
+      for (const e of graph.edges) {
+        if (e.source.nodeId === src.id) {
+          commands.push(new RemoveEdgeCommand(e.id));
+          if (!removedIds.has(e.target.nodeId)) {
+            commands.push(new AddEdgeCommand({
+              ...e,
+              id: genId('merged-edge'),
+              source: { nodeId: stackNodeId, pinId: 'media' },
+            }));
+          }
+        } else if (e.target.nodeId === src.id) {
+          commands.push(new RemoveEdgeCommand(e.id));
+        }
+      }
+      commands.push(new RemoveNodeCommand(src.id));
+      continue;
+    }
+
+    // 常规源节点:构造卡片 + 删除全部关联边
+    cards.push({
+      id: genId('card'),
+      sourceType: src.type as StackCard['sourceType'],
+      sourceNodeId: src.id,
+      data: (src.data as Record<string, unknown>) ?? {},
+      title: src.title,
+      size: src.size,
+    });
+    for (const e of graph.edges) {
+      if (e.source.nodeId !== src.id && e.target.nodeId !== src.id) continue;
+      commands.push(new RemoveEdgeCommand(e.id));
+      // 源节点有下游边且下游节点未被收纳 → 转移到新 StackNode,保留图语义
+      if (e.source.nodeId === src.id && !removedIds.has(e.target.nodeId)) {
+        commands.push(new AddEdgeCommand({
+          ...e,
+          id: genId('stacked-edge'),
+          source: { nodeId: stackNodeId, pinId: SOURCE_OUTPUT_PIN[src.type] ?? 'media' },
+        }));
+      }
+    }
+    commands.push(new RemoveNodeCommand(src.id));
+  }
+
+  commands.push(new UpdateNodeDataCommand(
+    stackNodeId,
+    { cards, activeIndex: Math.max(0, cards.length - 1) } as Record<string, unknown>,
+  ));
+
+  return {
+    command: new BatchCommand(commands, 'stacked-media-stack-selected'),
+    stackNodeId,
+    cards,
+    collectedCount: stackable.length,
+    skippedCount: sourceNodes.length - stackable.length,
+    skippedIds: sourceNodes.filter((n) => !isStackable(n)).map((n) => n.id),
+  };
+}
+
 export interface MergeStacksResult {
   command: BatchCommand;
   cards: StackCard[];

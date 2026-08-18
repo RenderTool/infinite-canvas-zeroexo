@@ -924,7 +924,10 @@
     "stackEjectTitle": "Eject as an independent node with auto connection",
     "stackOnlyAcceptsMedia": "Resource browser only accepts image/video inputs",
     "stackConvertTo": "Convert to Stack",
-    "stackCreateNew": "Create Stack Node"
+    "stackCreateNew": "Create Stack Node",
+    "stackSelected": "Stack Selected Nodes",
+    "stackSelectedDone": "{{count}} nodes stacked",
+    "stackSelectedResult": "{{collected}} nodes stacked, {{skipped}} unsupported nodes skipped"
   },
   "toolTitles": {
     "duplicate": "Duplicate Node",

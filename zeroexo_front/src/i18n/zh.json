@@ -923,7 +923,10 @@
     "stackEjectTitle": "移出为独立节点并自动连线",
     "stackOnlyAcceptsMedia": "资源浏览器仅接受图片/视频连入",
     "stackConvertTo": "转入堆叠",
-    "stackCreateNew": "生成堆叠节点"
+    "stackCreateNew": "生成堆叠节点",
+    "stackSelected": "堆叠所选节点",
+    "stackSelectedDone": "已收纳 {{count}} 个节点",
+    "stackSelectedResult": "已收纳 {{collected}} 个节点，跳过 {{skipped}} 个不支持的节点"
   },
   "toolTitles": {
     "duplicate": "复制节点",
