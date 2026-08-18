@@ -134,7 +134,7 @@ export function PublicPromptSection({ onViewAll }: PublicPromptSectionProps): Re
   const { theme } = useTheme();
   const { t, i18n } = useTranslation();
   const { isAuthenticated } = useAuth();
-  const { modal, message: antdMessage } = AntdApp.useApp();
+  const { message: antdMessage } = AntdApp.useApp();
   // 防止同个卡片重复点击
   const cloningIds = useRef(new Set<string>());
   // 每次挂载(刷新)生成新随机种子: 同一 seed 下滚动分页稳定不重复,不同 seed 下每次刷新换一批

@@ -280,6 +280,8 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
     // 基准尺寸与 image/video 节点一致
     defaultSize: { width: 620, height: 348 },
     resizable: true,
+    // 用户缩放沿当前显示卡片比例进行；切换卡片时由领域命令重新计算比例。
+    lockAspectRatio: true,
     minSize: { width: 220, height: 160 },
     specialAppearance: true,
     runtime: createNodeRuntime({ width: 500, height: 500 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),

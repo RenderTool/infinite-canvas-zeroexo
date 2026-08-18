@@ -25,22 +25,22 @@ const ALL_NODE_TYPES: AddNodeType[] = [
 const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
   // 生成:可输出到所有节点(含自身,支持链式生成)
   generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench'],
-  // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成
-  text: ['text', 'image', 'video', 'audio', 'script', 'generator'],
+  // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成/堆叠
+  text: ['text', 'image', 'video', 'audio', 'stacked-media', 'script', 'generator'],
   // 图片:图生图/图生视频/图生音频/生成/堆叠
   image: ['image', 'video', 'audio', 'stacked-media', 'generator'],
   // 视频:视频生视频/视频生音频/生成/堆叠
   video: ['video', 'audio', 'stacked-media', 'generator'],
-  // 音频:音频生视频(多模态)/生成
-  audio: ['video', 'generator'],
+  // 音频:音频生视频(多模态)/生成/堆叠
+  audio: ['video', 'stacked-media', 'generator'],
   // 剧本:只能连分镜
   script: ['storyboard'],
   // 分镜:只能连工作台
   storyboard: ['workbench'],
   // 工作台:终端节点,不接下游
   workbench: [],
-  // 堆叠:终端节点,不接下游(未来可接生成器进一步处理)
-  'stacked-media': [],
+  // 堆叠是当前 item 的切换器：可进入生成链路，也可连入另一个 StackNode 触发合并。
+  'stacked-media': ['image', 'video', 'audio', 'generator', 'stacked-media'],
 };
 
 /**

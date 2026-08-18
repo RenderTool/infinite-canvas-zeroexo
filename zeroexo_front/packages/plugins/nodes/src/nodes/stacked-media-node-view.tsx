@@ -13,18 +13,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Package, Upload } from 'lucide-react';
-import { ResizeNodeCommand, UpdateNodeDataCommand } from '@zeroexo/core';
+import { Package, Upload } from 'lucide-react';
+import { UpdateNodeDataCommand } from '@zeroexo/core';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView } from '../base-node-view.js';
-import { VideoNodeView } from './video-node-view.js';
-import { useHydratedContent } from '../utils/hydrate.js';
 import { StackCollectToast } from './stacked-media-toast.js';
-import { collectCard, mergeStacks, undoCollect as undoCollectModel } from './stacked-media-model.js';
+import { activateStackCard, collectCard, mergeStacks, undoCollect as undoCollectModel } from './stacked-media-model.js';
+import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
 import {
   parseStackedMediaData,
   type StackCard,
@@ -55,362 +54,6 @@ function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// ===== 媒体缩略图(hydrate 感知) =====
-
-function MediaThumbnail({
-  cardData,
-  type,
-  style,
-}: {
-  cardData: Record<string, unknown>;
-  type: 'image' | 'video';
-  style?: React.CSSProperties;
-}): React.ReactElement {
-  const content = (cardData?.content as string | undefined) ?? '';
-  const storageKey = cardData?.storageKey as string | undefined;
-  const src = useHydratedContent(storageKey, content);
-
-  if (!src) {
-    return <div style={{ width: '100%', height: '100%', background: '#555', ...style }} />;
-  }
-  if (type === 'image') {
-    return (
-      <img
-        src={src}
-        alt=""
-        draggable={false}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', ...style }}
-      />
-    );
-  }
-  return (
-    <video
-      src={src}
-      muted
-      preload="metadata"
-      playsInline
-      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none', ...style }}
-    />
-  );
-}
-
-/** 根据卡片类型渲染对应媒体内容 */
-function renderCardContent(
-  card: StackCard,
-  cardWidth: number,
-  cardHeight: number,
-): React.ReactElement {
-  if (card.sourceType === 'image') {
-    // 使用图片原生渲染(更轻量)
-    const content = (card.data?.content as string | undefined) ?? '';
-    const storageKey = card.data?.storageKey as string | undefined;
-    return <ImageContent src={content} storageKey={storageKey} />;
-  }
-
-  if (card.sourceType !== 'video') {
-    const label = card.title || card.sourceType;
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 10,
-          color: 'var(--color-text-secondary, #78716c)',
-          background: 'var(--color-bg-surface, #f5f5f4)',
-        }}
-      >
-        <FileText size={28} strokeWidth={1.6} />
-        <span style={{ maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{label}</span>
-      </div>
-    );
-  }
-
-  // 视频: 使用 VideoNodeView contentOnly 渲染
-  const virtualNode = {
-    id: card.id,
-    type: card.sourceType,
-    title: card.title ?? '',
-    data: card.data,
-    size: { width: cardWidth, height: cardHeight },
-    position: { x: 0, y: 0 },
-  } as unknown as NodeRendererProps['node'];
-
-  const props = {
-    node: virtualNode,
-    pins: [],
-    isSelected: false,
-    isHovered: false,
-    forceShowPins: false,
-    updateNode: () => {},
-    invK: 1,
-    connectionController: null,
-    contentOnly: true,
-  } as NodeRendererProps & { contentOnly: boolean; connectionController: ConnectionController | null };
-
-  return <VideoNodeView {...props} />;
-}
-
-function ImageContent({ src, storageKey }: { src: string; storageKey?: string }): React.ReactElement {
-  const hydratedSrc = useHydratedContent(storageKey, src);
-  if (!hydratedSrc) {
-    return <div style={{ width: '100%', height: '100%', background: '#555' }} />;
-  }
-  return (
-    <img
-      src={hydratedSrc}
-      alt=""
-      draggable={false}
-      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-    />
-  );
-}
-
-/** 主图区替换按钮:hover 父容器显示,复用 base-node-view ReplaceButton 的视觉 */
-function MainReplaceButton({ onClick }: { onClick: () => void }): React.ReactElement {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      type="button"
-      title="替换当前卡片"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        position: 'absolute',
-        left: 6,
-        bottom: 6,
-        width: 24,
-        height: 24,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 6,
-        border: 'none',
-        background: 'rgba(0,0,0,0.55)',
-        color: '#fff',
-        cursor: 'pointer',
-        transition: 'opacity 0.15s',
-        zIndex: 10,
-        opacity: hover ? 0.85 : 0,
-      }}
-    >
-      <Upload size={13} />
-    </button>
-  );
-}
-
-// ===== 底部导航栏(完全复刻 image-viewer.html:两端箭头 + 滑动窗口缩略图 + 页码) =====
-
-/** 固定缩略图数量 */
-const FIXED_THUMB_COUNT = 5;
-
-/** 滑动窗口:以 activeIndex 为中心,两端 clamp 到合法范围 */
-function windowRange(activeIndex: number, total: number): { start: number; count: number } {
-  if (total <= FIXED_THUMB_COUNT) return { start: 0, count: total };
-  let start = activeIndex - Math.floor(FIXED_THUMB_COUNT / 2);
-  if (start < 0) start = 0;
-  if (start + FIXED_THUMB_COUNT > total) start = total - FIXED_THUMB_COUNT;
-  return { start, count: FIXED_THUMB_COUNT };
-}
-
-function BottomNav({
-  cards,
-  activeIndex,
-  onJump,
-  onPrev,
-  onNext,
-}: {
-  cards: StackCard[];
-  activeIndex: number;
-  onJump: (index: number) => void;
-  onPrev: () => void;
-  onNext: () => void;
-}): React.ReactElement {
-  const { theme } = useTheme();
-  const total = cards.length;
-  const isDark = theme.mode === 'dark';
-
-  const borderColor = isDark ? 'rgba(255,255,255,0.15)' : 'var(--color-border, #e7e5e4)';
-  const textMuted = isDark ? 'rgba(255,255,255,0.7)' : 'var(--color-text-secondary, #57534e)';
-  const pageColor = isDark ? 'rgba(255,255,255,0.5)' : 'var(--color-text-tertiary, #a8a29e)';
-  const hoverPrimary = 'var(--color-primary, #e94560)';
-
-  // 箭头按钮样式(完全复刻 image-viewer.html;禁用态降透明度)
-  const makeArrowStyle = (disabled: boolean): React.CSSProperties => ({
-    width: 32,
-    height: 32,
-    border: `1px solid ${borderColor}`,
-    borderRadius: '50%',
-    background: isDark ? 'transparent' : 'var(--color-bg-page, #ffffff)',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    fontSize: 14,
-    color: textMuted,
-    userSelect: 'none',
-    flexShrink: 0,
-    padding: 0,
-    opacity: disabled ? 0.35 : 1,
-    transition: 'all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
-  });
-
-  const onArrowEnter = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.borderColor = hoverPrimary;
-    e.currentTarget.style.color = hoverPrimary;
-    e.currentTarget.style.transform = 'scale(1.1)';
-  };
-  const onArrowLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.borderColor = borderColor;
-    e.currentTarget.style.color = textMuted;
-    e.currentTarget.style.transform = 'scale(1)';
-  };
-
-  // 滑动窗口:始终渲染 5 格,窗口内有卡片的位置显示缩略图,其余为虚线占位
-  const win = windowRange(activeIndex, total);
-  const slots = Array.from({ length: FIXED_THUMB_COUNT }, (_, i) => {
-    const realIndex = win.start + i;
-    const card = realIndex < total ? cards[realIndex] : undefined;
-    return card ? { card, realIndex } : null;
-  });
-  const prevDisabled = activeIndex <= 0;
-  const nextDisabled = activeIndex >= total - 1;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        width: '100%',
-        height: 48,
-        padding: '0 8px',
-        gap: 4,
-      }}
-    >
-      {/* 左箭头(导航栏最左端,首张禁用) */}
-      <button
-        type="button"
-        onClick={onPrev}
-        onPointerDown={(e) => e.stopPropagation()}
-        disabled={prevDisabled}
-        style={makeArrowStyle(prevDisabled)}
-        title="上一张"
-        onMouseEnter={prevDisabled ? undefined : onArrowEnter}
-        onMouseLeave={prevDisabled ? undefined : onArrowLeave}
-      >
-        &#10094;
-      </button>
-
-      {/* 滑动窗口圆形缩略图(始终 5 格,中间弹性区) */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          flex: 1,
-          justifyContent: 'center',
-        }}
-      >
-        {slots.map((slot, i) => {
-          if (!slot) {
-            // 窗口外占位:虚线边框
-            return (
-              <div
-                key={`empty-${i}`}
-                style={{
-                  width: 40,
-                  height: 40,
-                  border: `2px dashed ${isDark ? 'rgba(255,255,255,0.12)' : 'var(--color-border, #e7e5e4)'}`,
-                  borderRadius: '50%',
-                  flexShrink: 0,
-                  background: 'transparent',
-                  opacity: 0.5,
-                }}
-              />
-            );
-          }
-          const isActive = slot.realIndex === activeIndex;
-          return (
-            <div
-              key={slot.card.id}
-              onClick={() => onJump(slot.realIndex)}
-              onPointerDown={(e) => e.stopPropagation()}
-              style={{
-                width: 40,
-                height: 40,
-                border: `2px solid ${isActive ? hoverPrimary : 'transparent'}`,
-                borderRadius: '50%',
-                overflow: 'hidden',
-                cursor: 'pointer',
-                flexShrink: 0,
-                background: isDark ? 'rgba(255,255,255,0.1)' : 'var(--color-bg-page, #ffffff)',
-                padding: 2,
-                transition: 'border-color 0.2s ease-out, transform 0.2s ease-out',
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.borderColor = isDark ? 'rgba(255,255,255,0.3)' : 'var(--color-border-strong, #d6d3d1)';
-                  e.currentTarget.style.transform = 'scale(1.08)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.borderColor = 'transparent';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }
-              }}
-              title={slot.card.title ?? slot.card.sourceType}
-            >
-              <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden' }}>
-                {slot.card.sourceType === 'image' || slot.card.sourceType === 'video'
-                  ? <MediaThumbnail cardData={slot.card.data} type={slot.card.sourceType} />
-                  : <FileText size={16} color={textMuted} />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 右箭头(导航栏最右端,末张禁用) + 页码 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <button
-          type="button"
-          onClick={onNext}
-          onPointerDown={(e) => e.stopPropagation()}
-          disabled={nextDisabled}
-          style={makeArrowStyle(nextDisabled)}
-          title="下一张"
-          onMouseEnter={nextDisabled ? undefined : onArrowEnter}
-          onMouseLeave={nextDisabled ? undefined : onArrowLeave}
-        >
-          &#10095;
-        </button>
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: pageColor,
-            minWidth: 32,
-            textAlign: 'center',
-            userSelect: 'none',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {total > 0 ? `${activeIndex + 1}/${total}` : '0/0'}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 /** StackNodeView 主组件 */
 export function StackedMediaNodeView({
   node,
@@ -430,6 +73,9 @@ export function StackedMediaNodeView({
   const { theme } = useTheme();
   const data = parseStackedMediaData(node.data as Record<string, unknown> | undefined);
   const [activeIndex, setActiveIndex] = useState(data.activeIndex);
+  const hasCards = data.cards.length > 0;
+  // 派生状态必须在所有 effect 之前声明，避免 effect 依赖数组读取 TDZ 变量。
+  const activeCard = hasCards ? data.cards[activeIndex] ?? null : null;
   /** 切换动画期间(true 时所有卡片渲染静帧缩略图,视频暂停渲染) */
   const [isAnimating, setIsAnimating] = useState(false);
   const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -482,7 +128,6 @@ export function StackedMediaNodeView({
   // 非打扰式收纳:检测到新连线(image/video 源连入 prompt pin)时直接自动收纳,
   // 画布锚定胶囊提示 5 秒内可「移除」撤销,不弹窗
   const [collectToast, setCollectToast] = useState<CollectSnapshot | null>(null);
-  const lastSizedCardRef = useRef<string | null>(null);
 
   const handledEdgesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -505,44 +150,39 @@ export function StackedMediaNodeView({
   const handlePrev = useCallback(() => {
     if (activeIndex > 0) {
       beginSwitchAnimation();
-      setActiveIndex(activeIndex - 1);
-      updateNode({ data: { ...data, activeIndex: activeIndex - 1 } });
+      const nextIndex = activeIndex - 1;
+      if (commandQueue) {
+        commandQueue.execute(activateStackCard(node, data, nextIndex).command);
+      } else {
+        updateNode({ data: { ...data, activeIndex: nextIndex } });
+      }
+      setActiveIndex(nextIndex);
     }
-  }, [activeIndex, data, updateNode, beginSwitchAnimation]);
+  }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
 
   const handleNext = useCallback(() => {
     if (activeIndex < data.cards.length - 1) {
       beginSwitchAnimation();
-      setActiveIndex(activeIndex + 1);
-      updateNode({ data: { ...data, activeIndex: activeIndex + 1 } });
+      const nextIndex = activeIndex + 1;
+      if (commandQueue) {
+        commandQueue.execute(activateStackCard(node, data, nextIndex).command);
+      } else {
+        updateNode({ data: { ...data, activeIndex: nextIndex } });
+      }
+      setActiveIndex(nextIndex);
     }
-  }, [activeIndex, data, updateNode, beginSwitchAnimation]);
+  }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
 
   const handleJump = useCallback((index: number) => {
     if (index === activeIndex) return;
     beginSwitchAnimation();
+    if (commandQueue) {
+      commandQueue.execute(activateStackCard(node, data, index).command);
+    } else {
+      updateNode({ data: { ...data, activeIndex: index } });
+    }
     setActiveIndex(index);
-    updateNode({ data: { ...data, activeIndex: index } });
-  }, [activeIndex, data, updateNode, beginSwitchAnimation]);
-
-  // 媒体切换时按当前素材比例调整 StackNode 总高度，导航栏作为附加区域保留。
-  // 500x500 只作为设计基准，不把节点锁成固定相册容器。
-  useEffect(() => {
-    if (!commandQueue || !activeCard) return;
-    const width = node.size?.width ?? 620;
-    const naturalWidth = Number(activeCard.data.naturalWidth);
-    const naturalHeight = Number(activeCard.data.naturalHeight);
-    if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) return;
-    const targetHeight = Math.max(220, Math.round(width * (naturalHeight / naturalWidth) + 56));
-    const resizeKey = `${activeCard.id}:${width}:${targetHeight}`;
-    if (lastSizedCardRef.current === resizeKey || Math.abs((node.size?.height ?? 0) - targetHeight) <= 2) return;
-    lastSizedCardRef.current = resizeKey;
-    commandQueue.execute(new ResizeNodeCommand(
-      node.id,
-      { x: node.position.x, y: node.position.y, width, height: node.size?.height ?? 348 },
-      { x: node.position.x, y: node.position.y, width, height: targetHeight },
-    ));
-  }, [activeCard, commandQueue, node.id, node.position.x, node.position.y, node.size?.height, node.size?.width]);
+  }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
 
   // ===== 收纳:连线预览 → 卡片(删边 + 删源节点 + 追加卡片,自动执行 + 胶囊可撤销) =====
   const handleCollect = useCallback((edge: EdgeRecord, sourceNode: NodeRecord) => {
@@ -653,12 +293,8 @@ export function StackedMediaNodeView({
     setUploading(false);
   }, [commandQueue, uploading, fileToCard, data.cards, node.id]);
 
-  const hasCards = data.cards.length > 0;
-
   // 标题栏图标
   const titleIcon = <Package size={14} />;
-
-  const activeCard = hasCards ? data.cards[activeIndex] : null;
 
   /** 替换活跃卡片内容(主图区替换按钮) */
   const handleReplacePick = useCallback(async (files: FileList | null) => {
@@ -745,7 +381,7 @@ export function StackedMediaNodeView({
           background: theme.node.contentBackground,
         }}
       >
-        {activeCard && renderCardContent(activeCard, (node.size?.width ?? 620) - 32, (node.size?.height ?? 348) - 80)}
+        {activeCard && <StackMediaContent card={activeCard} width={(node.size?.width ?? 620) - 32} height={(node.size?.height ?? 348) - 80} />}
       </div>
       {/* 活跃卡替换按钮(hover 主图区显示,复用 ReplaceButton 视觉) */}
       <MainReplaceButton onClick={() => replaceFileInputRef.current?.click()} />
@@ -795,7 +431,7 @@ export function StackedMediaNodeView({
             padding: '0 4px',
           }}
         >
-          <BottomNav
+          <StackBottomNav
             cards={data.cards}
             activeIndex={activeIndex}
             onJump={handleJump}

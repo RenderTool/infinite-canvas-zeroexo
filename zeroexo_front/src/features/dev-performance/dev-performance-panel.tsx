@@ -43,6 +43,8 @@ export function DevPerformancePanel({ store, syncStatus }: DevPerformancePanelPr
   });
 
   useEffect(() => {
+    // 关闭面板时不保留 RAF 采样循环，开发工具不能反过来污染性能数据。
+    if (!open) return;
     let frame = 0;
     let last = performance.now();
     let frames = 0;
@@ -70,7 +72,7 @@ export function DevPerformancePanel({ store, syncStatus }: DevPerformancePanelPr
       running = false;
       cancelAnimationFrame(frame);
     };
-  }, [store]);
+  }, [store, open]);
 
   return (
     <div

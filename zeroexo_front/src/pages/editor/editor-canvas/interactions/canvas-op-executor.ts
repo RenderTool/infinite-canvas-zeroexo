@@ -188,7 +188,7 @@ export class CanvasOpExecutor {
 
     if (ops.length === 1) {
       const validation = this.validateOp(ops[0]!);
-      if (!validation.valid) return this.reject(baseMetrics, validation.reason, startedAt);
+      if (!validation.valid) return this.reject(baseMetrics, validation.reason ?? 'Validation failed', startedAt);
       const cmd = this.toCommand(ops[0]!);
       if (!cmd) return this.reject(baseMetrics, 'Unsupported canvas operation', startedAt);
       baseMetrics.commandCount = 1;
@@ -201,7 +201,7 @@ export class CanvasOpExecutor {
     const cmds: Command[] = [];
     for (const op of ops) {
       const validation = this.validateOp(op);
-      if (!validation.valid) return this.reject(baseMetrics, validation.reason, startedAt);
+      if (!validation.valid) return this.reject(baseMetrics, validation.reason ?? 'Validation failed', startedAt);
       const cmd = this.toCommand(op);
       if (cmd) cmds.push(cmd);
     }

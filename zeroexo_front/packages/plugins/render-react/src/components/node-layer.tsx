@@ -241,7 +241,9 @@ const NodeItem = React.memo(
     // 切分/裁剪等任意宽高比节点(如图片拆解切片)必须回退到真实尺寸渲染(React Flow 模式),
     // 否则相邻节点拼合时还会因合成层设备像素取整产生缝隙
     const defaultSize = ext?.defaultSize;
-    const canScale = ext?.lockAspectRatio === true;
+    // 旧扩展仍可使用 lockAspectRatio；新节点优先从 Runtime Contract 声明缩放策略。
+    const scaleContract = ext?.runtime?.definition?.size;
+    const canScale = ext?.lockAspectRatio === true || scaleContract?.mode === 'uniform';
     const rawSx = defaultSize && defaultSize.width > 0 ? size.width / defaultSize.width : 1;
     const rawSy = defaultSize && defaultSize.height > 0 ? size.height / defaultSize.height : 1;
     const isUniformScale = Math.abs(rawSx - rawSy) <= 0.001;
@@ -649,5 +651,4 @@ function DefaultNodeContent({
     </div>
   );
 }
-
 

@@ -129,7 +129,7 @@ export async function syncProjectToCloud(
       // 增量模式:只提取变更的节点。
       // 用 Map 索引避免对每个 changedId 做 O(n) find(500+ 节点下避免 O(n²))
       const nodeById = new Map(
-        (nodes as Record<string, unknown>[]).map((n) => [n.id as string, n] as const),
+        (nodes as unknown as Record<string, unknown>[]).map((n) => [n.id as string, n] as const),
       );
       const deltaNodes: unknown[] = [];
       let deletedCount = 0;

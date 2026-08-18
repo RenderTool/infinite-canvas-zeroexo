@@ -19,8 +19,10 @@ import {
   Heading1,
 } from 'lucide-react';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
-import { AddNodeCommand, AddEdgeCommand, BatchCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, BatchCommand } from '@zeroexo/core';
 import { setImageBlob } from '@zeroexo/plugin-persistence';
+import { collectCard } from './nodes/stacked-media-model.js';
+import { parseStackedMediaData } from './nodes/stacked-media-types.js';
 
 // ===== 通用工具(所有节点共用) =====
 
@@ -320,7 +322,7 @@ export function getImageTools(): ToolDefinition[] {
       icon: <Package size={14} />,
       group: 'edit',
       run: (node: NodeRecord, ctx: ToolContext) => {
-        createStackNode(node, ctx);
+        convertToStack(node, ctx);
       },
     },
     ...buildImageEditTools(),
@@ -339,7 +341,7 @@ export function getVideoTools(): ToolDefinition[] {
       icon: <Package size={14} />,
       group: 'edit',
       run: (node: NodeRecord, ctx: ToolContext) => {
-        createStackNode(node, ctx);
+        convertToStack(node, ctx);
       },
     },
     // 截帧:截取视频首帧/尾帧/当前帧,并在画布上生成新图片节点
@@ -376,7 +378,7 @@ function genId(prefix: string): string {
  * 逻辑:
  * 1. 检查当前节点 output 是否有连线到 StackNode 的 prompt pin
  * 2. 如果有 → 直接执行收纳(删边+删源节点+追加卡片)
- * 3. 如果没有 → 创建新 StackNode(右侧偏移),建立连线,再执行收纳
+ * 3. 如果没有 → 一个原子 Batch 内创建 StackNode、建立临时边并立即收纳
  */
 export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
   const graph = ctx.commandQueue.getState();
@@ -396,9 +398,15 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
     // 已有 StackNode → 直接收纳
     const stackNode = graph.nodes.find((n: NodeRecord) => n.id === existingEdge.target.nodeId);
     if (!stackNode) return;
-    collectIntoStack(node, ctx, existingEdge, stackNode);
+    const collected = collectCard(
+      stackNode.id,
+      parseStackedMediaData(stackNode.data as Record<string, unknown> | undefined),
+      node,
+      existingEdge,
+    );
+    ctx.commandQueue.execute(collected.command);
   } else {
-    // 无 StackNode → 创建新 StackNode + 连线 + 收纳
+    // 无 StackNode → 一个原子命令完成创建与收纳，避免 setTimeout 和 View effect 竞争。
     const nodePos = node.position ?? { x: 0, y: 0 };
     const nodeWidth = node.size?.width ?? 620;
     const stackNodeId = genId('stack-node');
@@ -417,35 +425,23 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
       target: { nodeId: stackNodeId, pinId: 'prompt' },
     };
 
-    // 先创建节点和边,再收纳
+    const collect = collectCard(stackNodeId, { cards: [], activeIndex: 0 }, node, newEdge);
     ctx.commandQueue.execute(new BatchCommand([
       new AddNodeCommand(stackNode),
       new AddEdgeCommand(newEdge),
-    ], 'create-stack-node'));
-
-    // 等下一个 tick 再执行收纳(确保 graph 已更新)
-    setTimeout(() => {
-      const updatedGraph = ctx.commandQueue.getState();
-      if (!updatedGraph) return;
-      const updatedEdge = updatedGraph.edges.find((e: EdgeRecord) => e.id === edgeId);
-      const updatedStackNode = updatedGraph.nodes.find((n: NodeRecord) => n.id === stackNodeId);
-      if (updatedEdge && updatedStackNode) {
-        collectIntoStack(node, ctx, updatedEdge, updatedStackNode);
-      }
-    }, 50);
+      collect.command,
+    ], 'stacked-media-create-and-collect'));
   }
 }
 
 /**
- * 在当前节点右侧创建一个空的 StackNode 并建立连线
+ * 在当前节点右侧创建一个空的 StackNode。
  *
  * 逻辑:
  * 1. 确定 output pin id(image → 'image', video → 'video')
  * 2. 在节点右侧偏移位置创建空 StackNode
- * 3. 建立 output → StackNode prompt 连线
  */
 export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
-  const outputPinId = node.type === 'video' ? 'video' : 'image';
   const nodePos = node.position ?? { x: 0, y: 0 };
   const nodeWidth = node.size?.width ?? 620;
   const stackNodeId = genId('stack-node');
@@ -457,44 +453,7 @@ export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
     title: '堆叠媒体',
     data: { cards: [], activeIndex: 0 },
   };
-  const edgeId = genId('edge-stack');
-  const newEdge: EdgeRecord = {
-    id: edgeId,
-    source: { nodeId: node.id, pinId: outputPinId },
-    target: { nodeId: stackNodeId, pinId: 'prompt' },
-  };
-
-  ctx.commandQueue.execute(new BatchCommand([
-    new AddNodeCommand(stackNode),
-    new AddEdgeCommand(newEdge),
-  ], 'create-stack-node'));
-}
-
-/** 将源节点收纳到 StackNode 的卡片列表中 */
-function collectIntoStack(
-  node: NodeRecord,
-  ctx: ToolContext,
-  edge: EdgeRecord,
-  stackNode: NodeRecord,
-): void {
-  const stackData = (stackNode.data as Record<string, unknown>) ?? {};
-  const cards = (stackData.cards as unknown[]) ?? [];
-  const newCard = {
-    id: genId('card'),
-    sourceType: node.type === 'video' ? 'video' : 'image',
-    data: (node.data as Record<string, unknown>) ?? {},
-    title: node.title,
-    size: node.size,
-  };
-  const updatedCards = [...cards, newCard];
-  ctx.commandQueue.execute(new BatchCommand([
-    new RemoveEdgeCommand(edge.id),
-    new UpdateNodeDataCommand(stackNode.id, {
-      cards: updatedCards,
-      activeIndex: updatedCards.length - 1,
-    } as Record<string, unknown>),
-    new RemoveNodeCommand(node.id),
-  ], 'stacked-media-collect'));
+  ctx.commandQueue.execute(new AddNodeCommand(stackNode));
 }
 
 /** 截取视频帧并创建新图片节点 */

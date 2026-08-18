@@ -10,6 +10,7 @@ import {
   AddEdgeCommand,
   RemoveEdgeCommand,
   RemoveNodeCommand,
+  ResizeNodeCommand,
   UpdateNodeDataCommand,
   BatchCommand,
 } from '@zeroexo/core';
@@ -20,6 +21,8 @@ import type { StackedMediaData, StackCard } from './stacked-media-types.js';
 const SIBLING_GAP = 40;
 /** 移出节点放置在 StackNode 前方的间距 */
 const EJECT_OFFSET_X = 40;
+/** 导航栏是 StackNode 内容的一部分，尺寸计算必须显式纳入。 */
+const STACK_NAVIGATION_HEIGHT = 56;
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -230,9 +233,48 @@ export function appendCards(
 
 export interface SwitchResult {
   patch: { cards: StackCard[]; activeIndex: number };
+  activeIndex: number;
 }
 
-/** 切换活跃卡片 */
+/**
+ * 按当前素材比例推导 StackNode 高度。
+ * 这是派生布局，而不是把 500x500 设计基准固化为相册容器。
+ */
+export function getStackDisplayHeight(card: StackCard | undefined, width: number): number | null {
+  if (!card || width <= 0) return null;
+  const naturalWidth = Number(card.data.naturalWidth);
+  const naturalHeight = Number(card.data.naturalHeight);
+  if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+    return null;
+  }
+  return Math.max(220, Math.round(width * (naturalHeight / naturalWidth) + STACK_NAVIGATION_HEIGHT));
+}
+
+/** 切换活跃卡片，并在同一事务中同步派生尺寸。 */
+export function activateStackCard(node: NodeRecord, data: StackedMediaData, index: number): SwitchResult & { command: BatchCommand } {
+  const activeIndex = Math.max(0, Math.min(index, Math.max(0, data.cards.length - 1)));
+  const commands: Command[] = [
+    new UpdateNodeDataCommand(node.id, { cards: data.cards, activeIndex } as Record<string, unknown>),
+  ];
+  const width = node.size?.width ?? 620;
+  const targetHeight = getStackDisplayHeight(data.cards[activeIndex], width);
+  const currentHeight = node.size?.height ?? 348;
+  if (targetHeight !== null && Math.abs(currentHeight - targetHeight) > 2) {
+    commands.push(new ResizeNodeCommand(
+      node.id,
+      { x: node.position.x, y: node.position.y, width, height: currentHeight },
+      { x: node.position.x, y: node.position.y, width, height: targetHeight },
+    ));
+  }
+  return {
+    patch: { cards: data.cards, activeIndex },
+    activeIndex,
+    command: new BatchCommand(commands, 'stacked-media-activate-card'),
+  };
+}
+
+/** 无 node 上下文时仅生成数据 patch，供纯数据工具使用。 */
 export function switchActive(data: StackedMediaData, index: number): SwitchResult {
-  return { patch: { cards: data.cards, activeIndex: index } };
+  const activeIndex = Math.max(0, Math.min(index, Math.max(0, data.cards.length - 1)));
+  return { patch: { cards: data.cards, activeIndex }, activeIndex };
 }
