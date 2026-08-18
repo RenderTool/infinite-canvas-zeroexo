@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function args(argv) {
   const result = {};
@@ -68,15 +69,44 @@ function edge(id, source, target, sourcePin = 'output', targetPin = 'input') {
   return { id: `stress-edge-${id}`, source: { nodeId: source, pinId: sourcePin }, target: { nodeId: target, pinId: targetPin } };
 }
 
+/** 各节点类型 output pin id(连线时必须用真实 pin,否则画布无法渲染) */
+const SOURCE_PIN = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  text: 'output',
+  'stacked-media': 'media',
+  storyboard: 'output',
+  script: 'output',
+  generator: 'output',
+  workbench: 'output',
+};
+
+/** 各节点类型 input pin id;null 表示该类型无 input pin(不可作为连线目标) */
+const TARGET_PIN = {
+  image: 'prompt',
+  video: 'prompt',
+  audio: 'prompt',
+  text: 'input',
+  'stacked-media': 'prompt',
+  storyboard: 'input',
+  script: null,
+  generator: 'input',
+  workbench: 'input',
+};
+
 function buildEdges(nodes, mode, columns, random) {
   const edges = [];
   const seen = new Set();
   const add = (source, target, kind = 'grid') => {
     if (!nodes[source] || !nodes[target] || source === target) return;
+    const sourcePin = SOURCE_PIN[nodes[source].type];
+    const targetPin = TARGET_PIN[nodes[target].type];
+    if (!sourcePin || !targetPin) return;
     const key = `${source}:${target}`;
     if (seen.has(key)) return;
     seen.add(key);
-    edges.push(edge(edges.length, nodes[source].id, nodes[target].id, kind, 'input'));
+    edges.push(edge(edges.length, nodes[source].id, nodes[target].id, sourcePin, targetPin));
   };
 
   for (let i = 0; i < nodes.length; i += 1) {
@@ -112,7 +142,9 @@ const nodes = Array.from({ length: count }, (_, index) => {
   return createNode(index, type, material, columns, random);
 });
 const edges = buildEdges(nodes, mode, columns, random);
-const output = options.output || path.resolve(process.cwd(), `stress-${count}-${seed}-${mode}.json`);
+// 默认输出到 public/stress/stress-1000.json(dev server 可直接 fetch 注入)
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const output = options.output || path.resolve(projectRoot, 'public/stress/stress-1000.json');
 const graph = {
   nodes,
   edges,

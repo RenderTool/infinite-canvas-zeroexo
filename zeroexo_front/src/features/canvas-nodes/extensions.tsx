@@ -5,7 +5,7 @@
  * 使用 PluginNodesPlugin.registerAll 一次性注册三类型。
  */
 
-import type { NodeTypeExtension, NodeRendererProps, ToolDefinition } from '@zeroexo/core';
+import type { NodeTypeExtension, NodeRendererProps, ToolDefinition, NodeRuntimeContract, NodeCapabilities } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
@@ -35,6 +35,31 @@ const CREATION_COLOR: Record<CreationNodeType, string> = {
   storyboard: '#8b5cf6',
   workbench: '#06b6d4',
 };
+
+/** 各剧创节点能力声明(不参与堆叠,不参与媒体计算) */
+const CREATION_CAPABILITIES: Record<CreationNodeType, NodeCapabilities> = {
+  script: { stackable: false, capabilities: ['script'] },
+  storyboard: { stackable: false, capabilities: ['storyboard'] },
+  workbench: { stackable: false, capabilities: ['workbench'] },
+};
+
+/** 构建剧创节点 runtime contract(自由缩放 + 标准 NodeShell 外观) */
+function createCreationRuntime(defaultSize: { width: number; height: number }): NodeRuntimeContract {
+  return {
+    definition: {
+      schemaVersion: 1,
+      size: {
+        basis: { ...defaultSize, referenceSize: 500 },
+        mode: 'free',
+        preserveAspectRatio: false,
+      },
+      visual: {
+        appearance: 'shell',
+        selectionMode: 'runtime',
+      },
+    },
+  };
+}
 
 // ===== 剧本节点工具(通过 nodeActionBus 广播,script-editor-sheet 订阅) =====
 
@@ -129,6 +154,17 @@ function createCreationExtension(
     defaultSize: CREATION_DEFAULT_SIZE[kind],
     minSize: CREATION_MIN_SIZE[kind],
     resizable: true,
+    // P5 契约接入:声明领域能力(不参与堆叠)与运行时缩放/外观契约
+    capabilities: CREATION_CAPABILITIES[kind],
+    runtime: createCreationRuntime(CREATION_DEFAULT_SIZE[kind]),
+    // 标准 NodeShell 状态渲染,排布边界即 node.size
+    viewContract: {
+      selectionEffect: 'default',
+      focusEffect: 'default',
+      hoverEffect: 'default',
+      connectionHoverEffect: 'default',
+      useShellChrome: true,
+    },
     getPins: () => CREATION_PINS[kind],
     canConnect,
     getTools: kind === 'script' ? () => getScriptTools() : kind === 'storyboard' ? () => getStoryboardTools() : undefined,

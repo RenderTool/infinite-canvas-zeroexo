@@ -608,7 +608,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         ) : null}
 
         {import.meta.env.DEV && !state.loading && state.editor ? (
-          <DevPerformancePanel store={state.editor.store} syncStatus={status} />
+          <DevPerformancePanel store={state.editor.store} commandQueue={refs.commandQueue} syncStatus={status} />
         ) : null}
 
         {/* BUG5: RightSideToolBar 已移除 — 节点创建功能并入 LeftSideToolBar 加号菜单 */}

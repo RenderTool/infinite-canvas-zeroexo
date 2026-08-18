@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
+import type { CommandQueue, GraphModel } from '@zeroexo/core';
 
 interface PerformanceSnapshot {
   fps: number;
@@ -12,6 +13,7 @@ interface PerformanceSnapshot {
 
 interface DevPerformancePanelProps {
   store: ReactGraphStore;
+  commandQueue: CommandQueue | null;
   syncStatus?: string;
 }
 
@@ -32,8 +34,10 @@ function classify(snapshot: Omit<PerformanceSnapshot, 'bottleneck'>): string {
   return 'nominal';
 }
 
-export function DevPerformancePanel({ store, syncStatus }: DevPerformancePanelProps): React.ReactElement {
+export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerformancePanelProps): React.ReactElement {
   const [open, setOpen] = useState(false);
+  const [injecting, setInjecting] = useState(false);
+  const [injectInfo, setInjectInfo] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<PerformanceSnapshot>({
     fps: 0,
     frameMs: 0,
@@ -73,6 +77,25 @@ export function DevPerformancePanel({ store, syncStatus }: DevPerformancePanelPr
       cancelAnimationFrame(frame);
     };
   }, [store, open]);
+
+  /** 一键注入 1000 节点压力 fixture(public/stress/stress-1000.json),验证渲染/连线/同步瓶颈 */
+  const handleInjectStress = useCallback(async () => {
+    if (injecting) return;
+    setInjecting(true);
+    setInjectInfo(null);
+    try {
+      const res = await fetch('/stress/stress-1000.json');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const graph = (await res.json()) as GraphModel & { viewport: { x: number; y: number; k: number } };
+      commandQueue?.replaceState(graph);
+      store.setViewport(graph.viewport ?? { x: 80, y: 80, k: 0.42 });
+      setInjectInfo(`injected: ${graph.nodes.length} nodes / ${graph.edges.length} edges`);
+    } catch (err) {
+      setInjectInfo(`inject failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setInjecting(false);
+    }
+  }, [injecting, commandQueue, store]);
 
   return (
     <div
@@ -123,6 +146,29 @@ export function DevPerformancePanel({ store, syncStatus }: DevPerformancePanelPr
           <div>sync: {syncStatus ?? 'unknown'}</div>
           <div style={{ color: snapshot.bottleneck === 'nominal' ? '#b8f2d0' : '#ffd28a' }}>
             bottleneck: {snapshot.bottleneck}
+          </div>
+          <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => void handleInjectStress()}
+              disabled={injecting}
+              style={{
+                border: '1px solid rgba(255,255,255,0.18)',
+                borderRadius: 5,
+                background: 'rgba(255,255,255,0.06)',
+                color: '#e8edf2',
+                padding: '4px 8px',
+                cursor: injecting ? 'not-allowed' : 'pointer',
+                opacity: injecting ? 0.5 : 1,
+              }}
+            >
+              {injecting ? 'INJECTING...' : 'INJECT 1000 NODES'}
+            </button>
+            {injectInfo ? (
+              <div style={{ marginTop: 4, fontSize: 10, color: injectInfo.startsWith('injected') ? '#b8f2d0' : '#ff9d9d' }}>
+                {injectInfo}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
