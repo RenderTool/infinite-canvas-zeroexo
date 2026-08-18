@@ -5,6 +5,7 @@
  * 以及文件大小格式化、图片 URL 构建等纯函数。
  */
 import { useEffect, useState } from 'react';
+import { getAccessToken } from '@/services/api-client';
 
 /** 素材类型 -> i18n key 映射 */
 export const KIND_LABELS: Record<string, string> = {
@@ -91,7 +92,7 @@ export function useAuthorizedImageUrl(
       return;
     }
     // 私有资源：fetch + Authorization header 加载，避免 JWT 进 query string
-    const token = localStorage.getItem('admin-token');
+    const token = getAccessToken();
     if (!token) {
       setUrl(undefined);
       return;

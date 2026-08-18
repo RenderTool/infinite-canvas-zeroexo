@@ -25,6 +25,16 @@ export function setRefreshToken(token: string | null): void {
   refreshTokenValue = token;
 }
 
+/** 当前内存中是否存在 accessToken（不依赖 localStorage，安全修复 F1.1） */
+export function hasAccessToken(): boolean {
+  return accessToken !== null;
+}
+
+/** 读取内存中的 accessToken（不依赖 localStorage，安全修复 F1.1） */
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
 export function getApiBaseUrl(): string {
   return API_BASE;
 }
@@ -44,8 +54,8 @@ export class ApiError extends Error {
  * 尝试刷新 token
  * 返回新的 accessToken，失败则返回 null
  *
- * 安全说明：
- * - accessToken 保存在内存（模块变量）+ localStorage（供页面刷新后恢复会话，短期有效）
+ * 安全说明（修复 F1.1）：
+ * - accessToken 仅保存在内存（模块变量），绝不写入 localStorage，避免 XSS 窃取管理员令牌
  * - refreshToken 仅存入 sessionStorage（标签页级、关闭即失效），
  *   降低其在 localStorage 中长期明文驻留的泄露面（XSS 窃取后无法离线换取新 token）
  */
@@ -66,7 +76,7 @@ async function tryRefreshToken(): Promise<string | null> {
     if (body.accessToken) {
       accessToken = body.accessToken;
       refreshTokenValue = body.refreshToken ?? rt;
-      localStorage.setItem('admin-token', body.accessToken);
+      // 注意：accessToken 不再写入 localStorage
       sessionStorage.setItem('admin-refresh-token', refreshTokenValue!);
       return body.accessToken;
     }
@@ -102,8 +112,9 @@ function handleUnauthorized(err: ApiError, retry: () => Promise<any>) {
             accessToken = null;
             refreshTokenValue = null;
             try {
-              localStorage.removeItem('admin-token');
               sessionStorage.removeItem('admin-refresh-token');
+              // 兼容：清理旧版本遗留的 localStorage 凭据（新版不再写入）
+              localStorage.removeItem('admin-token');
               localStorage.removeItem('admin-user');
             } catch { /* ignore */ }
             message.error('登录已过期,请重新登录');
@@ -131,19 +142,21 @@ function handleUnauthorized(err: ApiError, retry: () => Promise<any>) {
 }
 
 /**
- * 统一 API 错误提示 - 按状态码分类,透传后端具体错误信息。
- * - 401: 会被 handleUnauthorized 拦截，仅非刷新请求抵达这里
- * - 403: 显示后端返回的"需要管理员权限"等具体提示
- * - 其他: 优先显示后端 message,缺失时使用 fallback
- * - 非 ApiError(网络错误等): 显示 fallback
+ * 统一 API 错误提示 - 按状态码分类。
+ * 安全说明（修复 F6.2/F4.2 信息泄露）：
+ * - 4xx 业务错误：透传后端业务文案（如"需要管理员权限"），这些通常不含技术细节。
+ * - 5xx/502 等服务器错误：不再透传原始 message（可能含堆栈/内部路径），统一为通用文案，
+ *   技术细节仅由调用方记入 console，避免泄露给前端用户。
+ * - 网络/未知错误：使用 fallback 文案。
  */
 export function showApiError(err: unknown, fallback: string): void {
   if (err instanceof ApiError) {
     if (err.status === 401) {
       accessToken = null;
       try {
-        localStorage.removeItem('admin-token');
         sessionStorage.removeItem('admin-refresh-token');
+        // 兼容：清理旧版遗留的 localStorage 凭据
+        localStorage.removeItem('admin-token');
         localStorage.removeItem('admin-user');
       } catch {
         // 忽略 localStorage 访问异常
@@ -162,11 +175,16 @@ export function showApiError(err: unknown, fallback: string): void {
       message.error('服务暂时不可用，请稍后重试');
       return;
     }
+    // 5xx 服务器错误：不透传后端原始 message（防止泄露堆栈/路径等内部细节）
+    if (err.status >= 500) {
+      message.error('服务器开小差了，请稍后重试');
+      return;
+    }
     message.error(err.message || fallback);
     return;
   }
   if (err instanceof Error && err.message && !(err instanceof TypeError)) {
-    message.error(err.message || fallback);
+    message.error(fallback);
     return;
   }
   message.error(fallback);

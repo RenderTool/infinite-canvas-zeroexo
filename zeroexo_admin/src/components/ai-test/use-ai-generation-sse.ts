@@ -41,7 +41,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { fetchEventSource, EventSourceMessage } from '@microsoft/fetch-event-source';
-import { getApiBaseUrl } from '@/services/api-client';
+import { getApiBaseUrl, getAccessToken } from '@/services/api-client';
 
 /** SSE 推送的 AI 生成完成事件（解析后） */
 export interface AiGenerationSseEvent {
@@ -109,7 +109,7 @@ export function useAiGenerationSse(
     abortRef.current = abort;
 
     const timer = setTimeout(() => {
-      const token = localStorage.getItem('admin-token') || '';
+      const token = getAccessToken() || '';
       const url = `${getApiBaseUrl()}/ai-events`;
 
       fetchEventSource(url, {
@@ -124,8 +124,9 @@ export function useAiGenerationSse(
           }
           if (response.status === 401) {
             intentionalCloseRef.current = true;
-            localStorage.removeItem('admin-token');
+            // 清除内存态与 refreshToken；并兼容清理旧版 localStorage 遗留凭据
             sessionStorage.removeItem('admin-refresh-token');
+            localStorage.removeItem('admin-token');
             localStorage.removeItem('admin-user');
             setTimeout(() => {
               window.location.href = '/admin/login';

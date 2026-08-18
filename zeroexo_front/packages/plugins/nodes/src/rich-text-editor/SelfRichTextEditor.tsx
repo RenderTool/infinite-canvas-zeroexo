@@ -15,6 +15,48 @@ import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { SimpleSelect } from '@/shared/components/index.js';
 
+/**
+ * 安全净化 HTML（修复 F2.2 XSS）。零依赖实现：
+ * - 移除 <script>/<style>/<iframe>/<object>/<embed> 等危险标签
+ * - 移除所有 on* 事件属性
+ * - 移除 javascript:/data: 等危险 URI（仅放行 http(s)/mailto/相对/锚点）
+ * 注意：本函数用于屏蔽来自协作同步/导入/网络等不受信来源的恶意 HTML，
+ * 不影响用户通过工具栏正常产生的富文本。
+ */
+const DANGEROUS_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE']);
+
+function sanitizeHtml(dirty: string): string {
+  if (typeof window === 'undefined' || typeof DOMParser === 'undefined') return dirty;
+  const doc = new DOMParser().parseFromString(dirty, 'text/html');
+
+  const walk = (node: Element): void => {
+    // 移除危险标签
+    Array.from(node.querySelectorAll('*')).forEach((el) => {
+      if (DANGEROUS_TAGS.has(el.tagName)) {
+        el.remove();
+      }
+    });
+    // 移除事件属性与危险 URI
+    Array.from(node.getElementsByTagName('*')).forEach((el) => {
+      Array.from(el.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        const val = attr.value.trim().toLowerCase();
+        if (name.startsWith('on')) {
+          el.removeAttribute(attr.name);
+        } else if (
+          (name === 'href' || name === 'src' || name === 'xlink:href') &&
+          (val.startsWith('javascript:') || val.startsWith('data:') || val.startsWith('vbscript:'))
+        ) {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+  };
+
+  walk(doc.body);
+  return doc.body.innerHTML;
+}
+
 export interface SelfRichTextEditorProps {
   value: string;
   onChange: (html: string) => void;
@@ -56,7 +98,8 @@ export function SelfRichTextEditor({
   useEffect(() => {
     const el = editorRef.current;
     if (el && el.innerHTML !== value) {
-      el.innerHTML = value;
+      // 净化后再写入，防止来自导入/协作同步的恶意 HTML 造成 XSS
+      el.innerHTML = sanitizeHtml(value);
     }
     // eslint-disable-line react-hooks/exhaustive-deps
   }, []);

@@ -34,8 +34,8 @@ export interface ImagePanZoom {
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
-  /** 绑定到舞台容器(触摸双指缩放需要真实尺寸) */
-  containerRef: React.RefObject<HTMLDivElement>;
+  /** 绑定到舞台容器(回调 ref,挂载时自动绑定原生 wheel 监听) */
+  containerRef: (el: HTMLDivElement | null) => void;
   /** 舞台容器手势事件集 */
   containerHandlers: ImagePanZoomHandlers;
   /** 图片 transform/过渡/光标样式 */
@@ -45,7 +45,20 @@ export interface ImagePanZoom {
 export function useImagePanZoom(): ImagePanZoom {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setScale((prev) => Math.min(Math.max(0.25, prev + delta), 4));
+  }, []);
+  // 用回调 ref 在元素挂载时即绑定原生 wheel 监听,避免依赖 useEffect 时机
+  // (StrictMode 双调用 / 调用方覆盖 ref 时也能稳定生效)
+  const setContainerRef = useCallback((el: HTMLDivElement | null) => {
+    const prev = containerRef.current;
+    if (prev && prev !== el) prev.removeEventListener('wheel', handleWheel);
+    containerRef.current = el;
+    if (el) el.addEventListener('wheel', handleWheel, { passive: false });
+  }, [handleWheel]);
   const isDragging = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
 
@@ -65,21 +78,6 @@ export function useImagePanZoom(): ImagePanZoom {
 
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
-  // 滚轮缩放需 preventDefault 阻止页面滚动,React 合成事件为 passive 无法 preventDefault,
-  // 因此改为原生非 passive 监听,绑定到 containerRef。
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale((prev) => Math.min(Math.max(0.25, prev + delta), 4));
-  }, []);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
-  }, [handleWheel]);
-
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (scale <= 1) return;
     isDragging.current = true;
@@ -90,11 +88,24 @@ export function useImagePanZoom(): ImagePanZoom {
     if (!isDragging.current) return;
     const dx = e.clientX - lastMouse.current.x;
     const dy = e.clientY - lastMouse.current.y;
-    setPosition((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
     lastMouse.current = { x: e.clientX, y: e.clientY };
+    // 复用 RAF 批处理,避免 mousemove 高频触发 setState 造成重渲染卡顿
+    const baseX = pendingRef.current?.x ?? positionRef.current.x;
+    const baseY = pendingRef.current?.y ?? positionRef.current.y;
+    pendingRef.current = { scale: scaleRef.current, x: baseX + dx, y: baseY + dy };
+    if (rafRef.current === 0) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        if (pendingRef.current) { setScale(pendingRef.current.scale); setPosition({ x: pendingRef.current.x, y: pendingRef.current.y }); pendingRef.current = null; }
+      });
+    }
   }, []);
 
-  const handleMouseUp = useCallback(() => { isDragging.current = false; }, []);
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+    // 触发一次重渲染,使拖拽结束后 transition 恢复(用于缩放/重置缓动)
+    setPosition((prev) => ({ ...prev }));
+  }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!e.touches[0]) return;
@@ -157,8 +168,9 @@ export function useImagePanZoom(): ImagePanZoom {
 
   const imgTransformStyle: CSSProperties = {
     transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
-    transition: scale > 1 || position.x !== 0 || position.y !== 0 ? 'transform 0.1s ease-out' : 'none',
-    cursor: scale > 1 ? 'grab' : 'default',
+    // 拖拽平移期间关闭过渡,避免 transform 缓动造成的拖尾呆滞;缩放/重置时保留缓动
+    transition: !isDragging.current && (scale > 1 || position.x !== 0 || position.y !== 0) ? 'transform 0.1s ease-out' : 'none',
+    cursor: scale > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'default',
   };
 
   return {
@@ -167,7 +179,7 @@ export function useImagePanZoom(): ImagePanZoom {
     zoomIn,
     zoomOut,
     reset,
-    containerRef,
+    containerRef: setContainerRef,
     containerHandlers: {
       onMouseDown: handleMouseDown,
       onMouseMove: handleMouseMove,

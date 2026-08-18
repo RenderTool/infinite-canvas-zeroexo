@@ -48,8 +48,9 @@ export default function ApplyPage() {
             navigate('/', { replace: true });
           } catch {
             // 刷新用户信息失败 => token 已过期，清除并重定向到登录页
-            localStorage.removeItem('admin-token');
+            // 注：accessToken/user 已不再存于 localStorage，此处仅清理遗留凭据与 refreshToken
             sessionStorage.removeItem('admin-refresh-token');
+            localStorage.removeItem('admin-token');
             localStorage.removeItem('admin-user');
             navigate('/login', { replace: true });
           }

@@ -1,4 +1,4 @@
-import { apiGet, apiPut, apiDelete, showApiError } from '@/services/api-client';
+import { apiGet, apiPut, apiDelete, showApiError, getAccessToken } from '@/services/api-client';
 import type { BrandingConfig } from './branding-types';
 import { DEFAULT_BRANDING_CONFIG } from './branding-types';
 
@@ -57,7 +57,7 @@ export async function uploadBrandingFile(
   const xhr = new XMLHttpRequest();
   return new Promise((resolve, reject) => {
     xhr.open('POST', `/api/admin/branding/upload?category=${encodeURIComponent(category)}`);
-    const token = localStorage.getItem('admin-token');
+    const token = getAccessToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
     xhr.upload.onprogress = (e) => {

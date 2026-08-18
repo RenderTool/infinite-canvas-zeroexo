@@ -30,40 +30,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // 安全说明（修复 F1.1/F1.2/F1.3）：
+  // - accessToken 仅存于内存（模块变量），不再写入 localStorage，避免 XSS 窃取管理员令牌。
+  // - refreshToken 存于 sessionStorage（标签页级、关闭即失效），用于刷新页面后静默续期。
+  // - 含 role/permissions 的 user 对象仅存内存，不再持久化到 localStorage，防止本地篡改提权。
+  //   权限的唯一可信来源是后端的 /auth/me；任何 localStorage 中的 user 仅作首屏占位，刷新后立即以 /auth/me 覆盖。
   useEffect(() => {
-    const token = localStorage.getItem('admin-token');
-    // refreshToken 存于 sessionStorage（标签页级），见 api-client.ts 中的安全说明
+    // 仅从 sessionStorage 读取 refreshToken 用于续期（accessToken 不落盘）
     const rt = sessionStorage.getItem('admin-refresh-token');
-    if (token) {
-      setAccessToken(token);
-      if (rt) setRefreshToken(rt);
-      // 先尝试从 localStorage 加载缓存用户数据用于快速渲染
-      const userStr = localStorage.getItem('admin-user');
-      if (userStr) {
-        try {
-          const cached = JSON.parse(userStr);
-          // 兼容旧缓存数据(没有 permissions 字段)
-          if (!cached.permissions) cached.permissions = [];
-          setUser(cached);
-        } catch {
-          // 缓存损坏(JSON 解析失败)：清除后稍后从 /auth/me 重新拉取
-          localStorage.removeItem('admin-user');
-        }
-      }
-      // 异步从后端获取最新用户信息(含权限)
+    if (rt) setRefreshToken(rt);
+    if (rt) {
+      // 有 refreshToken：必须先经后端校验才能恢复会话，防止使用伪造/篡改的本地状态
       apiGet<User>('/auth/me')
         .then((freshUser) => {
           setUser(freshUser);
-          localStorage.setItem('admin-user', JSON.stringify(freshUser));
         })
         .catch(() => {
-          // 请求失败（如用户被禁用、token过期等），清除认证状态
+          // 校验失败（禁用/过期等）：清除认证状态
           setAccessToken(null);
           setRefreshToken(null);
           setUser(null);
-          localStorage.removeItem('admin-token');
           sessionStorage.removeItem('admin-refresh-token');
-          localStorage.removeItem('admin-user');
         })
         .finally(() => {
           setLoading(false);
@@ -81,9 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(data.accessToken);
     if (data.refreshToken) setRefreshToken(data.refreshToken);
     setUser(data.user);
-    localStorage.setItem('admin-token', data.accessToken);
+    // 注意：accessToken 与 user 不再写入 localStorage
     if (data.refreshToken) sessionStorage.setItem('admin-refresh-token', data.refreshToken);
-    localStorage.setItem('admin-user', JSON.stringify(data.user));
   };
 
   /** 从后端重新拉取最新用户信息并同步缓存，失败返回 null */
@@ -91,7 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const freshUser = await apiGet<User>('/auth/me');
       setUser(freshUser);
-      localStorage.setItem('admin-user', JSON.stringify(freshUser));
       return freshUser;
     } catch {
       return null;
@@ -102,9 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setRefreshToken(null);
     setUser(null);
-    localStorage.removeItem('admin-token');
     sessionStorage.removeItem('admin-refresh-token');
-    localStorage.removeItem('admin-user');
   };
 
   return (

@@ -2,7 +2,6 @@ import { useEffect, useState, useMemo } from 'react';
 import { RouterProvider, createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/auth';
 import { ConfigProvider, Spin, theme } from 'antd';
-import { setAccessToken } from '@/services/api-client';
 import MainLayout from '@/layouts/MainLayout';
 import Login from '@/pages/login';
 import Register from '@/pages/register';
@@ -41,9 +40,19 @@ function ProtectedRoute() {
   return <Outlet />;
 }
 
+/**
+ * 是否为管理后台合法用户（三权之一）。
+ * 安全说明（修复 F6.1 防提权兜底）：
+ * - 必须显式匹配三个已知角色，role 为 undefined/空/伪造值一律视为无权限，杜绝本地篡改/缓存污染导致越权。
+ * - 注意：前端角色仅用于 UI 路由展示，所有管理接口仍以【后端基于服务端 JWT 的鉴权】为唯一可信边界。
+ */
+function isAdminUser(role?: string): boolean {
+  return role === 'admin' || role === 'super_admin' || role === 'operator';
+}
+
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  if (user && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'operator')) {
+  if (user && isAdminUser(user.role)) {
     return <>{children}</>;
   }
   return <Navigate to="/apply" replace />;
@@ -51,7 +60,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
 function HomeRedirect() {
   const { user } = useAuth();
-  if (user && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'operator')) {
+  if (user && isAdminUser(user.role)) {
     return <Navigate to="/analytics" replace />;
   }
   return <Navigate to="/apply" replace />;
@@ -78,13 +87,6 @@ const antdLocaleMap: Record<string, typeof zhCN> = {
 };
 
 function AppContent() {
-  useEffect(() => {
-    const token = localStorage.getItem('admin-token');
-    if (token) {
-      setAccessToken(token);
-    }
-  }, []);
-
   const router = createBrowserRouter(
     [
       {

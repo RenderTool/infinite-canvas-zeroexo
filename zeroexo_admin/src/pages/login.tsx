@@ -4,6 +4,7 @@ import { LockOutlined, MailOutlined } from '@ant-design/icons';
 import { Button, Dropdown, message } from 'antd';
 import { Languages } from 'lucide-react';
 import { useAuth } from '@/contexts/auth';
+import { showApiError } from '@/services/api-client';
 import { useTranslation } from 'react-i18next';
 
 export default function Login() {
@@ -22,12 +23,9 @@ export default function Login() {
     try {
       await login(values.email, values.password);
       navigate('/dashboard');
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        t('auth.message.loginFailed');
-      message.error(msg);
+    } catch (err) {
+      // 统一错误脱敏：5xx 不透传后端原始 message（防泄露堆栈/路径），业务文案正常展示
+      showApiError(err, t('auth.message.loginFailed'));
     }
   };
 
