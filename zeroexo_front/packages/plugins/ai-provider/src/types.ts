@@ -152,29 +152,6 @@ export interface TextNodeData {
   opacity?: number;
 }
 
-/** 配置节点数据 */
-export interface ConfigNodeData {
-  /** BUG4: 节点显示名称(自增编号如"配置1",创建时设置) */
-  title?: string;
-  prompt: string;
-  status: GenerationStatus;
-  generationMode: 'image' | 'video' | 'audio' | 'text';
-  model: string;
-  size: string;
-  quality: string;
-  count: number;
-  /** 视频专属 */
-  seconds?: number;
-  vquality?: string;
-  generateAudio?: boolean;
-  watermark?: boolean;
-  /** 音频专属 */
-  voice?: string;
-  audioFormat?: string;
-  audioSpeed?: number;
-  audioInstructions?: string;
-}
-
 /** 视频节点数据 */
 export interface VideoNodeData {
   /** BUG4: 节点显示名称(自增编号如"视频1",创建时设置) */

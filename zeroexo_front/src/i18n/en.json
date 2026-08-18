@@ -571,15 +571,13 @@
     "text": "Text",
     "ai.image": "Image",
     "ai.video": "Video",
-    "ai.audio": "Audio",
-    "config": "Config"
+    "ai.audio": "Audio"
   },
   "canvasNodes": {
     "stage": {
       "script": "Script",
       "storyboard": "Storyboard",
-      "workbench": "Workbench",
-      "episodeContainer": "Episode Container"
+      "workbench": "Workbench"
     },
     "unbound": "No creation project bound",
     "bindButton": "Select project",
@@ -592,11 +590,7 @@
     "enterScriptAgent": "Script mode",
     "scriptPlaceholder": "Start writing your script here...",
     "storyboardPending": "Storyboard management coming soon",
-    "workbenchPending": "Workbench coming soon",
-    "episodeContainer": {
-      "empty": "No episodes",
-      "noSummary": "No summary"
-    }
+    "workbenchPending": "Workbench coming soon"
   },
   "imageEditor": {
     "title": "Image Editor",
@@ -877,7 +871,6 @@
     "audioTitle": "Audio Generation",
     "audioEmpty": "Empty audio",
     "audioDefault": "Audio",
-    "configTitle": "Generation Config",
     "generatorTitle": "Generator",
     "configMode": "Mode",
     "configModel": "Model",
@@ -2173,19 +2166,6 @@
     "scriptTitle": "{{title}} - Script import",
     "scriptTitleDefault": "Script import {{time}}",
     "textPreview": "Plain text"
-  },
-  "previs": {
-    "previsTimeline": "Previs timeline",
-    "generating": "Generating previs...",
-    "noPrevisData": "No previs data",
-    "videoTrack": "Video track",
-    "audioTrack": "Audio track",
-    "effectTrack": "Effect track",
-    "play": "Play",
-    "pause": "Pause",
-    "skipToStart": "Skip to start",
-    "skipToEnd": "Skip to end",
-    "togglePlayback": "{{state}}"
   },
   "creationNode": {
     "defaultFirstEpisode": "Episode 1"

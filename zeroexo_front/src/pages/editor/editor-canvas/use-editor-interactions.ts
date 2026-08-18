@@ -731,7 +731,7 @@ export function useEditorInteractions({
             : type === 'image' ? 'nodeTypes.ai.image'
               : type === 'video' ? 'nodeTypes.ai.video'
                 : type === 'audio' ? 'nodeTypes.ai.audio'
-                  : 'nodeTypes.config';
+                  : 'nodes.generatorTitle';
     const nodeTitle = `${t(baseNameKey)}${sameTypeCount + 1}`;
     refs.commandQueue?.execute(
       new AddNodeCommand({

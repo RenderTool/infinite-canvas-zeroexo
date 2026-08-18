@@ -918,7 +918,7 @@ export function useEditorState(canvasId: string): {
                   : type === 'script' ? 'canvasNodes.stage.script'
                   : type === 'storyboard' ? 'canvasNodes.stage.storyboard'
                     : type === 'workbench' ? 'canvasNodes.stage.workbench'
-                      : 'nodeTypes.config';
+                      : 'nodes.generatorTitle';
       const nodeTitle = `${t(baseNameKey)}${sameTypeCount + 1}`;
       const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench';
       editor.core.commandQueue.execute(

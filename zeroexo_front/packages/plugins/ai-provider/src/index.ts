@@ -18,7 +18,6 @@ export type {
   GenerationStatus,
   ImageNodeData,
   TextNodeData,
-  ConfigNodeData,
   VideoNodeData,
   AudioNodeData,
   ResolvedConfig,

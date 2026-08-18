@@ -570,15 +570,13 @@
     "text": "文本",
     "ai.image": "图片",
     "ai.video": "视频",
-    "ai.audio": "音频",
-    "config": "生成器"
+    "ai.audio": "音频"
   },
   "canvasNodes": {
     "stage": {
       "script": "剧本",
       "storyboard": "分镜",
-      "workbench": "出片",
-      "episodeContainer": "剧集容器"
+      "workbench": "出片"
     },
     "unbound": "尚未绑定创作项目",
     "bindButton": "选择创作项目",
@@ -591,11 +589,7 @@
     "enterScriptAgent": "剧本模式",
     "scriptPlaceholder": "在此开始编写剧本...",
     "storyboardPending": "分镜管理功能待完善",
-    "workbenchPending": "出片工作台功能待完善",
-    "episodeContainer": {
-      "empty": "暂无剧集",
-      "noSummary": "暂无摘要"
-    }
+    "workbenchPending": "出片工作台功能待完善"
   },
   "imageEditor": {
     "title": "图片编辑",
@@ -876,7 +870,6 @@
     "audioTitle": "音频生成",
     "audioEmpty": "空音频",
     "audioDefault": "音频",
-    "configTitle": "生成配置",
     "generatorTitle": "生成器",
     "configMode": "模式",
     "configModel": "模型",
@@ -2172,19 +2165,6 @@
     "scriptTitle": "{{title}} - 剧本导入",
     "scriptTitleDefault": "剧本导入 {{time}}",
     "textPreview": "纯文本"
-  },
-  "previs": {
-    "previsTimeline": "预演时间线",
-    "generating": "生成预演中…",
-    "noPrevisData": "暂无预演数据",
-    "videoTrack": "画面轨道",
-    "audioTrack": "音频轨道",
-    "effectTrack": "特效轨道",
-    "play": "播放",
-    "pause": "暂停",
-    "skipToStart": "回到开头",
-    "skipToEnd": "跳到末尾",
-    "togglePlayback": "{{state}}"
   },
   "creationNode": {
     "defaultFirstEpisode": "第1集"

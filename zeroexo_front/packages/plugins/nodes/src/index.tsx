@@ -1,13 +1,14 @@
 /**
  * @zeroexo/plugin-nodes - 统一业务节点集
  *
- * 合并 5 种业务节点(text/config/ai.image/ai.video/ai.audio)为单包,
- * 采用 BaseNodeView 基类 + 派生视图架构(类似 C++ 派生类模式)。
+ * 合并 7 种业务节点(text/generator/image/video/audio/ai-placeholder/stacked-media)为单包,
+ * 遵循 Node Model/View 契约(每个扩展声明 capabilities/runtime/viewContract)。
  *
  * 架构:
  * - BaseNodeView: 所有节点的外壳(NodeShell 包裹 + 引脚布局 + 引脚拖拽回调)
  * - AIStateView: AI 生成节点的 4 状态机(idle/loading/error/success)
  * - 各派生视图: 提供内容区,通过 BaseNodeView 渲染引脚
+ * - stacked-media-model: StackNode 纯数据层,收纳/移出/合并/多选堆叠均通过 BatchCommand 原子事务
  *
  * 引脚回调:
  *   NodeRendererProps 不含引脚事件回调。插件 install 时获取 ConnectionController,
@@ -399,7 +400,7 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
 /**
  * PluginNodesPlugin - 统一业务节点插件 + 节点注册入口
  *
- * 一个插件注册全部 5 种业务节点类型(text/config/ai.image/ai.video/ai.audio)。
+ * 一个插件注册全部 7 种业务节点类型(text/generator/image/video/audio/ai-placeholder/stacked-media)。
  * 替代原先 5 个独立插件包,符合"节点集"而非"独立插件"的设计理念。
  *
  * 同时作为 app 注册自定义节点的统一入口:对外暴露 register/registerAll/get/all/

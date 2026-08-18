@@ -741,7 +741,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
                 : type === 'image' ? 'nodeTypes.ai.image'
                   : type === 'video' ? 'nodeTypes.ai.video'
                     : type === 'audio' ? 'nodeTypes.ai.audio'
-                      : 'nodeTypes.config';
+                      : 'nodes.generatorTitle';
             return `${t(baseNameKey)}${sameTypeCount + 1 + batchIndex}`;
           }}
         />

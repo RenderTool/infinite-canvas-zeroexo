@@ -34,7 +34,6 @@ const NODE_TYPE_TITLE_KEY: Record<string, string> = {
   'image': 'nodes.imageTitle',
   'video': 'nodes.videoTitle',
   'audio': 'nodes.audioTitle',
-  config: 'nodes.configTitle',
 };
 
 /** Bug7/Bug8: 获取节点显示名称(优先 node.title,其次 data.title,再次类型默认名,最后回退 id) */

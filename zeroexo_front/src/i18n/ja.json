@@ -571,15 +571,13 @@
     "text": "テキスト",
     "ai.image": "画像",
     "ai.video": "動画",
-    "ai.audio": "音声",
-    "config": "設定"
+    "ai.audio": "音声"
   },
   "canvasNodes": {
     "stage": {
       "script": "脚本",
       "storyboard": "絵コンテ",
-      "workbench": "出画",
-      "episodeContainer": "エピソードコンテナ"
+      "workbench": "出画"
     },
     "unbound": "制作プロジェクト未バインド",
     "bindButton": "プロジェクトを選択",
@@ -592,11 +590,7 @@
     "enterScriptAgent": "脚本モード",
     "scriptPlaceholder": "ここに脚本を書き始めます...",
     "storyboardPending": "絵コンテ管理機能は未実装",
-    "workbenchPending": "出画ワークベンチは未実装",
-    "episodeContainer": {
-      "empty": "エピソードがありません",
-      "noSummary": "要約がありません"
-    }
+    "workbenchPending": "出画ワークベンチは未実装"
   },
   "imageEditor": {
     "title": "画像編集",
@@ -877,7 +871,6 @@
     "audioTitle": "音声生成",
     "audioEmpty": "空の音声ノード",
     "audioDefault": "音声",
-    "configTitle": "生成設定",
     "generatorTitle": "生成器",
     "configMode": "モード",
     "configModel": "モデル",
@@ -2173,19 +2166,6 @@
     "scriptTitle": "{{title}} - 脚本インポート",
     "scriptTitleDefault": "脚本インポート {{time}}",
     "textPreview": "プレーンテキスト"
-  },
-  "previs": {
-    "previsTimeline": "プレビスタイムライン",
-    "generating": "プレビス生成中…",
-    "noPrevisData": "プレビスデータがありません",
-    "videoTrack": "ビデオトラック",
-    "audioTrack": "オーディオトラック",
-    "effectTrack": "エフェクトトラック",
-    "play": "再生",
-    "pause": "一時停止",
-    "skipToStart": "最初に戻る",
-    "skipToEnd": "最後にジャンプ",
-    "togglePlayback": "{{state}}"
   },
   "creationNode": {
     "defaultFirstEpisode": "第1話"
