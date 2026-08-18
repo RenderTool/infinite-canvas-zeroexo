@@ -1,0 +1,19 @@
+{
+  "heroVideos": [
+    {
+      "url": "http://localhost:3000/api/storage/get?key=resources%2Fpublic%2Fbranding%2Fhero%2Fe9b984fd07e9f25cd9ca400c6b5d2aed8fd8dcb8155b516478bd26af25d34185.mp4",
+      "image": "http://localhost:3000/api/storage/get?key=resources%2Fpublic%2Fbranding%2Ffallback%2F3c6b293fba9882f00e0693b42c5b93bc951107793fe4d62c779fe66ae4b7706f.webp",
+      "label": "202608132214",
+      "enabled": true
+    }
+  ],
+  "heroFallbackImage": "/api/storage/get?key=resources/public/branding/fallback/hero-fallback.webp",
+  "updatedAt": "2026-08-16T23:13:28.064Z",
+  "version": 3,
+  "heroVideoUrl": null,
+  "heroCarouselInterval": 10,
+  "heroCarouselEnabled": false,
+  "siteTitle": null,
+  "siteSubtitle": null,
+  "logoUrl": null
+}

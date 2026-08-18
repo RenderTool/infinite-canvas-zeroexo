@@ -1,0 +1,75 @@
+{
+  "id": "gemini-nano-banana-lite",
+  "name": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
+  "protocol": "gemini",
+  "modelType": "image",
+  "endpoint": "/v1beta/models/{model}:generateContent",
+  "maxPromptLength": 20000,
+  "parameters": [
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "1k",
+      "values": ["1k"],
+      "labels": { "1k": "1K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "auto",
+      "values": ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+      "labels": {
+        "auto": "AUTO", "1:1": "1:1", "1:4": "1:4", "1:8": "1:8",
+        "2:3": "2:3", "3:2": "3:2", "3:4": "3:4", "4:1": "4:1",
+        "4:3": "4:3", "4:5": "4:5", "5:4": "5:4", "8:1": "8:1",
+        "9:16": "9:16", "16:9": "16:9", "21:9": "21:9"
+      },
+      "display": "radio"
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图数",
+      "default": 14
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "png",
+      "values": ["png", "jpeg", "webp"],
+      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 1048576,
+      "maxTotalPixels": 1048576,
+      "minAspectRatio": 0.125,
+      "maxAspectRatio": 8,
+      "maxReferenceImages": 14,
+      "supportsImageToImage": true,
+      "maxEdgeLength": 1024
+    },
+    "paramMapping": {
+      "resolution": "generationConfig.response_format.image.image_size",
+      "aspectRatio": "generationConfig.response_format.image.aspect_ratio"
+    },
+    "valueMapping": {
+      "resolution": { "1k": "1K" },
+      "aspectRatio": { "auto": "" }
+    }
+  },
+  "pricing": { "perImage": 0.01 },
+  "matchKeywords": ["gemini-3.1-flash-lite-image", "nano-banana-2-lite"]
+}

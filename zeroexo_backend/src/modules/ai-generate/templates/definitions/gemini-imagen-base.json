@@ -1,0 +1,81 @@
+{
+  "id": "gemini-imagen-base",
+  "name": "Gemini Imagen 系列",
+  "protocol": "gemini",
+  "modelType": "image",
+  "endpoint": "/v1beta/models/{model}:predict",
+  "maxPromptLength": 5000,
+  "parameters": [
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "1k",
+      "values": ["1k"],
+      "labels": { "1k": "1K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "1:1",
+      "values": ["1:1"],
+      "labels": { "1:1": "1:1" },
+      "display": "radio"
+    },
+    {
+      "name": "size",
+      "type": "size",
+      "label": "尺寸（宽×高）",
+      "default": { "width": 1024, "height": 1024 }
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": false
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图数",
+      "default": 0
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "png",
+      "values": ["png", "jpeg", "webp"],
+      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 1048576,
+      "maxTotalPixels": 1048576,
+      "minAspectRatio": 1,
+      "maxAspectRatio": 1,
+      "maxReferenceImages": 0,
+      "supportsImageToImage": false,
+      "maxEdgeLength": 1024
+    },
+    "paramMapping": {
+      "resolution": "generationConfig.response_format.image.image_size",
+      "aspectRatio": "generationConfig.response_format.image.aspect_ratio"
+    },
+    "valueMapping": {
+      "resolution": { "1k": "1K" },
+      "aspectRatio": { "1:1": "" }
+    }
+  },
+  "matchKeywords": ["imagen-4"]
+}

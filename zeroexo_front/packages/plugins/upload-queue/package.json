@@ -1,0 +1,29 @@
+{
+  "name": "@zeroexo/plugin-upload-queue",
+  "version": "0.0.1",
+  "description": "ZeroExo upload queue plugin - generic concurrent task queue with progress tracking",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@zeroexo/core": "workspace:*",
+    "@zeroexo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "rimraf": "^6.0.0"
+  }
+}

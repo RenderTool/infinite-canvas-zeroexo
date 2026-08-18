@@ -1,0 +1,172 @@
+/* ==========================================================
+   ScriptReader.css - 全屏翻阅阅读模式（Phase 5 第二阶段）
+   命名空间 .zx-reader-*；纸张样式复用 .zx-script-page / .ql-editor
+   ========================================================== */
+
+/* ── 全屏遮罩（模糊背景 + 淡入） ── */
+/* z-index 默认 Z_INDEX.DROPDOWN(1000)，实际由组件 props 覆盖（全屏模式使用 Z_INDEX.FULLSCREEN_DROPDOWN） */
+.zx-reader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(6px);
+  animation: zx-reader-fade-in 0.2s ease;
+}
+
+@keyframes zx-reader-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── 顶部栏 ── */
+.zx-reader-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  flex-shrink: 0;
+}
+
+.zx-reader-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #eee;
+}
+
+.zx-reader-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eee;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.zx-reader-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* ── 中部翻页舞台 ── */
+.zx-reader-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 0 20px;
+}
+
+.zx-reader-nav {
+  width: 40px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.zx-reader-nav:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+.zx-reader-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── 纸张（A4 比例，样式变量来自 .zx-script-page） ── */
+.zx-reader-paper {
+  width: min(660px, 92%);
+  height: min(840px, 86vh);
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  transform-origin: center;
+}
+
+/* PPT 风格翻页动画：方向滑入 + 轻微 3D 旋转 */
+.zx-reader-enter-right {
+  animation: zx-reader-page-in-right 0.38s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.zx-reader-enter-left {
+  animation: zx-reader-page-in-left 0.38s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes zx-reader-page-in-right {
+  from { opacity: 0; transform: translateX(60px) rotateY(-10deg) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes zx-reader-page-in-left {
+  from { opacity: 0; transform: translateX(-60px) rotateY(10deg) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 页眉元信息（集数 / 页码） */
+.zx-script-reader-meta {
+  flex-shrink: 0;
+  padding: 12px 64px 0 64px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--script-page-number);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* 内容区：复用 .zx-script-page .ql-editor 的纸张底色 / 字体 / 块样式 */
+.zx-script-reader-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.zx-script-reader-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--script-page-number);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* ── 底部进度条 ── */
+.zx-reader-bottombar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 20px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+}
+
+.zx-reader-progress {
+  width: 260px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.zx-reader-hint {
+  opacity: 0.6;
+  font-size: 11px;
+}

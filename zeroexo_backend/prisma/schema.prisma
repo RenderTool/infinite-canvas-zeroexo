@@ -1,0 +1,1185 @@
+// ZeroExo 数据库 schema - Phase D4 + P3 AI 对接
+// 模型: User / Project / Asset / Resource / Prompt / AiGeneration / ApiProvider
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  username          String             @unique
+  passwordHash      String
+  nickname          String?
+  avatarUrl         String?
+  bio               String?
+  role              String             @default("user")
+  /// 邮箱是否已验证
+  emailVerified     Boolean            @default(false)
+  /// 是否被禁用(临时封号)。true 时拒绝登录和所有 API 请求
+  disabled          Boolean            @default(false)
+  storageQuota      BigInt             @default(1073741824)
+  /// 当前生效的订阅计划 code (free/basic/standard/premium/ultimate/enterprise)
+  planCode          String?
+  /// 当前订阅计划到期时间(到期后回退为 free)
+  planExpiresAt     DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
+  projects          Project[]
+  assets            Asset[]
+  prompts           Prompt[]
+  aiGenerations     AiGeneration[]
+  aiPreference      UserAiPreference?
+  verificationCodes VerificationCode[]
+  folders           AssetFolder[]
+  subjects          Subject[]
+  userCredit        UserCredit?
+  creditTransactions CreditTransaction[]
+  consumptionLogs   ConsumptionLog[]
+  subscriptions     Subscription[]
+  /// 协作成员关系
+  collaborationMembers CollaborationMember[]
+}
+
+/// RBAC 权限点
+model Permission {
+  id              String           @id @default(uuid())
+  /// 权限编码,如 system:settings
+  code            String           @unique
+  /// 权限名称(中文),如"系统配置"
+  name            String
+  /// 所属模块,如 system / user / role / resource / project / ai / application / recycle
+  module          String
+  createdAt       DateTime         @default(now())
+  rolePermissions RolePermission[]
+}
+
+/// 角色-权限关联(多对多)
+model RolePermission {
+  id           String     @id @default(uuid())
+  /// 角色标识: super_admin | admin | operator | user
+  role         String
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([role, permissionId])
+}
+
+/// 用户申请记录(申请注册或申请管理员权限)
+model UserApplication {
+  id           String    @id @default(uuid())
+  email        String
+  username     String
+  passwordHash String
+  nickname     String?
+  /// 申请类型: register | admin | operator
+  type         String
+  /// 申请理由
+  reason       String?
+  /// 状态: pending | approved | rejected
+  status       String    @default("pending")
+  /// 审核人 ID
+  approvedBy   String?
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([email])
+  @@index([status])
+}
+
+/// 邮箱验证码(注册/重置密码)
+model VerificationCode {
+  id        String    @id @default(uuid())
+  email     String
+  code      String
+  /// register | reset
+  type      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([email, type])
+  @@index([code])
+}
+
+model Project {
+  id             String    @id @default(uuid())
+  ownerId        String
+  owner          User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title          String
+  scene          Json      @default("[]")
+  connections    Json      @default("[]")
+  viewport       Json?
+  backgroundMode String    @default("dots")
+  showImageInfo  Boolean   @default(false)
+  thumbnailUrl   String?
+  tags           String[]  @default([])
+  isPublic       Boolean   @default(false)
+  version        Int       @default(0)
+  /// 剧本/脚本内容
+  script         Json?
+  /// 分镜数据
+  storyboard     Json?
+  /// 生成参数历史
+  generations    Json?
+  /// 项目配置（题材、风格、时长等）
+  config         Json?
+  /// 资产数据（实体、素材等）
+  assets         Json?
+  /// 项目描述
+  description    String?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([ownerId])
+  @@index([updatedAt])
+}
+
+/// 项目版本快照元数据 - 记录画布时间点快照(支持回退)
+/// 快照文件路径: storage/resources/front/canvases/{ownerId}/{projectId}/scene-v{N}.json
+model ProjectVersion {
+  id        String   @id @default(uuid())
+  projectId String
+  /// 版本号(项目内从 1 递增,唯一)
+  version   Int
+  /// 快照文件大小(字节)
+  size      Int      @default(0)
+  /// 快照中的节点数
+  nodeCount Int      @default(0)
+  /// 创建者用户 ID
+  createdBy String
+  /// 自定义版本名称(可选)
+  label     String?
+  /// 创建方式: manual | auto-delete | auto-ai | auto-timer
+  source    String   @default("manual")
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, version])
+  @@index([projectId, createdAt])
+}
+
+model Asset {
+  id           String    @id @default(uuid())
+  ownerId      String
+  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  kind         String
+  filename     String
+  storageKey   String
+  mimeType     String
+  size         BigInt
+  width        Int?
+  height       Int?
+  duration     Float?
+  thumbnailKey String?
+  text         String?
+  tags         String[]  @default([])
+  visibility   String    @default("private")
+  category     String    @default("user")    /// user | ai-test | ai-generation
+  /// 所属文件夹(资产/测试模块合并后,一个素材可归入一个文件夹)
+  folderId     String?
+  /// 资产类型补充: zeroexo-text | zeroexo-entity | zeroexo-prompt (结构化资产引擎产物)
+  /// 分别对应 .zeroexo 文件中的 text/entity/prompt 类型数据
+  folder       AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  version      Int       @default(0)
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([ownerId])
+  @@index([kind])
+  @@index([storageKey])
+  @@index([category])
+  @@index([folderId])
+}
+
+/// 源素材记录 - 跟踪前端上传的原始素材(如剧本/角色设定等)经过资产引擎处理后生成的资产。
+/// 每条记录关联一个已处理的 Asset,以及可选的脚本(script)来源。
+model SourceMaterial {
+  id               String   @id @default(cuid())
+  /// 所属项目 ID
+  projectId        String
+  /// 上传用户 ID
+  userId           String
+  /// 处理完成后生成的资产 ID
+  processedAssetId String
+  /// 处理状态: pending | processing | completed | failed
+  processingStatus  String   @default("pending")
+  /// 关联的脚本 ID(可选)
+  scriptId         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([processedAssetId])
+}
+
+/// 资产文件夹 - 树形结构,支持系统预设根目录(场景/角色/道具/提示词/其他)不可删除
+model AssetFolder {
+  id        String   @id @default(uuid())
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// 文件夹名
+  name      String
+  /// 父文件夹 ID,根目录为 null
+  parentId  String?
+  parent    AssetFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  AssetFolder[] @relation("FolderTree")
+  /// 是否系统预设(场景/角色/道具/提示词/其他),true 时不可删除/重命名
+  system    Boolean  @default(false)
+  /// 系统标识: scene | character | prop | prompt | other(仅 system=true 时有意义)
+  systemKey String?
+  /// 排序权重,小的在前
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assets    Asset[]
+  prompts   Prompt[]
+  subjects  Subject[]
+
+  @@unique([ownerId, parentId, name])
+  @@index([ownerId, parentId])
+  @@index([systemKey])
+}
+
+/// 资源池 - 内容寻址存储(CAS),按 SHA-256 哈希去重,引用计数管理生命周期。
+/// 同一份文件(相同哈希)全局只存储一份,被 Asset 和 Project.scene 共同引用。
+/// refCount = 0 时软删除(deletedAt 标记),由定时 GC 任务清理物理文件。
+model Resource {
+  id         String    @id @default(uuid())
+  /// SHA-256 内容哈希,全局唯一
+  hash       String    @unique
+  /// 存储路径: resources/{ownerId}/{hash前2位}/{hash}.{ext} (统一前缀,废弃 assets/)
+  storageKey String    @unique
+  ownerId    String
+  size       BigInt
+  mimeType   String
+  /// 引用计数: Asset 引用 +1, Project 引用 +1; 删除时 -1
+  refCount   Int       @default(0)
+  /// 软删除标记,refCount=0 时设置,GC 任务定期清理
+  deletedAt  DateTime?
+  /// 文件当前所在的存储 driver(local | s3 | oss | cos),用于迁移期读取正确 driver
+  driver     String    @default("local")
+  /// driver 需要的额外元数据(bucket/region/endpoint 等),JSON 格式
+  /// 例: { "bucket": "zeroexo-assets", "region": "oss-cn-hangzhou" }
+  driverMeta Json      @default("{}")
+  /// 上次迁移时间(用于追溯何时迁到当前 driver)
+  migratedAt DateTime?
+  /// 是否被版本快照保护(快照引用此资源时禁止 GC 删除)
+  snapshotProtected Boolean  @default(false)
+  /// 引用此资源的版本快照数量(归零时解除保护)
+  snapshotRefCount  Int      @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([ownerId])
+  @@index([hash])
+  @@index([deletedAt])
+  @@index([driver])
+}
+
+model Prompt {
+  id           String    @id @default(uuid())
+  ownerId      String
+  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title        String
+  content      String
+  /// 英文提示词内容(可选)
+  contentEn    String?
+  /// 日文提示词内容(可选)
+  contentJa    String?
+  /// 备注/说明(可选)
+  note         String?
+  category     String
+  tags         String[]  @default([])
+  source       String    @default("local")
+  sourceRepo   String?
+  favorite     Boolean   @default(false)
+  /// 所属文件夹(测试模块合并后,提示词可归入'提示词'文件夹及其子文件夹)
+  folderId     String?
+  folder       AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  /// 提示词中的多张参考图 storageKey 列表(冗余存储便于列表展示,真实数据在 PromptImage)
+  imageKeys    String[]  @default([])
+  version      Int       @default(0)
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  images       PromptImage[]
+
+  @@index([ownerId])
+  @@index([category])
+  @@index([folderId])
+}
+
+/// 提示词参考图 - 一个提示词可关联多张参考图(从资产库选择或上传)
+model PromptImage {
+  id         String   @id @default(uuid())
+  promptId   String
+  prompt     Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  /// 关联的 Asset.storageKey
+  storageKey String
+  /// reference(参考图) | result(结果图) | preview(预览)
+  role       String   @default("reference")
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([promptId])
+}
+
+/// 主体(角色/场景/道具) - 独立模块,可被画布/创作等模块引用
+model Subject {
+  id          String   @id @default(uuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// 主体类型: character | scene | prop
+  type        String
+  /// 主体名
+  name        String
+  /// 别名(逗号分隔存储)
+  aliases     String   @default("")
+  /// 一句话简介
+  description String   @default("")
+  /// 头像(Asset.storageKey)
+  avatarKey   String?
+  /// Emoji 头像(优先于 avatarKey 显示)
+  avatarEmoji String?
+  /// 状态: ok | warn | err
+  status      String   @default("ok")
+  /// 主体一致性描述(用于跨镜头保持形象一致)
+  consistency String   @default("")
+  /// 自由扩展字段(JSON 序列化,如配音关联、属性等)
+  fields      Json     @default("{}")
+  /// 标签
+  tags        String[] @default([])
+  /// 关联的形象图集 Asset.storageKey 列表
+  imageKeys   String[] @default([])
+  /// 所属文件夹
+  folderId    String?
+  folder      AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  /// 同步元数据
+  version     Int      @default(0)
+  lastSyncedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([type])
+  @@index([folderId])
+}
+
+// ===== P3 AI 对接 =====
+
+/// AI 生成任务记录
+model AiGeneration {
+  id             String   @id @default(uuid())
+  ownerId        String
+  owner          User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// 关联的 API Provider 标识(type='ai'),冗余存储 providerName 便于溯源
+  providerId     String?
+  /// 冗余字段,provider 删除后仍可溯源
+  providerName   String
+  model          String
+  /// 生成类型: text | image | video | audio
+  kind           String
+  prompt         String
+  negativePrompt String?
+  /// 生成参数(size/quality/steps/seed/seconds 等)
+  params         Json     @default("{}")
+  /// pending | running | success | failed | cancelled
+  status         String   @default("pending")
+  errorMessage   String?
+  /// 稳定错误码(前端按此查 i18n 词条翻译)
+  errorCode      String?
+  /// 成功后指向 Asset.id(产物自动落素材库)
+  resultAssetId  String?
+  /// 总消耗 token(估算)
+  costTokens     Int?
+  /// 输入 token 数(API 返回的 usage.prompt_tokens 或等效字段)
+  inputTokens    Int?
+  /// 输出 token 数(API 返回的 usage.completion_tokens 或等效字段)
+  outputTokens   Int?
+  costMs         Int?
+  /// 关联画布(可选)
+  projectId      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([kind])
+  @@index([ownerId, projectId, kind, status])
+}
+
+/// 用户级 AI 配置(默认模型、并发数、能力默认值)
+/// 一对一关联 User,记录该用户在 AI 调用时倾向使用的模型与并发限制
+model UserAiPreference {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 各能力默认模型,格式: providerId::modelId
+  analysisModel  String?
+  characterModel String?
+  locationModel  String?
+  videoModel     String?
+  audioModel     String?
+
+  /// 并发限制(各能力的并行任务数)
+  analysisConcurrency Int @default(3)
+  imageConcurrency    Int @default(2)
+  videoConcurrency    Int @default(1)
+
+  /// 能力默认值 JSON,按能力类型组织(分辨率/时长/比例等)
+  /// 结构: { text: {...}, image: {...}, video: {...}, audio: {...} }
+  capabilityDefaults Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===== 阶段A: 统一 API Provider 抽象 =====
+
+/// 统一的外部服务集成表 - 涵盖 AI / Email / OAuth / Storage / Payment
+/// 通过 type 字段区分业务分类,通过 provider 字段区分具体服务商
+/// 替代 settings.json 中的 smtp/oauth 块及旧的 AiProvider 表
+model ApiProvider {
+  id              String    @id @default(uuid())
+  /// 显示名: "GPT-4o 生产" / "阿里云 DM 营销邮件" / "QQ 互联" / "MinIO 杭州"
+  name            String
+  /// 服务商标识: openai | anthropic | gemini | smtp | aliyun-dm | qq | github | minio | s3 | oss | cos | stripe | alipay | wechat-pay
+  provider        String
+  /// 业务分类: ai | email | oauth | storage | payment
+  type            String
+  /// 公开配置(非敏感): host/port/region/bucket/baseUrl/appId/redirectUri
+  config          Json      @default("{}")
+  /// 凭证(加密存储): apiKey/secretKey/accessKey/accessKeySecret/appSecret
+  credentials     Json      @default("{}")
+  /// 凭证脱敏摘要(用于回显): "sk-****XkAb"
+  credentialsMask String?
+  /// 能力声明: AI: ["text","image","video","audio"]; Email: ["send","bounce"]; OAuth: ["authorize","refresh"]
+  capabilities    String[]  @default([])
+  /// 限额配置: { daily: 1000, monthly: 30000, dailyUsed: 0, monthlyUsed: 0 }
+  quota           Json      @default("{}")
+  /// 健康状态: healthy | degraded | down | unknown
+  health          String    @default("unknown")
+  /// 上次健康检查延迟(ms)
+  healthLatencyMs Int?
+  /// 上次健康检查时间
+  healthCheckedAt DateTime?
+  /// 健康检查错误信息
+  healthError     String?
+  /// 最后使用时间(用于清理未用服务)
+  lastUsedAt      DateTime?
+  /// 是否启用
+  enabled         Boolean   @default(true)
+  /// 是否为该类型默认(每 type 下最多一个)
+  isDefault       Boolean   @default(false)
+  /// 业务方用户 ID(null = 系统级)
+  ownerId         String?
+  /// 备注
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  usages     ApiUsage[]
+  healthLogs ApiHealthLog[]
+
+  @@unique([ownerId, provider, name])
+  @@index([type, enabled])
+  @@index([provider])
+  @@index([isDefault])
+}
+
+/// API 用量记录 - 按时间窗口聚合
+/// 用于: 限额告警 / 用量统计 / 商业化计费基础
+model ApiUsage {
+  id          String      @id @default(uuid())
+  providerId  String
+  provider    ApiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// 指标类型: token | request | byte | email_sent | image_generated | video_generated | storage_used
+  metric      String
+  /// 用量数值
+  value       BigInt
+  /// 时间窗口: hour | day | month
+  window      String
+  /// 窗口起始时间
+  windowStart DateTime
+  /// 模型 ID（可空，用于按模型精确计价；历史记录为 null）
+  modelId     String?
+  createdAt   DateTime    @default(now())
+
+  @@index([providerId, metric, window, windowStart])
+  @@index([providerId, modelId, metric, window, windowStart])
+  @@index([windowStart])
+}
+
+/// 健康检查日志 - 保留 90 天用于历史趋势
+model ApiHealthLog {
+  id           String      @id @default(uuid())
+  providerId   String
+  provider     ApiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// 状态: healthy | degraded | down
+  status       String
+  /// 检查延迟(ms)
+  latencyMs    Int?
+  /// 错误信息
+  errorMessage String?
+  checkedAt    DateTime    @default(now())
+
+  @@index([providerId, checkedAt])
+  @@index([status, checkedAt])
+}
+
+// ===== 阶段A: 存储迁移任务 =====
+
+/// 跨 driver 数据迁移任务
+model MigrationJob {
+  id             String    @id @default(uuid())
+  /// 源 driver: local | s3 | oss | cos
+  fromDriver     String
+  /// 目标 driver
+  toDriver       String
+  /// 状态: pending | running | paused | completed | failed | cancelled
+  status         String    @default("pending")
+  /// 计划迁移文件数
+  totalFiles     Int       @default(0)
+  /// 已完成文件数
+  completedFiles Int       @default(0)
+  /// 失败文件数
+  failedFiles    Int       @default(0)
+  /// 跳过文件数(已存在且哈希一致)
+  skippedFiles   Int       @default(0)
+  /// 总字节数
+  totalBytes     BigInt    @default(0)
+  /// 已迁移字节数
+  completedBytes BigInt    @default(0)
+  /// 开始时间
+  startedAt      DateTime?
+  /// 完成时间
+  completedAt    DateTime?
+  /// 错误信息
+  errorMessage   String?
+  /// 创建者(管理员 ID)
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  items MigrationJobItem[]
+
+  @@index([status])
+  @@index([createdBy])
+  @@index([createdAt])
+}
+
+/// 迁移任务文件级明细
+model MigrationJobItem {
+  id           String       @id @default(uuid())
+  jobId        String
+  job          MigrationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// 资源存储 key
+  storageKey   String
+  /// 文件大小
+  size         BigInt
+  /// 状态: pending | running | completed | failed | skipped
+  status       String       @default("pending")
+  /// 重试次数
+  attempts     Int          @default(0)
+  /// 错误信息
+  errorMessage String?
+  /// MD5/ETag 校验值
+  checksum     String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([jobId, storageKey])
+  @@index([jobId, status])
+}
+
+/// 敏感操作审计日志
+/// 用于追溯角色权限变更、用户角色变更、API Key 重置等高危操作
+/// 持久化到数据库,保留至少 180 天用于合规审计
+model AuditLog {
+  id         String   @id @default(uuid())
+  /// 操作者用户 ID
+  actorId    String
+  /// 操作者用户名(冗余,便于阅读)
+  actorName  String
+  /// 操作者角色(冗余)
+  actorRole  String
+  /// 操作类型: ROLE_PERMISSION_UPDATE | USER_ROLE_CHANGE | API_KEY_RESET 等
+  action     String
+  /// 目标类型: ROLE | USER | PROVIDER 等
+  targetType String
+  /// 目标标识
+  targetId   String
+  /// 变更前快照(JSON)
+  before     Json?
+  /// 变更后快照(JSON)
+  after      Json?
+  /// 操作时的客户端 IP
+  ip         String?
+  /// 客户端 User-Agent
+  userAgent  String?
+  /// 是否为敏感操作(true 时为 L3 高危)
+  sensitive  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model AiChatSession {
+  id         String          @id @default(cuid())
+  userId     String
+  providerId String
+  model      String
+  title      String          @default("")
+  summary    String?         // AI 生成的早期对话摘要
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  messages   AiChatMessage[]
+
+  @@index([userId])
+  @@unique([userId, providerId, model], name: "AiChatSession_userId_providerId_model_key")
+}
+
+model AiChatMessage {
+  id              String         @id @default(cuid())
+  sessionId       String
+  session         AiChatSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role            String
+  content         String
+  thinkingContent String?
+  createdAt       DateTime       @default(now())
+
+  @@index([sessionId])
+}
+
+
+
+/// Agent 配置
+model AiAgentConfig {
+  id            String    @id @default(uuid())
+  agentType     String    @unique
+  name          String
+  description   String?
+  systemPrompt  String?
+  model         String?
+  temperature   Float?
+  maxTokens     Int?
+  maxIterations Int?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+/// 用户收藏的公共提示词(收藏关系,非副本)
+model PromptFavorite {
+  id        String   @id @default(uuid())
+  userId    String
+  promptId  String
+  createdAt DateTime @default(now())
+
+  prompt    PublicPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, promptId])
+  @@index([userId])
+  @@index([promptId])
+}
+
+/// 公共提示词 - 对所有用户(含未登录)只读,管理员可管理
+model PublicPrompt {
+  id           String   @id @default(uuid())
+  title        String
+  content      String
+  /// 分类: role | scene | style | shot | other
+  category     String
+  tags         String[] @default([])
+  /// 用户收藏关系
+  favorites    PromptFavorite[]
+  /// 图片信息 [{storageKey, width, height, alt}]
+  images       Json     @default("[]")
+  /// 来源: image-prompt-library | manual
+  source       String   @default("manual")
+  /// 原始 item id(from image-prompt-library)
+  sourceId     String?
+  /// 原始 cluster 名称
+  clusterName  String?
+  /// 来源项目名称（github repo）
+  sourceName   String?
+  /// 原文链接
+  sourceUrl    String?
+  /// 许可证: CC0 | CC BY 4.0 | MIT
+  license      String?
+  /// 多语言标题 JSON { en, zh_hans, zh_hant }
+  demoTitles   Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([source])
+}
+
+/// 政策文档 - 支持版本化 + 多语言，管理员管理版本发布
+model Policy {
+  id             String   @id @default(uuid())
+  /// 唯一标识: privacy | terms | disclaimer | about | announcement
+  key            String   @unique
+  /// 当前生效的版本号(null=未发布)
+  currentVersion Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  versions PolicyVersion[]
+  @@index([key])
+}
+
+/// 政策版本 - 每次编辑创建新版本，支持多语言内容和发布控制
+model PolicyVersion {
+  id         String   @id @default(uuid())
+  /// 关联 Policy.key
+  policyKey  String
+  /// 自增版本号(从1开始)
+  version    Int
+  /// 标题(中文)
+  title      String
+  /// 标题(英文)
+  titleEn    String   @default("")
+  /// 标题(日文)
+  titleJa    String   @default("")
+  /// 中文内容(Markdown)
+  content    String   @default("")
+  /// 英文内容(Markdown)
+  contentEn  String   @default("")
+  /// 日文内容(Markdown)
+  contentJa  String   @default("")
+  /// 分类: policy(政策/法律) | announcement(公告)
+  type       String   @default("policy")
+  /// 是否已发布
+  published  Boolean  @default(false)
+  /// 版本说明(管理员可见)
+  notes      String   @default("")
+  /// 最后编辑者 ID
+  editorId   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  policy Policy @relation(fields: [policyKey], references: [key], onDelete: Cascade)
+
+  @@unique([policyKey, version])
+  @@index([policyKey, published])
+  @@index([policyKey, version])
+}
+
+/// 统一 Agent 任务记录 - 所有 Agent 执行任务统一入口
+model AgentTask {
+  id            String    @id @default(cuid())
+  userId        String
+  projectId     String?
+  /// 任务类型: script_writer | storyboard_assistant | image_generation | ...
+  taskType      String
+  /// 状态: pending | running | completed | failed | cancelled
+  status        String    @default("pending")
+  /// 任务输入(JSON)
+  input         Json?
+  /// 任务输出(JSON)
+  output        Json?
+  /// 进度 0-100
+  progress      Int       @default(0)
+  /// 错误信息
+  error         String?
+  /// 关联的 AgentConversation ID
+  conversationId String?
+  /// 关联的 AgentMessage ID
+  messageId     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  completedAt   DateTime?
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([status])
+  @@index([taskType])
+  @@index([userId, status])
+}
+
+// ===== 计费系统 =====
+
+/// 用户积分账户 - 每个用户一条记录
+model UserCredit {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 当前积分余额
+  balance         Int      @default(0)
+  /// 累计充值积分
+  totalCharged    Int      @default(0)
+  /// 累计消耗积分
+  totalConsumed   Int      @default(0)
+  /// 累计退款积分
+  totalRefunded   Int      @default(0)
+  /// 积分货币代码(扩展用)
+  currency        String   @default("CREDIT")
+  /// 是否启用
+  enabled         Boolean  @default(true)
+  /// 预冻结金额(已冻结但未结算的积分)
+  frozenAmount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  transactions CreditTransaction[]
+  consumptions ConsumptionLog[]
+
+  @@index([userId])
+}
+
+/// 积分流水账 - 充值/消耗/退款全量记录
+model CreditTransaction {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditId      String
+  credit        UserCredit @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  /// 类型: recharge | consume | refund | freeze | unfreeze
+  type          String
+  /// 变动积分(正数=充值/解冻,负数=消耗)
+  amount        Int
+  /// 变动后余额
+  balanceAfter  Int
+  /// 关联消耗记录 ID (消耗时)
+  referenceId   String?
+  /// 备注
+  remark        String?
+  /// 操作人(管理员充值时)
+  operatorId    String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([userId, type, createdAt])
+}
+
+/// AI 消耗明细 - 每次 AI 调用的完整计费记录
+model ConsumptionLog {
+  id                    String   @id @default(uuid())
+  /// 关联的 AiGeneration ID
+  generationId          String?
+  /// 关联的 AI Chat Session ID
+  chatSessionId         String?
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditId              String
+  userCredit            UserCredit @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  /// 模型名
+  model                 String
+  /// 模型类型: llm | image | video | audio
+  modelType             String
+  /// 计量单元: token | image | video | audio
+  unitType              String
+  /// 用量数值(如 token 数、图片张数、视频秒数)
+  usageAmount           BigInt
+  /// 输入 token 数(仅 LLM)
+  inputTokens           Int?
+  /// 输出 token 数(仅 LLM)
+  outputTokens          Int?
+  /// 扣除积分
+  creditsConsumed       Int
+  /// 扣除积分对应的人民币(按汇率换算)
+  creditValueCny        Float    @default(0)
+  /// 上游实际扣费(USD)
+  upstreamCostUsd       Float    @default(0)
+  /// 上游扣费渠道/号池
+  channelPool           String?
+  /// 模型倍率快照
+  modelMultiplier       Float    @default(1)
+  /// 补全倍率快照
+  completionMultiplier  Float    @default(1)
+  /// 分组倍率快照
+  groupMultiplier       Float    @default(1)
+  /// 积分单价快照(每单位积分)
+  creditPerUnit         Float    @default(0)
+  /// 计费状态: completed | failed | refunded
+  billingStatus         String   @default("completed")
+  /// 错误信息(失败时)
+  errorMessage          String?
+  createdAt             DateTime @default(now())
+
+  @@index([userId])
+  @@index([model])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([modelType])
+}
+
+/// 定价配置 - 按模型类型/模型/渠道配置倍率和积分单价
+model PricingConfig {
+  id                    String   @id @default(uuid())
+  /// 模型类型: llm | image | video | audio
+  modelType             String
+  /// 服务商: openai | anthropic | deepseek | ...
+  provider              String
+  /// 模型 ID
+  modelId               String
+  /// 计量单元: token | image | video | audio
+  unitType              String
+  /// 模型倍率(输入): 上游价 × 此倍率 = 输入单价
+  modelMultiplier       Float    @default(1)
+  /// 补全倍率(输出): 输入单价 × 此倍率 = 输出单价
+  completionMultiplier  Float    @default(1)
+  /// 分组倍率: 针对特定渠道/用户组的叠加系数
+  groupMultiplier       Float    @default(1)
+  /// 积分单价: 每单位(千token/张/秒)多少积分
+  creditPerUnit         Float    @default(0)
+  /// 积分单位大小: 如 1000 tokens = 1 unit
+  creditUnitSize        Int      @default(1000)
+  /// 是否启用
+  enabled               Boolean  @default(true)
+  /// 备注
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([modelType, provider, modelId])
+  @@index([modelType])
+  @@index([provider])
+  @@index([enabled])
+}
+
+/// 每日报表 - 每日凌晨汇总前一天的 billing 数据
+model DailyReport {
+  id              String   @id @default(uuid())
+  /// 报表日期(唯一),格式 YYYY-MM-DD
+  date            String   @unique
+  /// 总调用次数
+  totalCalls      Int      @default(0)
+  /// 总消耗积分
+  totalCredits    Int      @default(0)
+  /// 上游总成本(USD)
+  totalCostUsd    Float    @default(0)
+  /// 上游总成本(CNY,按汇率换算)
+  totalCostCny    Float    @default(0)
+  /// 总营收(CNY)
+  totalRevenueCny Float    @default(0)
+  /// 毛利润(CNY) = totalRevenueCny - totalCostCny
+  grossProfitCny  Float    @default(0)
+  /// 毛利率(%)
+  marginRate      Float    @default(0)
+  /// 按模型类型 + 服务商分组的详细汇总
+  summary         Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  @@index([date])
+}
+
+/// 订阅计划(定价分组) - 基础/标准/高级/超级/企业团队
+model Plan {
+  id          String   @id @default(uuid())
+  /// 计划 code: free | basic | standard | premium | ultimate | enterprise
+  code        String   @unique
+  /// 显示名: 基础版 / 标准版 / 高级版 / 超级版 / 企业版
+  name        String
+  /// 描述
+  description String?
+  /// 分组倍率: 该计划用户的消费倍率(默认 1x, <1 折扣, >1 加价)
+  multiplier  Float    @default(1)
+  /// 每个计费周期赠送的积分(积分余额)
+  creditsPerCycle Int  @default(0)
+  /// 月付价格(CNY)
+  monthlyPrice   Float  @default(0)
+  /// 季付价格(CNY)
+  quarterlyPrice Float  @default(0)
+  /// 年付价格(CNY)
+  yearlyPrice    Float  @default(0)
+  /// 席位数量(企业/团队套餐, 默认 1)
+  seats          Int    @default(1)
+  /// 是否启用
+  enabled        Boolean @default(true)
+  /// 排序(升序)
+  sortOrder      Int     @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([enabled])
+  @@index([sortOrder])
+}
+
+/// 用户订阅记录 - 记录每次订阅的周期/到期时间/续费状态
+model Subscription {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       Plan     @relation(fields: [planId], references: [id])
+  /// 冗余计划 code(计划改名/禁用后仍可追溯)
+  planCode   String
+  /// 计费周期: month | quarter | year
+  cycle      String   @default("month")
+  /// 席位数量
+  seats      Int      @default(1)
+  /// 状态: active | expired | cancelled
+  status     String   @default("active")
+  /// 续费方式: manual | auto (支付接入后支持 auto)
+  renewMode  String   @default("manual")
+  /// 开始时间
+  startAt    DateTime
+  /// 到期时间(到期后自动回退 free)
+  expiresAt  DateTime
+  /// 取消时间
+  cancelledAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([planId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+// ===== 协作系统 =====
+
+/// 协作房间 - 画布协作空间
+model CollaborationRoom {
+  id            String   @id @default(cuid())
+  /// 关联的画布 ID (Project.id)
+  canvasId      String
+  /// 房主用户 ID
+  ownerId       String
+  /// 邀请码(6位随机)
+  inviteCode    String   @unique
+  /// 邀请链接
+  inviteLink    String   @unique
+  /// 模式: invite-only | public | auto-self
+  mode          String   @default("invite-only")
+  /// 最大成员数(null=无限制)
+  maxMembers    Int?
+  /// 状态: active | closed
+  status        String   @default("active")
+  /// 邀请过期时间
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 权限设置
+  allowChat      Boolean  @default(true)
+  allowAgentChat Boolean  @default(true)
+  allowEdit      Boolean  @default(true)
+  allowDownload  Boolean  @default(false)
+
+  members       CollaborationMember[]
+  messages      CollaborationMessage[]
+  agentSessions AgentSession[]
+
+  @@index([canvasId])
+  @@index([inviteCode])
+  @@index([status])
+}
+
+/// 协作成员
+model CollaborationMember {
+  id          String   @id @default(cuid())
+  roomId      String
+  userId      String
+  nickname    String?
+  /// 角色: owner | editor | viewer
+  role        String   @default("viewer")
+  /// 权限: view,chat,edit,agent,download
+  permissions String   @default("view,chat")
+  /// 状态: online | offline | banned | muted
+  status      String   @default("online")
+  /// 设备类型: desktop | tablet | mobile
+  deviceType  String   @default("desktop")
+  /// 同账户多设备序号(0=主设备, 1/2/3=副设备)
+  sessionIndex Int      @default(0)
+  joinedAt    DateTime @default(now())
+  lastActiveAt DateTime @updatedAt
+
+  room        CollaborationRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId, sessionIndex])
+  @@index([roomId])
+  @@index([userId])
+  @@index([status])
+}
+
+/// 协作消息(聊天记录)
+model CollaborationMessage {
+  id             String   @id @default(cuid())
+  roomId         String
+  senderId       String
+  senderName     String
+  senderRole     String
+  /// 消息类型: text | system | agent | agent_action
+  type           String   @default("text")
+  content        String
+  /// @提及的用户 ID 列表
+  mentions       String[] @default([])
+  /// 是否 @了 Agent
+  agentMentioned Boolean  @default(false)
+  /// 回复的消息 ID
+  replyToId      String?
+  createdAt      DateTime @default(now())
+
+  room           CollaborationRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+/// Agent 会话(协作模式下的共享记忆)
+model AgentSession {
+  id            String   @id @default(cuid())
+  roomId        String
+  canvasId      String
+  agentType     String   @default("canvas-assistant")
+  systemPrompt  String?
+  /// 共享记忆(JSON) - 项目上下文、对话历史、协作统计等
+  memory        Json?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  room          CollaborationRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  messages      AgentSessionMessage[]
+
+  @@unique([roomId])
+  @@index([canvasId])
+}
+
+/// Agent 会话消息
+model AgentSessionMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  senderId  String
+  senderName String
+  role      String   // user | agent | system
+  content   String
+  toolCalls Json?
+  createdAt DateTime @default(now())
+
+  session   AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([createdAt])
+}

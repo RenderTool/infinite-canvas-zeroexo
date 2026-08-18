@@ -1,0 +1,51 @@
+# ============ Dependencies ============
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# ============ Build output ============
+dist/
+build/
+*.tsbuildinfo
+
+# ============ Environment ============
+# 排除所有 .env 变体，保留 .env.example 模板
+.env
+.env.*
+!.env.example
+
+# ============ Runtime data (仅根目录,避免误伤 src/modules 下同名源码模块) ============
+/storage/
+/logs/
+/pgsql/
+
+# ============ Secrets ============
+# 本地种子/运行配置可能包含 SMTP 口令、OAuth 密钥等
+prisma/local-seed-config.json
+config/settings.json
+config/settings.local.json
+
+# ============ IDE / Editor ============
+.idea/
+.vscode/
+*.swp
+*.swo
+.trae/
+
+# ============ OS ============
+.DS_Store
+Thumbs.db
+
+# ============ Logs ============
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ============ Test coverage ============
+coverage/
+.nyc_output/
+
+# ============ Misc ============
+*.pid
+*.seed
+*.pid.lock

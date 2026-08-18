@@ -1,0 +1,8 @@
+[
+  {
+    "modelType": "audio",
+    "provider": "bailian",
+    "modelId": "qwen-tts",
+    "pricing": { "mode": "flat", "flatAmount": 0.02 }
+  }
+]

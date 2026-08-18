@@ -1,0 +1,45 @@
+{
+  "name": "@zeroexo/plugin-layout",
+  "version": "0.0.1",
+  "description": "ZeroExo layout plugin (arrange/align/distribute/unify-size/sort - 18 operations)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@zeroexo/core": "workspace:*",
+    "@zeroexo/shared": "workspace:*",
+    "@zeroexo/plugin-render-react": "workspace:*",
+    "@zeroexo/plugin-selection": "workspace:*",
+    "@zeroexo/plugin-history": "workspace:*",
+    "dagre": "^0.8.5"
+  },
+  "devDependencies": {
+    "@types/dagre": "^0.7.52",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0",
+    "rimraf": "^6.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

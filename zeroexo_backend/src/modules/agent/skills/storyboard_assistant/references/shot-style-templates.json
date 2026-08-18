@@ -1,0 +1,44 @@
+{
+  "shotStyleTemplates": [
+    {
+      "videoType": "concept_teaching",
+      "label": "概念讲解",
+      "cameraRhythm": "中速",
+      "preferredShotTypes": ["全景", "中景", "近景", "特写"],
+      "lighting": "明亮均匀，突出信息",
+      "allowedCameraMovements": ["推近", "拉远", "摇移", "特写"]
+    },
+    {
+      "videoType": "story_board",
+      "label": "剧情分镜",
+      "cameraRhythm": "变化丰富",
+      "preferredShotTypes": ["远景", "全景", "中景", "近景", "特写"],
+      "lighting": "按情绪设计，戏剧性光影",
+      "allowedCameraMovements": ["推", "拉", "摇", "移", "跟", "升", "降", "环绕", "航拍"]
+    },
+    {
+      "videoType": "product_intro",
+      "label": "产品介绍",
+      "cameraRhythm": "中速",
+      "preferredShotTypes": ["全景", "中景", "特写"],
+      "lighting": "明亮、干净、突出产品",
+      "allowedCameraMovements": ["环绕", "推近", "摇移", "特写"]
+    },
+    {
+      "videoType": "data_report",
+      "label": "数据报告",
+      "cameraRhythm": "慢速",
+      "preferredShotTypes": ["中景", "近景", "特写"],
+      "lighting": "明亮均匀，突出数据",
+      "allowedCameraMovements": ["推近", "摇移", "特写"]
+    },
+    {
+      "videoType": "tutorial",
+      "label": "教程指南",
+      "cameraRhythm": "慢速",
+      "preferredShotTypes": ["中景", "近景", "特写"],
+      "lighting": "明亮清晰，突出操作",
+      "allowedCameraMovements": ["推近", "特写", "固定"]
+    }
+  ]
+}

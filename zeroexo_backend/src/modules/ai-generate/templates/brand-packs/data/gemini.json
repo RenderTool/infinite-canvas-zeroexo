@@ -1,0 +1,16 @@
+{
+  "id": "gemini-202607",
+  "provider": "gemini",
+  "name": "Google Gemini",
+  "version": "1.0.0",
+  "official": true,
+  "label": "Google Gemini",
+  "color": "#4285f4",
+  "description": "Google Gemini, 提供语言模型和 Nano Banana、Imagen 图像生成模型。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "gemini",
+    "defaultBaseUrl": "https://generativelanguage.googleapis.com",
+    "capabilities": ["llm", "image"]
+  }
+}

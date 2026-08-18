@@ -1,0 +1,402 @@
+@import 'antd/dist/reset.css';
+@import 'bootstrap-icons/font/bootstrap-icons.min.css';
+
+/* ========== 现代化设计令牌 (CSS Variables) ========== */
+:root {
+  /* 品牌主色系 */
+  --color-primary: #1677ff;
+  --color-primary-hover: #4096ff;
+  --color-primary-active: #0958d9;
+  --color-primary-light: #e6f4ff;
+  
+  /* 功能色 */
+  --color-success: #10b981;
+  --color-success-light: #ecfdf5;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fffbeb;
+  --color-error: #ef4444;
+  --color-error-light: #fef2f2;
+  --color-ai: #8b5cf6;
+  --color-ai-light: #f5f3ff;
+  
+  /* 文本色（WCAG AA 对比度） */
+  --color-text-primary: #171717;
+  --color-text-secondary: #525252;
+  --color-text-tertiary: #a3a3a3;
+  --color-text-disabled: #d4d4d4;
+  --color-text-inverse: #ffffff;
+  
+  /* 背景层级 */
+  --color-bg-page: #fafafa;
+  --color-bg-surface: #ffffff;
+  --color-bg-elevated: #f5f5f5;
+  --color-bg-hover: #f5f5f5;
+  --color-bg-active: #e5e5e5;
+  --color-bg-selected: #eff6ff;
+  --color-bg-popup: #ffffff;
+  --color-bg-code: #f6f8fa;
+  
+  /* 边框色 */
+  --color-border: #e5e5e5;
+  --color-border-light: #f5f5f5;
+  --color-border-strong: #d4d4d4;
+  --color-border-focus: #1677ff;
+  
+  /* 字体 */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  
+  /* 圆角 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  
+  /* 阴影层级 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-primary: 0 4px 12px rgba(22, 119, 255, 0.25);
+  
+  /* 渐变 */
+  --gradient-brand: linear-gradient(135deg, #1677ff 0%, #7c3aed 100%);
+  --gradient-brand-hover: linear-gradient(135deg, #4096ff 0%, #8b5cf6 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-ai: linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%);
+  
+  /* 动效 */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  
+  /* 布局 */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 56px;
+}
+
+/* ========== 基础重置 ========== */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow-x: hidden;
+  font-family: var(--font-family);
+  color: var(--color-text-primary);
+  background: var(--color-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ========== ProLayout 布局 ========== */
+.ant-pro-layout {
+  .ant-pro-sider {
+    background: var(--color-bg-surface) !important;
+    border-right: 1px solid var(--color-border) !important;
+  }
+  
+  .ant-pro-sider-logo {
+    background: transparent !important;
+    border-bottom: 1px solid var(--color-border-light) !important;
+    height: 64px !important;
+  }
+  
+  .ant-layout-sider-children {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .ant-menu {
+    background: transparent !important;
+    border-right: none !important;
+  }
+  
+  .ant-menu-item {
+    margin: 4px 8px !important;
+    border-radius: var(--radius-md) !important;
+    height: 40px !important;
+    line-height: 40px !important;
+    color: var(--color-text-secondary) !important;
+    
+    &:hover {
+      background: var(--color-bg-hover) !important;
+      color: var(--color-text-primary) !important;
+    }
+    
+    &.ant-menu-item-selected {
+      background: var(--color-bg-selected) !important;
+      color: var(--color-primary) !important;
+      font-weight: 500;
+      
+      .ant-menu-title-content {
+        color: var(--color-primary) !important;
+      }
+    }
+  }
+  
+  /* 子菜单图标对齐 */
+  .ant-menu-submenu-title {
+    height: 40px !important;
+    line-height: 40px !important;
+    margin: 4px 8px !important;
+    border-radius: var(--radius-md) !important;
+  }
+  
+  .ant-pro-layout-header {
+    background: var(--color-bg-surface) !important;
+    border-bottom: 1px solid var(--color-border) !important;
+    height: var(--header-height) !important;
+    line-height: var(--header-height) !important;
+    padding: 0 24px !important;
+  }
+  
+  .ant-pro-layout-content {
+    background: var(--color-bg-page) !important;
+    padding: var(--spacing-md) !important;
+    overflow-x: hidden !important;
+  }
+}
+
+/* 强制 ProLayout 容器传递 100% 高度 */
+.ant-pro-layout,
+.ant-pro-layout-container,
+.ant-pro-basicLayout,
+.ant-pro-basicLayout-content,
+.ant-pro-layout-content {
+  height: 100% !important;
+}
+
+.main-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+}
+
+.main-content > * {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ========== 滚动条美化（无动画） ========== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-strong);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-tertiary);
+}
+
+/* ========== BreadcrumbLayout 内容区 ========== */
+.breadcrumb-layout-content {
+  overflow: hidden !important;
+  box-sizing: border-box;
+  
+  /* 修复 ant-row 负 margin 导致的水平滚动条 */
+  .ant-row {
+    margin-inline: 0 !important;
+  }
+  
+  /* 防止表格产生水平溢出 */
+  .ant-table-container {
+    overflow: hidden !important;
+  }
+  
+  .breadcrumb-layout-content > * + * {
+    margin-top: var(--spacing-md);
+  }
+}
+
+/* 全局防止容器溢出 */
+.ant-card,
+.ant-modal-content {
+  box-sizing: border-box;
+}
+
+/* ========== 资源表格行操作（更多按钮） ========== */
+/* 默认隐藏，hover 表行时淡入显示 */
+.resource-table .row-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.resource-table .ant-table-tbody > tr:hover .row-actions {
+  opacity: 1;
+}
+
+/* ========== 消息行交互样式 ========== */
+.message-row {
+  &:hover .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.message-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.message-action-btn {
+  &:hover {
+    background-color: var(--color-bg-hover);
+  }
+}
+
+/* ========== 无障碍焦点样式 ========== */
+*:focus-visible {
+  outline: none !important;
+}
+
+/* 移除输入框/选择器的默认focus outline */
+.ant-input:focus,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-select-selector:focus,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused,
+.ant-input-number-focused,
+.ant-cascader-picker-focused {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 移除Button的focus outline */
+.ant-btn:focus,
+.ant-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* ========== 选中文字颜色 ========== */
+::selection {
+  background: var(--color-primary-light);
+  color: var(--color-primary-active);
+}
+
+/* ========== 表格行操作按钮显示 ========== */
+.ant-table-tbody > tr .row-action-btn {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* 行操作按钮蓝色样式 */
+.row-action-btn {
+  color: var(--color-primary, #1677ff) !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  
+  &:hover {
+    color: var(--color-primary-hover, #4096ff) !important;
+    background: var(--color-primary-light, #e6f4ff) !important;
+  }
+}
+
+/* ========== 数据类表格行高（2倍） ========== */
+.data-table .ant-table-tbody > tr > td {
+  padding-top: 20px !important;
+  padding-bottom: 20px !important;
+}
+
+.data-table .ant-table-thead > tr > th {
+  padding-top: 16px !important;
+  padding-bottom: 16px !important;
+}
+
+/* ========== 全局数据表格单元格内边距（所有表格统一微调） ========== */
+.ant-table-thead > tr > th {
+  padding-top: 16px !important;
+  padding-bottom: 16px !important;
+}
+
+.ant-table-tbody > tr > td {
+  padding-top: 20px !important;
+  padding-bottom: 20px !important;
+}
+
+/* 媒体类表格（有图片）保持原行高 */
+.media-table .ant-table-tbody > tr > td {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+/* ========== 表格单元格内元素内边距（标签/按钮/链接统一 5px，内容更透气） ========== */
+.ant-table-tbody > tr > td {
+  .ant-tag,
+  .ant-btn,
+  .row-action-btn,
+  a {
+    padding: 5px;
+  }
+}
+
+/* ========== 移除输入框/选择器的过度动画 ========== */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-picker,
+.ant-input-number,
+.ant-cascader-picker,
+.ant-tree-select .ant-select-selector {
+  transition: none !important;
+  
+  &:focus,
+  &:focus-within,
+  &:hover {
+    transition: none !important;
+  }
+}
+
+/* 移除Button的hover动画 */
+.ant-btn {
+  transition: none !important;
+  
+  &:hover,
+  &:active {
+    transition: none !important;
+  }
+}
+
+/* ========== 打印样式 ========== */
+@media print {
+  .ant-pro-layout-sider,
+  .ant-pro-layout-header,
+  .ant-table-thead > tr > th::before,
+  .ant-table-cell::before {
+    display: none !important;
+  }
+}

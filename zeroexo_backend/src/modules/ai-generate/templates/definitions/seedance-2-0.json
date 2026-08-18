@@ -1,0 +1,196 @@
+{
+  "id": "seedance-2-0",
+  "name": "Seedance 2.0",
+  "protocol": "openai",
+  "modelType": "video",
+  "endpoint": "/api/v3/contents/generations/tasks",
+  "maxPromptLength": 500,
+  "parameters": [
+    {
+      "name": "mode",
+      "type": "enum",
+      "label": "生成模式",
+      "default": "image-to-video-first-last-frame",
+      "values": ["image-to-video-first-last-frame", "multi-modal-reference"],
+      "labels": {
+        "image-to-video-first-last-frame": "首尾帧",
+        "multi-modal-reference": "多模态"
+      },
+      "display": "radio",
+      "valueTooltips": {
+        "image-to-video-first-last-frame": "输入首帧和/或尾帧图片，配合文本提示词生成视频，至少需要提供一张图片",
+        "multi-modal-reference": "输入图片、视频、音频等多种参考素材，配合文本提示词生成视频"
+      }
+    },
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "720p",
+      "values": ["480p", "720p", "1080p", "4k"],
+      "labels": { "480p": "480P", "720p": "720P", "1080p": "1080P", "4k": "4K" },
+      "display": "radio",
+      "valueTooltips": {
+        "480p": "480p 分辨率，最快速生成",
+        "720p": "720p 分辨率，平衡质量与速度",
+        "1080p": "1080p 全高清（Seedance 2.0 Fast/Mini 不支持）",
+        "4k": "4K 超高清（仅 Seedance 2.0 支持，10bit H.265）"
+      }
+    },
+    {
+      "name": "ratio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "16:9",
+      "values": ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+      "labels": {
+        "adaptive": "AUTO",
+        "21:9": "21:9",
+        "16:9": "16:9",
+        "4:3": "4:3",
+        "1:1": "1:1",
+        "3:4": "3:4",
+        "9:16": "9:16"
+      },
+      "display": "radio",
+      "valueTooltips": {
+        "adaptive": "AUTO 模式：根据输入内容智能选择最佳宽高比"
+      }
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "时长（秒）",
+      "default": 5,
+      "min": 4,
+      "max": 15,
+      "tooltip": "生成视频时长，4-15秒"
+    },
+    {
+      "name": "generateAudio",
+      "type": "boolean",
+      "label": "生成音频",
+      "default": true,
+      "tooltip": "控制生成的视频是否包含与画面同步的声音"
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "returnLastFrame",
+      "type": "boolean",
+      "label": "返回尾帧",
+      "default": false,
+      "tooltip": "返回生成视频的尾帧图像，可用于生成连续视频"
+    },
+    {
+      "name": "cameraFixed",
+      "type": "boolean",
+      "label": "固定镜头",
+      "default": false,
+      "tooltip": "固定镜头，画面不移动"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "default": 0,
+      "min": 0,
+      "max": 2147483647,
+      "tooltip": "随机种子，相同种子可复现相同结果（0 表示随机）"
+    },
+    {
+      "name": "priority",
+      "type": "number",
+      "label": "执行优先级",
+      "default": 0,
+      "min": 0,
+      "max": 9,
+      "tooltip": "设置请求执行优先级，数值越大优先级越高（0-9）"
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "参考图上限",
+      "default": 9,
+      "min": 0,
+      "max": 9
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "maxReferenceVideos",
+      "type": "number",
+      "label": "参考视频上限",
+      "default": 3,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "name": "referenceVideosEnabled",
+      "type": "boolean",
+      "label": "参考视频",
+      "default": false
+    },
+    {
+      "name": "maxReferenceAudios",
+      "type": "number",
+      "label": "参考音频上限",
+      "default": 3,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "name": "referenceAudiosEnabled",
+      "type": "boolean",
+      "label": "参考音频",
+      "default": false
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "maxReferenceImages": 9,
+      "maxReferenceVideos": 3,
+      "maxReferenceAudios": 3,
+      "minDuration": 4,
+      "maxDuration": 15,
+      "supportsImageToImage": false
+    },
+    "paramMapping": {
+      "mode": "mode",
+      "resolution": "resolution",
+      "ratio": "ratio",
+      "duration": "duration",
+      "generateAudio": "generate_audio",
+      "watermark": "watermark",
+      "returnLastFrame": "return_last_frame",
+      "cameraFixed": "camera_fixed",
+      "seed": "seed",
+      "priority": "priority",
+      "referenceImages": "image",
+      "referenceVideos": "video",
+      "referenceAudio": "audio"
+    },
+    "valueMapping": {
+      "resolution": {
+        "480p": "480p",
+        "720p": "720p",
+        "1080p": "1080p",
+        "4k": "4k"
+      },
+      "mode": {
+        "image-to-video-first-last-frame": "image_to_video_first_last_frame",
+        "multi-modal-reference": "multi_modal_reference"
+      }
+    }
+  },
+  "pricing": { "perSecond": 0.1 },
+  "matchKeywords": ["seedance-2-0", "doubao-seedance-2-0", "doubao-seedance-2"]
+}

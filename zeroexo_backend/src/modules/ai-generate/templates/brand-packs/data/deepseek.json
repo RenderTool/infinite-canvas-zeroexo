@@ -1,0 +1,16 @@
+{
+  "id": "deepseek-202607",
+  "provider": "deepseek",
+  "name": "DeepSeek",
+  "version": "1.0.0",
+  "official": true,
+  "label": "DeepSeek",
+  "color": "#4f6ef7",
+  "description": "DeepSeek 官方 API, 提供高性能开源语言模型。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "openai",
+    "defaultBaseUrl": "https://api.deepseek.com",
+    "capabilities": ["llm"]
+  }
+}

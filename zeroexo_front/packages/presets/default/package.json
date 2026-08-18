@@ -1,0 +1,50 @@
+{
+  "name": "@zeroexo/preset-default",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@zeroexo/core": "workspace:*",
+    "@zeroexo/shared": "workspace:*",
+    "@zeroexo/plugin-render-react": "workspace:*",
+    "@zeroexo/plugin-interaction": "workspace:*",
+    "@zeroexo/plugin-selection": "workspace:*",
+    "@zeroexo/plugin-connection": "workspace:*",
+    "@zeroexo/plugin-history": "workspace:*",
+    "@zeroexo/plugin-node-registry": "workspace:*",
+    "@zeroexo/plugin-minimap": "workspace:*",
+    "@zeroexo/plugin-keyboard": "workspace:*",
+    "@zeroexo/plugin-persistence": "workspace:*",
+    "@zeroexo/plugin-ai-provider": "workspace:*",
+    "@zeroexo/plugin-nodes": "workspace:*",
+    "@zeroexo/plugin-group": "workspace:*",
+    "@zeroexo/plugin-layout": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.0",
+    "rimraf": "^6.0.0"
+  }
+}

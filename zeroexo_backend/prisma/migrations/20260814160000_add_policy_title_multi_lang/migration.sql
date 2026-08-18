@@ -1,0 +1,3 @@
+-- 给 PolicyVersion 添加多语言标题字段
+ALTER TABLE "PolicyVersion" ADD COLUMN IF NOT EXISTS "titleEn" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "PolicyVersion" ADD COLUMN IF NOT EXISTS "titleJa" TEXT NOT NULL DEFAULT '';

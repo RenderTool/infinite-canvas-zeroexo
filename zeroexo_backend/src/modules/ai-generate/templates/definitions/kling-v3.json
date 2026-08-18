@@ -1,0 +1,124 @@
+{
+  "id": "kling-v3",
+  "name": "可灵 Kling 3.0",
+  "protocol": "openai",
+  "modelType": "video",
+  "endpoint": "/api/v1/services/aigc/video-generation/video-synthesis",
+  "maxPromptLength": 2500,
+  "parameters": [
+    {
+      "name": "mode",
+      "type": "enum",
+      "label": "生成模式",
+      "default": "image-to-video-first-last-frame",
+      "values": ["image-to-video-first-last-frame", "multi-modal-reference"],
+      "labels": {
+        "image-to-video-first-last-frame": "首尾帧",
+        "multi-modal-reference": "多模态"
+      },
+      "display": "radio",
+      "valueTooltips": {
+        "image-to-video-first-last-frame": "输入首帧和/或尾帧图片，配合文本提示词生成视频，至少需要提供一张图片",
+        "multi-modal-reference": "输入图片、视频、音频等多种参考素材，配合文本提示词生成视频"
+      }
+    },
+    {
+      "name": "duration",
+      "type": "enum",
+      "label": "时长（秒）",
+      "default": 5,
+      "values": ["5", "10"],
+      "labels": { "5": "5秒", "10": "10秒" },
+      "display": "radio"
+    },
+    {
+      "name": "size",
+      "type": "enum",
+      "label": "视频尺寸",
+      "default": "720x1280",
+      "values": ["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1024"],
+      "labels": { "720x1280": "720P 竖屏", "1080x1920": "1080P 竖屏", "1280x720": "720P 横屏", "1920x1080": "1080P 横屏", "1024x1024": "1:1 方形" },
+      "display": "select"
+    },
+    {
+      "name": "sound",
+      "type": "boolean",
+      "label": "生成音频",
+      "default": true,
+      "tooltip": "控制生成的视频是否包含音频"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "default": 0,
+      "min": 0,
+      "max": 2147483647,
+      "tooltip": "随机种子，相同种子可复现相同结果（0 表示随机）"
+    },
+    {
+      "name": "style",
+      "type": "enum",
+      "label": "风格",
+      "default": "auto",
+      "values": ["auto", "cinematic", "anime", "realistic", "3d-cartoon"],
+      "labels": { "auto": "自动", "cinematic": "电影感", "anime": "动漫", "realistic": "写实", "3d-cartoon": "3D卡通" },
+      "display": "select"
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "参考图上限",
+      "default": 7,
+      "min": 0,
+      "max": 7
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "maxReferenceVideos",
+      "type": "number",
+      "label": "参考视频上限",
+      "default": 1,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "referenceVideosEnabled",
+      "type": "boolean",
+      "label": "参考视频",
+      "default": false
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "maxReferenceImages": 7,
+      "maxReferenceVideos": 1,
+      "minDuration": 5,
+      "maxDuration": 10,
+      "supportsImageToImage": false
+    },
+    "paramMapping": {
+      "mode": "mode",
+      "duration": "duration",
+      "size": "size",
+      "sound": "sound",
+      "seed": "seed",
+      "style": "style",
+      "referenceImages": "image",
+      "referenceVideos": "video"
+    },
+    "valueMapping": {
+      "mode": {
+        "image-to-video-first-last-frame": "image_to_video_first_last_frame",
+        "multi-modal-reference": "multi_modal_reference"
+      }
+    }
+  },
+  "pricing": { "perSecond": 0.08 },
+  "matchKeywords": ["kling", "kling-v3"]
+}

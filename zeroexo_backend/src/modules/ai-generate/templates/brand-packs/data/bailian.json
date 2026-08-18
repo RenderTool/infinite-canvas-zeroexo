@@ -1,0 +1,16 @@
+{
+  "id": "bailian-202607",
+  "provider": "bailian",
+  "name": "阿里百炼",
+  "version": "1.0.0",
+  "official": true,
+  "label": "阿里百炼",
+  "color": "#ff6a00",
+  "description": "阿里云百炼平台, 提供通义千问、万相等多模态模型。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "openai",
+    "defaultBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode",
+    "capabilities": ["llm", "video", "audio"]
+  }
+}

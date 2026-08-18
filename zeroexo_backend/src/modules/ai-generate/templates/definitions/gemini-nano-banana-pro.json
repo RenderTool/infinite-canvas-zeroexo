@@ -1,0 +1,75 @@
+{
+  "id": "gemini-nano-banana-pro",
+  "name": "Nano Banana Pro (Gemini 3 Pro Image)",
+  "protocol": "gemini",
+  "modelType": "image",
+  "endpoint": "/v1beta/models/{model}:generateContent",
+  "maxPromptLength": 20000,
+  "parameters": [
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "1k",
+      "values": ["512", "1k", "2k", "4k"],
+      "labels": { "512": "512", "1k": "1K", "2k": "2K", "4k": "4K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "auto",
+      "values": ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+      "labels": {
+        "auto": "AUTO", "1:1": "1:1", "1:4": "1:4", "1:8": "1:8",
+        "2:3": "2:3", "3:2": "3:2", "3:4": "3:4", "4:1": "4:1",
+        "4:3": "4:3", "4:5": "4:5", "5:4": "5:4", "8:1": "8:1",
+        "9:16": "9:16", "16:9": "16:9", "21:9": "21:9"
+      },
+      "display": "radio"
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图数",
+      "default": 14
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "png",
+      "values": ["png", "jpeg", "webp"],
+      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 262144,
+      "maxTotalPixels": 16777216,
+      "minAspectRatio": 0.125,
+      "maxAspectRatio": 8,
+      "maxReferenceImages": 14,
+      "supportsImageToImage": true,
+      "maxEdgeLength": 4096
+    },
+    "paramMapping": {
+      "resolution": "generationConfig.response_format.image.image_size",
+      "aspectRatio": "generationConfig.response_format.image.aspect_ratio"
+    },
+    "valueMapping": {
+      "resolution": { "512": "512", "1k": "1K", "2k": "2K", "4k": "4K" },
+      "aspectRatio": { "auto": "" }
+    }
+  },
+  "pricing": { "perImage": 0.05 },
+  "matchKeywords": ["gemini-3-pro-image", "nano-banana-pro"]
+}

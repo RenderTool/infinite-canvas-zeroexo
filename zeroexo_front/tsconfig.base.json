@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    // 所有 workspace 包共用的 alias/paths:
+    // baseUrl 相对于 <root>/zeroexo_front/ 本 tsconfig.base.json 所在目录
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@zeroexo/core": ["packages/core/src/index.ts"],
+      "@zeroexo/shared": ["packages/shared/src/index.ts"],
+      "@zeroexo/plugin-ai-provider": ["packages/plugins/ai-provider/src/index.ts"],
+      "@zeroexo/plugin-connection": ["packages/plugins/connection/src/index.ts"],
+      "@zeroexo/plugin-group": ["packages/plugins/group/src/index.ts"],
+      "@zeroexo/plugin-history": ["packages/plugins/history/src/index.ts"],
+      "@zeroexo/plugin-image-editor": ["packages/plugins/image-editor/src/index.ts"],
+      "@zeroexo/plugin-interaction": ["packages/plugins/interaction/src/index.ts"],
+      "@zeroexo/plugin-keyboard": ["packages/plugins/keyboard/src/index.ts"],
+      "@zeroexo/plugin-layout": ["packages/plugins/layout/src/index.ts"],
+      "@zeroexo/plugin-minimap": ["packages/plugins/minimap/src/index.ts"],
+      "@zeroexo/plugin-node-registry": ["packages/plugins/node-registry/src/index.ts"],
+      "@zeroexo/plugin-nodes": ["packages/plugins/nodes/src/index.tsx"],
+      "@zeroexo/plugin-persistence": ["packages/plugins/persistence-localforage/src/index.ts"],
+      "@zeroexo/plugin-render-react": ["packages/plugins/render-react/src/index.ts"],
+      "@zeroexo/plugin-selection": ["packages/plugins/selection/src/index.ts"],
+      "@zeroexo/plugin-theme": ["packages/plugins/theme/src/index.ts"],
+      "@zeroexo/plugin-upload-queue": ["packages/plugins/upload-queue/src/index.ts"],
+      "@zeroexo/preset-default": ["packages/presets/default/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

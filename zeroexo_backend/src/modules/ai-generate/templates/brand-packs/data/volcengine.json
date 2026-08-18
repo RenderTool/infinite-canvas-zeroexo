@@ -1,0 +1,16 @@
+{
+  "id": "volcengine-202607",
+  "provider": "volcengine",
+  "name": "火山引擎 Ark",
+  "version": "1.0.0",
+  "official": true,
+  "label": "火山引擎 Ark",
+  "color": "#0071e3",
+  "description": "火山引擎方舟平台, 提供豆包 Seedream(图像)和 Seedance(视频)系列模型。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "openai",
+    "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "capabilities": ["image", "video", "audio"]
+  }
+}

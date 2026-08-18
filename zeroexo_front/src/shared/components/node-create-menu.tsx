@@ -1,0 +1,178 @@
+/**
+ * NodeCreateMenu - 通用节点创建菜单
+ *
+ * 作为空白右键菜单、引用该节点生成菜单、加号菜单的基础UI框架组件。
+ * 视觉风格与 CanvasMenu(Logo 下拉列表)一致:使用 antd Dropdown 同款样式。
+ *
+ * 使用方式:
+ * - 接收 position 在任意位置弹出
+ * - onSelect 回调返回所选节点类型
+ * - onClose 关闭菜单
+ */
+
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Type, Image as ImageIcon, Sparkles, FileText, Clapperboard, Film, Package } from 'lucide-react';
+import type { ThemeConfig } from '@zeroexo/shared';
+
+/** 节点类型 */
+export type AddNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench';
+
+export interface NodeCreateMenuProps {
+  /** 菜单位置(固定定位) */
+  position: { x: number; y: number };
+  /** 选中节点类型回调 */
+  onSelect: (type: AddNodeType) => void;
+  /** 关闭菜单回调 */
+  onClose: () => void;
+  /** 主题 */
+  theme: ThemeConfig;
+  /** 可选:菜单标题,默认使用 t('toolbar.createNode') */
+  title?: string;
+  /** 可选:菜单宽度,默认 200 */
+  width?: number;
+}
+
+/** 节点类型定义 */
+interface NodeTypeDef {
+  type: AddNodeType;
+  icon: React.ReactNode;
+  labelKey: string;
+  category: 'generate' | 'media' | 'creation';
+}
+
+/** 分类顺序（用于分割线分组，不显示标题） */
+const CATEGORY_ORDER: Array<'generate' | 'media' | 'creation'> = ['generate', 'media', 'creation'];
+
+function createNodeTypeDefs(_t: (key: string) => string): NodeTypeDef[] {
+  return [
+    { type: 'generator', icon: <Sparkles size={14} />, labelKey: 'toolbar.generator', category: 'generate' },
+    { type: 'stacked-media', icon: <Package size={14} />, labelKey: 'toolbar.stackedMedia', category: 'generate' },
+    { type: 'text', icon: <Type size={14} />, labelKey: 'toolbar.text', category: 'media' },
+    { type: 'image', icon: <ImageIcon size={14} />, labelKey: 'toolbar.image', category: 'media' },
+    { type: 'video', icon: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>, labelKey: 'toolbar.video', category: 'media' },
+    { type: 'audio', icon: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>, labelKey: 'toolbar.audio', category: 'media' },
+    { type: 'script', icon: <FileText size={14} />, labelKey: 'canvasNodes.stage.script', category: 'creation' },
+    { type: 'storyboard', icon: <Clapperboard size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
+    { type: 'workbench', icon: <Film size={14} />, labelKey: 'canvasNodes.stage.workbench', category: 'creation' },
+  ];
+}
+
+export function NodeCreateMenu({
+  position,
+  onSelect,
+  onClose,
+  theme,
+  width = 200,
+}: NodeCreateMenuProps): React.ReactElement {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const nodeTypes = createNodeTypeDefs(t);
+  const [visible, setVisible] = useState(false);
+  const [menuHeight, setMenuHeight] = useState(0);
+
+  // 检测移动端(菜单向上弹出)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
+  // 弹出动画:useLayoutEffect + 双 rAF 触发入场,生产模式更流畅
+  useLayoutEffect(() => {
+    let raf2: number;
+    const raf1 = requestAnimationFrame(() => {
+      if (menuRef.current) setMenuHeight(menuRef.current.offsetHeight);
+      raf2 = requestAnimationFrame(() => setVisible(true));
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, []);
+
+  // 点击外部关闭
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('pointerdown', onPointer, true);
+    return () => document.removeEventListener('pointerdown', onPointer, true);
+  }, [onClose]);
+
+  // Escape 关闭
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const isDark = theme.mode === 'dark';
+  const hoverBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+
+  // 移动端:菜单向上弹出,transformOrigin 改为 bottom center
+  const menuLeft = isMobile ? position.x : position.x;
+  const menuTop = isMobile ? Math.max(8, position.y - menuHeight) : position.y;
+  const transformOrigin = isMobile ? 'bottom center' : 'top center';
+
+  return (
+    <div
+      ref={menuRef}
+      style={{
+        position: 'fixed',
+        left: menuLeft,
+        top: menuTop,
+        zIndex: 1000,
+        minWidth: width,
+        maxWidth: width + 60,
+        background: theme.toolbar.panel,
+        border: `1px solid ${theme.toolbar.border}`,
+        borderRadius: 6,
+        boxShadow: '0 6px 16px 0 rgba(0,0,0,0.08), 0 3px 6px -4px rgba(0,0,0,0.12), 0 9px 28px 8px rgba(0,0,0,0.05)',
+        padding: '4px 0',
+        display: 'flex',
+        flexDirection: 'column',
+        color: theme.toolbar.text,
+        transform: visible ? 'scaleY(1)' : (isMobile ? 'scaleY(0.85)' : 'scaleY(0.85)'),
+        opacity: visible ? 1 : 0,
+        transformOrigin,
+        transition: 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
+      }}
+    >
+      <div style={{ overflowY: 'auto', flex: 1, maxHeight: 320 }} onWheel={(e) => e.stopPropagation()}>
+        {CATEGORY_ORDER.map((cat, catIdx) => {
+          const groupDefs = nodeTypes.filter((d) => d.category === cat);
+          if (groupDefs.length === 0) return null;
+          return (
+            <div key={cat}>
+              {catIdx > 0 && <div style={{ height: 1, margin: '4px 8px', background: theme.toolbar.border }} />}
+              {groupDefs.map((def) => (
+                <button
+                  key={def.type}
+                  type="button"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    padding: '5px 12px', border: 'none', borderRadius: 0,
+                    background: 'transparent',
+                    color: theme.toolbar.text, fontSize: 13, textAlign: 'left',
+                    cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  onClick={() => { onSelect(def.type); onClose(); }}
+                >
+                  <span style={{ width: 14, height: 14, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {def.icon}
+                  </span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t(def.labelKey)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,16 @@
+{
+  "id": "openai-202607",
+  "provider": "openai",
+  "name": "OpenAI",
+  "version": "1.0.0",
+  "official": true,
+  "label": "OpenAI",
+  "color": "#10a37f",
+  "description": "OpenAI 官方 API, 提供高性能语言模型和 GPT Image、DALL·E 图像生成模型。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "openai",
+    "defaultBaseUrl": "https://api.openai.com",
+    "capabilities": ["llm", "image"]
+  }
+}

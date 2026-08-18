@@ -1,0 +1,16 @@
+{
+  "id": "anthropic-202607",
+  "provider": "anthropic",
+  "name": "Claude",
+  "version": "1.0.0",
+  "official": true,
+  "label": "Claude",
+  "color": "#d97757",
+  "description": "Claude 系列模型, 擅长长上下文推理与复杂分析。",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "baseConfig": {
+    "apiFormat": "anthropic",
+    "defaultBaseUrl": "https://api.anthropic.com",
+    "capabilities": ["llm"]
+  }
+}

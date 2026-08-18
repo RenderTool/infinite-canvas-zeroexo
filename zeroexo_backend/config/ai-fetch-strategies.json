@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-22T00:00:00.000Z",
+  "description": "各 AI 运营商的模型列表拉取策略配置。endpoint 是相对于 buildApiUrl 处理后的版本化 baseUrl 的路径。修改此文件无需重启后端服务（开发期热重载）。",
+  "strategies": {
+    "openai": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "anthropic": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "x-api-key": "{apiKey}",
+        "anthropic-version": "2023-06-01"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "display_name"
+      },
+      "healthEndpoint": "/messages",
+      "healthMethod": "POST",
+      "healthBody": {
+        "model": "claude-3-haiku",
+        "max_tokens": 1,
+        "messages": [{ "role": "user", "content": "hi" }]
+      }
+    },
+    "gemini": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "x-goog-api-key": "{apiKey}"
+      },
+      "queryParams": {
+        "pageSize": "1000"
+      },
+      "response": {
+        "path": "models",
+        "idField": "name",
+        "nameField": "displayName"
+      }
+    },
+    "gemini-cn": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "x-goog-api-key": "{apiKey}"
+      },
+      "queryParams": {
+        "pageSize": "1000"
+      },
+      "response": {
+        "path": "models",
+        "idField": "name",
+        "nameField": "displayName"
+      }
+    },
+    "stability": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "models",
+        "idField": "id",
+        "nameField": "name"
+      }
+    },
+    "volcengine": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "bailian": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "deepseek": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "siliconflow": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "mock": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {},
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    },
+    "custom": {
+      "endpoint": "/models",
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer {apiKey}"
+      },
+      "response": {
+        "path": "data",
+        "idField": "id",
+        "nameField": "id"
+      }
+    }
+  }
+}

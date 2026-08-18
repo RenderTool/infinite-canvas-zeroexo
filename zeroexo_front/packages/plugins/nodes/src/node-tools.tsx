@@ -1,0 +1,639 @@
+/**
+ * 节点工具定义 — 为业务节点类型提供 ToolDefinition 数组
+ *
+ * 架构: 数据驱动 + 策略模式
+ * - 每个工具是纯数据 + 函数对象(id/label/icon/run)
+ * - run 通过 ToolContext 访问业务能力(commandQueue/eventBus/openImageDialog)
+ * - 图标用 lucide-react(符合项目约定:禁止 emoji)
+ *
+ * 统一工具栏顺序:
+ * - 固定操作(基础): 复制(duplicate) → 删除(delete) → 重命名(rename) → 存素材(saveAsset) → 替换(replace) → 下载(download)
+ * - 分割线
+ * - 节点特定操作: AI相关(复制提示词) → 编辑相关(更多:局部遮罩/裁剪/分割) → 查看(详情)
+ */
+
+import {
+  Settings2, Package,
+  Brush, Scissors,
+  Grid2x2, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
+  Heading1,
+} from 'lucide-react';
+import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, BatchCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand } from '@zeroexo/core';
+import { setImageBlob } from '@zeroexo/plugin-persistence';
+
+// ===== 通用工具(所有节点共用) =====
+
+/** 基础固定工具集 */
+function createBasicTools(
+  options: {
+    hasDetail?: boolean;
+  } = {},
+): ToolDefinition[] {
+  const { hasDetail = false } = options;
+  const tools: ToolDefinition[] = [];
+  if (hasDetail) tools.push(createDetailTool());
+  return tools;
+}
+
+// ===== 各节点类型工具集 =====
+
+// ===== 文本格式化预设 =====
+
+const HEADER_PRESETS = [
+  { key: 'div', label: '正文' },
+  { key: 'h1', label: 'H1' },
+  { key: 'h2', label: 'H2' },
+  { key: 'h3', label: 'H3' },
+  { key: 'h4', label: 'H4' },
+  { key: 'h5', label: 'H5' },
+  { key: 'h6', label: 'H6' },
+];
+const TEXT_COLORS = ['#1f2937', '#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#ffffff'];
+const HIGHLIGHT_COLORS = ['#ffd54f', '#a5d6a7', '#90caf9', '#ef9a9a', '#ce93d8', '#ffab91'];
+
+/** 恢复焦点到编辑器并保存选区(工具栏按钮点击后编辑器失焦,重新聚焦确保 execCommand 生效) */
+function restoreEditorFocus(): void {
+  const editor = document.querySelector('.zxe-content-editable');
+  if (editor instanceof HTMLElement) {
+    // 保存当前选区(如果存在)
+    const sel = window.getSelection();
+    const savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    editor.focus();
+    // 恢复选区:如果之前有选区且锚点在编辑器内,恢复之;否则 select all
+    if (savedRange && editor.contains(savedRange.startContainer)) {
+      const newSel = window.getSelection();
+      if (newSel) {
+        newSel.removeAllRanges();
+        newSel.addRange(savedRange);
+      }
+    } else {
+      // 无选区 → 全选编辑器内容
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      const newSel = window.getSelection();
+      if (newSel) {
+        newSel.removeAllRanges();
+        newSel.addRange(range);
+      }
+    }
+  }
+}
+
+/** 文本节点工具 */
+export function getTextTools(): ToolDefinition[] {
+  return [
+    ...createBasicTools({ hasDetail: false }),
+    // 标题下拉(H1-H6+正文)
+    {
+      id: 'header',
+      label: '标题',
+      title: '标题',
+      icon: <Heading1 size={14} />,
+      group: 'format',
+      menu: (): ToolMenuItem[] => HEADER_PRESETS.map((h) => ({
+        key: h.key,
+        label: h.label,
+        run: (_node: NodeRecord, _ctx: ToolContext) => {
+          restoreEditorFocus();
+          document.execCommand('formatBlock', false, h.key);
+        },
+      })),
+      run: () => {},
+    },
+    // 加粗
+    {
+      id: 'bold',
+      label: '加粗',
+      title: '加粗',
+      icon: <Bold size={14} />,
+      group: 'format',
+      active: () => {
+        try { return document.queryCommandState('bold'); } catch { return false; }
+      },
+      run: () => {
+        restoreEditorFocus();
+        document.execCommand('bold');
+      },
+    },
+    // 斜体
+    {
+      id: 'italic',
+      label: '斜体',
+      title: '斜体',
+      icon: <Italic size={14} />,
+      group: 'format',
+      active: () => {
+        try { return document.queryCommandState('italic'); } catch { return false; }
+      },
+      run: () => {
+        restoreEditorFocus();
+        document.execCommand('italic');
+      },
+    },
+    // 下划线
+    {
+      id: 'underline',
+      label: '下划线',
+      title: '下划线',
+      icon: <Underline size={14} />,
+      group: 'format',
+      active: () => {
+        try { return document.queryCommandState('underline'); } catch { return false; }
+      },
+      run: () => {
+        restoreEditorFocus();
+        document.execCommand('underline');
+      },
+    },
+    // 文字颜色
+    {
+      id: 'textColor',
+      label: '颜色',
+      title: '文字颜色',
+      icon: <Palette size={14} />,
+      group: 'color',
+      menu: (): ToolMenuItem[] => [
+        ...TEXT_COLORS.map((c) => ({
+          key: `color-${c}`,
+          label: c,
+          icon: <span style={{ display: 'inline-block', width: 14, height: 14, background: c, border: '1px solid rgba(128,128,128,0.3)' }} />,
+          run: () => {
+            restoreEditorFocus();
+            document.execCommand('foreColor', false, c);
+          },
+        })),
+        { key: 'div-c', divider: true },
+        {
+          key: 'clear-color',
+          label: '清除颜色',
+          run: () => {
+            restoreEditorFocus();
+            document.execCommand('foreColor', false, '#1f2937');
+          },
+        },
+      ],
+      run: () => {},
+    },
+    // 背景颜色
+    {
+      id: 'highlight',
+      label: '高亮',
+      title: '背景颜色',
+      icon: <Highlighter size={14} />,
+      group: 'color',
+      menu: (): ToolMenuItem[] => [
+        ...HIGHLIGHT_COLORS.map((c) => ({
+          key: `hl-${c}`,
+          label: c,
+          icon: <span style={{ display: 'inline-block', width: 14, height: 14, background: c, border: '1px solid rgba(128,128,128,0.3)' }} />,
+          run: () => {
+            restoreEditorFocus();
+            document.execCommand('hiliteColor', false, c);
+          },
+        })),
+        { key: 'div-h', divider: true },
+        {
+          key: 'clear-hl',
+          label: '清除高亮',
+          run: () => {
+            restoreEditorFocus();
+            document.execCommand('hiliteColor', false, 'transparent');
+          },
+        },
+      ],
+      run: () => {},
+    },
+    // 清除格式:恢复焦点 + removeFormat
+    {
+      id: 'clearFormat',
+      label: '清除',
+      title: '清除格式',
+      icon: <RemoveFormatting size={14} />,
+      group: 'font',
+      danger: true,
+      run: (_node: NodeRecord, _ctx: ToolContext) => {
+        restoreEditorFocus();
+        // 多次尝试清除格式,确保生效
+        try {
+          document.execCommand('removeFormat');
+          document.execCommand('formatBlock', false, 'div');
+          // 清除选区内所有内联样式
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            const ancestor = range.commonAncestorContainer;
+            if (ancestor.nodeType === Node.ELEMENT_NODE) {
+              (ancestor as HTMLElement).querySelectorAll('[style]').forEach((el) => {
+                (el as HTMLElement).removeAttribute('style');
+              });
+            }
+          }
+        } catch { /* 静默处理 */ }
+      },
+    },
+  ];
+}
+
+// ===== 图片节点工具 =====
+
+/** 图片节点编辑相关工具(归并为"更多"分组) */
+function buildImageEditTools(): ToolDefinition[] {
+  return [
+    {
+      id: 'moreEdit',
+      label: '更多',
+      title: '更多编辑',
+      icon: <Settings2 size={14} />,
+      group: 'edit',
+      visible: (node: NodeRecord) => {
+        const data = node.data as Record<string, unknown>;
+        return Boolean(data?.['content']);
+      },
+      menu: () => [
+        {
+          key: 'maskEdit',
+          label: '局部遮罩',
+          icon: <Brush size={14} />,
+          run: (node: NodeRecord, ctx: ToolContext) => {
+            ctx.openImageDialog?.(node, 'maskEdit');
+          },
+        },
+        {
+          key: 'crop',
+          label: '裁剪',
+          icon: <Scissors size={14} />,
+          run: (node: NodeRecord, ctx: ToolContext) => {
+            ctx.openImageDialog?.(node, 'crop');
+          },
+        },
+        {
+          key: 'split',
+          label: '分割',
+          icon: <Grid2x2 size={14} />,
+          run: (node: NodeRecord, ctx: ToolContext) => {
+            ctx.openImageDialog?.(node, 'split');
+          },
+        },
+      ],
+      run: () => {},
+    },
+  ];
+}
+
+/** 创建详情工具(替换原来的大图功能) */
+function createDetailTool(): ToolDefinition {
+  return {
+    id: 'detail',
+    label: '详情',
+    title: '详情',
+    icon: <AlertCircle size={14} />,
+    group: 'basic',
+    visible: (node: NodeRecord) => {
+      const data = node.data as Record<string, unknown>;
+      return Boolean(data?.['content']);
+    },
+    run: (node: NodeRecord, ctx: ToolContext) => {
+      ctx.eventBus.emit('node:detail', { node });
+    },
+  };
+}
+
+/**
+ * 图片节点工具(完整工具集)
+ *
+ * 工具顺序:
+ * - 基础固定操作: 详情(detail)
+ * - AI相关: 复制提示词(copyPrompt) → 反推(reversePrompt) → 放大(upscale) → 多角度(angle)
+ * - 编辑相关: 锁比例(resize) → 局部编辑(maskEdit) → 裁剪(crop) → 切图(split)
+ *
+ * 注: 复制/删除/重命名/存素材/替换/下载 已移至右键菜单
+ */
+export function getImageTools(): ToolDefinition[] {
+  return [
+    ...createBasicTools({ hasDetail: true }),
+    // 堆叠:将当前节点自动转为堆叠节点
+    {
+      id: 'createStackNode',
+      label: '堆叠',
+      title: '堆叠',
+      icon: <Package size={14} />,
+      group: 'edit',
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        createStackNode(node, ctx);
+      },
+    },
+    ...buildImageEditTools(),
+  ];
+}
+
+/** 视频节点工具 */
+export function getVideoTools(): ToolDefinition[] {
+  return [
+    ...createBasicTools({ hasDetail: true }),
+    // 堆叠:将当前节点自动转为堆叠节点
+    {
+      id: 'createStackNode',
+      label: '堆叠',
+      title: '堆叠',
+      icon: <Package size={14} />,
+      group: 'edit',
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        createStackNode(node, ctx);
+      },
+    },
+    // 截帧:截取视频首帧/尾帧/当前帧,并在画布上生成新图片节点
+    {
+      id: 'captureFrame',
+      label: '截帧',
+      title: '截帧',
+      icon: <Camera size={14} />,
+      group: 'edit',
+      visible: (node: NodeRecord) => {
+        const data = node.data as Record<string, unknown>;
+        return Boolean(data?.['content']);
+      },
+      menu: () => [
+        { key: 'first', label: '截首帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'first'); } },
+        { key: 'last', label: '截尾帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'last'); } },
+        { key: 'current', label: '截取当前帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'current'); } },
+      ],
+      run: () => {},
+    },
+  ];
+}
+
+// ===== StackNode 转入堆叠 =====
+
+/** 生成唯一 id */
+function genId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 将当前节点转入 StackNode
+ *
+ * 逻辑:
+ * 1. 检查当前节点 output 是否有连线到 StackNode 的 prompt pin
+ * 2. 如果有 → 直接执行收纳(删边+删源节点+追加卡片)
+ * 3. 如果没有 → 创建新 StackNode(右侧偏移),建立连线,再执行收纳
+ */
+export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
+  const graph = ctx.commandQueue.getState();
+  if (!graph) return;
+
+  // 确定 output pin id
+  const outputPinId = node.type === 'video' ? 'video' : 'image';
+
+  // 查找已连线的 StackNode
+  const existingEdge = graph.edges.find((e: EdgeRecord) =>
+    e.source.nodeId === node.id &&
+    e.source.pinId === outputPinId &&
+    graph.nodes.find((n: NodeRecord) => n.id === e.target.nodeId && n.type === 'stacked-media')
+  );
+
+  if (existingEdge) {
+    // 已有 StackNode → 直接收纳
+    const stackNode = graph.nodes.find((n: NodeRecord) => n.id === existingEdge.target.nodeId);
+    if (!stackNode) return;
+    collectIntoStack(node, ctx, existingEdge, stackNode);
+  } else {
+    // 无 StackNode → 创建新 StackNode + 连线 + 收纳
+    const nodePos = node.position ?? { x: 0, y: 0 };
+    const nodeWidth = node.size?.width ?? 620;
+    const stackNodeId = genId('stack-node');
+    const stackNode: NodeRecord = {
+      id: stackNodeId,
+      type: 'stacked-media',
+      position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
+      size: { width: 620, height: 348 },
+      title: '堆叠媒体',
+      data: { cards: [], activeIndex: 0 },
+    };
+    const edgeId = genId('edge-stack');
+    const newEdge: EdgeRecord = {
+      id: edgeId,
+      source: { nodeId: node.id, pinId: outputPinId },
+      target: { nodeId: stackNodeId, pinId: 'prompt' },
+    };
+
+    // 先创建节点和边,再收纳
+    ctx.commandQueue.execute(new BatchCommand([
+      new AddNodeCommand(stackNode),
+      new AddEdgeCommand(newEdge),
+    ], 'create-stack-node'));
+
+    // 等下一个 tick 再执行收纳(确保 graph 已更新)
+    setTimeout(() => {
+      const updatedGraph = ctx.commandQueue.getState();
+      if (!updatedGraph) return;
+      const updatedEdge = updatedGraph.edges.find((e: EdgeRecord) => e.id === edgeId);
+      const updatedStackNode = updatedGraph.nodes.find((n: NodeRecord) => n.id === stackNodeId);
+      if (updatedEdge && updatedStackNode) {
+        collectIntoStack(node, ctx, updatedEdge, updatedStackNode);
+      }
+    }, 50);
+  }
+}
+
+/**
+ * 在当前节点右侧创建一个空的 StackNode 并建立连线
+ *
+ * 逻辑:
+ * 1. 确定 output pin id(image → 'image', video → 'video')
+ * 2. 在节点右侧偏移位置创建空 StackNode
+ * 3. 建立 output → StackNode prompt 连线
+ */
+export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
+  const outputPinId = node.type === 'video' ? 'video' : 'image';
+  const nodePos = node.position ?? { x: 0, y: 0 };
+  const nodeWidth = node.size?.width ?? 620;
+  const stackNodeId = genId('stack-node');
+  const stackNode: NodeRecord = {
+    id: stackNodeId,
+    type: 'stacked-media',
+    position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
+    size: { width: 620, height: 348 },
+    title: '堆叠媒体',
+    data: { cards: [], activeIndex: 0 },
+  };
+  const edgeId = genId('edge-stack');
+  const newEdge: EdgeRecord = {
+    id: edgeId,
+    source: { nodeId: node.id, pinId: outputPinId },
+    target: { nodeId: stackNodeId, pinId: 'prompt' },
+  };
+
+  ctx.commandQueue.execute(new BatchCommand([
+    new AddNodeCommand(stackNode),
+    new AddEdgeCommand(newEdge),
+  ], 'create-stack-node'));
+}
+
+/** 将源节点收纳到 StackNode 的卡片列表中 */
+function collectIntoStack(
+  node: NodeRecord,
+  ctx: ToolContext,
+  edge: EdgeRecord,
+  stackNode: NodeRecord,
+): void {
+  const stackData = (stackNode.data as Record<string, unknown>) ?? {};
+  const cards = (stackData.cards as unknown[]) ?? [];
+  const newCard = {
+    id: genId('card'),
+    sourceType: node.type === 'video' ? 'video' : 'image',
+    data: (node.data as Record<string, unknown>) ?? {},
+    title: node.title,
+    size: node.size,
+  };
+  const updatedCards = [...cards, newCard];
+  ctx.commandQueue.execute(new BatchCommand([
+    new RemoveEdgeCommand(edge.id),
+    new UpdateNodeDataCommand(stackNode.id, {
+      cards: updatedCards,
+      activeIndex: updatedCards.length - 1,
+    } as Record<string, unknown>),
+    new RemoveNodeCommand(node.id),
+  ], 'stacked-media-collect'));
+}
+
+/** 截取视频帧并创建新图片节点 */
+async function captureAndCreateImageNode(
+  node: NodeRecord,
+  ctx: ToolContext,
+  frameType: 'first' | 'last' | 'current',
+): Promise<void> {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const content = data.content as string | undefined;
+  if (!content) return;
+
+  // 优先用 data-node-id 找到页面上已渲染的 video 元素
+  const existingVid = document.querySelector<HTMLVideoElement>(
+    `video[data-node-id="${node.id}"]`
+  );
+
+  let frameSrc: HTMLVideoElement;
+
+  if (frameType === 'current' && existingVid) {
+    // 截取当前帧:直接使用页面上正在播放的 video 元素,保证 currentTime 准确
+    frameSrc = existingVid;
+    // 确保暂停,避免 drawImage 时帧正在更新
+    existingVid.pause();
+  } else {
+    // 截首帧/尾帧:需要创建新 video 元素并 seek 到目标位置
+    const videoSrc = existingVid?.currentSrc || existingVid?.src || content;
+    const vid = document.createElement('video');
+    vid.muted = true;
+    vid.preload = 'auto';
+    vid.src = videoSrc;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        vid.onloadedmetadata = () => {
+          if (frameType === 'first') {
+            vid.currentTime = 0;
+          } else if (frameType === 'last') {
+            vid.currentTime = Math.max(0, (vid.duration || 0) - 0.1);
+          }
+          vid.onseeked = () => resolve();
+        };
+        vid.onerror = () => reject(new Error('Failed to load video'));
+        setTimeout(() => reject(new Error('Timeout')), 10000);
+      });
+      frameSrc = vid;
+    } catch {
+      vid.remove();
+      return;
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  const w = frameSrc.videoWidth || 640;
+  const h = frameSrc.videoHeight || 480;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx2d = canvas.getContext('2d');
+  if (!ctx2d) return;
+  ctx2d.drawImage(frameSrc, 0, 0, w, h);
+
+  // 转为 blob 并存储到 image_files
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) return;
+
+  const storageKey = `image:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const blobUrl = await setImageBlob(storageKey, blob);
+
+  // 从页面上已渲染的视频元素读取帧信息(帧号/总帧/fps)
+  const srcVid = existingVid;
+  const playingFps = parseInt(srcVid?.dataset.fps ?? '0', 10) || 30;
+  const playingTotal = parseInt(srcVid?.dataset.totalFrames ?? '0', 10) || Math.round((frameSrc.duration || 0) * playingFps);
+  const playingCurrent = parseInt(srcVid?.dataset.currentFrame ?? '0', 10) || 0;
+
+  // 计算帧号
+  let frameNumber: number;
+  if (frameType === 'first') {
+    frameNumber = 0;
+  } else if (frameType === 'last') {
+    frameNumber = playingTotal - 1;
+  } else {
+    frameNumber = playingCurrent;
+  }
+
+  // 创建新图片节点,偏移到视频节点右下方
+  const nodePos = node.position ?? { x: 0, y: 0 };
+  const nodeSize = node.size ?? { width: 420, height: 236 };
+  const aspect = h / w;
+  const imgWidth = 340;
+  const imgHeight = Math.round(imgWidth * aspect);
+  const frameLabel = `帧${frameNumber}_${playingTotal}`;
+  const nodeTitle = node.title ? `${node.title}_${frameLabel}` : `截帧_${frameLabel}`;
+  const newNodeId = `captured-frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const newNode: NodeRecord = {
+    id: newNodeId,
+    type: 'image',
+    position: { x: nodePos.x + nodeSize.width + 40, y: nodePos.y },
+    size: { width: imgWidth, height: imgHeight },
+    title: nodeTitle,
+    data: {
+      content: blobUrl,
+      storageKey,
+      status: 'success',
+      naturalWidth: w,
+      naturalHeight: h,
+      prompt: '',
+    },
+  };
+  ctx.commandQueue.execute(new AddNodeCommand(newNode));
+
+  // 从视频节点 output(video) 连线到新图片节点 input(prompt),类似图片裁剪
+  const edgeId = `edge-${node.id}-${newNodeId}`;
+  ctx.commandQueue.execute(new AddEdgeCommand({
+    id: edgeId,
+    source: { nodeId: node.id, pinId: 'video' },
+    target: { nodeId: newNodeId, pinId: 'prompt' },
+  }));
+}
+
+/** 音频节点工具 */
+export function getAudioTools(): ToolDefinition[] {
+  return [
+    ...createBasicTools({ hasDetail: true }),
+  ];
+}
+
+/** 生成器节点工具 */
+export function getGeneratorTools(): ToolDefinition[] {
+  return [
+    ...createBasicTools(),
+    {
+      id: 'editGenerator',
+      label: '编辑',
+      title: '编辑配置',
+      icon: <Settings2 size={14} />,
+      group: 'edit',
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        ctx.openEditor?.(node);
+      },
+    },
+  ];
+}

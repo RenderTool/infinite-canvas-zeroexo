@@ -1,0 +1,84 @@
+/**
+ * 统一连线约束规则
+ *
+ * 一个方向性兼容矩阵,覆盖两个查询入口:
+ * - 正向(源→目标): 源节点 output 能连到哪些目标节点 input
+ * - 反向(目标←源): 目标节点 input 能接受哪些源节点 output
+ *
+ * 使用方:
+ * - ConnectionController.validate(): 手动拖拽连线时验证
+ * - ConnectionDropMenu: 菜单项禁用过滤(引用该节点生成)
+ * - NodeCreateMenu: 无约束(空白创建)
+ */
+
+import type { AddNodeType } from './components/node-create-menu.js';
+
+/** 所有节点类型 */
+const ALL_NODE_TYPES: AddNodeType[] = [
+  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench',
+];
+
+/**
+ * 兼容性矩阵 (output → input 方向)
+ * key = 源节点类型, value = 允许连接的目标节点类型列表
+ */
+const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
+  // 生成:可输出到所有节点(含自身,支持链式生成)
+  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench'],
+  // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成
+  text: ['text', 'image', 'video', 'audio', 'script', 'generator'],
+  // 图片:图生图/图生视频/图生音频/生成/堆叠
+  image: ['image', 'video', 'audio', 'stacked-media', 'generator'],
+  // 视频:视频生视频/视频生音频/生成/堆叠
+  video: ['video', 'audio', 'stacked-media', 'generator'],
+  // 音频:音频生视频(多模态)/生成
+  audio: ['video', 'generator'],
+  // 剧本:只能连分镜
+  script: ['storyboard'],
+  // 分镜:只能连工作台
+  storyboard: ['workbench'],
+  // 工作台:终端节点,不接下游
+  workbench: [],
+  // 堆叠:终端节点,不接下游(未来可接生成器进一步处理)
+  'stacked-media': [],
+};
+
+/**
+ * 判断 source→target 是否允许连接 (统一规则)
+ *
+ * 正向和反向共用此函数:
+ * - 正向: canConnect(sourceType, targetType)
+ * - 反向: canConnect(actualSourceType, targetType)
+ *
+ * 未知类型默认允许(向后兼容未注册的节点类型)
+ */
+export function canConnect(sourceType: string, targetType: string): boolean {
+  const allowed = COMPATIBILITY_MATRIX[sourceType];
+  if (!allowed) return true; // 未知类型默认允许
+  return allowed.includes(targetType as AddNodeType);
+}
+
+/**
+ * 获取源节点允许连接的所有目标类型 (用于菜单禁用过滤)
+ *
+ * 未知类型返回全部(向后兼容)
+ */
+export function getAllowedTargetTypes(sourceType: string): AddNodeType[] {
+  const allowed = COMPATIBILITY_MATRIX[sourceType];
+  return allowed ?? ALL_NODE_TYPES;
+}
+
+/**
+ * 获取目标节点能接受的所有源类型 (用于反向查询)
+ *
+ * 遍历矩阵,找出 value 中包含 targetType 的所有 key
+ */
+export function getAllowedSourceTypes(targetType: string): AddNodeType[] {
+  const result: AddNodeType[] = [];
+  for (const [sourceType, allowedTargets] of Object.entries(COMPATIBILITY_MATRIX)) {
+    if (allowedTargets.includes(targetType as AddNodeType)) {
+      result.push(sourceType as AddNodeType);
+    }
+  }
+  return result;
+}

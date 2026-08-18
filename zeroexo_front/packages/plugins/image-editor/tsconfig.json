@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    // 覆盖基类 paths:解析到 dist 类型声明,避免拉入 shared 源码触发 rootDir 冲突
+    "baseUrl": "../../..",
+    "paths": {
+      "@zeroexo/shared": ["packages/shared/dist/index.d.ts"],
+      "@zeroexo/core": ["packages/core/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "tsConfigPath": "tsconfig.json",
+    "assets": [
+      {
+        "include": "**/*.html",
+        "outDir": "dist"
+      },
+      {
+        "include": "modules/ai-generate/templates/definitions/*.json",
+        "outDir": "dist"
+      },
+      {
+        "include": "modules/ai-generate/templates/brand-packs/data/*.json",
+        "outDir": "dist"
+      },
+      {
+        "include": "modules/creative-wizard/templates.json",
+        "outDir": "dist"
+      }
+    ]
+  }
+}

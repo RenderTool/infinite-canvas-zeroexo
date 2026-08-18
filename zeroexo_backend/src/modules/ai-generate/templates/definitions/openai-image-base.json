@@ -1,0 +1,72 @@
+{
+  "id": "openai-image-base",
+  "name": "OpenAI 图像标准",
+  "protocol": "openai",
+  "modelType": "image",
+  "endpoint": "/images/generations",
+  "maxPromptLength": 4000,
+  "fallback": true,
+  "parameters": [
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图片",
+      "default": false
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图片数",
+      "default": 0
+    },
+    {
+      "name": "size",
+      "type": "enum",
+      "label": "尺寸",
+      "default": "1024x1024",
+      "values": ["1024x1024", "1792x1024", "1024x1792"],
+      "labels": { "1024x1024": "1024×1024", "1792x1024": "1792×1024", "1024x1792": "1024×1792" },
+      "display": "select"
+    },
+    {
+      "name": "n",
+      "type": "number",
+      "label": "生成数量",
+      "default": 1,
+      "min": 1,
+      "max": 10
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "jpeg",
+      "values": ["png", "jpeg"],
+      "labels": { "png": "PNG", "jpeg": "JPEG" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 1048576,
+      "maxTotalPixels": 3211264,
+      "minAspectRatio": 1,
+      "maxAspectRatio": 1,
+      "maxReferenceImages": 0,
+      "supportsImageToImage": false,
+      "maxEdgeLength": 2048
+    },
+    "paramMapping": {
+      "size": "size",
+      "n": "n"
+    },
+    "valueMapping": {}
+  },
+  "matchKeywords": ["openai", "gpt-image", "dall-e"]
+}

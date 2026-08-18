@@ -1,0 +1,103 @@
+{
+  "id": "dall-e-3",
+  "name": "DALL-E 3 系列",
+  "protocol": "openai",
+  "modelType": "image",
+  "endpoint": "/images/generations",
+  "maxPromptLength": 4000,
+  "parameters": [
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "2k",
+      "values": ["1k", "2k"],
+      "labels": { "1k": "1K", "2k": "2K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "1:1",
+      "values": ["auto", "1:1", "16:9", "9:16"],
+      "labels": { "auto": "AUTO", "1:1": "1:1", "16:9": "16:9", "9:16": "9:16" },
+      "display": "radio"
+    },
+    {
+      "name": "size",
+      "type": "enum",
+      "label": "尺寸",
+      "default": "1024x1024",
+      "values": ["1024x1024", "1792x1024", "1024x1792"],
+      "labels": { "1024x1024": "1024×1024", "1792x1024": "1792×1024", "1024x1792": "1024×1792" },
+      "display": "select"
+    },
+    {
+      "name": "quality",
+      "type": "enum",
+      "label": "质量",
+      "default": "standard",
+      "values": ["standard", "hd"],
+      "labels": { "standard": "标准", "hd": "HD" },
+      "display": "select"
+    },
+    {
+      "name": "style",
+      "type": "enum",
+      "label": "风格",
+      "default": "vivid",
+      "values": ["vivid", "natural"],
+      "labels": { "vivid": "生动", "natural": "自然" },
+      "display": "select"
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图片",
+      "default": false
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图片数",
+      "default": 0
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "jpeg",
+      "values": ["png", "jpeg"],
+      "labels": { "png": "PNG", "jpeg": "JPEG" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 1048576,
+      "maxTotalPixels": 3211264,
+      "minAspectRatio": 0.5625,
+      "maxAspectRatio": 1.7777777777777777,
+      "maxReferenceImages": 0,
+      "supportsImageToImage": false,
+      "maxEdgeLength": 1792
+    },
+    "paramMapping": {
+      "size": "size",
+      "quality": "quality",
+      "style": "style"
+    },
+    "valueMapping": {
+      "resolution": { "1k": "1024", "2k": "1792" }
+    }
+  },
+  "pricing": { "perImage": 0.04 },
+  "matchKeywords": ["dall-e", "dalle"]
+}

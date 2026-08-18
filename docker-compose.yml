@@ -1,0 +1,153 @@
+# ============================================================
+# ZeroExo Platform - Docker Compose（主仓库自带部署方案）
+#
+# 适用于 GitHub 仓库 clone 后一键启动:
+#   frontend (画布) + backend (NestJS API) + admin (React 管理后台) + 基础设施
+#
+# 使用方式:
+#   docker compose up -d          # 启动全部
+#   docker compose down           # 停止（保留数据卷）
+#
+# 生产部署:
+#   通过 .env 覆盖默认口令/密钥:
+#   POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD / JWT_SECRET
+# ============================================================
+
+services:
+  # ========== 基础设施 ==========
+  postgres:
+    image: postgres:16-alpine
+    container_name: zeroexo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zeroexo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zeroexo}
+      POSTGRES_DB: zeroexo
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zeroexo -d zeroexo']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zeroexo
+
+  redis:
+    image: redis:7-alpine
+    container_name: zeroexo-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zeroexo
+
+  minio:
+    image: minio/minio:latest
+    container_name: zeroexo-minio
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zeroexo
+
+  # ========== 应用服务 ==========
+  backend:
+    build:
+      context: ./zeroexo_backend
+      dockerfile: Dockerfile
+    container_name: zeroexo-backend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://zeroexo:${POSTGRES_PASSWORD:-zeroexo}@postgres:5432/zeroexo
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - zeroexo
+
+  frontend:
+    build:
+      context: ./zeroexo_front
+      dockerfile: Dockerfile
+    container_name: zeroexo-frontend
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://backend:3000
+    depends_on:
+      - backend
+    networks:
+      - zeroexo
+
+  admin:
+    build:
+      context: ./zeroexo_admin
+      dockerfile: Dockerfile
+    container_name: zeroexo-admin
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://backend:3000
+    depends_on:
+      - backend
+    networks:
+      - zeroexo
+
+  # ========== 反向代理 ==========
+  nginx:
+    image: nginx:alpine
+    container_name: zeroexo-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - admin
+      - backend
+    networks:
+      - zeroexo
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  zeroexo:
+    driver: bridge

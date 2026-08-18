@@ -1,0 +1,49 @@
+{
+  "name": "zeroexo-admin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "@ant-design/pro-components": "3.1.14-4",
+    "@lobehub/fluent-emoji": "^4.1.0",
+    "@lobehub/icons": "^5.14.0",
+    "@lobehub/ui": "^5.23.1",
+    "@microsoft/fetch-event-source": "^2.0.1",
+    "antd": "^6.5.1",
+    "bootstrap-icons": "^1.13.1",
+    "dayjs": "^1.11.13",
+    "echarts": "^6.1.0",
+    "echarts-for-react": "^3.0.6",
+    "i18next": "^26.3.6",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.10",
+    "react-markdown": "^9.1.0",
+    "react-router-dom": "^7.3.0",
+    "recharts": "^3.10.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "^9.12.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.12",
+    "less": "^4.2.0",
+    "typescript": "^5.7.2",
+    "vite": "^8.1.5"
+  }
+}

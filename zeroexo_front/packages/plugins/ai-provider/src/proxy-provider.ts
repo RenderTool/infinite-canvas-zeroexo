@@ -1,0 +1,389 @@
+/**
+ * ProxyProvider - AI Provider 的后端代理实现(P3.4 + P3.5)
+ *
+ * 通过后端 /api/ai/generate 调用 AI 服务,所有 API Key 在后端加密存储。
+ * 产物自动落 Asset,本 provider 负责拉取产物并构造节点视图所需的返回类型。
+ *
+ * 解耦: 不直接依赖 app 层的 apiFetch,通过 ProxyFetch 函数注入。
+ * app 层负责注入带 JWT 鉴权 + 401 自动刷新的 fetcher。
+ *
+ * P3.5 增强:
+ * - 超时控制(image 60s / text 30s / video 10min / audio 60s)
+ * - 自动重试(网络错误 3 次指数退避 / 5xx 2 次 / 429 读 Retry-After)
+ * - 错误分类(抛出 AiError,含 errorType 供前端展示错误图标)
+ */
+
+import type { AIProvider } from './provider.js';
+import type {
+  AudioGenerationRequest,
+  GeneratedAudio,
+  GeneratedImage,
+  GeneratedVideo,
+  ImageEditRequest,
+  ImageGenerationRequest,
+  TextGenerationRequest,
+  VideoGenerationRequest,
+} from './types.js';
+import { blobToDataUrl } from './lib/http-utils.js';
+import { readVideoMetaFromBlob } from './lib/video-api.js';
+import { readAudioMetaFromBlob } from './lib/audio-api.js';
+import {
+  AiError,
+  classifyError,
+  isRetryable,
+  maxRetryCount,
+  retryDelayMs,
+  timeoutMsByKind,
+} from './ai-error.js';
+
+/** 后端代理调用函数(由 app 层注入 apiFetch) */
+export type ProxyFetch = <T>(
+  path: string,
+  options?: RequestInit,
+) => Promise<T>;
+
+/** 语言获取函数(由 app 层注入,返回当前用户语言 zh/en/ja) */
+export type LocaleGetter = () => string;
+
+/** 后端 /api/ai/generate 响应 */
+interface GenerateResponse {
+  generationId: string;
+  assetId: string;
+  kind: 'text' | 'image' | 'video' | 'audio';
+  text?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  costTokens?: number;
+  costMs?: number;
+  url?: string;
+}
+
+/** /api/assets/:id/download 响应 */
+interface DownloadUrlResponse {
+  url: string;
+}
+
+/** 通用 GET → Blob */
+async function fetchBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new AiError(
+      classifyError(null, res.status),
+      `下载失败: HTTP ${res.status}`,
+      { statusCode: res.status },
+    );
+  }
+  return await res.blob();
+}
+
+/** sleep 工具(可被 AbortSignal 中断) */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AiError('TIMEOUT', '已取消', { cause: signal.reason }));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new AiError('TIMEOUT', '已取消', { cause: signal.reason }));
+      },
+      { once: true },
+    );
+  });
+}
+
+/**
+ * 从错误对象提取 HTTP 状态码
+ * app 层的 ApiError 含 status 字段;原生 fetch 错误无 status
+ */
+function extractStatus(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as { status?: number; statusCode?: number };
+    if (typeof e.status === 'number') return e.status;
+    if (typeof e.statusCode === 'number') return e.statusCode;
+  }
+  return undefined;
+}
+
+/** 从错误对象提取 Retry-After(秒),仅 429 时有意义 */
+function extractRetryAfterSec(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as { retryAfter?: string; headers?: Headers };
+    if (typeof e.retryAfter === 'string') {
+      const n = Number(e.retryAfter);
+      if (!Number.isNaN(n)) return n;
+    }
+    if (e.headers && typeof e.headers.get === 'function') {
+      const ra = e.headers.get('retry-after');
+      if (ra) {
+        const n = Number(ra);
+        if (!Number.isNaN(n)) return n;
+      }
+    }
+  }
+  return undefined;
+}
+
+export class ProxyProvider implements AIProvider {
+  id = 'ai-provider' as const;
+
+  constructor(
+    private readonly fetcher: ProxyFetch,
+    private readonly localeGetter?: LocaleGetter,
+  ) {}
+
+  install(): void {
+    // 无状态,无需 install 钩子
+  }
+  activate(): void {
+    // nothing
+  }
+  deactivate(): void {
+    // nothing
+  }
+  uninstall(): void {
+    // nothing
+  }
+
+  /**
+   * 检查是否已配置 - 始终返回 true
+   * 真正的渠道状态由 AI 设置页查询 /api/ai/channels,
+   * 若用户未配置渠道,后端 generate 接口会抛"未配置 AI 渠道"错误,前端展示给用户。
+   */
+  isConfigured(): boolean {
+    return true;
+  }
+
+  /** 文生图 */
+  async generateImage(req: ImageGenerationRequest): Promise<GeneratedImage[]> {
+    const result = await this.callGenerateWithRetry(
+      {
+        kind: 'image',
+        prompt: req.prompt,
+        model: req.model,
+        params: {
+          size: req.size,
+          quality: req.quality,
+          count: req.count,
+        },
+      },
+      req.signal,
+    );
+    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const blob = await fetchBlob(downloadUrl, req.signal);
+    const dataUrl = await blobToDataUrl(blob);
+    return [
+      {
+        dataUrl,
+        width: result.width ?? 0,
+        height: result.height ?? 0,
+        mimeType: result.mimeType ?? 'image/png',
+        bytes: blob.size,
+      },
+    ];
+  }
+
+  /** 图生图/图片编辑(后端目前不支持,直接抛错) */
+  async editImage(_req: ImageEditRequest): Promise<GeneratedImage[]> {
+    throw new AiError('VALIDATION_ERROR', '图生图/图片编辑暂未支持,请使用文生图');
+  }
+
+  /** 文本生成 */
+  async generateText(
+    req: TextGenerationRequest,
+    onDelta?: (delta: string) => void,
+  ): Promise<string> {
+    console.log('[ProxyProvider.generateText] request:', { model: req.model, providerId: req.providerId, promptLength: req.prompt.length });
+    const result = await this.callGenerateWithRetry(
+      {
+        kind: 'text',
+        prompt: req.prompt,
+        model: req.model,
+        providerId: req.providerId,
+        params: req.params ?? {},
+      },
+      req.signal,
+    );
+    const text = result.text ?? '';
+    console.log('[ProxyProvider.generateText] response:', { textLength: text.length, textPreview: text.substring(0, 200) });
+    // 非流式响应，将完整文本通过 onDelta 回调传递一次，确保进度回调能触发
+    if (onDelta && text) {
+      onDelta(text);
+    }
+    return text;
+  }
+
+  /** 视频生成 */
+  async generateVideo(req: VideoGenerationRequest): Promise<GeneratedVideo> {
+    const result = await this.callGenerateWithRetry(
+      {
+        kind: 'video',
+        prompt: req.prompt,
+        model: req.model,
+        params: {
+          size: req.size,
+          seconds: req.seconds,
+          vquality: req.vquality,
+          generateAudio: req.generateAudio,
+          watermark: req.watermark,
+        },
+      },
+      req.signal,
+    );
+    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const blob = await fetchBlob(downloadUrl, req.signal);
+    return readVideoMetaFromBlob(blob);
+  }
+
+  /** 音频生成 */
+  async generateAudio(req: AudioGenerationRequest): Promise<GeneratedAudio> {
+    const result = await this.callGenerateWithRetry(
+      {
+        kind: 'audio',
+        prompt: req.prompt,
+        model: req.model,
+        params: {
+          voice: req.voice,
+          audioFormat: req.format,
+          audioSpeed: req.speed,
+          audioInstructions: req.instructions,
+        },
+      },
+      req.signal,
+    );
+    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const blob = await fetchBlob(downloadUrl, req.signal);
+    return readAudioMetaFromBlob(blob);
+  }
+
+  /**
+   * 调用 POST /api/ai/generate(带超时 + 重试 + 错误分类)
+   *
+   * 超时: 根据 kind 决定(image 60s / text 30s / video 10min / audio 60s)
+   * 重试: NETWORK_ERROR 3 次 / PROVIDER_ERROR 2 次 / RATE_LIMIT 1 次(读 Retry-After)
+   * 错误: 抛出 AiError,含 errorType 字段供前端展示
+   *
+   * @param payload 请求体
+   * @param externalSignal 外部传入的 AbortSignal(用户主动取消)
+   */
+  private async callGenerateWithRetry(
+    payload: {
+      kind: 'text' | 'image' | 'video' | 'audio';
+      prompt: string;
+      model: string;
+      providerId?: string;
+      params?: Record<string, unknown>;
+      locale?: string;
+    },
+    externalSignal?: AbortSignal,
+  ): Promise<GenerateResponse> {
+    // 透传用户语言,供后端控制文本生成输出语言
+    payload.locale = this.localeGetter?.() ?? 'zh';
+    const timeoutMs = timeoutMsByKind(payload.kind);
+    // 内部超时控制器(与外部 signal 合并)
+    const timeoutController = new AbortController();
+    const timeoutTimer = setTimeout(
+      () => timeoutController.abort(new Error('AI_REQUEST_TIMEOUT')),
+      timeoutMs,
+    );
+
+    // 合并外部 signal 与内部超时 signal
+    const mergedSignal = externalSignal
+      ? AbortSignal.any([externalSignal, timeoutController.signal])
+      : timeoutController.signal;
+
+    // 外部取消时,清理超时
+    externalSignal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timeoutTimer);
+      },
+      { once: true },
+    );
+
+    try {
+      let attempt = 0;
+
+      // 首次调用 + 重试循环
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        try {
+          const result = await this.fetcher<GenerateResponse>('/ai/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: mergedSignal,
+          });
+          return result;
+        } catch (err) {
+          // 外部取消优先
+          if (externalSignal?.aborted) {
+            throw new AiError('TIMEOUT', '已取消', { cause: err });
+          }
+          // 超时
+          if (timeoutController.signal.aborted) {
+            throw new AiError(
+              'TIMEOUT',
+              `请求超时(${timeoutMs / 1000}s),请稍后重试`,
+              { cause: err },
+            );
+          }
+
+          const status = extractStatus(err);
+          const errorType = classifyError(err, status);
+
+          // 不可重试:直接抛出
+          if (!isRetryable(errorType)) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new AiError(errorType, message, {
+              statusCode: status,
+              cause: err,
+            });
+          }
+
+          // 已达最大重试次数:抛出
+          const maxRetry = maxRetryCount(errorType);
+          if (attempt >= maxRetry) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new AiError(errorType, message, {
+              statusCode: status,
+              cause: err,
+            });
+          }
+
+          // 计算重试延迟
+          let delay: number;
+          if (errorType === 'RATE_LIMIT') {
+            const retryAfterSec = extractRetryAfterSec(err) ?? 5;
+            delay = retryAfterSec * 1000;
+          } else {
+            delay = retryDelayMs(errorType, attempt);
+          }
+
+          await sleep(delay, externalSignal);
+          attempt++;
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } finally {
+      clearTimeout(timeoutTimer);
+    }
+  }
+
+  /** 获取 Asset 下载 URL(GET /api/assets/:id/download) */
+  private async getAssetDownloadUrl(
+    assetId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const result = await this.fetcher<DownloadUrlResponse>(
+      `/assets/${assetId}/download`,
+      { method: 'GET', signal },
+    );
+    return result.url;
+  }
+}

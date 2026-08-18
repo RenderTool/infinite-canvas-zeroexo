@@ -1,0 +1,115 @@
+{
+  "id": "gpt-image-1",
+  "name": "GPT Image 1",
+  "protocol": "openai",
+  "modelType": "image",
+  "endpoint": "/images/generations",
+  "maxPromptLength": 4000,
+  "parameters": [
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图片",
+      "default": false
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "最大参考图片数",
+      "default": 0
+    },
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "1k",
+      "values": ["1k", "2k"],
+      "labels": { "1k": "1K", "2k": "2K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "auto",
+      "values": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+      "labels": {
+        "auto": "AUTO", "1:1": "1:1", "16:9": "16:9", "9:16": "9:16",
+        "4:3": "4:3", "3:4": "3:4", "3:2": "3:2", "2:3": "2:3"
+      },
+      "display": "radio"
+    },
+    {
+      "name": "width",
+      "type": "number",
+      "label": "宽度",
+      "default": 1024,
+      "min": 256,
+      "max": 2048,
+      "step": 64
+    },
+    {
+      "name": "height",
+      "type": "number",
+      "label": "高度",
+      "default": 1024,
+      "min": 256,
+      "max": 2048,
+      "step": 64
+    },
+    {
+      "name": "quality",
+      "type": "enum",
+      "label": "质量",
+      "default": "auto",
+      "values": ["auto", "hd", "high", "medium", "low", "standard"],
+      "labels": { "auto": "自动", "hd": "高清", "high": "高", "medium": "中", "low": "低", "standard": "标准" },
+      "display": "select"
+    },
+    {
+      "name": "n",
+      "type": "number",
+      "label": "生成数量",
+      "default": 1,
+      "min": 1,
+      "max": 10,
+      "step": 1
+    },
+    {
+      "name": "output_format",
+      "type": "enum",
+      "label": "输出格式",
+      "default": "png",
+      "values": ["png", "jpeg", "webp"],
+      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
+      "display": "select"
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 262144,
+      "maxTotalPixels": 4194304,
+      "minAspectRatio": 0.333,
+      "maxAspectRatio": 3,
+      "maxReferenceImages": 0,
+      "supportsImageToImage": false,
+      "maxEdgeLength": 2048
+    },
+    "paramMapping": {
+      "quality": "quality",
+      "n": "n",
+      "output_format": "output_format"
+    },
+    "valueMapping": {
+      "resolution": { "1k": "1024x1024", "2k": "2048x2048" }
+    }
+  },
+  "pricing": { "perImage": 0.04 },
+  "matchKeywords": ["gpt-image-1"]
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "modelType": "image",
+    "provider": "openai",
+    "modelId": "dall-e-3",
+    "pricing": { "mode": "flat", "flatAmount": 0.04 }
+  },
+  {
+    "modelType": "image",
+    "provider": "volcengine",
+    "modelId": "doubao-seedream-2.0",
+    "pricing": { "mode": "flat", "flatAmount": 0.02 }
+  },
+  {
+    "modelType": "video",
+    "provider": "volcengine",
+    "modelId": "doubao-seedance-2.0",
+    "pricing": {
+      "mode": "capability",
+      "tiers": [
+        { "when": { "resolution": "480p" }, "amount": 0.3 },
+        { "when": { "resolution": "720p" }, "amount": 0.6 }
+      ]
+    }
+  },
+  {
+    "modelType": "video",
+    "provider": "bailian",
+    "modelId": "wan2.7-i2v",
+    "pricing": { "mode": "flat", "flatAmount": 0.5 }
+  },
+  {
+    "modelType": "video",
+    "provider": "bailian",
+    "modelId": "wan2.6-i2v",
+    "pricing": { "mode": "flat", "flatAmount": 0.4 }
+  }
+]

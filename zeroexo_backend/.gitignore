@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# PM2 logs (仅根目录,避免误伤 src/modules/logs 源码模块)
+/logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Runtime config (contains SMTP secrets, OAuth keys, etc.)
+config/settings.json
+config/settings.local.json
+
+# Logs
+*.log
+
+# Storage runtime data (仅根目录,避免误伤 src/modules/storage 源码模块)
+/storage/
+
+# Local seed config (contains SMTP secrets, API keys, etc.)
+prisma/local-seed-config.json
+
+# Local PostgreSQL installation
+pgsql/

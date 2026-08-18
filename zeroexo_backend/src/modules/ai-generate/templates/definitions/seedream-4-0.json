@@ -1,0 +1,88 @@
+{
+  "id": "seedream-4-0",
+  "name": "Seedream 4.0",
+  "protocol": "openai",
+  "modelType": "image",
+  "endpoint": "/images/generations",
+  "maxPromptLength": 300,
+  "parameters": [
+    {
+      "name": "resolution",
+      "type": "enum",
+      "label": "分辨率",
+      "default": "2k",
+      "values": ["1k", "2k", "4k"],
+      "labels": { "1k": "1K", "2k": "2K", "4k": "4K" },
+      "display": "radio"
+    },
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "1:1",
+      "values": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+      "labels": {
+        "auto": "AUTO", "1:1": "1:1", "16:9": "16:9", "9:16": "9:16",
+        "4:3": "4:3", "3:4": "3:4", "3:2": "3:2", "2:3": "2:3", "21:9": "21:9"
+      },
+      "display": "radio"
+    },
+    {
+      "name": "size",
+      "type": "size",
+      "label": "尺寸（宽×高）",
+      "default": { "width": 2048, "height": 2048 }
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "参考图上限",
+      "default": 14,
+      "min": 0,
+      "max": 14
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "imageFormat",
+      "type": "enum",
+      "label": "图片格式",
+      "default": "jpeg",
+      "values": ["png", "jpeg"],
+      "labels": { "png": "PNG", "jpeg": "JPEG" },
+      "display": "select"
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 921600,
+      "maxTotalPixels": 16777216,
+      "minAspectRatio": 0.0625,
+      "maxAspectRatio": 16,
+      "maxReferenceImages": 14,
+      "supportsImageToImage": true,
+      "maxEdgeLength": 4096
+    },
+    "paramMapping": {
+      "size": "size",
+      "watermark": "watermark",
+      "referenceImages": "image",
+      "imageFormat": "output_format"
+    },
+    "valueMapping": {
+      "resolution": { "1k": "1k", "2k": "2k", "4k": "4k" }
+    }
+  },
+  "pricing": { "perImage": 0.03 },
+  "matchKeywords": ["seedream-4-0", "doubao-seedream-4-0"]
+}

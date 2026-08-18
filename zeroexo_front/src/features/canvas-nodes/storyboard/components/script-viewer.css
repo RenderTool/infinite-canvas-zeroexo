@@ -1,0 +1,152 @@
+/* ==========================================================
+   script-viewer.css - 剧本纸张风格（Quill 剥离后复刻）
+   命名空间 .zx-script-page，明暗主题通过 data-theme 选择器
+   仅保留 ql-editor 渲染类，移除 Quill 容器/工具栏样式
+   ========================================================== */
+
+/* ── 纸张容器（明暗主题 CSS 变量） ── */
+.zx-script-page {
+  --script-bg: #f5f2e8;
+  --script-text: #1a1a1a;
+  --script-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --script-line-color: #d4cdc0;
+  --script-page-number: #999;
+  --script-accent: #8b5cf6;
+  --script-margin-line: #e8e0d0;
+  --script-rule-bg: #efe9dc;
+  --script-character: #b3392e;
+}
+.zx-script-page[data-theme="dark"] {
+  --script-bg: #2a2722;
+  --script-text: #d4d0c8;
+  --script-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --script-line-color: #3d3832;
+  --script-page-number: #6b6559;
+  --script-accent: #a78bfa;
+  --script-margin-line: #3d3832;
+  --script-rule-bg: #353028;
+  --script-character: #e07a5f;
+}
+
+/* ── 编辑区：Courier 12pt、单倍行距、宽左边距模拟 1.5inch ── */
+.zx-script-page .ql-editor {
+  background: var(--script-bg) !important;
+  color: var(--script-text) !important;
+  font-family: 'Courier New', Courier, monospace !important;
+  font-size: 12pt !important;
+  line-height: 1.35 !important;
+  padding: 40px 56px 56px 64px !important;
+  min-height: 480px !important;
+  transition: background 0.3s ease !important;
+}
+
+/* ── 段落基础 ── */
+.zx-script-page .ql-editor p {
+  margin: 0 0 6px 0 !important;
+  line-height: 1.35 !important;
+}
+.zx-script-page .ql-editor p:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* ── 场景标题 ── */
+.zx-script-page .ql-editor .script-scene-heading {
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  margin: 18px 0 10px 0 !important;
+  padding-bottom: 3px !important;
+  border-bottom: 1px solid var(--script-rule-bg) !important;
+  letter-spacing: 0.02em !important;
+}
+
+/* ── 动作描述 ── */
+.zx-script-page .ql-editor .script-action {
+  text-indent: 0 !important;
+}
+
+/* ── 角色名 ── */
+.zx-script-page .ql-editor .script-character {
+  display: block !important;
+  text-align: center !important;
+  text-transform: uppercase !important;
+  font-weight: 700 !important;
+  color: var(--script-character) !important;
+  margin: 14px 0 4px 0 !important;
+  letter-spacing: 0.03em !important;
+}
+
+/* ── 对白 ── */
+.zx-script-page .ql-editor .script-dialogue {
+  padding-left: 56px !important;
+  padding-right: 56px !important;
+  margin-bottom: 8px !important;
+}
+
+/* ── 括号指示 ── */
+.zx-script-page .ql-editor .script-parenthetical {
+  padding-left: 84px !important;
+  font-style: italic !important;
+  margin-bottom: 4px !important;
+  color: var(--script-text) !important;
+  opacity: 0.85 !important;
+}
+
+/* ── 转场 ── */
+.zx-script-page .ql-editor .script-transition {
+  display: block !important;
+  text-align: right !important;
+  text-transform: uppercase !important;
+  font-weight: 600 !important;
+  margin: 14px 0 !important;
+}
+
+/* ── 分页标记 ── */
+.zx-script-page .ql-editor .script-page-break {
+  border-top: 1px dashed var(--script-line-color) !important;
+  text-align: center !important;
+  font-size: 9pt !important;
+  color: var(--script-page-number) !important;
+  margin: 26px 0 !important;
+  padding: 6px 0 0 0 !important;
+  position: relative !important;
+  height: 22px !important;
+  user-select: none !important;
+  pointer-events: none !important;
+}
+.zx-script-page .ql-editor .script-page-break::before {
+  content: 'PAGE BREAK';
+  display: block;
+  background: var(--script-bg);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: -9px;
+  padding: 0 12px;
+  letter-spacing: 0.12em;
+  transition: background 0.3s ease;
+}
+
+/* ── 节点只读阅读态：紧凑纸张 ── */
+.zx-script-page.zx-page-compact .ql-editor {
+  min-height: 0 !important;
+  padding: 14px 18px !important;
+  font-size: 10pt !important;
+}
+.zx-script-page.zx-page-compact .ql-editor .script-scene-heading {
+  margin: 10px 0 6px 0 !important;
+}
+.zx-script-page.zx-page-compact .ql-editor .script-dialogue {
+  padding-left: 28px !important;
+  padding-right: 28px !important;
+}
+.zx-script-page.zx-page-compact .ql-editor .script-parenthetical {
+  padding-left: 42px !important;
+}
+
+/* ── 空节点范文预览 ── */
+.zx-script-page.zx-page-compact.zx-page-compact-preview .ql-editor {
+  background: transparent !important;
+}
+.zx-script-page.zx-page-compact.zx-page-compact-preview .ql-editor .script-page-break::before {
+  background: transparent !important;
+}

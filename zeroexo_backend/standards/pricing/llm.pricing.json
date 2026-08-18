@@ -1,0 +1,56 @@
+[
+  {
+    "modelType": "llm",
+    "provider": "openai",
+    "modelId": "gpt-4o",
+    "pricing": { "mode": "flat", "inputPerMillion": 2.5, "outputPerMillion": 10.0 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "openai",
+    "modelId": "gpt-4o-mini",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.15, "outputPerMillion": 0.6 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "anthropic",
+    "modelId": "claude-3-5-sonnet",
+    "pricing": { "mode": "flat", "inputPerMillion": 3.0, "outputPerMillion": 15.0 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "anthropic",
+    "modelId": "claude-3-haiku",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.25, "outputPerMillion": 1.25 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "gemini",
+    "modelId": "gemini-pro",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.5, "outputPerMillion": 1.5 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "deepseek",
+    "modelId": "deepseek-chat",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.27, "outputPerMillion": 1.1 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "deepseek",
+    "modelId": "deepseek-reasoner",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.55, "outputPerMillion": 2.19 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "bailian",
+    "modelId": "qwen-plus",
+    "pricing": { "mode": "flat", "inputPerMillion": 0.4, "outputPerMillion": 1.2 }
+  },
+  {
+    "modelType": "llm",
+    "provider": "bailian",
+    "modelId": "qwen-max",
+    "pricing": { "mode": "flat", "inputPerMillion": 2.8, "outputPerMillion": 8.4 }
+  }
+]

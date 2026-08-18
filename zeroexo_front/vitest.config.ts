@@ -1,0 +1,33 @@
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+/**
+ * Vitest 单元测试配置
+ *
+ * 仅用于 ChatArea 拆分后的组件单元测试（jsdom 环境）。
+ * 与 vite.config.ts 共享相同的 @ → ./src 别名。
+ */
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
+    css: false,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      include: [
+        'src/**',
+        'packages/core/src/**',
+      ],
+    },
+  },
+});
