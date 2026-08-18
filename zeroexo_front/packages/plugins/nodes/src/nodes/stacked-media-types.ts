@@ -8,8 +8,8 @@
 
 import type { ToolContext } from '@zeroexo/core';
 
-/** 堆叠卡片中的媒体源类型(仅支持图片/视频) */
-export type StackMediaType = 'image' | 'video';
+/** 堆叠卡片中的源类型。视图按 capability 选择对应的预览器。 */
+export type StackMediaType = 'image' | 'video' | 'audio' | 'text' | 'storyboard' | 'script' | 'custom';
 
 /** 单张堆叠卡片 */
 export interface StackCard {
@@ -17,6 +17,8 @@ export interface StackCard {
   id: string;
   /** 原始节点类型 */
   sourceType: StackMediaType;
+  /** 被收纳前的源节点 id，仅用于追踪和 Agent/Debug，不要求节点仍存在。 */
+  sourceNodeId?: string;
   /** 原始节点数据（拷贝自原节点 data） */
   data: Record<string, unknown>;
   /** 原始节点标题 */
@@ -45,7 +47,7 @@ export function createStackedMediaDefaultData(): StackedMediaData {
   };
 }
 
-/** 从节点数据解析 StackedMediaData（兼容空数据） */
+/** 从当前 schema 解析 StackedMediaData。 */
 export function parseStackedMediaData(data: Record<string, unknown> | undefined): StackedMediaData {
   if (!data) return createStackedMediaDefaultData();
   const cards = (data.cards as StackCard[] | undefined) ?? [];

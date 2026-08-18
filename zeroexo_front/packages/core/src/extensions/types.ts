@@ -6,6 +6,7 @@ import type { NodeRecord } from '../model/types.js';
 import type { CommandQueue } from '../command/command-queue.js';
 import type { EventBus } from '../bus/event-bus.js';
 import type { NodeViewContract } from '../node-view-contract.js';
+import type { NodeCapabilities, NodeRuntimeContract } from '../node-runtime-contract.js';
 
 /** 引脚定义(UE5 风格命名: Pin) */
 export interface Pin {
@@ -116,6 +117,11 @@ export interface ToolDefinition {
   group?: string;
   /** 执行函数(策略实现,通过 ctx 访问业务能力) */
   run: (node: NodeRecord, ctx: ToolContext) => void;
+  /**
+   * 工具显示在宿主节点上,但作用于另一个领域目标时使用。
+   * 典型场景:StackNode 显示当前媒体项的 crop/replace 工具。
+   */
+  targetNode?: (hostNode: NodeRecord, ctx: ToolContext) => NodeRecord;
   /** 下拉菜单项(可选;存在时渲染为下拉按钮而非普通按钮) */
   menu?: (node: NodeRecord, ctx: ToolContext) => ToolMenuItem[];
 }
@@ -138,6 +144,10 @@ export interface NodeTypeExtension {
   category: string;
   color: string;
   icon?: string;
+
+  /** 领域能力声明与运行时行为，View 不应读取未声明的节点字段。 */
+  capabilities?: NodeCapabilities;
+  runtime?: NodeRuntimeContract;
 
   getPins?(node: NodeRecord): Pin[];
   renderNode?: NodeRenderer;

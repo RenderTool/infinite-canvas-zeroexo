@@ -53,6 +53,33 @@ export type {
 
 // ===== 节点视图契约(MVVM) =====
 export type { NodeViewContract } from './node-view-contract.js';
+export type {
+  CanvasActor,
+  CanvasOperationContext,
+  CanvasOperationMetrics,
+  CanvasOperationObserver,
+  NodeCapabilities,
+  NodeDefinition,
+  NodeElementMeasureContract,
+  NodeMotionContract,
+  NodeRuntimeContext,
+  NodeRuntimeContract,
+  NodeScaleContract,
+  NodeScaleMode,
+  NodeSelectionMode,
+  NodeSizeBasis,
+  NodeStateStyle,
+  NodeVisualContract,
+  OverlayContract,
+} from './node-runtime-contract.js';
+export type {
+  CanvasSchema,
+  ConnectionContext,
+  ConnectionDecision,
+  NodeAction,
+  NodeActionContext,
+} from './canvas-schema.js';
+export { allowAllCanvasSchema } from './canvas-schema.js';
 
 // ===== 编辑器入口 =====
 export { createEditor } from './editor.js';

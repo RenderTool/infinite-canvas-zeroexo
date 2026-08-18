@@ -22,7 +22,15 @@ import {
   MoveNodeCommand,
   BatchCommand,
 } from '@zeroexo/core';
-import type { Command } from '@zeroexo/core';
+import { allowAllCanvasSchema } from '@zeroexo/core';
+import type {
+  CanvasOperationContext,
+  CanvasOperationMetrics,
+  CanvasOperationObserver,
+  CanvasSchema,
+  Command,
+  CommandQueue,
+} from '@zeroexo/core';
 
 // ===== 操作类型定义 =====
 
@@ -112,37 +120,143 @@ export type CanvasOp =
   | MoveNodeOp
   | BatchOp;
 
+export interface CanvasOpExecutorOptions {
+  schema?: CanvasSchema;
+  observer?: CanvasOperationObserver;
+  defaultContext?: Partial<CanvasOperationContext>;
+}
+
+function createId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // ===== 执行器 =====
 
 export class CanvasOpExecutor {
-  private commandQueue: any;
+  private readonly commandQueue: CommandQueue;
+  private readonly schema: CanvasSchema;
+  private readonly observer?: CanvasOperationObserver;
+  private readonly defaultContext: Partial<CanvasOperationContext>;
 
-  constructor(commandQueue: any) {
+  constructor(commandQueue: CommandQueue, options: CanvasOpExecutorOptions = {}) {
     this.commandQueue = commandQueue;
+    this.schema = options.schema ?? allowAllCanvasSchema;
+    this.observer = options.observer;
+    this.defaultContext = options.defaultContext ?? {};
   }
 
   /**
    * 批量执行一组 CanvasOp 操作
    * 如果操作数 > 1，自动包装为 BatchCommand 以支持撤销/重做
    */
-  async executeOps(ops: CanvasOp[]): Promise<void> {
-    if (!this.commandQueue || ops.length === 0) return;
+  async executeOps(
+    ops: CanvasOp[],
+    context: Partial<CanvasOperationContext> = {},
+  ): Promise<CanvasOperationMetrics> {
+    const operationContext: CanvasOperationContext = {
+      operationId: context.operationId ?? createId('canvas-op'),
+      traceId: context.traceId ?? this.defaultContext.traceId ?? createId('trace'),
+      actor: context.actor ?? this.defaultContext.actor ?? 'user',
+      source: context.source ?? this.defaultContext.source,
+      projectId: context.projectId ?? this.defaultContext.projectId,
+      dryRun: context.dryRun ?? this.defaultContext.dryRun,
+      idempotencyKey: context.idempotencyKey ?? this.defaultContext.idempotencyKey,
+      parentOperationId: context.parentOperationId ?? this.defaultContext.parentOperationId,
+    };
+    const startedAt = Date.now();
+    const before = this.commandQueue.getState();
+    const baseMetrics: CanvasOperationMetrics = {
+      operationId: operationContext.operationId,
+      traceId: operationContext.traceId,
+      actor: operationContext.actor,
+      opCount: ops.length,
+      commandCount: 0,
+      nodeCountBefore: before.nodes.length,
+      edgeCountBefore: before.edges.length,
+      durationMs: 0,
+      status: 'planned',
+    };
+
+    if (ops.length === 0) {
+      const metrics = { ...baseMetrics, durationMs: Date.now() - startedAt };
+      this.observer?.onPlan?.(metrics);
+      return metrics;
+    }
 
     if (ops.length === 1) {
+      const validation = this.validateOp(ops[0]!);
+      if (!validation.valid) return this.reject(baseMetrics, validation.reason, startedAt);
       const cmd = this.toCommand(ops[0]!);
-      if (cmd) this.commandQueue.execute(cmd);
-      return;
+      if (!cmd) return this.reject(baseMetrics, 'Unsupported canvas operation', startedAt);
+      baseMetrics.commandCount = 1;
+      this.observer?.onPlan?.({ ...baseMetrics });
+      if (!operationContext.dryRun) this.commandQueue.execute(cmd);
+      return this.complete(baseMetrics, operationContext.dryRun ? 'planned' : 'executed', startedAt);
     }
 
     // 批量操作：收集所有命令
     const cmds: Command[] = [];
     for (const op of ops) {
+      const validation = this.validateOp(op);
+      if (!validation.valid) return this.reject(baseMetrics, validation.reason, startedAt);
       const cmd = this.toCommand(op);
       if (cmd) cmds.push(cmd);
     }
-    if (cmds.length > 0) {
-      this.commandQueue.execute(new BatchCommand(cmds, 'canvas-op-batch'));
+    baseMetrics.commandCount = cmds.length;
+    this.observer?.onPlan?.({ ...baseMetrics });
+    if (cmds.length === 0) return this.reject(baseMetrics, 'No supported canvas operations', startedAt);
+    if (!operationContext.dryRun) this.commandQueue.execute(new BatchCommand(cmds, 'canvas-op-batch'));
+    return this.complete(baseMetrics, operationContext.dryRun ? 'planned' : 'executed', startedAt);
+  }
+
+  private validateOp(op: CanvasOp): { valid: boolean; reason?: string } {
+    if (op.op === 'add_node') {
+      const result = this.schema.validateNode?.({
+        id: op.args.id,
+        type: op.args.type,
+        position: op.args.position,
+        size: op.args.size,
+        title: op.args.title,
+        data: op.args.data,
+      });
+      return result?.valid === false
+        ? { valid: false, reason: result.errors?.join('; ') ?? 'Node validation failed' }
+        : { valid: true };
     }
+    if (op.op === 'add_edge') {
+      const decision = this.schema.validateConnection({
+        source: { nodeId: op.args.source.nodeId, pinId: op.args.source.pinId ?? 'output' },
+        target: { nodeId: op.args.target.nodeId, pinId: op.args.target.pinId ?? 'input' },
+      });
+      return decision.allowed ? { valid: true } : { valid: false, reason: decision.reason ?? 'Connection rejected' };
+    }
+    return { valid: true };
+  }
+
+  private complete(
+    base: CanvasOperationMetrics,
+    status: CanvasOperationMetrics['status'],
+    startedAt: number,
+  ): CanvasOperationMetrics {
+    const after = this.commandQueue.getState();
+    const metrics = {
+      ...base,
+      status,
+      nodeCountAfter: after.nodes.length,
+      edgeCountAfter: after.edges.length,
+      durationMs: Date.now() - startedAt,
+    };
+    this.observer?.onComplete?.(metrics);
+    return metrics;
+  }
+
+  private reject(base: CanvasOperationMetrics, error: string, startedAt: number): CanvasOperationMetrics {
+    const metrics = { ...base, status: 'rejected' as const, error, durationMs: Date.now() - startedAt };
+    this.observer?.onComplete?.(metrics);
+    return metrics;
   }
 
   /**
@@ -173,7 +287,7 @@ export class CanvasOpExecutor {
 
       case 'add_edge': {
         const { id, source, target } = op.args;
-        const edgeId = id ?? `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const edgeId = id ?? createId('edge');
         return new AddEdgeCommand({
           id: edgeId,
           source: { nodeId: source.nodeId, pinId: source.pinId ?? 'output' },

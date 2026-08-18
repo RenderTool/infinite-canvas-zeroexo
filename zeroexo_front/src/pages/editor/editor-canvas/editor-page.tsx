@@ -66,6 +66,7 @@ import { useAiConfigStore } from '@/features/ai-config/use-ai-config-store.js';
 import { useEditorDialogs } from './use-editor-dialogs.js';
 import { useEditorInteractions } from './use-editor-interactions.js';
 import { MobileHierarchyDrawer } from './editor-mobile-drawer.js';
+import { DevPerformancePanel } from '@/features/dev-performance/dev-performance-panel.js';
 
 export interface EditorPageProps {
   canvasId: string;
@@ -604,6 +605,10 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
              */
             // usePureIcon={false}
           />
+        ) : null}
+
+        {import.meta.env.DEV && !state.loading && state.editor ? (
+          <DevPerformancePanel store={state.editor.store} syncStatus={status} />
         ) : null}
 
         {/* BUG5: RightSideToolBar 已移除 — 节点创建功能并入 LeftSideToolBar 加号菜单 */}

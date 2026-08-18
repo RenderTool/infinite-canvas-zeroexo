@@ -18,7 +18,7 @@
  *   generate 仅封装 provider 调用,状态管理由组件 handleGenerate 处理。
  */
 
-import type { Plugin, PluginContext, NodeTypeExtension, NodeRendererProps, ToolDefinition, ToolContext } from '@zeroexo/core';
+import type { Plugin, PluginContext, NodeTypeExtension, NodeRendererProps, ToolDefinition, ToolContext, NodeRuntimeContract } from '@zeroexo/core';
 import type { NodeRecord } from '@zeroexo/core';
 import type { NodeRegistryPlugin } from '@zeroexo/plugin-node-registry';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -119,6 +119,26 @@ const NODE_TYPES = {
 
 // ===== 扩展定义工厂 =====
 
+function createNodeRuntime(
+  defaultSize: { width: number; height: number },
+  options: { mode?: 'free' | 'uniform' | 'locked'; appearance?: 'shell' | 'custom'; preserveAspectRatio?: boolean } = {},
+): NodeRuntimeContract {
+  return {
+    definition: {
+      schemaVersion: 1,
+      size: {
+        basis: { ...defaultSize, referenceSize: 500 },
+        mode: options.mode ?? 'free',
+        preserveAspectRatio: options.preserveAspectRatio ?? false,
+      },
+      visual: {
+        appearance: options.appearance ?? 'shell',
+        selectionMode: 'runtime',
+      },
+    },
+  };
+}
+
 function createTextExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
   return {
     type: NODE_TYPES.text,
@@ -126,6 +146,8 @@ function createTextExtension(controller: ConnectionController | null, store: Rea
     category: 'Basic',
     color: '#6b7280',
     defaultSize: { width: 620, height: 348 },
+    runtime: createNodeRuntime({ width: 620, height: 348 }),
+    capabilities: { stackable: true, capabilities: ['text'] },
     resizable: true,
     getPins: () => getTextNodePins(),
     createDefaultData: createTextDefaultData,
@@ -143,6 +165,8 @@ function createGeneratorExtension(controller: ConnectionController | null, store
     category: 'Generator',
     color: '#8b5cf6',
     defaultSize: { width: 620, height: 348 },
+    runtime: createNodeRuntime({ width: 620, height: 348 }),
+    capabilities: { stackable: false, capabilities: ['generation'] },
     resizable: false,
     getPins: () => getGeneratorNodePins(),
     createDefaultData: createGeneratorDefaultData,
@@ -162,6 +186,8 @@ function createImageExtension(
     category: 'Media',
     color: '#9b59b6',
     defaultSize: { width: 620, height: 348 },
+    runtime: createNodeRuntime({ width: 620, height: 348, }, { mode: 'uniform', preserveAspectRatio: true }),
+    capabilities: { stackable: true, mediaKinds: ['image'], capabilities: ['media', 'replace', 'crop', 'split'] },
     resizable: true,
     lockAspectRatio: true,
     minSize: { width: 80, height: 80 },
@@ -184,6 +210,8 @@ function createVideoExtension(
     category: 'Media',
     color: '#3b82f6',
     defaultSize: { width: 620, height: 348 },
+    runtime: createNodeRuntime({ width: 620, height: 348 }, { mode: 'uniform', preserveAspectRatio: true }),
+    capabilities: { stackable: true, mediaKinds: ['video'], capabilities: ['media', 'replace'] },
     resizable: true,
     lockAspectRatio: true,
     minSize: { width: 80, height: 80 },
@@ -207,6 +235,8 @@ function createAudioExtension(
     color: '#10b981',
     // 气泡比例(特化外观:不参与全局外观配置与尺寸统一)
     defaultSize: { width: 360, height: 96 },
+    runtime: createNodeRuntime({ width: 360, height: 96 }, { appearance: 'custom' }),
+    capabilities: { stackable: true, mediaKinds: ['audio'], capabilities: ['media', 'replace', 'playback'] },
     resizable: false,
     specialAppearance: true,
     getPins: () => getAudioNodePins(),
@@ -227,6 +257,8 @@ function createAiPlaceholderExtension(controller: ConnectionController | null, s
     color: '#8b5cf6',
     // 尺寸:网格179×101 + 四周8px留白 = 195×117
     defaultSize: { width: 195, height: 117 },
+    runtime: createNodeRuntime({ width: 195, height: 117 }, { appearance: 'custom' }),
+    capabilities: { stackable: false, capabilities: ['placeholder'] },
     resizable: false,
     getPins: () => [],
     createDefaultData: createAiPlaceholderDefaultData,
@@ -247,8 +279,11 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
     color: '#f59e0b',
     // 基准尺寸与 image/video 节点一致
     defaultSize: { width: 620, height: 348 },
-    resizable: false,
+    resizable: true,
+    minSize: { width: 220, height: 160 },
     specialAppearance: true,
+    runtime: createNodeRuntime({ width: 500, height: 500 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
+    capabilities: { stackable: true, mediaKinds: ['image', 'video', 'audio', 'text'], capabilities: ['stack', 'merge-stacks', 'media-edit'] },
     getPins: () => getStackedMediaPins(),
     createDefaultData: createStackedMediaDefaultData,
     // 节点视图契约(MVVM 试点):默认走 NodeShell 状态渲染,声明排布边界
@@ -257,14 +292,14 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
       connectionHoverEffect: 'default',
       hoverEffect: 'default',
     },
-    // 纵深防御:作为 input 端时仅接受 image/video 源
+    // 纵深防御:作为 input 端时仅接受已声明可堆叠的基础节点
     // (既有类型兼容矩阵已排除其余类型,不存在"未识别"态)
     canConnect: (source, target) => {
       if (!store) return;
       const tgtNode = store.getNode(target.nodeId);
       if (!tgtNode || tgtNode.type !== NODE_TYPES.stackedMedia) return;
       const srcNode = store.getNode(source.nodeId);
-      if (srcNode && srcNode.type !== 'image' && srcNode.type !== 'video') {
+      if (srcNode && !['image', 'video', 'audio', 'text', NODE_TYPES.stackedMedia].includes(srcNode.type)) {
         return { valid: false, reason: i18next.t('nodes.stackOnlyAcceptsMedia') };
       }
     },
@@ -275,17 +310,34 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
 
       // 根据活跃卡片类型注入原始工具(排除"堆叠"自身)
       if (activeCard) {
-        const sourceTools = activeCard.sourceType === 'video' ? getVideoTools() : getImageTools();
+        const sourceTools = activeCard.sourceType === 'video'
+          ? getVideoTools()
+          : activeCard.sourceType === 'audio'
+            ? getAudioTools()
+            : activeCard.sourceType === 'text'
+              ? getTextTools()
+              : activeCard.sourceType === 'image'
+                ? getImageTools()
+                : [];
+        const activeTarget: NodeRecord = {
+          id: activeCard.sourceNodeId ?? activeCard.id,
+          type: activeCard.sourceType,
+          title: activeCard.title ?? '',
+          position: node.position,
+          size: activeCard.size ?? node.size,
+          data: activeCard.data,
+        };
         for (const t of sourceTools) {
           if (t.id === 'createStackNode') continue; // 排除"堆叠"自身
-          tools.push(t);
+          tools.push({ ...t, targetNode: () => activeTarget });
         }
       }
 
       // 移出按钮(仅 StackNode 显示;label 与 node-tools.tsx 其余工具一致,硬编码中文)
       tools.push({
         id: 'eject',
-        label: '移出',
+        // 胶囊中统一使用图标按钮，title/tooltip 提供语义。
+        label: '',
         title: '移出为独立节点',
         icon: 'x-circle',
         danger: true,

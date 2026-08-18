@@ -13,8 +13,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Package, Upload } from 'lucide-react';
-import { UpdateNodeDataCommand } from '@zeroexo/core';
+import { FileText, Package, Upload } from 'lucide-react';
+import { ResizeNodeCommand, UpdateNodeDataCommand } from '@zeroexo/core';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -24,7 +24,7 @@ import { BaseNodeView } from '../base-node-view.js';
 import { VideoNodeView } from './video-node-view.js';
 import { useHydratedContent } from '../utils/hydrate.js';
 import { StackCollectToast } from './stacked-media-toast.js';
-import { collectCard, undoCollect as undoCollectModel } from './stacked-media-model.js';
+import { collectCard, mergeStacks, undoCollect as undoCollectModel } from './stacked-media-model.js';
 import {
   parseStackedMediaData,
   type StackCard,
@@ -105,6 +105,28 @@ function renderCardContent(
     const content = (card.data?.content as string | undefined) ?? '';
     const storageKey = card.data?.storageKey as string | undefined;
     return <ImageContent src={content} storageKey={storageKey} />;
+  }
+
+  if (card.sourceType !== 'video') {
+    const label = card.title || card.sourceType;
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          color: 'var(--color-text-secondary, #78716c)',
+          background: 'var(--color-bg-surface, #f5f5f4)',
+        }}
+      >
+        <FileText size={28} strokeWidth={1.6} />
+        <span style={{ maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{label}</span>
+      </div>
+    );
   }
 
   // 视频: 使用 VideoNodeView contentOnly 渲染
@@ -348,7 +370,9 @@ function BottomNav({
               title={slot.card.title ?? slot.card.sourceType}
             >
               <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden' }}>
-                <MediaThumbnail cardData={slot.card.data} type={slot.card.sourceType} />
+                {slot.card.sourceType === 'image' || slot.card.sourceType === 'video'
+                  ? <MediaThumbnail cardData={slot.card.data} type={slot.card.sourceType} />
+                  : <FileText size={16} color={textMuted} />}
               </div>
             </div>
           );
@@ -447,7 +471,7 @@ export function StackedMediaNodeView({
     for (const edge of graph.edges) {
       if (edge.target.nodeId !== node.id || edge.target.pinId !== 'prompt') continue;
       const sourceNode = graph.nodes.find((n) => n.id === edge.source.nodeId);
-      if (sourceNode && (sourceNode.type === 'image' || sourceNode.type === 'video')) {
+      if (sourceNode && ['image', 'video', 'audio', 'text', 'stacked-media'].includes(sourceNode.type)) {
         result.push({ edge, sourceNode });
       }
     }
@@ -458,6 +482,7 @@ export function StackedMediaNodeView({
   // 非打扰式收纳:检测到新连线(image/video 源连入 prompt pin)时直接自动收纳,
   // 画布锚定胶囊提示 5 秒内可「移除」撤销,不弹窗
   const [collectToast, setCollectToast] = useState<CollectSnapshot | null>(null);
+  const lastSizedCardRef = useRef<string | null>(null);
 
   const handledEdgesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -500,15 +525,41 @@ export function StackedMediaNodeView({
     updateNode({ data: { ...data, activeIndex: index } });
   }, [activeIndex, data, updateNode, beginSwitchAnimation]);
 
+  // 媒体切换时按当前素材比例调整 StackNode 总高度，导航栏作为附加区域保留。
+  // 500x500 只作为设计基准，不把节点锁成固定相册容器。
+  useEffect(() => {
+    if (!commandQueue || !activeCard) return;
+    const width = node.size?.width ?? 620;
+    const naturalWidth = Number(activeCard.data.naturalWidth);
+    const naturalHeight = Number(activeCard.data.naturalHeight);
+    if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) return;
+    const targetHeight = Math.max(220, Math.round(width * (naturalHeight / naturalWidth) + 56));
+    const resizeKey = `${activeCard.id}:${width}:${targetHeight}`;
+    if (lastSizedCardRef.current === resizeKey || Math.abs((node.size?.height ?? 0) - targetHeight) <= 2) return;
+    lastSizedCardRef.current = resizeKey;
+    commandQueue.execute(new ResizeNodeCommand(
+      node.id,
+      { x: node.position.x, y: node.position.y, width, height: node.size?.height ?? 348 },
+      { x: node.position.x, y: node.position.y, width, height: targetHeight },
+    ));
+  }, [activeCard, commandQueue, node.id, node.position.x, node.position.y, node.size?.height, node.size?.width]);
+
   // ===== 收纳:连线预览 → 卡片(删边 + 删源节点 + 追加卡片,自动执行 + 胶囊可撤销) =====
   const handleCollect = useCallback((edge: EdgeRecord, sourceNode: NodeRecord) => {
     if (!commandQueue) return;
+    if (sourceNode.type === 'stacked-media' && store) {
+      const result = mergeStacks(node, data, sourceNode, edge, store.getGraph());
+      commandQueue.execute(result.command);
+      setActiveIndex(result.activeIndex);
+      setCollectToast(null);
+      return;
+    }
     const result = collectCard(node.id, data, sourceNode, edge);
     commandQueue.execute(result.command);
     setActiveIndex(result.cards.length - 1);
     // 画布锚定胶囊快照(仅保留最近一次可撤销)
     setCollectToast({
-      label: `已收纳 · ${sourceNode.type === 'video' ? '视频' : '图片'}`,
+      label: `已收纳 · ${sourceNode.title || sourceNode.type}`,
       sourceNode,
       edge,
       cardId: result.cardId,
@@ -641,7 +692,7 @@ export function StackedMediaNodeView({
       color: theme.toolbar.textMuted,
       // 空态背景与有卡态主图区一致,消除"合入后发灰"
       background: theme.node.contentBackground,
-      border: '1px solid var(--color-border, #e7e5e4)',
+      border: 0,
       borderRadius: 8,
       overflow: 'hidden',
     }}>
@@ -690,7 +741,7 @@ export function StackedMediaNodeView({
           inset: 0,
           overflow: 'hidden',
           borderRadius: 8,
-          border: '1px solid var(--color-border, #e7e5e4)',
+          border: 0,
           background: theme.node.contentBackground,
         }}
       >

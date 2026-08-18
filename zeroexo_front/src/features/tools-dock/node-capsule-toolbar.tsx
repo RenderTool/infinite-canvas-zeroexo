@@ -216,7 +216,11 @@ export function NodeCapsuleToolbar({
         ? getGroupTools(node!, toolContext)
         : ext?.getTools ? ext.getTools(node!, toolContext) : [])
     : [];
-  const visibleTools = tools.filter((tool) => !tool.visible || tool.visible(node!, toolContext));
+  const resolveToolNode = (tool: ToolDefinition): NodeRecord => tool.targetNode?.(node!, toolContext) ?? node!;
+  const visibleTools = tools.filter((tool) => {
+    const targetNode = resolveToolNode(tool);
+    return !tool.visible || tool.visible(targetNode, toolContext);
+  });
 
   // 显示条件与 ToolsDock 一致
   const isSingleGroup = hasNodeTools && isGroupNode && !isMultiSelect && !isPreview;
@@ -369,17 +373,18 @@ export function NodeCapsuleToolbar({
       {/* 节点/组工具 */}
       {showNodeTools &&
         visibleTools.map((tool, i) => {
-          const isActive = tool.active?.(node!, toolContext) ?? false;
-          const title = getToolTitle(tool, node!, toolContext, t);
-          const icon = normalizeIcon(resolveIcon(tool.icon, node!, toolContext), 16);
-          const label = getToolLabel(tool, node!, toolContext, t);
+          const toolNode = resolveToolNode(tool);
+          const isActive = tool.active?.(toolNode, toolContext) ?? false;
+          const title = getToolTitle(tool, toolNode, toolContext, t);
+          const icon = normalizeIcon(resolveIcon(tool.icon, toolNode, toolContext), 16);
+          const label = getToolLabel(tool, toolNode, toolContext, t);
           const prevTool = visibleTools[i - 1];
           const showDivider = prevTool && prevTool.group !== tool.group;
           const hasMenu = !!tool.menu;
 
           // 带菜单的工具:渲染为下拉按钮
           if (hasMenu) {
-            const menuItems = tool.menu!(node!, toolContext);
+            const menuItems = tool.menu!(toolNode, toolContext);
             return (
               <React.Fragment key={tool.id}>
                 {showDivider && <div style={{ width: 1, height: 20, margin: '0 2px', background: dividerBg }} />}
@@ -410,7 +415,7 @@ export function NodeCapsuleToolbar({
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
-                              mi.run?.(node!, toolContext);
+                              mi.run?.(toolNode, toolContext);
                               setOpenMenu(null);
                             }}
                           >
@@ -432,7 +437,7 @@ export function NodeCapsuleToolbar({
               <button
                 type="button"
                 title={title}
-                onClick={(e) => { e.stopPropagation(); tool.run(node!, toolContext); }}
+                onClick={(e) => { e.stopPropagation(); tool.run(toolNode, toolContext); }}
                 onPointerDown={(e) => e.stopPropagation()}
                 style={toolButtonStyle(isActive, !!tool.danger, !!tool.primary, tool.primary ? themeAccent : nodeAccent, dangerColor, textColor, hoverBg)}
                 onMouseEnter={(e) => { if (!isActive && !tool.primary) e.currentTarget.style.background = hoverBg; }}
@@ -456,7 +461,7 @@ export function NodeCapsuleToolbar({
       {showAlignAgg ? renderAggButton('align', <AlignCenterVertical size={16} />, t('toolbar.align')) : null}
       {showSizeAgg ? renderAggButton('size', <Scaling size={16} />, t('toolbar.unify')) : null}
       {showLayerAgg ? renderAggButton('layer', <Layers size={16} />, t('toolbar.layer')) : null}
-      {/* 移出组:直达动作按钮(非菜单),单选且有父组时显示 */}
+      {/* 移出组:统一为纯图标动作按钮，避免与节点工具出现两套交互 */}
       {showMoveOut ? (
         <div style={{ position: 'relative' }}>
           <button
@@ -469,7 +474,6 @@ export function NodeCapsuleToolbar({
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <LogOut size={16} />
-            {!effectivePureIcon ? <span>{t('toolbar.moveOutGroup')}</span> : null}
           </button>
         </div>
       ) : null}

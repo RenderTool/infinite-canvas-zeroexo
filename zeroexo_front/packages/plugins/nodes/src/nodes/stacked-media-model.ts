@@ -13,13 +13,13 @@ import {
   UpdateNodeDataCommand,
   BatchCommand,
 } from '@zeroexo/core';
-import type { NodeRecord, EdgeRecord } from '@zeroexo/core';
+import type { Command, NodeRecord, EdgeRecord } from '@zeroexo/core';
 import type { StackedMediaData, StackCard } from './stacked-media-types.js';
 
 /** 兄弟垂直队列间距 */
 const SIBLING_GAP = 40;
-/** 无兄弟时新节点相对 stack 节点右侧偏移 */
-const EJECT_OFFSET_X = 100;
+/** 移出节点放置在 StackNode 前方的间距 */
+const EJECT_OFFSET_X = 40;
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -49,7 +49,8 @@ export function collectCard(
 ): CollectResult {
   const card: StackCard = {
     id: genId('card'),
-    sourceType: sourceNode.type as StackMediaSource,
+    sourceType: sourceNode.type as StackCard['sourceType'],
+    sourceNodeId: sourceNode.id,
     data: (sourceNode.data as Record<string, unknown>) ?? {},
     title: sourceNode.title,
     size: sourceNode.size,
@@ -63,6 +64,46 @@ export function collectCard(
     ], 'stacked-media-collect'),
     cards,
     cardId: card.id,
+  };
+}
+
+export interface MergeStacksResult {
+  command: BatchCommand;
+  cards: StackCard[];
+  activeIndex: number;
+}
+
+/** 合并 StackNode：源堆叠进入目标堆叠，目标节点拥有最终领域状态。 */
+export function mergeStacks(
+  targetNode: NodeRecord,
+  targetData: StackedMediaData,
+  sourceNode: NodeRecord,
+  incomingEdge: EdgeRecord,
+  graph: { edges: EdgeRecord[] },
+): MergeStacksResult {
+  const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
+  const sourceCards = (sourceData.cards as StackCard[] | undefined) ?? [];
+  const cards = [...targetData.cards, ...sourceCards];
+  const commands: Command[] = [
+    new RemoveEdgeCommand(incomingEdge.id),
+    new UpdateNodeDataCommand(targetNode.id, { cards, activeIndex: Math.max(0, cards.length - 1) } as Record<string, unknown>),
+  ];
+
+  // 源 Stack 的下游边转移到目标 Stack，避免合并时静默丢失图关系。
+  for (const edge of graph.edges) {
+    if (edge.source.nodeId !== sourceNode.id || edge.id === incomingEdge.id) continue;
+    commands.push(new RemoveEdgeCommand(edge.id));
+    commands.push(new AddEdgeCommand({
+      ...edge,
+      id: genId('merged-edge'),
+      source: { ...edge.source, nodeId: targetNode.id },
+    }));
+  }
+  commands.push(new RemoveNodeCommand(sourceNode.id));
+  return {
+    command: new BatchCommand(commands, 'stacked-media-merge'),
+    cards,
+    activeIndex: Math.max(0, cards.length - 1),
   };
 }
 
@@ -99,7 +140,7 @@ export interface EjectResult {
   activeIndex: number;
 }
 
-/** 移出:活跃卡片 → output 侧独立节点 + 连线 + 垂直排序 */
+/** 移出:活跃卡片 → 断开关系的独立节点 + StackNode 前方垂直排序 */
 export function ejectCard(
   commandQueue: { getState: () => { nodes: NodeRecord[]; edges: EdgeRecord[] } },
   node: NodeRecord,
@@ -113,22 +154,17 @@ export function ejectCard(
   const newCards = data.cards.filter((_, idx) => idx !== cardIndex);
   const newIndex = newCards.length === 0 ? 0 : Math.min(cardIndex, newCards.length - 1);
 
-  // 同层垂直排序:扫描本节点 out 边已连的兄弟节点
   const siblings = graph.edges
-    .filter((e) => e.source.nodeId === node.id)
-    .map((e) => graph.nodes.find((n) => n.id === e.target.nodeId))
+    .filter((e) => e.target.nodeId === node.id)
+    .map((e) => graph.nodes.find((n) => n.id === e.source.nodeId))
     .filter((n): n is NodeRecord => !!n);
-
-  const nodeWidth = node.size?.width ?? 720;
-  const firstSibling = siblings[0];
-  let position: { x: number; y: number };
-  if (firstSibling) {
-    const x = firstSibling.position.x;
-    const bottomY = Math.max(...siblings.map((s) => s.position.y + (s.size?.height ?? 0)));
-    position = { x, y: bottomY + SIBLING_GAP };
-  } else {
-    position = { x: node.position.x + nodeWidth + EJECT_OFFSET_X, y: node.position.y };
-  }
+  const siblingBottom = siblings.length > 0
+    ? Math.max(...siblings.map((s) => s.position.y + (s.size?.height ?? 0)))
+    : node.position.y;
+  const position = {
+    x: node.position.x - (card.size?.width ?? 620) - EJECT_OFFSET_X,
+    y: Math.max(node.position.y, siblingBottom + SIBLING_GAP),
+  };
 
   const newNode: NodeRecord = {
     id: genId('stacked-ejected'),
@@ -138,17 +174,10 @@ export function ejectCard(
     size: card.size ?? { width: 620, height: 348 },
     data: { ...card.data },
   };
-  const newEdge: EdgeRecord = {
-    id: genId('edge-eject'),
-    source: { nodeId: node.id, pinId: 'media' },
-    target: { nodeId: newNode.id, pinId: 'prompt' },
-  };
-
   return {
     command: new BatchCommand([
       new UpdateNodeDataCommand(node.id, { cards: newCards, activeIndex: newIndex } as Record<string, unknown>),
       new AddNodeCommand(newNode),
-      new AddEdgeCommand(newEdge),
     ], 'stacked-media-eject'),
     cards: newCards,
     activeIndex: newIndex,
