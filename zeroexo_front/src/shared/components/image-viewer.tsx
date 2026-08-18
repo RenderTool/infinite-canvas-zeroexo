@@ -19,7 +19,6 @@ import { Tooltip } from 'antd';
 // ===== 缩放/平移 Hook =====
 
 export interface ImagePanZoomHandlers {
-  onWheel: React.WheelEventHandler<HTMLDivElement>;
   onMouseDown: React.MouseEventHandler<HTMLDivElement>;
   onMouseMove: React.MouseEventHandler<HTMLDivElement>;
   onMouseUp: React.MouseEventHandler<HTMLDivElement>;
@@ -66,11 +65,20 @@ export function useImagePanZoom(): ImagePanZoom {
 
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  // 滚轮缩放需 preventDefault 阻止页面滚动,React 合成事件为 passive 无法 preventDefault,
+  // 因此改为原生非 passive 监听,绑定到 containerRef。
+  const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     setScale((prev) => Math.min(Math.max(0.25, prev + delta), 4));
   }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (scale <= 1) return;
@@ -161,7 +169,6 @@ export function useImagePanZoom(): ImagePanZoom {
     reset,
     containerRef,
     containerHandlers: {
-      onWheel: handleWheel,
       onMouseDown: handleMouseDown,
       onMouseMove: handleMouseMove,
       onMouseUp: handleMouseUp,
@@ -210,7 +217,6 @@ export function ImageViewerStage({
     <div
       {...restProps}
       ref={panZoom.containerRef}
-      onWheel={h.onWheel}
       onMouseDown={h.onMouseDown}
       onMouseMove={h.onMouseMove}
       onMouseUp={h.onMouseUp}

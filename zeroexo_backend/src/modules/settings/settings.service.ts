@@ -120,15 +120,58 @@ export class SettingsService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     try {
       const settings = await this.readConfig();
-      if (settings.storageRoot && settings.storageRoot !== this.minio.getStorageRoot()) {
-        await this.minio.setStorageRoot(settings.storageRoot);
-        this.logger.log(`从配置文件加载存储路径: ${settings.storageRoot}`);
+      if (settings.storageRoot) {
+        const curRoot = this.minio.getStorageRoot();
+        const cfgRoot = path.resolve(settings.storageRoot);
+        if (cfgRoot !== curRoot) {
+          await this.applyStorageRoot(settings, settings.storageRoot);
+        }
       }
     } catch (err) {
       // 配置文件不存在时静默忽略(首次启动正常)
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.logger.warn(
           `加载配置文件失败: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * 应用存储根目录(支持项目目录迁移)
+   *
+   * 策略:
+   * - 相对路径:直接基于 process.cwd 解析,项目移动后自动跟随新位置
+   * - 绝对路径:目录存在时尊重用户配置;目录已失效(项目迁移遗留旧绝对路径)
+   *   时自动回退到项目内相对路径 "storage",并写回配置,避免资源写入不存在的旧目录
+   */
+  private async applyStorageRoot(settings: AppSettings, root: string): Promise<void> {
+    if (!path.isAbsolute(root)) {
+      await this.minio.setStorageRoot(root);
+      this.logger.log(`从配置文件加载存储路径: ${root}`);
+      return;
+    }
+    try {
+      await fs.access(root);
+      await this.minio.setStorageRoot(root);
+      this.logger.log(`从配置文件加载存储路径: ${root}`);
+    } catch {
+      const fallback = 'storage';
+      try {
+        await fs.access(path.resolve(fallback));
+        await this.minio.setStorageRoot(fallback);
+        await this.writeConfig({
+          ...settings,
+          storageRoot: fallback,
+          updatedAt: new Date().toISOString(),
+          version: CURRENT_CONFIG_VERSION,
+        });
+        this.logger.warn(
+          `配置的存储根目录不存在(${root}),已自动回退至项目内相对路径: ${path.resolve(fallback)}`,
+        );
+      } catch {
+        this.logger.warn(
+          `配置的存储根目录不存在(${root})且项目内无 ${fallback} 目录,保留原配置`,
         );
       }
     }

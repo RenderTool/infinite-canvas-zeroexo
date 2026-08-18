@@ -327,7 +327,8 @@ html, body {
 }
 
 /* ========== 数据类表格行高（2倍） ========== */
-.data-table .ant-table-tbody > tr > td {
+/* 排除 ant-table-measure-row 测量行，避免其 height:0 被撑高产生空行 */
+.data-table .ant-table-tbody > tr:not(.ant-table-measure-row) > td {
   padding-top: 20px !important;
   padding-bottom: 20px !important;
 }
@@ -343,7 +344,7 @@ html, body {
   padding-bottom: 16px !important;
 }
 
-.ant-table-tbody > tr > td {
+.ant-table-tbody > tr:not(.ant-table-measure-row) > td {
   padding-top: 20px !important;
   padding-bottom: 20px !important;
 }
