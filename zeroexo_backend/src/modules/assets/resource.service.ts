@@ -57,23 +57,37 @@ export class ResourceService {
         });
       }
 
-      // 验证文件实际存在磁盘上（防止 DB 记录残留但文件因上传失败等原因丢失）
-      // 如果文件不存在,则重新创建 Resource 并强制重新上传
-      try {
-        const fileBuffer = await this.minio.readFile(existing.storageKey);
-        if (fileBuffer) {
-          return { storageKey: existing.storageKey, needsUpload: false };
+      // 验证文件实际存在于 MinIO（防止 DB 记录残留但物理文件丢失）
+      // 使用 statObject(HEAD 请求) 而非 readFile,避免将大文件完整读入内存
+      const fileExists = await this.minio.fileExists(existing.storageKey);
+
+      if (fileExists) {
+        // 恢复软删除状态 + 引用计数+1
+        if (existing.deletedAt || existing.refCount === 0) {
+          await this.prisma.resource.update({
+            where: { id: existing.id },
+            data: { deletedAt: null, refCount: 1 },
+          });
+        } else {
+          await this.prisma.resource.update({
+            where: { id: existing.id },
+            data: { refCount: { increment: 1 } },
+          });
         }
-      } catch {
-        // readFile 可能抛出非 ENOENT 异常,同样视为文件不存在
+        return { storageKey: existing.storageKey, needsUpload: false };
       }
 
-      // 文件不存在,删除旧记录,重新生成 storageKey 并强制上传
+      // DB 记录存在但 MinIO 物理文件丢失 → 标记需重新上传(保留原 storageKey)
+      // 场景: GC 清理、MinIO 故障恢复、手动删除等导致不一致
       this.logger.warn(
-        `CAS 去重命中但文件实际不存在,重新创建(旧 key: ${existing.storageKey})`,
+        `[CAS] hash=${opts.hash.slice(0, 16)}... DB record exists(key=${existing.storageKey}) but MinIO file MISSING. Forcing re-upload.`,
       );
-      await this.prisma.resource.delete({ where: { id: existing.id } });
-      // 继续执行下方创建新资源的逻辑
+      // 重置为活跃状态,引用计数归 1,客户端需重新上传文件到同一 storageKey
+      await this.prisma.resource.update({
+        where: { id: existing.id },
+        data: { deletedAt: null, refCount: 1 },
+      });
+      return { storageKey: existing.storageKey, needsUpload: true };
     }
 
     // 新资源:生成 CAS 存储路径

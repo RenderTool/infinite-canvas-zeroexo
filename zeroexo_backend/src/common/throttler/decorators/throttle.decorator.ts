@@ -88,3 +88,15 @@ export const SmsThrottle = () => tierDecorator('sms', THROTTLE_TIERS.sms);
 /** 注册:5 次/天(防批量注册) */
 export const RegisterThrottle = () =>
   tierDecorator('register', THROTTLE_TIERS.register);
+
+/** 画布写操作:10 次/分(防恶意高频修改) */
+export const CanvasWriteThrottle = () =>
+  tierDecorator('canvasWrite', THROTTLE_TIERS.canvasWrite);
+
+/** 画布创建:5 次/分(防批量创建) */
+export const CanvasCreateThrottle = () =>
+  tierDecorator('canvasCreate', THROTTLE_TIERS.canvasCreate);
+
+/** 资源预签名:20 次/分(防批量 presign 攻击) */
+export const PresignThrottle = () =>
+  tierDecorator('presign', THROTTLE_TIERS.presign);

@@ -102,6 +102,21 @@ export const THROTTLE_TIERS = {
   sms: { ttl: 60_000, limit: 1 },
   /** 注册:5 次/天(防批量注册) */
   register: { ttl: 86_400_000, limit: 5 },
+  /**
+   * 画布写操作档位不再绑定 PATCH /projects/:id。
+   * 实时编辑走 Yjs WebSocket,HTTP PATCH 只负责防抖后的快照落库。
+   * 保留该档位供未来明确的控制面端点使用。
+   */
+  canvasWrite: { ttl: 60_000, limit: 120 },
+  /**
+   * 画布创建:5 次/分(防批量创建空项目)
+   */
+  canvasCreate: { ttl: 60_000, limit: 5 },
+  /**
+   * 资源预签名:20 次/分(防批量 presign 攻击)
+   * 比 upload 档位稍宽松(正常粘贴多个图片节点时会连续 presign)
+   */
+  presign: { ttl: 60_000, limit: 20 },
 } as const;
 
 export type ThrottleTierName = keyof typeof THROTTLE_TIERS;

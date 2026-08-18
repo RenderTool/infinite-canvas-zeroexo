@@ -141,8 +141,11 @@ export class PromptsService {
   async create(ownerId: string, dto: CreatePromptDto) {
     const imageKeys = dto.imageKeys ?? [];
     const prompt = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.prompt.create({
-        data: {
+      // 同步场景会携带本地 id。若该 id 已存在（如上次推送成功但本地 cloudId 丢失），
+      // 直接 create 会触发唯一约束冲突，故用 upsert 幂等处理。
+      const created = await tx.prompt.upsert({
+        where: { id: dto.id ?? '' },
+        create: {
           ownerId,
           title: dto.title,
           content: dto.content,
@@ -159,8 +162,26 @@ export class PromptsService {
           imageKeys,
           lastSyncedAt: new Date(),
         },
+        update: {
+          title: dto.title,
+          content: dto.content,
+          category: dto.category,
+          ...(dto.contentEn !== undefined ? { contentEn: dto.contentEn } : {}),
+          ...(dto.contentJa !== undefined ? { contentJa: dto.contentJa } : {}),
+          ...(dto.note !== undefined ? { note: dto.note } : {}),
+          ...(dto.tags !== undefined ? { tags: dto.tags } : {}),
+          ...(dto.favorite !== undefined ? { favorite: dto.favorite } : {}),
+          ...(dto.folderId !== undefined ? { folderId: dto.folderId } : {}),
+          ...(dto.source !== undefined ? { source: dto.source } : {}),
+          ...(dto.sourceRepo !== undefined ? { sourceRepo: dto.sourceRepo } : {}),
+          ...(imageKeys.length > 0 ? { imageKeys } : {}),
+          version: { increment: 1 },
+          lastSyncedAt: new Date(),
+        },
       });
+      // 参考图采用整体替换，保证与传入的 imageKeys 一致
       if (imageKeys.length > 0) {
+        await tx.promptImage.deleteMany({ where: { promptId: created.id } });
         await tx.promptImage.createMany({
           data: imageKeys.map((key, idx) => ({
             promptId: created.id,

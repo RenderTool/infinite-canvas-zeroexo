@@ -11,8 +11,7 @@
  * 本文件仅保留核心编排逻辑:fullSync、事件处理、防抖推送。
  */
 
-import { getProject, loadProjectGraph, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
-import type { GraphModel } from '@zeroexo/core';
+import { getProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { apiGet, apiDelete, ApiError } from '../api-client.js';
 import type { CloudProject } from './sync-projects.js';
 import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud } from './sync-projects.js';
@@ -24,7 +23,7 @@ import {
   PROJECT_UPDATE_DEBOUNCE_MS, FULL_SYNC_DEBOUNCE_MS,
   markProjectDirty, markProjectClean, isProjectDirty,
   markPendingDelete, clearPendingDelete,
-  enqueuePush, checkProjectConflict, notifyProjectConflict,
+  enqueuePush, checkProjectConflict,
   hasLocalChanges,
 } from './sync-utils.js';
 import type { ProjectConflict } from './sync-utils.js';
@@ -156,40 +155,8 @@ export async function onProjectUpdated(localId: string): Promise<void> {
     return;
   }
   if (!isOnline()) return;
-
-  const local = await getProject(localId);
-  if (!local || !local.cloudId) {
-    debouncedPush(localId);
-    return;
-  }
-
-  try {
-    const cloud = await apiGet<CloudProject>(`/projects/${local.cloudId}`);
-    if (cloud.version > (local.version ?? 0) && !isProjectDirty(localId)) {
-      await syncProjectResourcesFromCloud((cloud.scene as GraphModel['nodes']) ?? []);
-      await mergeCloudProjectToLocal(cloud);
-      return;
-    }
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      const localGraph = await loadProjectGraph(localId);
-      notifyProjectConflict({
-        projectId: localId,
-        title: local.title,
-        localVersion: local.version ?? 0,
-        cloudVersion: 0,
-        localUpdatedAt: local.updatedAt,
-        cloudUpdatedAt: '',
-        localNodeCount: localGraph?.nodes.length ?? 0,
-        cloudNodeCount: 0,
-        hasLocalChanges: isProjectDirty(localId),
-        cloudDeleted: true,
-      });
-      return;
-    }
-    debugLog(`[sync] onProjectUpdated cloud fetch failed for ${localId}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
+  // Yjs WebSocket 负责实时广播；云端版本检查在实际快照提交前统一处理。
+  // 本地编辑不再先 GET 云端，避免高频协作把 HTTP 控制面打满。
   debouncedPush(localId);
 }
 

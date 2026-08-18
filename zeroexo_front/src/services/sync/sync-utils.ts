@@ -25,8 +25,11 @@ function debugError(...args: unknown[]): void {
 
 // ===== 防抖常量 =====
 
-/** 项目更新推送防抖间隔(ms) — 必须 > PersistencePlugin 的持久化防抖(400ms) + 100ms 安全余量 */
-const PROJECT_UPDATE_DEBOUNCE_MS = 600;
+/**
+ * 项目更新推送防抖间隔(ms)。Yjs 负责实时协作，HTTP 只负责快照落库。
+ * 2 秒可减少连续编辑期间的快照请求，同时不影响协作者看到实时状态。
+ */
+const PROJECT_UPDATE_DEBOUNCE_MS = 2_000;
 /** 全量同步防抖间隔(ms) */
 const FULL_SYNC_DEBOUNCE_MS = 1000;
 
@@ -38,6 +41,15 @@ const FULL_SYNC_DEBOUNCE_MS = 1000;
 
 const DIRTY_PERSIST_KEY = 'zeroexo:dirty-projects';
 const dirtyProjects = new Set<string>();
+
+/**
+ * 节点级变更追踪(类似 UE5 FastArray 的 DirtyMask)。
+ *
+ * key = projectId, value = 变更的节点 ID 集合。
+ * 每次 push 成功后清空对应项目的变更集。
+ * 用于增量同步:只推送变更节点而非完整 scene。
+ */
+const projectChangedNodes = new Map<string, Set<string>>();
 
 function persistDirtyProjects(): void {
   try {
@@ -65,11 +77,71 @@ function markProjectDirty(projectId: string): void {
 function markProjectClean(projectId: string): void {
   dirtyProjects.delete(projectId);
   persistDirtyProjects();
+  // 同时清除节点级变更追踪(push 成功后才调用,确保失败时变更记录不丢失)
+  projectChangedNodes.delete(projectId);
   notifyDirtyChanged();
 }
 
 function isProjectDirty(projectId: string): boolean {
   return dirtyProjects.has(projectId);
+}
+
+// ===== 节点级变更追踪(FastArray DirtyMask) =====
+
+/**
+ * 标记指定项目的某个节点已变更。
+ * 编辑器在节点增/删/改时调用,用于增量同步。
+ */
+export function markNodeDirty(projectId: string, nodeId: string): void {
+  let set = projectChangedNodes.get(projectId);
+  if (!set) {
+    set = new Set();
+    projectChangedNodes.set(projectId, set);
+  }
+  set.add(nodeId);
+  markProjectDirty(projectId); // 项目级脏标记也必须设置
+}
+
+/**
+ * 批量标记多个节点为已变更。
+ * 批量粘贴/导入场景使用,避免逐个调用 markNodeDirty。
+ */
+export function markNodesDirty(projectId: string, nodeIds: string[]): void {
+  let set = projectChangedNodes.get(projectId);
+  if (!set) {
+    set = new Set();
+    projectChangedNodes.set(projectId, set);
+  }
+  for (const id of nodeIds) set.add(id);
+  markProjectDirty(projectId);
+}
+
+/**
+ * 获取指定项目自上次同步以来的变更节点 ID 列表。
+ *
+ * 重要:此函数【只读不消费】。变更记录在 push 成功后由 markProjectClean 统一清除,
+ * 而非在此处删除。这样当 push 失败(429 限流 / 500 / 网络错误)时,
+ * 变更记录仍保留,下次重试可继续增量推送,不会静默丢失数据。
+ *
+ * 副作用:调用后项目级 dirty 标记仍保留,直到 markProjectClean 成功。
+ */
+export function takeChangedNodeIds(projectId: string): string[] {
+  const set = projectChangedNodes.get(projectId);
+  if (!set) return [];
+  return Array.from(set);
+}
+
+/**
+ * 确认并清除变更记录(仅在 push 成功后调用)。
+ * 等价于 markProjectClean 内部行为,供需要"清节点变更但保留项目 dirty"的场景使用。
+ */
+export function clearChangedNodes(projectId: string): void {
+  projectChangedNodes.delete(projectId);
+}
+
+/** 获取变更节点数量(不清除,仅用于 UI 显示) */
+export function getChangedNodeCount(projectId: string): number {
+  return projectChangedNodes.get(projectId)?.size ?? 0;
 }
 
 // ===== 待删除项目追踪 =====
@@ -119,6 +191,65 @@ function enqueuePush(projectId: string, fn: () => Promise<void>): void {
       pushQueues.delete(projectId);
     }
   });
+}
+
+// ===== 指数退避自动重试(429 限流 / 临时失败) =====
+
+/**
+ * 每个项目独立的退避重试调度器。
+ * 当 push 因 429 限流或临时网络错误失败时,自动按指数退避重新推送,
+ * 避免用户在"错误以为已同步"状态下丢失数据。
+ *
+ * 设计要点:
+ * - 每个项目维护独立的 timer 与 attempt 计数,互不干扰
+ * - 指数退避:2s → 4s → 8s → ... 上限 60s,最多 MAX_RETRIES 次
+ * - 重试成功或达到上限后,清空该项目的调度状态
+ * - 用户手动操作(onProjectUpdated)会 reset 退避计数,从 2s 重新开始
+ */
+const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const retryAttempts = new Map<string, number>();
+
+const RETRY_BASE_DELAY_MS = 2_000;
+const RETRY_MAX_DELAY_MS = 60_000;
+const MAX_AUTO_RETRIES = 5;
+
+/**
+ * 调度一次自动重试。
+ * @param projectId 项目 id
+ * @param fn 重试时要执行的回调(通常为再次调用 syncProjectToCloud)
+ */
+export function scheduleAutoRetry(projectId: string, fn: () => Promise<void>): void {
+  // 已有未完成的调度 → 直接跳过(避免重复调度)
+  if (retryTimers.has(projectId)) return;
+
+  const attempt = (retryAttempts.get(projectId) ?? 0) + 1;
+  if (attempt > MAX_AUTO_RETRIES) {
+    debugLog(`[sync] auto-retry exhausted for ${projectId} after ${MAX_AUTO_RETRIES} attempts. Manual sync required.`);
+    retryAttempts.delete(projectId);
+    return;
+  }
+  retryAttempts.set(projectId, attempt);
+
+  // 指数退避:2s → 4s → 8s → 16s → 32s(封顶 60s)
+  const delay = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+  debugLog(`[sync] scheduling auto-retry #${attempt} for ${projectId} in ${delay}ms (rate-limit / transient failure)`);
+
+  const timer = setTimeout(async () => {
+    retryTimers.delete(projectId);
+    try {
+      await enqueuePush(projectId, fn);
+      // 重试成功 → 清空调度状态
+      retryAttempts.delete(projectId);
+    } catch {
+      // fn 内部处理失败,此处仅保留 attempts,等待下次调度
+    }
+  }, delay);
+  retryTimers.set(projectId, timer);
+}
+
+/** 重置某项目的退避计数(用户在编辑器内再次操作时调用) */
+export function resetAutoRetry(projectId: string): void {
+  retryAttempts.delete(projectId);
 }
 
 // ===== CloudProject 接口(内部使用) =====

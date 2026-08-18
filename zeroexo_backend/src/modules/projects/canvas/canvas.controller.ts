@@ -14,6 +14,7 @@ import { CanvasService } from './canvas.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/canvas.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { CanvasCreateThrottle } from '../../../common/throttler/decorators/throttle.decorator';
 
 @ApiTags('Projects')
 @ApiBearerAuth()
@@ -39,6 +40,7 @@ export class CanvasController {
   }
 
   @Post()
+  @CanvasCreateThrottle()
   @ApiOperation({ summary: '创建项目' })
   create(@CurrentUser('id') userId: string, @Body() dto: CreateProjectDto) {
     return this.canvasService.create(userId, dto);

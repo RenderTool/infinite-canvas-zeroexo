@@ -97,4 +97,12 @@ export class MinioService implements OnApplicationBootstrap {
   async readFile(key: string): Promise<Buffer | null> {
     return this.storageService.readFile(key);
   }
+
+  /**
+   * 轻量级文件存在性检查(HEAD 请求,不读取 body)。
+   * 用于 CAS 去重时验证 DB 记录与 MinIO 物理文件的一致性。
+   */
+  async fileExists(key: string): Promise<boolean> {
+    return this.storageService.exists(key);
+  }
 }

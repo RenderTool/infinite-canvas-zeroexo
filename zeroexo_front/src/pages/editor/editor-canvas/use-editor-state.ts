@@ -21,6 +21,7 @@ import type { AIProvider } from '@zeroexo/plugin-ai-provider';
 import { apiFetch, ApiError } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
 import { onProjectUpdated, syncProjectFromCloud, markProjectDirty, markProjectClean, checkProjectConflict, forcePullProjectFromCloud, forcePushLocalToCloud, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud } from '@/services/sync/sync-service.js';
+import { markNodesDirty, debugLog } from '@/services/sync/sync-utils.js';
 import type { ProjectConflict } from '@/services/sync/sync-service.js';
 import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
 import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
@@ -530,12 +531,62 @@ export function useEditorState(canvasId: string): {
         }
       }
     };
+    // 上一帧的节点内容指纹(用于 FastArray 式增量同步)。
+    // 对每个节点单独计算轻量指纹,从而捕获"新增/删除/内容或位置修改"三类变更。
+    // 相比全图 JSON 序列化,这里仅序列化关键字段,且截断大字符串(如 base64 图片),
+    // 避免 500+ 节点下全量序列化大二进制造成卡顿。
+    let prevNodeFingerprints = new Map<string, string>();
+    const fingerprintReplacer = (_k: string, v: unknown): unknown => {
+      // 截断超长字符串(如 base64 图片/音频数据),避免生成巨大指纹字符串
+      if (typeof v === 'string' && v.length > 256) {
+        return `${v.slice(0, 256)}…${v.length}`;
+      }
+      return v;
+    };
+    const nodeFingerprint = (n: unknown): string => {
+      try {
+        // 只对发生变化的字段序列化;大字符串被截断,开销可控
+        return JSON.stringify(n, fingerprintReplacer);
+      } catch {
+        return (n as { id?: string }).id ?? 'unknown';
+      }
+    };
+
     /** graph 变更时：更新 UI + 先上传资源到云端再用 cloud key 推送 Yjs + 云同步 */
     const onGraphChanged = () => {
       updateUIState();
       if (isInitialized && !suppressNextSync) {
         const graph = store.getGraph();
         const nodes = graph.nodes;
+
+        // ==== FastArray 增量同步:diff 前后节点指纹,标记新增/删除/修改的节点 ====
+        const changedIds: string[] = [];
+        const curFingerprints = new Map<string, string>();
+        for (const n of nodes) {
+          const id = (n as { id: string }).id;
+          curFingerprints.set(id, nodeFingerprint(n));
+        }
+
+        if (prevNodeFingerprints.size > 0) {
+          for (const id of curFingerprints.keys()) {
+            // 新增节点
+            if (!prevNodeFingerprints.has(id)) changedIds.push(id);
+            // 已存在但内容/位置变化
+            else if (prevNodeFingerprints.get(id) !== curFingerprints.get(id)) changedIds.push(id);
+          }
+          // 已删除节点(记录为 "__deleted__" 由 sync-projects 处理)
+          for (const id of prevNodeFingerprints.keys()) {
+            if (!curFingerprints.has(id)) changedIds.push(id);
+          }
+        }
+        // 首次(prevNodeFingerprints 为空)不标记,避免首次加载触发全量误标
+        prevNodeFingerprints = curFingerprints;
+        if (changedIds.length > 0) {
+          markNodesDirty(canvasId, changedIds);
+          if (changedIds.length <= 20) {
+            debugLog(`[canvas] incremental dirty: +${changedIds.length} nodes`, changedIds);
+          }
+        }
 
         // 先上传本地资源(图片/视频/音频)到云端,将 storageKey 替换为 cloud key,
         // 再通过 Yjs 广播,避免其他浏览器收到 local storageKey 后找不到 blob。
