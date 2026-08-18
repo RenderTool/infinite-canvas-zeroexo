@@ -284,14 +284,17 @@ export class AdminUsersController {
   ) {
     const target = await this.prisma.user.findUnique({
       where: { id },
-      select: { role: true, disabled: true },
+      select: { id: true, role: true, disabled: true },
     });
     if (!target) {
       throw new Error('用户不存在');
     }
 
-    // 仅高权限可操作低权限
-    this.assertCanModify(target.role, req.user?.role, '修改');
+    // 越权校验：仅当操作者非本人时，要求操作者等级严格高于目标等级。
+    // 本人修改本人允许（如改昵称/订阅），但仍受下方角色变更等级校验约束，无法借机提权。
+    if (req.user?.id !== target.id) {
+      this.assertCanModify(target.role, req.user?.role, '修改');
+    }
 
     const { role, planCode, planExpiresAt, ...rest } = body;
 

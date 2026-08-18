@@ -139,8 +139,22 @@ export default function UserTable({
     setPage(1);
   };
 
-  const handleOpenEdit = async (record: User) => {
+  const handleOpenEdit = (record: User) => {
     setEditRecord(record);
+    // 仅打开弹窗；表单回填放到弹窗打开后的 useEffect 中，
+    // 此时 <Form form={editForm}> 已挂载、editForm 实例已连接，setFieldsValue 安全（修复控制台警告）
+    setEditModalOpen(true);
+  };
+
+  /**
+   * 弹窗打开后回填数据。
+   * 监听 editModalOpen：弹窗渲染后 <Form> 已挂载，editForm 实例已连接 DOM，
+   * 此时调用 setFieldsValue 不会触发 "useForm is not connected" 警告。
+   */
+  useEffect(() => {
+    if (!editModalOpen) return;
+    const record = editRecord;
+    if (!record) return;
     editForm.setFieldsValue({
       nickname: record.nickname || '',
       role: record.role,
@@ -148,32 +162,45 @@ export default function UserTable({
       planExpiresAt: undefined,
     });
     // 动态获取启用的会员分组
-    try {
-      const plans = await apiGet<PlanItem[]>('/admin/plans?enabled=true');
-      setPlanOptions(
-        (Array.isArray(plans) ? plans : []).map((p) => ({
-          label: `${p.name} (${p.code})`,
-          value: p.code,
-        })),
-      );
-    } catch {
-      setPlanOptions([]);
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const plans = await apiGet<PlanItem[]>('/admin/plans?enabled=true');
+        if (cancelled) return;
+        setPlanOptions(
+          (Array.isArray(plans) ? plans : []).map((p) => ({
+            label: `${p.name} (${p.code})`,
+            value: p.code,
+          })),
+        );
+      } catch {
+        if (!cancelled) setPlanOptions([]);
+      }
+    })();
     // 回填当前有效订阅（无设置则保持为空）
-    const isActive = record.planCode && record.planExpiresAt && new Date(record.planExpiresAt).getTime() > Date.now();
+    const isActive =
+      record.planCode && record.planExpiresAt && new Date(record.planExpiresAt).getTime() > Date.now();
     if (isActive) {
       editForm.setFieldsValue({
         planCode: record.planCode,
         planExpiresAt: dayjs(record.planExpiresAt),
       });
     }
-    setEditModalOpen(true);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [editModalOpen, editRecord, editForm]);
 
   const handleEditSubmit = async () => {
     if (!editRecord) return;
+    let values: Record<string, any>;
     try {
-      const values = await editForm.validateFields();
+      values = await editForm.validateFields();
+    } catch {
+      // 表单校验失败：字段已有红框提示，不关闭弹窗、不报错
+      return;
+    }
+    try {
       const payload: any = { ...values };
       if (payload.role && !isSuperAdmin) {
         delete payload.role;
@@ -186,8 +213,9 @@ export default function UserTable({
       setEditRecord(null);
       editForm.resetFields();
       triggerRefresh();
-    } catch {
-      // validation failed, no need to handle
+    } catch (err) {
+      // 提交失败：明确提示后端错误（不再静默吞掉导致"点了没反应"）
+      showApiError(err, t('users.message.operationFailed'));
     }
   };
 

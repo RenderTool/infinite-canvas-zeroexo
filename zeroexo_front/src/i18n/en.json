@@ -1104,6 +1104,7 @@
     "scriptCreateFailed": "Failed to create script",
     "copySuffix": "Copy",
     "copyFailed": "Failed to copy",
+    "loginRequired": "Please sign in before continuing",
     "batchDeleteTitle": "Batch Delete",
     "batchDeleteConfirm": "Are you sure you want to delete the selected {{count}} items? This action cannot be undone.",
     "deleteSuccess": "Deleted successfully",
@@ -1214,6 +1215,7 @@
     "contentRequired": "Content is required",
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
+    "loginRequired": "Please sign in before continuing",
     "deleteTitle": "Delete prompt",
     "deleteConfirm": "Delete prompt \"{{name}}\"? This cannot be undone.",
     "saving": "Saving...",
@@ -1225,7 +1227,7 @@
     "notePlaceholder": "Add notes or description",
     "imagesCount": "{{count}} images",
     "copying": "Copying...",
-    "generateSimilar": "Generate Similar",
+    "generateSimilar": "Save a Copy",
     "favorited": "Favorited",
     "unsaved": "Unsaved changes",
     "uploading": "Uploading...",
@@ -1234,7 +1236,8 @@
     "tagTooLong": "Tag exceeds max length of {{max}}, truncated (current length: {{length}})",
     "tagsTruncated": "Some tags have been truncated (max length: {{max}})",
     "tagLimitHint": "Up to {{maxCount}} tags, max {{maxLength}} characters each ({{count}} currently)",
-    "copyFailed": "Failed to copy"
+    "copyFailed": "Failed to copy",
+    "loginRequired": "Please sign in before continuing"
   },
   "scriptEditor": {
     "menuTitle": "Choose block type",
@@ -1757,7 +1760,7 @@
     "noCover": "No cover yet"
   },
   "promptCard": {
-    "generateSimilar": "Generate Similar",
+    "generateSimilar": "Save a Copy",
     "pleaseLoginFirst": "Please login first",
     "favorited": "Favorited",
     "favorite": "Favorite",

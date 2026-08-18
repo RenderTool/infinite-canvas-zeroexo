@@ -1103,6 +1103,7 @@
     "scriptCreateFailed": "创建剧本失败",
     "copySuffix": "副本",
     "copyFailed": "复制失败",
+    "loginRequired": "请先登录后再操作",
     "batchDeleteTitle": "批量删除",
     "batchDeleteConfirm": "确定删除选中的 {{count}} 项吗？此操作不可恢复。",
     "deleteSuccess": "删除成功",
@@ -1213,6 +1214,7 @@
     "contentRequired": "请输入内容",
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
+    "loginRequired": "请先登录后再操作",
     "deleteTitle": "删除提示词",
     "deleteConfirm": "确定删除提示词「{{name}}」吗?此操作不可恢复。",
     "saving": "保存中...",
@@ -1224,7 +1226,7 @@
     "notePlaceholder": "添加备注或说明",
     "imagesCount": "{{count}} 张",
     "copying": "复制中...",
-    "generateSimilar": "生成同款",
+    "generateSimilar": "收藏副本",
     "favorited": "已收藏",
     "unsaved": "未保存的变动",
     "uploading": "上传中...",
@@ -1233,7 +1235,8 @@
     "tagTooLong": "标签长度超过最大限制 {{max}}，已截断（当前长度: {{length}}）",
     "tagsTruncated": "部分标签已截断（最大长度: {{max}}）",
     "tagLimitHint": "最多 {{maxCount}} 个标签，每个最多 {{maxLength}} 字符（当前 {{count}} 个）",
-    "copyFailed": "复制失败"
+    "copyFailed": "复制失败",
+    "loginRequired": "请先登录后再操作"
   },
   "scriptEditor": {
     "menuTitle": "选择块类型",
@@ -1756,7 +1759,7 @@
     "noCover": "暂无封面"
   },
   "promptCard": {
-    "generateSimilar": "生成同款",
+    "generateSimilar": "收藏副本",
     "pleaseLoginFirst": "请先登录",
     "favorited": "已收藏",
     "favorite": "收藏",

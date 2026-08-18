@@ -742,6 +742,11 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
 
   // ── 收藏 ──
   const handleToggleFavorite = useCallback(async (item: { type: 'subject' | 'prompt' | 'asset'; id: string; data: any }) => {
+    if (!isAuthenticated) {
+      antdMessage.warning(t('assetLibrary.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     try {
       const currentFavorite = item.data.favorite ?? false;
       const newFavState = !currentFavorite;

@@ -97,7 +97,7 @@ async function fetchPrompts(force: boolean): Promise<void> {
   return promptsInflight;
 }
 
-// ── 模块级强制刷新（供 store 外部写操作后失效缓存，如公共提示词生成同款） ──
+// ── 模块级强制刷新（供 store 外部写操作后失效缓存，如公共提示词收藏副本） ──
 
 /** 强制刷新共享提示词缓存（写操作后调用，绕过 TTL，保证列表出现最新副本） */
 export function refreshSharedPrompts(force = true): Promise<void> {

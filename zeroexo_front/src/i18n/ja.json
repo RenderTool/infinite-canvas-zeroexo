@@ -1103,6 +1103,7 @@
     "scriptCreateFailed": "スクリプトの作成に失敗しました",
     "copySuffix": "コピー",
     "copyFailed": "コピーに失敗しました",
+    "loginRequired": "続行するにはログインしてください",
     "batchDeleteTitle": "一括削除",
     "batchDeleteConfirm": "選択した {{count}} 項目を削除してもよろしいですか？この操作は元に戻せません。",
     "deleteSuccess": "削除しました",
@@ -1214,6 +1215,7 @@
     "contentRequired": "内容は必須です",
     "loadFailed": "読み込みに失敗しました",
     "saveFailed": "保存に失敗しました",
+    "loginRequired": "続行するにはログインしてください",
     "deleteTitle": "プロンプト削除",
     "deleteConfirm": "プロンプト「{{name}}」を削除しますか?元に戻せません。",
     "saving": "保存中...",
@@ -1225,7 +1227,7 @@
     "notePlaceholder": "メモや説明を追加",
     "imagesCount": "{{count}} 枚",
     "copying": "コピー中...",
-    "generateSimilar": "類似を生成",
+    "generateSimilar": "コピーを保存",
     "favorited": "お気に入り済み",
     "unsaved": "未保存の変更",
     "uploading": "アップロード中...",
@@ -1234,7 +1236,8 @@
     "tagTooLong": "タグが最大長 {{max}} を超えています。切り詰めました（現在の長さ: {{length}}）",
     "tagsTruncated": "一部のタグが切り詰められました（最大長: {{max}}）",
     "tagLimitHint": "最大 {{maxCount}} 個のタグ、各 {{maxLength}} 文字まで（現在 {{count}} 個）",
-    "copyFailed": "コピーに失敗しました"
+    "copyFailed": "コピーに失敗しました",
+    "loginRequired": "続行するにはログインしてください"
   },
   "hints": {
     "dragOutGroup": "ドラッグで外す",
@@ -1757,7 +1760,7 @@
     "noCover": "カバーなし"
   },
   "promptCard": {
-    "generateSimilar": "同じスタイルで生成",
+    "generateSimilar": "コピーを保存",
     "pleaseLoginFirst": "先にログインしてください",
     "favorited": "お気に入り済み",
     "favorite": "お気に入り",

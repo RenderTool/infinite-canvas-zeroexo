@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { AuthorizedImage } from '@/shared/components/authorized-media.js';
-import { Tooltip } from 'antd';
+import { Tooltip, App as AntdApp } from 'antd';
 
 // ===== 常量 =====
 
@@ -269,6 +269,7 @@ export function PromptCard({
   const [coverError, setCoverError] = useState(false);
   const { isAuthenticated } = useAuth();
   const { t } = useTranslation();
+  const { message: antdMessage } = AntdApp.useApp();
 
   const coverUrl = imageKeys.length > 0 && !coverError
     ? getResourceUrl(imageKeys[0], 'preview')
@@ -288,7 +289,11 @@ export function PromptCard({
 
   const handleCloneClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      antdMessage?.warning?.(t('promptCard.pleaseLoginFirst'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     onClone?.();
   };
 
@@ -346,14 +351,24 @@ export function PromptCard({
         {/* 右上角操作按钮 */}
         <div style={actionsContainerStyle()}>
           {mode === 'public' ? (
-            /* 公共模式：显示同款按钮（hover 时可见，使用原生 title 避免 overflow 裁剪） */
-            hovered && isAuthenticated && onClone && (
+            /* 公共模式：显示同款（收藏副本）按钮（hover 时可见，未登录也显示并引导登录） */
+            hovered && onClone && (
               <button
                 type="button"
-                title={t('promptCard.generateSimilar')}
-                style={actionBtnStyle()}
+                title={
+                  isAuthenticated
+                    ? t('promptCard.generateSimilar')
+                    : t('promptCard.pleaseLoginFirst')
+                }
+                style={{
+                  ...actionBtnStyle(),
+                  opacity: !isAuthenticated ? 0.4 : 1,
+                  cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
+                }}
                 onClick={handleCloneClick}
-                onMouseEnter={(e) => { e.currentTarget.style.background = theme.toolbar.accent; }}
+                onMouseEnter={(e) => {
+                  if (isAuthenticated) e.currentTarget.style.background = theme.toolbar.accent;
+                }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
               >
                 <Copy size={13} />

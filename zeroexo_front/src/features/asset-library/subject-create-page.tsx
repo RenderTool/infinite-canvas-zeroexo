@@ -50,6 +50,7 @@ import {
   type Subject,
   type SubjectType,
 } from './subjects-api.js';
+import { useAuth } from '@/features/auth/auth-store.js';
 
 interface SubjectCreatePageProps {
   subjectId?: string;
@@ -119,6 +120,7 @@ export function SubjectCreatePage(props: SubjectCreatePageProps): React.ReactEle
   const { theme } = useTheme();
   const isMobile = useIsMobile();
   const { message: antdMessage, modal } = AntdApp.useApp();
+  const { isAuthenticated } = useAuth();
 
   const isEdit = !!props.subjectId;
   const [loading, setLoading] = useState(isEdit);
@@ -212,6 +214,11 @@ export function SubjectCreatePage(props: SubjectCreatePageProps): React.ReactEle
   }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async () => {
+    if (!isAuthenticated) {
+      antdMessage.warning(t('subjectCreate.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     if (!name.trim()) {
       antdMessage.warning(t('subjectCreate.nameRequired'));
       return;
@@ -248,6 +255,11 @@ export function SubjectCreatePage(props: SubjectCreatePageProps): React.ReactEle
 
   const handleDelete = useCallback(async () => {
     if (!props.subjectId) return;
+    if (!isAuthenticated) {
+      antdMessage.warning(t('subjectCreate.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     modal.confirm({
       title: t('subjectCreate.delete'),
       content: t('assetLibrary.confirmDeleteItem', { name: subject?.name ?? '' }),
@@ -292,6 +304,11 @@ export function SubjectCreatePage(props: SubjectCreatePageProps): React.ReactEle
 
   const handleAddImage = useCallback(
     async (file: File) => {
+      if (!isAuthenticated) {
+        antdMessage.warning(t('subjectCreate.loginRequired'));
+        if (typeof window !== 'undefined') window.location.hash = '#/auth';
+        return;
+      }
       const uploadId = `upload_${++uploadIdCounter.current}`;
       setUploadingProgress((prev) => ({ ...prev, [uploadId]: 0 }));
       try {
@@ -337,6 +354,11 @@ export function SubjectCreatePage(props: SubjectCreatePageProps): React.ReactEle
   /** 上传头像图片(优先于 emoji 显示) */
   const handleAvatarUpload = useCallback(
     async (file: File) => {
+      if (!isAuthenticated) {
+        antdMessage.warning(t('subjectCreate.loginRequired'));
+        if (typeof window !== 'undefined') window.location.hash = '#/auth';
+        return;
+      }
       try {
         const uploaded = await uploadAsset(file);
         const stored = await storeAddAssets([uploaded]);

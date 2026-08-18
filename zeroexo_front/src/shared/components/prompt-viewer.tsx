@@ -3,7 +3,7 @@
  *
  * 使用 PromptCreatePage 框架统一渲染所有提示词视图：
  * - 私有提示词：promptId 模式，可编辑
- * - 公共提示词：readOnly 模式，只读查看，支持生成同款
+ * - 公共提示词：readOnly 模式，只读查看，支持收藏副本
  */
 import { Modal } from 'antd';
 import { FileText, X } from 'lucide-react';

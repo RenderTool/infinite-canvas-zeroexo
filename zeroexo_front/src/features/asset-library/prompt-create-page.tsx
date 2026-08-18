@@ -53,6 +53,7 @@ import { notifyPromptCopied } from './prompt-copy-feedback.js';
 import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/components/image-viewer.js';
 import { useAuthImageUrl } from '@/shared/hooks/use-auth-image.js';
 import { AuthorizedImage } from '@/shared/components/authorized-media.js';
+import { useAuth } from '@/features/auth/auth-store.js';
 
 /** 公共提示词初始数据（只读模式） */
 export interface PublicPromptInitialData {
@@ -111,6 +112,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   const { theme } = useTheme();
   const isMobile = useIsMobile();
   const { message: antdMessage, modal } = AntdApp.useApp();
+  const { isAuthenticated } = useAuth();
 
   const isEdit = !!props.promptId;
   const isReadOnly = !!props.readOnly;
@@ -245,8 +247,13 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     props.onTitleChange?.(title);
   }, [title, props.onTitleChange]);
 
-  // 生成同款（复制到个人提示词库）
+  // 收藏副本（复制到个人提示词库）
   const handleGenerateSimilar = useCallback(async () => {
+    if (!isAuthenticated) {
+      antdMessage.warning(t('promptCreate.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     setSaving(true);
     try {
       const created = await createPrompt({
@@ -285,6 +292,11 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   }, [title, content, contentEn, contentJa, category, tags, images, props, antdMessage]);
 
   const handleSave = useCallback(async () => {
+    if (!isAuthenticated) {
+      antdMessage.warning(t('promptCreate.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     setSaving(true);
     try {
       // 重排图片:封面图排到最前面,确保 PromptCard 中 imageKeys[0] 是封面
@@ -436,6 +448,11 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
 
   // 切换收藏状态（仅资产库模式）
   const handleToggleFavorite = useCallback(async () => {
+    if (!isAuthenticated) {
+      antdMessage.warning(t('promptCreate.loginRequired'));
+      if (typeof window !== 'undefined') window.location.hash = '#/auth';
+      return;
+    }
     const newFav = !favorite;
     setFavorite(newFav);
     if (props.promptId) {
@@ -931,7 +948,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                   ) : (
                     <div style={{ flex: 1 }} />
                   )}
-                  {/* 生成同款 — 与私有模式主按钮同款样式 */}
+                  {/* 收藏副本 — 与私有模式主按钮同款样式 */}
                   <button
                     type="button"
                     onClick={handleGenerateSimilar}
@@ -2028,7 +2045,7 @@ function promptBlockStyle(theme: ReturnType<typeof useTheme>['theme']): CSSPrope
     flex: 1,
     minHeight: 160,
     overflow: 'auto',
-    resize: 'vertical',
+    resize: 'none',
   };
 }
 
@@ -2036,7 +2053,6 @@ function promptTextareaStyle(theme: ReturnType<typeof useTheme>['theme']): CSSPr
   const isDark = theme.mode === 'dark';
   return {
     width: '100%',
-    height: '100%',
     minHeight: 136,
     background: 'transparent',
     border: 'none',
@@ -2046,7 +2062,8 @@ function promptTextareaStyle(theme: ReturnType<typeof useTheme>['theme']): CSSPr
     lineHeight: 1.65,
     // 随主题区分文字颜色，保证浅色主题下可读性
     color: isDark ? '#d6d3d1' : '#44403c',
-    resize: 'none',
+    // 允许拖动右下角调整高度（修复"复制提示词"下方输入框无法改高度的问题）
+    resize: 'vertical',
     padding: 0,
   };
 }

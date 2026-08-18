@@ -5,7 +5,7 @@
  * 每次刷新生成随机 seed 配合后端 order=random，让首页内容随机换一批；
  * 右上角「查看更多」跳转公共提示词页面。
  * 数据接口免登录；初始加载失败或空数据时整块隐藏，不影响主页其余内容。
- * 点击卡片打开 PromptViewer 详情弹窗；hover 时显示「生成同款」按钮。
+ * 点击卡片打开 PromptViewer 详情弹窗；hover 时显示「收藏副本」按钮。
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { App as AntdApp, Skeleton, Spin } from 'antd';
@@ -202,19 +202,14 @@ export function PublicPromptSection({ onViewAll }: PublicPromptSectionProps): Re
   // 同步最新 fetchNext 到 ref，供稳定的滚动监听器使用
   fetchNextRef.current = () => { void fetchNext(); };
 
-  // 生成同款 - 创建副本
+  // 收藏副本 - 创建副本
   const handleClone = useCallback(async (item: PublicPromptItem) => {
     if (cloningIds.current.has(item.id)) return;
     cloningIds.current.add(item.id);
     try {
       if (!isAuthenticated) {
-        modal.confirm({
-          title: '提示',
-          content: '请先登录后使用此功能',
-          okText: '登录',
-          cancelText: '取消',
-          onOk: () => { window.location.hash = '#/auth'; },
-        });
+        antdMessage.warning(t('promptCard.pleaseLoginFirst'));
+        if (typeof window !== 'undefined') window.location.hash = '#/auth';
         return;
       }
       const clone = await apiFetch<{ id: string }>('/prompts', {

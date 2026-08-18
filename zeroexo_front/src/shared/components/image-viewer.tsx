@@ -36,6 +36,8 @@ export interface ImagePanZoom {
   reset: () => void;
   /** 绑定到舞台容器(回调 ref,挂载时自动绑定原生 wheel 监听) */
   containerRef: (el: HTMLDivElement | null) => void;
+  /** 绑定到图片元素:高频拖拽/缩放直接写 DOM transform,绕开 React 重渲染 */
+  imgRef: (el: HTMLImageElement | null) => void;
   /** 舞台容器手势事件集 */
   containerHandlers: ImagePanZoomHandlers;
   /** 图片 transform/过渡/光标样式 */
@@ -46,11 +48,26 @@ export function useImagePanZoom(): ImagePanZoom {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef(0);
+  const pendingRef = useRef<{ scale: number; x: number; y: number } | null>(null);
+  const scaleRef = useRef(scale);
+  const positionRef = useRef(position);
+  scaleRef.current = scale;
+  positionRef.current = position;
+  // 图片元素 ref:高频拖拽/缩放直接写 style.transform,绕开 React 重渲染(消除主线程长任务卡顿)
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  // 把当前 scale/position 直接写入 DOM(RAF 每帧调用,0 次 setState)
+  const applyTransform = useCallback((s: number, x: number, y: number) => {
+    const el = imgRef.current;
+    if (el) el.style.transform = `scale(${s}) translate(${x / s}px, ${y / s}px)`;
+  }, []);
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale((prev) => Math.min(Math.max(0.25, prev + delta), 4));
-  }, []);
+    const s = Math.min(Math.max(scaleRef.current + delta, 0.25), 4);
+    scaleRef.current = s; setScale(s);
+    applyTransform(s, positionRef.current.x, positionRef.current.y);
+  }, [applyTransform]);
   // 用回调 ref 在元素挂载时即绑定原生 wheel 监听,避免依赖 useEffect 时机
   // (StrictMode 双调用 / 调用方覆盖 ref 时也能稳定生效)
   const setContainerRef = useCallback((el: HTMLDivElement | null) => {
@@ -69,18 +86,15 @@ export function useImagePanZoom(): ImagePanZoom {
     lastX: number; lastY: number;
   }>({ mode: 'none', distance: 0, centerX: 0, centerY: 0, startScale: 1, startScaleX: 0, startScaleY: 0, lastX: 0, lastY: 0 });
 
-  const rafRef = useRef(0);
-  const pendingRef = useRef<{ scale: number; x: number; y: number } | null>(null);
-  const scaleRef = useRef(scale);
-  const positionRef = useRef(position);
-  scaleRef.current = scale;
-  positionRef.current = position;
-
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (scale <= 1) return;
+    // 阻止浏览器默认行为(图片原生拖拽 / 文本选择),否则 pointermove 会被浏览器长任务阻塞主线程
+    e.preventDefault();
     isDragging.current = true;
+    // 拖拽期间临时开启 GPU 合成层,结束后移除(避免超大图常驻纹理层导致重传卡顿)
+    if (imgRef.current) imgRef.current.style.willChange = 'transform';
     lastMouse.current = { x: e.clientX, y: e.clientY };
   }, [scale]);
 
@@ -96,15 +110,25 @@ export function useImagePanZoom(): ImagePanZoom {
     if (rafRef.current === 0) {
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = 0;
-        if (pendingRef.current) { setScale(pendingRef.current.scale); setPosition({ x: pendingRef.current.x, y: pendingRef.current.y }); pendingRef.current = null; }
+        if (pendingRef.current) {
+          // 直接写 DOM,0 次 setState,彻底绕开 React 重渲染导致的长任务卡顿
+          scaleRef.current = pendingRef.current.scale;
+          positionRef.current = { x: pendingRef.current.x, y: pendingRef.current.y };
+          applyTransform(pendingRef.current.scale, pendingRef.current.x, pendingRef.current.y);
+          pendingRef.current = null;
+        }
       });
     }
   }, []);
 
   const handleMouseUp = useCallback(() => {
+    if (!isDragging.current) return;
     isDragging.current = false;
-    // 触发一次重渲染,使拖拽结束后 transition 恢复(用于缩放/重置缓动)
-    setPosition((prev) => ({ ...prev }));
+    // 拖拽结束移除 will-change,避免超大图常驻 GPU 纹理层导致后续重传卡顿
+    if (imgRef.current) imgRef.current.style.willChange = 'auto';
+    // 拖拽结束同步一次 React state(低频),供工具栏显示缩放值/恢复 transition 缓动
+    setScale(scaleRef.current);
+    setPosition({ x: positionRef.current.x, y: positionRef.current.y });
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -134,7 +158,12 @@ export function useImagePanZoom(): ImagePanZoom {
       if (rafRef.current === 0) {
         rafRef.current = requestAnimationFrame(() => {
           rafRef.current = 0;
-          if (pendingRef.current) { setScale(pendingRef.current.scale); setPosition({ x: pendingRef.current.x, y: pendingRef.current.y }); pendingRef.current = null; }
+          if (pendingRef.current) {
+            scaleRef.current = pendingRef.current.scale;
+            positionRef.current = { x: pendingRef.current.x, y: pendingRef.current.y };
+            applyTransform(pendingRef.current.scale, pendingRef.current.x, pendingRef.current.y);
+            pendingRef.current = null;
+          }
         });
       }
       ts.lastX = e.touches[0].clientX; ts.lastY = e.touches[0].clientY;
@@ -150,7 +179,12 @@ export function useImagePanZoom(): ImagePanZoom {
       if (rafRef.current === 0) {
         rafRef.current = requestAnimationFrame(() => {
           rafRef.current = 0;
-          if (pendingRef.current) { setScale(pendingRef.current.scale); setPosition({ x: pendingRef.current.x, y: pendingRef.current.y }); pendingRef.current = null; }
+          if (pendingRef.current) {
+            scaleRef.current = pendingRef.current.scale;
+            positionRef.current = { x: pendingRef.current.x, y: pendingRef.current.y };
+            applyTransform(pendingRef.current.scale, pendingRef.current.x, pendingRef.current.y);
+            pendingRef.current = null;
+          }
         });
       }
     }
@@ -162,15 +196,27 @@ export function useImagePanZoom(): ImagePanZoom {
     else if (e.touches.length === 1 && e.touches[0]) { ts.mode = 'pan'; ts.lastX = e.touches[0].clientX; ts.lastY = e.touches[0].clientY; }
   }, []);
 
-  const zoomIn = useCallback(() => setScale((p) => Math.min(p + 0.25, 4)), []);
-  const zoomOut = useCallback(() => setScale((p) => Math.max(p - 0.25, 0.25)), []);
-  const reset = useCallback(() => { setScale(1); setPosition({ x: 0, y: 0 }); }, []);
+  const zoomIn = useCallback(() => {
+    const s = Math.min(scaleRef.current + 0.25, 4);
+    scaleRef.current = s; setScale(s);
+    applyTransform(s, positionRef.current.x, positionRef.current.y);
+  }, [applyTransform]);
+  const zoomOut = useCallback(() => {
+    const s = Math.max(scaleRef.current - 0.25, 0.25);
+    scaleRef.current = s; setScale(s);
+    applyTransform(s, positionRef.current.x, positionRef.current.y);
+  }, [applyTransform]);
+  const reset = useCallback(() => {
+    scaleRef.current = 1; positionRef.current = { x: 0, y: 0 };
+    setScale(1); setPosition({ x: 0, y: 0 });
+    applyTransform(1, 0, 0);
+  }, [applyTransform]);
 
   const imgTransformStyle: CSSProperties = {
-    transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
+    transform: `scale(${scaleRef.current}) translate(${positionRef.current.x / scaleRef.current}px, ${positionRef.current.y / scaleRef.current}px)`,
     // 拖拽平移期间关闭过渡,避免 transform 缓动造成的拖尾呆滞;缩放/重置时保留缓动
-    transition: !isDragging.current && (scale > 1 || position.x !== 0 || position.y !== 0) ? 'transform 0.1s ease-out' : 'none',
-    cursor: scale > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'default',
+    transition: !isDragging.current && (scaleRef.current > 1 || positionRef.current.x !== 0 || positionRef.current.y !== 0) ? 'transform 0.1s ease-out' : 'none',
+    cursor: scaleRef.current > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'default',
   };
 
   return {
@@ -180,6 +226,7 @@ export function useImagePanZoom(): ImagePanZoom {
     zoomOut,
     reset,
     containerRef: setContainerRef,
+    imgRef: (el: HTMLImageElement | null) => { imgRef.current = el; },
     containerHandlers: {
       onMouseDown: handleMouseDown,
       onMouseMove: handleMouseMove,
@@ -250,6 +297,7 @@ export function ImageViewerStage({
       }}
     >
       <img
+        ref={panZoom.imgRef}
         src={src}
         alt={alt}
         draggable={false}
@@ -258,6 +306,17 @@ export function ImageViewerStage({
           width: '100%',
           height: '100%',
           objectFit: 'contain',
+          // 注意:超大图不要常驻 will-change:transform,会让浏览器永久分配 GPU 纹理层,
+          // transform 变化时触发纹理重传导致秒级长帧。仅在拖拽/缩放期间由 JS 临时设置。
+          backfaceVisibility: 'hidden',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          // 彻底禁止浏览器对图片的原生拖拽/手势,避免拖拽时 pointermove 长任务阻塞主线程
+          pointerEvents: 'auto',
+          msTouchAction: 'none',
+          touchAction: 'none',
+          // @ts-expect-error 非标准属性,用于禁用浏览器图片拖拽 ghost
+          WebkitUserDrag: 'none',
           ...imgStyle,
           ...panZoom.imgTransformStyle,
         }}

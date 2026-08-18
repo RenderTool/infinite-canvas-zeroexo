@@ -81,9 +81,16 @@ async function rawFetch<T>(
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    const message =
+    // 401 未登录(无 token 或 token 失效且无法刷新):给出明确、可识别的提示
+    let message =
       (body as { message?: string })?.message ?? `HTTP ${res.status}`;
-    const code = (body as { code?: string })?.code;
+    let code = (body as { code?: string })?.code;
+    if (res.status === 401) {
+      code = code ?? 'AUTH_UNAUTHORIZED';
+      if (!accessToken) {
+        message = message === `HTTP ${res.status}` ? '请先登录后再操作' : message;
+      }
+    }
     throw new ApiError(res.status, body, message, code);
   }
   // 后端 TransformInterceptor 统一返回 { data: T }

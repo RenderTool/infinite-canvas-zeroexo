@@ -1,11 +1,11 @@
 /**
  * PublicPromptsPage - 公共提示词独立页面
  *
- * 公共提示词为只读资源，用户只能「生成同款」创建私有副本后编辑。
+ * 公共提示词为只读资源，用户只能「收藏副本」创建私有副本后编辑。
  * 无收藏功能。
  *
  * 入口: 主侧边栏「公共提示词」导航 → #/public-prompts
- * 无需登录即可浏览, 生成同款需登录后创建副本到私有提示词库
+ * 无需登录即可浏览, 收藏副本需登录后创建副本到私有提示词库
  */
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -273,7 +273,7 @@ export function PublicPromptsPage(): React.ReactElement {
     setPage(1);
   }, []);
 
-  // 生成同款 - 创建副本
+  // 收藏副本 - 创建副本
   const handleClone = useCallback(async (item: PublicPromptItem) => {
     if (cloningIds.current.has(item.id)) return;
     cloningIds.current.add(item.id);
