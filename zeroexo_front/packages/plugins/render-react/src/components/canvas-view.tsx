@@ -149,17 +149,26 @@ export function CanvasView({
   const viewport = useViewport(store);
   const selection = useSelection(store);
 
-  const handleUpdateNode = onUpdateNode ?? ((nodeId: string, patch: Partial<NodeRecord>) => {
-    // 默认通过 store.updateNodeData 更新节点 data(支持撤销)
-    // position 变更由 interaction 插件通过 MoveNodeCommand 处理,这里不处理
-    if (patch.data && typeof patch.data === 'object') {
-      store.updateNodeData(nodeId, patch.data as Record<string, unknown>);
-    }
-    // title 变更通过 renameNode(同时更新 node.title 和 node.data.title)
-    if (patch.title !== undefined) {
-      store.renameNode(nodeId, patch.title);
-    }
-  });
+  // 性能:handleUpdateNode 必须 useCallback 稳定化(引用稳定才让 NodeItem memo 生效),
+  // 否则 CanvasView 每次重渲染都产生新引用,穿透 NodeItem 的 memo 比较器导致全量节点重渲染。
+  const handleUpdateNode = React.useCallback(
+    (nodeId: string, patch: Partial<NodeRecord>) => {
+      if (onUpdateNode) {
+        onUpdateNode(nodeId, patch);
+        return;
+      }
+      // 默认通过 store.updateNodeData 更新节点 data(支持撤销)
+      // position 变更由 interaction 插件通过 MoveNodeCommand 处理,这里不处理
+      if (patch.data && typeof patch.data === 'object') {
+        store.updateNodeData(nodeId, patch.data as Record<string, unknown>);
+      }
+      // title 变更通过 renameNode(同时更新 node.title 和 node.data.title)
+      if (patch.title !== undefined) {
+        store.renameNode(nodeId, patch.title);
+      }
+    },
+    [onUpdateNode, store],
+  );
 
   // 空画布指引:首次交互(点击/拖入/创建节点)后不再显示
   const hintDismissed = React.useRef(false);

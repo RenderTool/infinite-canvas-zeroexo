@@ -353,6 +353,59 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   // 路径生成函数(模块级函数引用稳定,可作为 EdgeItem memo 依赖)
   const pathFn = edgePathType === 'smoothstep' ? smoothstepPath : bezierPath;
 
+  /**
+   * 非活跃边的可见性判定:选中/悬停/关联节点选中 → 活跃。
+   * 复用统一判定,避免两处循环内重复计算。
+   */
+  const isEdgeActive = (edge: EdgeRecord): boolean =>
+    selectedIds.has(edge.id) ||
+    hoveredId === edge.id ||
+    !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId));
+
+  // 性能(批次1):非活跃边计算提取为 useMemo,避免平移帧(k 不变时端点不变)全量重算。
+  // 依赖含 invK/edges/nodesById/选中态;平移帧这些不变 → 命中缓存,零重算。
+  const inactiveMergedPath = useMemo(() => {
+    const inactivePaths: string[] = [];
+    for (const edge of edges) {
+      if (isEdgeActive(edge)) continue;
+      const source = nodesById.get(edge.source.nodeId);
+      const target = nodesById.get(edge.target.nodeId);
+      if (!source || !target) continue;
+      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
+      if (!endpoints) continue;
+      inactivePaths.push(pathFn(endpoints));
+    }
+    return inactivePaths.length > 0 ? inactivePaths.join(' ') : null;
+  }, [edges, nodesById, extensions, pinDefaults, invK, pathFn, selectedIds, hoveredId, selectedNodeIds]);
+
+  // 性能(批次1):非活跃边透明命中区域(每边独立,保证点击/悬停可正常交互)也 memo 化。
+  const inactiveHitTargets = useMemo(() => {
+    const targets: React.ReactElement[] = [];
+    for (const edge of edges) {
+      if (isEdgeActive(edge)) continue;
+      const source = nodesById.get(edge.source.nodeId);
+      const target = nodesById.get(edge.target.nodeId);
+      if (!source || !target) continue;
+      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
+      if (!endpoints) continue;
+      const d = pathFn(endpoints);
+      targets.push(
+        <path
+          key={edge.id}
+          d={d}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={Math.max(18, 1.5 * 10)}
+          style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+          onPointerDown={onEdgePointerDown ? (e) => onEdgePointerDown(e, edge.id) : undefined}
+          onPointerEnter={onEdgePointerEnter ? (e) => onEdgePointerEnter(e, edge.id) : undefined}
+          onPointerLeave={onEdgePointerLeave ? (e) => onEdgePointerLeave(e, edge.id) : undefined}
+        />,
+      );
+    }
+    return targets;
+  }, [edges, nodesById, extensions, pinDefaults, invK, pathFn, selectedIds, hoveredId, selectedNodeIds, onEdgePointerDown, onEdgePointerEnter, onEdgePointerLeave]);
+
   return (
     <svg
       data-canvas-edge-layer
@@ -368,68 +421,20 @@ export const EdgeLayer = React.memo(function EdgeLayer({
     >
       
       <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.k})`}>
-        {/* P1-4: 非活跃边合并为单 path(视觉),减少 SVG 元素数量 */}
-        {(() => {
-          const inactivePaths: string[] = [];
-          let hasInactive = false;
-          for (const edge of edges) {
-            const isSelected = selectedIds.has(edge.id);
-            const isHovered = hoveredId === edge.id;
-            const isNodeConnected = !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId));
-            const isActive = isSelected || isHovered || isNodeConnected;
-            if (isActive) continue;
-            const source = nodesById.get(edge.source.nodeId);
-            const target = nodesById.get(edge.target.nodeId);
-            if (!source || !target) continue;
-            const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
-            if (!endpoints) continue;
-            inactivePaths.push(pathFn(endpoints));
-            hasInactive = true;
-          }
-          if (!hasInactive) return null;
-          return (
-            <path
-              d={inactivePaths.join(' ')}
-              fill="none"
-              stroke={edgeColor}
-              strokeWidth={1.5}
-              vectorEffect="non-scaling-stroke"
-              opacity={0.55}
-              style={{ pointerEvents: 'none' }}
-            />
-          );
-        })()}
-        {/* P1-4: 非活跃边透明命中区域(每边独立,保证点击/悬停可正常交互) */}
-        {(() => {
-          const targets: React.ReactElement[] = [];
-          for (const edge of edges) {
-            const isSelected = selectedIds.has(edge.id);
-            const isHovered = hoveredId === edge.id;
-            const isNodeConnected = !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId));
-            const isActive = isSelected || isHovered || isNodeConnected;
-            if (isActive) continue;
-            const source = nodesById.get(edge.source.nodeId);
-            const target = nodesById.get(edge.target.nodeId);
-            if (!source || !target) continue;
-            const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
-            if (!endpoints) continue;
-            const d = pathFn(endpoints);
-            targets.push(
-              <path
-                key={edge.id}
-                d={d}
-                fill="none"
-                stroke="transparent"
-                strokeWidth={Math.max(18, 1.5 * 10)}
-                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-                onPointerDown={onEdgePointerDown ? (e) => onEdgePointerDown(e, edge.id) : undefined}
-                onPointerEnter={onEdgePointerEnter ? (e) => onEdgePointerEnter(e, edge.id) : undefined}
-                onPointerLeave={onEdgePointerLeave ? (e) => onEdgePointerLeave(e, edge.id) : undefined}
-              />,
-            );
-          }
-          return targets.length > 0 ? <>{targets}</> : null;
-        })()}
+        {/* P1-4: 非活跃边合并为单 path(视觉),减少 SVG 元素数量 (批次1: useMemo 化) */}
+        {inactiveMergedPath && (
+          <path
+            d={inactiveMergedPath}
+            fill="none"
+            stroke={edgeColor}
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+            opacity={0.55}
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
+        {/* P1-4: 非活跃边透明命中区域(每边独立,保证点击/悬停可正常交互) (批次1: useMemo 化) */}
+        {inactiveHitTargets.length > 0 ? <>{inactiveHitTargets}</> : null}
         {/* P0-3: per-edge memo EdgeItem —— 仅活跃边保留多层结构(光晕/命中/主线/动画) */}
         {edges.map((edge) => {
           const source = nodesById.get(edge.source.nodeId);
