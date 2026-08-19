@@ -46,7 +46,7 @@ export type { CommentLayerProps } from './comment-layer.js';
 import { getTextTools, getImageTools, getVideoTools, getAudioTools } from './node-tools.js';
 
 // 工具函数 — storageKey → blob URL 重建
-export { useHydratedContent, useProgressiveImage, buildBackendUrl } from './utils/hydrate.js';
+export { useHydratedContent, useProgressiveImage, buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from './utils/hydrate.js';
 
 // 资产节点工厂 — 拖拽/上传/粘贴时创建节点实例
 export { createAssetNode } from './asset-node-factory.js';

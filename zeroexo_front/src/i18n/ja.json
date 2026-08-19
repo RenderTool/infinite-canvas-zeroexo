@@ -854,7 +854,12 @@
     "lock": "ロック",
     "unlock": "ロック解除",
     "close": "閉じる",
-    "viewResource": "リソースを表示"
+    "viewResource": "リソースを表示",
+    "hints": {
+      "navigate": "移動",
+      "locate": "フォーカス",
+      "quit": "閉じる"
+    }
   },
   "nodes": {
     "textTitle": "テキスト",

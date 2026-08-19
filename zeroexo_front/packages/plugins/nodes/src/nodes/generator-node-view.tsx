@@ -1,6 +1,9 @@
 /**
  * 生成器节点视图 - 统一生成节点(图片/视频/音频)
  *
+ * MVVM 迁移(Plan#10 第二批试点):数据变换/兼容性计算/命令构造已移至 generator-model.ts,
+ * 视图只消费模型派生数据并经 commandQueue 提交命令(回退 updateNode)。布局与配色对齐 StackNode。
+ *
  * 布局:
  * ┌─────────────────────────────────────────────────────────┐
  * │  参考素材区                                               │
@@ -25,6 +28,7 @@ import { getModelIconComponent } from '@zeroexo/shared';
 import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { BaseNodeView, nodeActionBus } from '../base-node-view.js';
 import { apiGet } from '@/services/api-client.js';
@@ -33,7 +37,24 @@ import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import type { ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
 import { DynamicParamForm } from '@/features/prompt-panel/components/dynamic-param-form.js';
 import GeneratorPromptEditor, { type GeneratorPromptEditorHandle, type ReferenceItem } from './generator-prompt-editor.js';
-import { useHydratedContent } from '../utils/hydrate.js';
+import { useHydratedContent, resolveContentUrl, resolveAnyThumbUrl } from '../utils/hydrate.js';
+import { resolveVideoThumbUrl } from '../utils/video-thumb.js';
+import {
+  appendReferenceImages,
+  computeReferenceCompatibility,
+  deriveIncomingReferences,
+  encodeModelValue,
+  mergeGeneratorParams,
+  referencesChanged,
+  setGenerationMode,
+  setGeneratorPrompt,
+  setModelSelection,
+  type GeneratorMode,
+  type GeneratorNodeData,
+} from './generator-model.js';
+
+// 类型重导出(保持既有消费方 import 路径兼容)
+export type { GeneratorNodeData };
 
 // ===== 引脚定义 =====
 export function getGeneratorNodePins(): Pin[] {
@@ -48,21 +69,6 @@ export function getGeneratorNodePins(): Pin[] {
 export interface GeneratorNodeViewProps extends NodeRendererProps {
   connectionController: ConnectionController | null;
   store: ReactGraphStore | null;
-}
-
-interface GeneratorNodeData {
-  generationMode: 'image' | 'video' | 'audio';
-  prompt: string;
-  status: 'idle' | 'generating' | 'success' | 'error';
-  referenceImages: string[];
-  channelId: string;
-  model: string;
-  /** 动态参数存储(与 Admin 配置的参数系统一致) */
-  params: Record<string, any>;
-  /** @deprecated 保留向后兼容,迁移到 params 字段 */
-  size?: string;
-  quality?: string;
-  count?: number;
 }
 
 // 生成模式选项
@@ -81,17 +87,6 @@ const NODE_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string }>
   script: { icon: <Clapperboard size={14} />, label: '剧本' },
   storyboard: { icon: <Clapperboard size={14} />, label: '分镜' },
   generator: { icon: <Sparkles size={14} />, label: '生成器' },
-};
-
-// 节点类型 → 输入类型映射(用于模型兼容性检查)
-const NODE_TYPE_TO_INPUT_TYPE: Record<string, string> = {
-  text: 'text',
-  image: 'image',
-  video: 'video',
-  audio: 'audio',
-  script: 'text',
-  storyboard: 'text',
-  generator: 'text',
 };
 
 // ===== 轻量主题化 Select 组件(内联,避免插件包依赖外部 shared 组件) =====
@@ -244,6 +239,7 @@ export function GeneratorNodeView({
   isHovered,
   forceShowPins,
   updateNode,
+  commandQueue,
   invK,
   connectionController,
   store: _store,
@@ -257,8 +253,12 @@ export function GeneratorNodeView({
   const nodeColor = theme.node.fill;
   const textColor = theme.toolbar.text;
   const mutedColor = theme.toolbar.textMuted;
-  const cardBorder = theme.mode === 'dark' ? '#2e2e2e' : '#e5e5e5';
-  const bgHover = theme.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  const isDark = theme.mode === 'dark';
+  // 顶部参考栏/底部操作栏配色对齐 StackNode 导航栏(StackBottomNav 同源 token)
+  const navBg = isDark ? '#1b1b1b' : '#fafaf7';
+  const navBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
+  const cardBorder = navBorder;
+  const bgHover = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)';
 
   // ===== 从 node.data 解构 =====
   const generationMode = data.generationMode ?? 'image';
@@ -327,7 +327,7 @@ export function GeneratorNodeView({
   }, [filteredModelOptions]);
 
   // 当前选择的模型编码值
-  const currentModelValue = channelId && model ? `${channelId}::${model}` : '';
+  const currentModelValue = encodeModelValue(channelId, model);
 
   // 获取当前模型支持的输入类型
   const supportedInputTypes = useMemo(() => {
@@ -350,19 +350,13 @@ export function GeneratorNodeView({
   const incomingNodesRaw = useMemo(() => {
     if (!connectionController) return [];
     const incoming = connectionController.getIncomingNodeTypes(node.id);
-    return incoming.map((item) => {
+    return deriveIncomingReferences(incoming.map((item) => {
       const nodeData = _store?.getNode(item.id);
       const nodeContent = (nodeData?.data as Record<string, unknown>)?.content as string | undefined;
       const nodeStorageKey = (nodeData?.data as Record<string, unknown>)?.storageKey as string | undefined;
       const nodeTitle = nodeData?.title || (nodeData?.data as Record<string, unknown> | undefined)?.title || item.type;
-      return {
-        id: item.id,
-        type: item.type,
-        content: nodeContent,
-        storageKey: nodeStorageKey,
-        title: nodeTitle as string,
-      };
-    });
+      return { id: item.id, type: item.type, content: nodeContent, storageKey: nodeStorageKey, title: nodeTitle as string };
+    }));
   }, [connectionController, node.id, _store, graphVersion]);
 
   // 稳定化 incomingNodes:仅当数据实际变化时更新引用,避免 graphVersion 变化导致无意义重渲染
@@ -370,45 +364,18 @@ export function GeneratorNodeView({
   const [incomingNodes, setIncomingNodes] = useState(incomingNodesRaw);
   useEffect(() => {
     const prev = incomingNodesRef.current;
-    if (prev.length !== incomingNodesRaw.length) {
-      incomingNodesRef.current = incomingNodesRaw;
-      setIncomingNodes(incomingNodesRaw);
-      return;
-    }
-    const changed = incomingNodesRaw.some((n, i) => n.id !== prev[i]?.id || n.type !== prev[i]?.type || n.content !== prev[i]?.content);
-    if (changed) {
-      incomingNodesRef.current = incomingNodesRaw;
-      setIncomingNodes(incomingNodesRaw);
-    }
+    if (!referencesChanged(prev, incomingNodesRaw)) return;
+    incomingNodesRef.current = incomingNodesRaw;
+    setIncomingNodes(incomingNodesRaw);
   }, [incomingNodesRaw]);
 
-  // 检查每个连入节点是否被当前模型支持
-  // 兼容性判断规则:
-  // 1. 未选择模型时默认所有节点兼容
-  // 2. 文本类节点永远兼容(text/script/storyboard/generator)
-  // 3. 图片/视频/音频节点:模型支持对应输入类型 或 生成模式匹配
+  // 检查每个连入节点是否被当前模型支持(规则集中于 generator-model.computeReferenceCompatibility)
   const nodeCompatibility = useMemo(() => {
-    const map: Record<string, boolean> = {};
-    const hasModelSelected = !!currentModelValue;
-    for (const n of incomingNodes) {
-      const inputType = NODE_TYPE_TO_INPUT_TYPE[n.type] || 'text';
-      // 文本类节点永远兼容
-      if (inputType === 'text') {
-        map[n.id] = true;
-        continue;
-      }
-      // 未选择模型时默认兼容
-      if (!hasModelSelected) {
-        map[n.id] = true;
-        continue;
-      }
-      // 已选择模型:检查模型输入类型是否包含该节点类型
-      const modelSupportsType = supportedInputTypes.includes(inputType);
-      // 额外:如果生成模式与节点类型匹配,也视为兼容(即使模型inputTypes未显式包含)
-      const modeMatches = generationMode === inputType;
-      map[n.id] = modelSupportsType || modeMatches;
-    }
-    return map;
+    return computeReferenceCompatibility(incomingNodes, {
+      hasModelSelected: !!currentModelValue,
+      supportedInputTypes,
+      generationMode,
+    });
   }, [incomingNodes, supportedInputTypes, currentModelValue, generationMode]);
 
   // ===== 双击编辑模式 =====
@@ -434,7 +401,9 @@ export function GeneratorNodeView({
     };
   }, [isEditing]);
 
-  // ===== 自动从连入图片节点获取参考图(仅用于兼容旧数据) =====
+  // ===== 自动从连入图片节点获取参考图 =====
+  // @deprecated 旧数据兼容路径:连入参考已由顶部参考栏直接读取 incomingNodes,
+  // 该 effect 仅为历史 referenceImages 数据兼容保留,验收后移除(Plan#10 T4)
   const syncedRefNodeIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!connectionController) return;
@@ -476,63 +445,103 @@ export function GeneratorNodeView({
       }
       if (newRefs.length > 0) {
         const currentData = (node.data ?? {}) as Partial<GeneratorNodeData>;
-        const existingRefs = currentData.referenceImages ?? [];
-        updateNode({ data: { ...currentData, referenceImages: [...existingRefs, ...newRefs] } });
+        if (commandQueue) {
+          commandQueue.execute(appendReferenceImages(node.id, currentData, newRefs));
+        } else {
+          const existingRefs = currentData.referenceImages ?? [];
+          updateNode({ data: { ...currentData, referenceImages: [...existingRefs, ...newRefs] } });
+        }
       }
     };
     void addNewRefs();
-  }, [connectionController, node.id, _store, referenceImages, graphVersion]);
+  }, [connectionController, node.id, _store, referenceImages, graphVersion, commandQueue, updateNode]);
 
   // ===== node 引用(用于稳定回调,避免闭包捕获新对象) =====
   const nodeRef = useRef(node);
   nodeRef.current = node;
 
-  // ===== 生成类型切换 =====
+  // ===== 生成类型切换(命令化,支持撤销) =====
   const handleModeChange = useCallback((mode: string) => {
     const currentData = nodeRef.current.data ?? {};
+    if (commandQueue) {
+      commandQueue.execute(setGenerationMode(node.id, currentData as Partial<GeneratorNodeData>, mode as GeneratorMode));
+      return;
+    }
     updateNode({ data: { ...currentData, generationMode: mode } });
-  }, [updateNode]);
+  }, [commandQueue, node.id, updateNode]);
 
-  // ===== 模型切换(简化:直接选择编码值) =====
+  // ===== 模型切换(命令化,编码值由模型层解析) =====
   const handleModelChange = useCallback((m: string) => {
     const currentData = nodeRef.current.data ?? {};
+    if (commandQueue) {
+      commandQueue.execute(setModelSelection(node.id, currentData as Partial<GeneratorNodeData>, m));
+      return;
+    }
     const parts = m.split('::');
     updateNode({ data: { ...currentData, channelId: parts[0] ?? '', model: parts[1] ?? '' } });
-  }, [updateNode]);
+  }, [commandQueue, node.id, updateNode]);
 
-  // ===== 参数配置变更(动态参数存储在 data.params 中) =====
+  // ===== 参数配置变更(动态参数存储在 data.params 中,命令化) =====
   const params = useMemo(() => data.params ?? {}, [data.params]);
   const handleConfigChange = useCallback((patch: Record<string, any>) => {
     const currentData = (nodeRef.current.data ?? {}) as Record<string, unknown>;
+    if (commandQueue) {
+      commandQueue.execute(mergeGeneratorParams(node.id, currentData as Partial<GeneratorNodeData>, patch));
+      return;
+    }
     const currentParams = (currentData.params ?? {}) as Record<string, unknown>;
     updateNode({ data: { ...currentData, params: { ...currentParams, ...patch } } });
-  }, [updateNode]);
+  }, [commandQueue, node.id, updateNode]);
 
   // ===== 编码模型值(用于 SettingsPopover) =====
-  const encodedModel = channelId && model ? `${channelId}::${model}` : '';
+  const encodedModel = currentModelValue;
 
-  // ===== 提示词输入(防抖写入 node data) =====
+  // ===== 提示词输入(防抖写入 node data,命令化) =====
   const handlePromptChange = useCallback((val: string) => {
     setPromptInput(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       const currentData = nodeRef.current.data ?? {};
-      updateNode({ data: { ...currentData, prompt: val } });
+      if (commandQueue) {
+        commandQueue.execute(setGeneratorPrompt(node.id, currentData as Partial<GeneratorNodeData>, val));
+      } else {
+        updateNode({ data: { ...currentData, prompt: val } });
+      }
     }, 300);
-  }, [updateNode]);
+  }, [commandQueue, node.id, updateNode]);
 
   // ===== 构建 references 数据供编辑器使用 =====
+  // @引用预览图解析:图片 hydrate / 视频走缩略图回退链(视频 URL 无法直接作 <img> src)
+  const [refUrlMap, setRefUrlMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(incomingNodes.map(async (n) => {
+        if (n.type === 'video') {
+          const u = await resolveVideoThumbUrl(n.storageKey, n.content);
+          if (u) next[n.id] = u;
+        } else if (n.type === 'image' && (n.content || n.storageKey)) {
+          const u = await resolveContentUrl(n.storageKey, n.content ?? '');
+          if (u) next[n.id] = u;
+        }
+      }));
+      if (!cancelled) setRefUrlMap(next);
+    })();
+    return () => { cancelled = true; };
+  }, [incomingNodes]);
+
   const references: ReferenceItem[] = useMemo(() => {
     return incomingNodes.map((n) => {
       const ref: ReferenceItem = {
         id: n.id,
         type: n.type as ReferenceItem['type'],
         name: n.title || n.id.slice(0, 8),
-        url: n.content || undefined,
+        url: refUrlMap[n.id] || (n.type === 'image' ? n.content : undefined) || undefined,
       };
       return ref;
     });
-  }, [incomingNodes]);
+  }, [incomingNodes, refUrlMap]);
 
   // ===== 参考素材管理 =====
   // "+" 按钮:打开文件选择器,支持文本/图片/视频,通过 nodeActionBus 传递给父组件处理
@@ -583,87 +592,35 @@ export function GeneratorNodeView({
   const titleIconSize = Math.max(9, Math.min(13 * (invK ?? 1), 16));
   const modeIcon = <Sparkles size={titleIconSize} />;
 
-  // ===== 视频缩略图生成组件(缓存缩略图避免闪烁) =====
-// 模块级缓存 Map,跨所有 VideoThumbnail 实例共享,避免重复创建视频元素
-const thumbnailCache = new Map<string, string>();
-
-const VideoThumbnail = memo(function VideoThumbnail({ src, size }: { src: string; size: number }): React.ReactElement {
-  const [thumb, setThumb] = useState<string | null>(null);
-  const cacheRef = useRef<Map<string, string>>(thumbnailCache);
-
+  // ===== 视频缩略图组件(回退链:持久化缩略图→后端 thumb→重建内容 URL video 首帧,不加载全量视频;无缩略图时回退图标) =====
+const VideoThumbnail = memo(function VideoThumbnail({ storageKey, src }: { storageKey?: string; src: string }): React.ReactElement {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
   useEffect(() => {
-    if (!src) return;
-    // 检查模块级缓存
-    const cached = cacheRef.current.get(src);
-    if (cached) {
-      setThumb(cached);
-      return;
-    }
-
+    if (!storageKey) return;
     let cancelled = false;
-    const vid = document.createElement('video');
-    vid.muted = true;
-    vid.preload = 'metadata';
-    vid.crossOrigin = 'anonymous';
-    vid.playsInline = true;
-
-    const cleanup = () => {
-      cancelled = true;
-      // 正确停止视频加载:移除 src 后调用 load()
-      vid.removeAttribute('src');
-      vid.load();
-      vid.remove();
-    };
-
-    const handleError = () => {
-      if (!cancelled) cleanup();
-    };
-
-    const handleLoadedMetadata = () => {
-      if (cancelled) return;
-      // 跳转到 0.5s 位置获取帧(比第一帧更可靠,避免首帧黑屏)
-      vid.currentTime = Math.min(0.5, vid.duration / 2);
-    };
-
-    const handleSeeked = () => {
-      if (cancelled) return;
+    // 回退链:持久化缩略图 → 后端 thumb 级资源 → 重建内容 URL(video preload=metadata 首帧)
+    (async () => {
+      // 1. 持久化缩略图(video-node-view 上传/播放时经 storeVideoThumbnail 存入)
       try {
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { cleanup(); return; }
-        // 绘制视频帧到 canvas
-        ctx.drawImage(vid, 0, 0, size, size);
-        const url = canvas.toDataURL('image/jpeg', 0.6);
-        if (!cancelled) {
-          cacheRef.current.set(src, url);
-          setThumb(url);
-        }
-      } catch { /* 静默 */ }
-      cleanup();
-    };
-
-    vid.onerror = handleError;
-    vid.onloadedmetadata = handleLoadedMetadata;
-    vid.onseeked = handleSeeked;
-
-    vid.src = src;
-    vid.load();
-
-    // 超时保护(10秒,blob URL 可能需要更长加载时间)
-    const timeoutId = setTimeout(() => {
-      if (!cancelled) cleanup();
-    }, 10000);
-
-    return () => {
-      clearTimeout(timeoutId);
-      cleanup();
-    };
-  }, [src, size]);
-
-  if (thumb) {
-    return <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
+        const persisted = await resolveVideoThumbnail(storageKey);
+        if (persisted && !cancelled) { setThumbUrl(persisted); return; }
+      } catch { /* 继续下一级 */ }
+      // 2. 后端 thumb 级资源(resources/ 后端 size=thumb 认证链路)
+      const thumb = await resolveAnyThumbUrl(storageKey);
+      if (thumb && !cancelled) { setThumbUrl(thumb); return; }
+      // 3. 重建内容 URL(刷新后 blob 失效场景,本地键从 IndexedDB 读,零网络)
+      const url = await resolveContentUrl(storageKey, src);
+      if (url && !cancelled) setVideoSrc(url);
+    })();
+    return () => { cancelled = true; };
+  }, [storageKey, src]);
+  if (thumbUrl) {
+    return <img src={thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
+  }
+  if (videoSrc) {
+    // 小槽位 video 回退:preload=metadata 仅拉头部显示首帧,不加载全量视频
+    return <video src={videoSrc} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />;
   }
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
@@ -672,17 +629,24 @@ const VideoThumbnail = memo(function VideoThumbnail({ src, size }: { src: string
   );
 });
 
-// ===== 图片引用组件(使用 useHydratedContent 解决 blob URL 失效问题) =====
+// ===== 图片引用组件(useHydratedContent 解决 blob URL 失效;52px 槽位优先 thumb 级资源) =====
 const HydratedImage = memo(function HydratedImage({ storageKey, content, size }: { storageKey?: string; content?: string; size?: number }): React.ReactElement {
   const hydrated = useHydratedContent(storageKey, content ?? '');
-  if (!hydrated) {
+  const [thumb, setThumb] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    resolveAnyThumbUrl(storageKey).then((u) => { if (!cancelled) setThumb(u); });
+    return () => { cancelled = true; };
+  }, [storageKey]);
+  const final = thumb || hydrated;
+  if (!final) {
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
         <Image size={size ?? 20} />
       </div>
     );
   }
-  return <img src={hydrated} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />;
+  return <img src={final} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />;
 });
 
 // ===== 首尾帧槽位组件(视频首尾帧模式专用) =====
@@ -695,7 +659,6 @@ const ReferenceSlot = memo(function ReferenceSlot({
   onRemove,
   cardBorder,
   bgHover,
-  textColor,
 }: {
   node: { id: string; type: string; content?: string; title: string; storageKey?: string };
   label: string;
@@ -705,7 +668,6 @@ const ReferenceSlot = memo(function ReferenceSlot({
   onRemove: () => void;
   cardBorder: string;
   bgHover: string;
-  textColor: string;
 }): React.ReactElement {
   const config = nodeTypeConfig ?? { icon: <FileText size={14} />, label: incomingNode.type };
   const hasThumbnail = !!thumbnail && incomingNode.type === 'image';
@@ -730,12 +692,9 @@ const ReferenceSlot = memo(function ReferenceSlot({
       {hasThumbnail ? (
         <HydratedImage storageKey={incomingNode.storageKey} content={thumbnail!} size={96} />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: 4, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
           <span style={{ flexShrink: 0, display: 'inline-flex', opacity: 0.7 }}>
             {config.icon}
-          </span>
-          <span style={{ fontSize: 10, color: textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 44, textAlign: 'center', lineHeight: 1.2 }}>
-            {incomingNode.title}
           </span>
         </div>
       )}
@@ -865,11 +824,12 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
         style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
         onDoubleClick={handleDoubleClick}
       >
-        {/* 参考素材区 */}
+        {/* 参考素材区(顶部,配色对齐 StackNode 导航栏) */}
         <div
           style={{
             padding: '8px 12px',
             borderBottom: `1px solid ${cardBorder}`,
+            background: navBg,
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -884,8 +844,8 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             type="button"
             onClick={handleAddReference}
             style={{
-              width: 44,
-              height: 44,
+              width: 52,
+              height: 52,
               borderRadius: 6,
               border: `1px dashed ${cardBorder}`,
               background: 'transparent',
@@ -901,7 +861,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <Upload size={18} />
+            <Upload size={16} />
           </button>
 
           {/* 视频首尾帧模式:渲染首帧/尾帧专用槽位 */}
@@ -924,7 +884,6 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                       onRemove={() => handleRemoveIncoming(firstFrameNode.id)}
                       cardBorder={cardBorder}
                       bgHover={bgHover}
-                      textColor={textColor}
                     />
                   ) : (
                     <div style={{
@@ -932,7 +891,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0, gap: 1, color: mutedColor, fontSize: 9, cursor: 'default',
                     }}>
-                      <span style={{ fontSize: 10, opacity: 0.5 }}>首帧</span>
+                      <span style={{ fontSize: 9, opacity: 0.5 }}>首帧</span>
                     </div>
                   )}
                   {/* 尾帧槽位 */}
@@ -946,7 +905,6 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                       onRemove={() => handleRemoveIncoming(lastFrameNode.id)}
                       cardBorder={cardBorder}
                       bgHover={bgHover}
-                      textColor={textColor}
                     />
                   ) : (
                     <div style={{
@@ -954,7 +912,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0, gap: 1, color: mutedColor, fontSize: 9, cursor: 'default',
                     }}>
-                      <span style={{ fontSize: 10, opacity: 0.5 }}>尾帧</span>
+                      <span style={{ fontSize: 9, opacity: 0.5 }}>尾帧</span>
                     </div>
                   )}
                 </>
@@ -989,11 +947,12 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                 >
                   {hasThumbnail ? (
                     incomingNode.type === 'video' ? (
-                      <VideoThumbnail src={thumbnail!} size={52} />
+                      <VideoThumbnail storageKey={incomingNode.storageKey} src={thumbnail!} />
                     ) : (
-                      <HydratedImage storageKey={(incomingNode as any).storageKey} content={thumbnail!} size={52} />
+                      <HydratedImage storageKey={incomingNode.storageKey} content={thumbnail!} size={52} />
                     )
                   ) : (
+                    /* 无缩略图才回退图标(标题保留,与原方块风格一致) */
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: 4, width: '100%' }}>
                       <span style={{ flexShrink: 0, display: 'inline-flex', opacity: 0.7 }}>
                         {config.icon}
@@ -1102,9 +1061,9 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
           )}
         </div>
 
-        {/* 底部操作栏 */}
+        {/* 底部操作栏(配色对齐 StackNode 导航栏) */}
         <div
-          style={{ padding: '8px 12px', borderTop: `1px solid ${cardBorder}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}
+          style={{ padding: '8px 12px', borderTop: `1px solid ${cardBorder}`, background: navBg, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}
           onPointerDown={handleInteractivePointerDown}
           onMouseDown={handleInteractiveMouseDown}
         >

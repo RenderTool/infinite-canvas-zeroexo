@@ -854,7 +854,12 @@
     "lock": "Lock",
     "unlock": "Unlock",
     "close": "Close",
-    "viewResource": "View Resource"
+    "viewResource": "View Resource",
+    "hints": {
+      "navigate": "Navigate",
+      "locate": "Locate",
+      "quit": "Quit"
+    }
   },
   "nodes": {
     "textTitle": "Text",

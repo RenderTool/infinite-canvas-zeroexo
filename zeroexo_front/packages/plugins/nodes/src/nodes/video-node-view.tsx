@@ -15,6 +15,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { VideoNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { uploadMediaFile, storeVideoThumbnail, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
+import { resolveAnyThumbUrl } from '../utils/hydrate.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView } from '../base-node-view.js';
 
@@ -267,12 +268,19 @@ export function VideoNodeView({
     currentFrameRef.current = 0;
     setThumbnailUrl(null);
 
-    // 优先从 localforage 读取已持久化的缩略图(刷新后无需加载视频即可显示)
+    // 缩略图回退链:持久化缩略图 → 后端 thumb 级资源(确保同一视频的不同节点都能显示缩略图)
     if (data.storageKey) {
       let cancelled = false;
-      resolveVideoThumbnail(data.storageKey).then((url) => {
-        if (!cancelled && url) setThumbnailUrl(url);
-      });
+      (async () => {
+        // 1. 持久化缩略图(video-node-view 上传/播放时经 storeVideoThumbnail 存入)
+        try {
+          const persisted = await resolveVideoThumbnail(data.storageKey);
+          if (persisted && !cancelled) { setThumbnailUrl(persisted); return; }
+        } catch { /* 继续下一级 */ }
+        // 2. 后端 thumb 级资源(resources/ 后端 size=thumb 认证链路)
+        const thumb = await resolveAnyThumbUrl(data.storageKey);
+        if (!cancelled && thumb) setThumbnailUrl(thumb);
+      })();
       return () => { cancelled = true; };
     }
   }, [hydratedContent, data.storageKey]);
@@ -340,6 +348,48 @@ export function VideoNodeView({
       vid.removeEventListener('play', onPlay);
     };
   }, [hydratedContent]); // hydratedContent 变化时(video src 加载完成)重新绑定
+
+  // === 阻止双击全屏(click 事件防抖接管单击/双击行为) ===
+  // 问题:Chrome 双击视频全屏行为无法通过 fullscreenchange 事件拦截
+  // 解决:使用 click 事件防抖,手动区分单击(播放/暂停)和双击(不做任何事),阻止浏览器默认双击全屏
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // 原生 click 事件监听器(捕获阶段),完全接管单击/双击行为
+    const onClick = (e: MouseEvent) => {
+      // 阻止默认行为(防止浏览器内部的双击全屏检测)
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (clickTimer) {
+        // 第二次点击(双击):清除定时器,不触发任何操作
+        clearTimeout(clickTimer);
+        clickTimer = null;
+      } else {
+        // 第一次点击:延迟处理播放/暂停(等待可能的第二次点击)
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          // 手动触发播放/暂停
+          if (vid.paused) {
+            void vid.play().catch(() => {});
+          } else {
+            vid.pause();
+          }
+        }, 300); // 300ms 内第二次点击视为双击
+      }
+    };
+
+    // 捕获阶段拦截,确保在浏览器默认行为之前执行
+    vid.addEventListener('click', onClick, { capture: true });
+
+    return () => {
+      vid.removeEventListener('click', onClick, { capture: true });
+      if (clickTimer) clearTimeout(clickTimer);
+    };
+  }, [hydratedContent]); // hydratedContent 变化时重新绑定(video 元素可能重新渲染)
 
   // 问题5: 标题栏尺寸规格
   const titleSizeText = data.naturalWidth && data.naturalHeight
@@ -421,16 +471,22 @@ export function VideoNodeView({
           style={{ ...mediaContainerStyle, background: '#000' }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
+          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onPointerDown={(e) => { if (e.detail > 1) { e.preventDefault(); e.stopPropagation(); } }}
         >
           <video
             ref={videoRef}
-            data-node-id={node.id}
+            // contentOnly(堆叠舞台)下不挂 data-node-id:card.id 非画布节点,
+            // 连线拖拽 elementFromPoint→closest('[data-node-id]') 会命中无效 id 导致连入失败
+            data-node-id={contentOnly ? undefined : node.id}
             src={hydratedContent}
             controls
-            controlsList="nofullscreen nodownload"
+            controlsList="nodownload noplaybackrate"
             preload="metadata"
             playsInline
-            onDoubleClick={(e) => e.preventDefault()}
+            disablePictureInPicture
+            onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onPointerDown={(e) => { if (e.detail > 1) { e.preventDefault(); e.stopPropagation(); } }}
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={handleTimeUpdate}
             style={{

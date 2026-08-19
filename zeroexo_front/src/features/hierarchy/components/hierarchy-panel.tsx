@@ -15,23 +15,23 @@
 import { useRef, useState, useLayoutEffect, useCallback, useMemo, useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Virtuoso } from 'react-virtuoso';
+import type { VirtuosoHandle } from 'react-virtuoso';
 import { useTranslation } from 'react-i18next';
 import { Select, Tooltip } from 'antd';
 import {
   ChevronDown, ChevronRight, FolderOpen, Image as ImageIcon,
   Settings2, Type as TypeIcon, File, FileText, Clapperboard, Film,
   Layers, X, Search, Download, CheckSquare, Square,
-  Eye, Lock, Unlock,
+  Lock, Combine, Video,
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { AssetDetailViewer } from '@/shared/components/index.js';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useHierarchyPanelProps } from '@zeroexo/plugin-group';
 import type { GroupPlugin, HierarchyTreeNode } from '@zeroexo/plugin-group';
 import type { SceneNode } from '@zeroexo/core';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { resolveThumbnailUrl, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
-import { buildBackendUrl } from '@zeroexo/plugin-nodes';
+import { buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from '@zeroexo/plugin-nodes';
 import { AuthorizedImage, AuthorizedVideo } from '@/shared/components/authorized-media.js';
 
 export interface HierarchyPanelSidebarProps {
@@ -58,9 +58,21 @@ function getTypeIcon(node: SceneNode): ReactNode {
     case 'group': return <FolderOpen {...cls} />;
     case 'image': return <ImageIcon {...cls} />;
     case 'text': return <TypeIcon {...cls} />;
-    case 'video': return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>;
+    case 'video': return <Video {...cls} />;
     case 'audio': return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>;
     case 'generator': return <Settings2 {...cls} />;
+    case 'stacked-media': {
+      // 堆叠节点:显示活跃卡片类型图标(空堆叠回退 Combine 图标)
+      const data = node.data as Record<string, unknown> | undefined;
+      const cards = (data?.cards as Array<{ sourceType: string }>) ?? [];
+      const activeIndex = (data?.activeIndex as number) ?? 0;
+      const activeCard = cards[activeIndex];
+      if (!activeCard) return <Combine {...cls} />;
+      if (activeCard.sourceType === 'video') return <Video {...cls} />;
+      if (activeCard.sourceType === 'image') return <ImageIcon {...cls} />;
+      if (activeCard.sourceType === 'text') return <TypeIcon {...cls} />;
+      return <Combine {...cls} />;
+    }
     case 'script': return <FileText {...cls} />;
     case 'storyboard': return <Clapperboard {...cls} />;
     case 'workbench': return <Film {...cls} />;
@@ -86,30 +98,52 @@ function HierarchyThumbnail({
   theme: ThemeConfig;
 }): React.ReactElement {
   const [thumbSrc, setThumbSrc] = useState('');
+  // 重建后的有效内容 URL(刷新后 blob URL 失效场景,video 回退用)
+  const [videoSrc, setVideoSrc] = useState('');
 
   useEffect(() => {
     // 无 storageKey(AI 生成未保存): content 通常是 dataURL,直接用
     if (!storageKey) {
       setThumbSrc(content || '');
+      setVideoSrc(content || '');
       return;
     }
-    // 后端键: 同步构造 ?size=thumb URL
+    // 视频: 优先 localforage 首帧(video-node-view 上传/播放时经 storeVideoThumbnail 存入);
+    // 无首帧时用 resolveContentUrl 重建内容 URL(video preload=metadata 回退显示首帧)
+    if (isVideo) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const persisted = await resolveVideoThumbnail(storageKey);
+          if (persisted && !cancelled) { setThumbSrc(persisted); return; }
+        } catch { /* 继续 */ }
+        // 无持久化首帧: 重建内容 URL(本地键从 IndexedDB 读,后端键走认证链路)
+        const src = await resolveContentUrl(storageKey, content ?? '');
+        if (!cancelled) setVideoSrc(src || '');
+      })();
+      return () => { cancelled = true; };
+    }
+    // 图片后端键: 同步构造 ?size=thumb URL(sharp 管道生成过该变体)
     const backendUrl = buildBackendUrl(storageKey, 'thumb');
     if (backendUrl) {
       setThumbSrc(backendUrl);
       return;
     }
-    // 本地键: 异步解析缩略图
+    // 图片本地键: 缩略图回退链(持久化缩略图 → 后端 thumb 级资源)
     let cancelled = false;
-    const resolver = isVideo ? resolveVideoThumbnail : resolveThumbnailUrl;
-    resolver(storageKey)
-      .then((url) => { if (!cancelled) setThumbSrc(url || ''); })
-      .catch(() => { if (!cancelled) setThumbSrc(''); });
+    (async () => {
+      try {
+        const persisted = await resolveThumbnailUrl(storageKey);
+        if (persisted && !cancelled) { setThumbSrc(persisted); return; }
+      } catch { /* 继续下一级 */ }
+      const thumb = await resolveAnyThumbUrl(storageKey);
+      if (!cancelled) setThumbSrc(thumb || '');
+    })();
     return () => { cancelled = true; };
   }, [storageKey, content, isVideo]);
 
-  // 视频无缩略图帧时回退到 <video preload="metadata">(仅拉头部)
-  const useVideoElement = isVideo && !thumbSrc && !!content;
+  // 视频无缩略图帧时回退到 <video preload="metadata">(仅拉头部,本地键零网络开销)
+  const useVideoElement = isVideo && !thumbSrc && !!videoSrc;
 
   return (
     <div
@@ -120,7 +154,7 @@ function HierarchyThumbnail({
     >
       {useVideoElement ? (
         <AuthorizedVideo
-          src={content}
+          src={videoSrc}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           muted
           playsInline
@@ -134,7 +168,12 @@ function HierarchyThumbnail({
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
         />
-      ) : null}
+      ) : (
+        // 无缩略图时回退图标(避免空白)
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.toolbar.textMuted, opacity: 0.6 }}>
+          {isVideo ? <Video size={14} /> : <ImageIcon size={14} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -159,9 +198,6 @@ export function HierarchyPanelSidebar({
     return () => { cancelAnimationFrame(id); cancelAnimationFrame(rafId); };
   }, [closing]);
 
-  // 资源查看器Modal状态
-  const [viewerNode, setViewerNode] = useState<SceneNode | null>(null);
-
   // 本地类型筛选(不依赖插件 HierarchyFilter.typeFilter 的 'all'|'group'|'node' 限制)
   const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
 
@@ -174,10 +210,54 @@ export function HierarchyPanelSidebar({
     setSelectIds(new Set());
   }, []);
 
+  // 键盘导航(底部快捷键栏 ↑↓/Enter/Esc):焦点行索引 + Virtuoso 滚动跟随
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [focusIndex, setFocusIndex] = useState(-1);
+
   // 对 props.tree 做本地类型过滤
   const filteredTree = localTypeFilter === 'all'
     ? props.tree
     : props.tree.filter((item) => item.node.type === localTypeFilter);
+
+  // 键盘导航:筛选结果变化后钳制/重置焦点索引
+  useEffect(() => {
+    setFocusIndex((prev) => (filteredTree.length === 0 ? -1 : Math.min(prev, filteredTree.length - 1)));
+  }, [filteredTree.length]);
+
+  // ↑↓ 导航 / Enter 定位 / Esc 退出:仅展开且事件源非输入控件时消费(不与重命名/搜索/画布快捷键冲突)
+  useEffect(() => {
+    if (closing || !expanded) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (filteredTree.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const base = focusIndex < 0 ? 0 : focusIndex;
+        const next = e.key === 'ArrowDown'
+          ? Math.min(base + 1, filteredTree.length - 1)
+          : Math.max(base - 1, 0);
+        setFocusIndex(next);
+        virtuosoRef.current?.scrollToIndex({ index: next, behavior: 'smooth', align: 'center' });
+      } else if (e.key === 'Enter') {
+        const item = focusIndex >= 0 ? filteredTree[focusIndex] : undefined;
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        props.onSelect(item.node.id, false);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => onFocusNode?.(item.node.id));
+        });
+      } else if (e.key === 'Escape') {
+        // 选择模式下 Esc 先退出选择,再退出面板
+        if (selectMode) { e.preventDefault(); e.stopPropagation(); exitSelectMode(); return; }
+        if (onClose) { e.preventDefault(); e.stopPropagation(); onClose(); }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closing, expanded, filteredTree, focusIndex, selectMode, exitSelectMode, onClose, onFocusNode, props]);
 
   // O-1: 预计算子节点数量(组节点用) — 避免每帧 O(n) filter
   const childrenCountMap = useMemo(() => {
@@ -382,6 +462,13 @@ export function HierarchyPanelSidebar({
   // 选中色 + 20% alpha
   const selectedBg = theme.toolbar.accent + '22';
   const selectedText = theme.toolbar.accent;
+  // 快捷键栏键帽样式(footer 三段式提示)
+  const keycapStyle: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    minWidth: 16, height: 16, padding: '0 4px', borderRadius: 4,
+    border: `1px solid ${theme.toolbar.border}`, background: theme.toolbar.panel,
+    color: theme.toolbar.text, fontSize: 9, fontWeight: 600, fontFamily: 'inherit',
+  };
 
   // 抽屉式动画:展开收起统一节奏
   // will-change 提示浏览器提前创建 GPU 合成层,避免首帧卡顿
@@ -402,6 +489,7 @@ export function HierarchyPanelSidebar({
   const innerStyle: CSSProperties = modal
     ? {
         width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+        position: 'relative',
         overflow: 'hidden', backgroundColor: theme.toolbar.panel,
         color: theme.toolbar.text,
         transform: translate3d,
@@ -411,6 +499,7 @@ export function HierarchyPanelSidebar({
       }
     : {
         width: PANEL_WIDTH, height: '100%', display: 'flex', flexDirection: 'column',
+        position: 'relative',
         overflow: 'hidden', backgroundColor: theme.toolbar.panel,
         color: theme.toolbar.text,
         transform: translate3d,
@@ -419,14 +508,6 @@ export function HierarchyPanelSidebar({
         boxShadow: expanded ? '8px 0 24px -14px rgba(0,0,0,0.35)' : 'none',
         willChange: 'transform',
       };
-  const headerStyle: CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 8, height: 46, padding: '0 14px',
-    flexShrink: 0,
-  };
-  const titleStyle: CSSProperties = {
-    fontSize: 13, fontWeight: 600, flex: 1, minWidth: 0, letterSpacing: '0.02em',
-    overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
-  };
   const listStyle: CSSProperties = {
     flex: 1, minHeight: 0, padding: '8px 0',
   };
@@ -434,12 +515,11 @@ export function HierarchyPanelSidebar({
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
     padding: '64px 0', opacity: 0.8,
   };
-  // 行内操作按钮(可见性/锁定):默认隐藏,行 hover 时显示;状态激活时常驻
-  const actionBtnStyle: CSSProperties = {
-    width: 18, height: 18, flexShrink: 0, border: 'none', background: 'transparent',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: 'pointer', color: 'inherit', padding: 0, borderRadius: 3,
-  };
+
+  // 键盘焦点行(高亮 + Virtuoso 跟随目标)
+  const focusedId = focusIndex >= 0 && focusIndex < filteredTree.length
+    ? filteredTree[focusIndex]!.node.id
+    : undefined;
 
   const renderItem = (item: HierarchyTreeNode, index: number): ReactNode => {
     const { node, depth, hasChildren } = item;
@@ -459,11 +539,25 @@ export function HierarchyPanelSidebar({
     const storageKey = nodeData?.storageKey as string | undefined;
     const isImage = node.type === 'image';
     const isVideo = node.type === 'video';
-    const showThumbnail = (isImage || isVideo) && (!!storageKey || !!contentUrl);
+    const isStackedMedia = node.type === 'stacked-media';
 
-    // 资源查看器不支持的类型:剧本/分镜/空图片/空视频(小眼睛不显示)
-    const canViewResource = node.type !== 'script' && node.type !== 'storyboard'
-      && !((isImage || isVideo) && !contentUrl);
+    // 堆叠节点:从活跃卡片提取缩略图信息
+    let stackThumbContent: string | undefined;
+    let stackThumbStorageKey: string | undefined;
+    let stackThumbIsVideo = false;
+    if (isStackedMedia && nodeData) {
+      const cards = (nodeData.cards as Array<{ sourceType: string; data?: Record<string, unknown> }>) ?? [];
+      const activeIndex = (nodeData.activeIndex as number) ?? 0;
+      const activeCard = cards[activeIndex];
+      if (activeCard?.data) {
+        stackThumbContent = activeCard.data.content as string | undefined;
+        stackThumbStorageKey = activeCard.data.storageKey as string | undefined;
+        stackThumbIsVideo = activeCard.sourceType === 'video';
+      }
+    }
+
+    const showThumbnail = (isImage || isVideo) && (!!storageKey || !!contentUrl)
+      || (isStackedMedia && (!!stackThumbStorageKey || !!stackThumbContent));
 
     // 引导线
     const glInfo = guideLineInfo[index];
@@ -472,7 +566,7 @@ export function HierarchyPanelSidebar({
       display: 'flex', alignItems: 'stretch', gap: 0,
       margin: '2px 8px', padding: 0,
       minHeight: 36, cursor: 'pointer', borderRadius: 6,
-      backgroundColor: isSelected ? selectedBg : 'transparent',
+      backgroundColor: isSelected ? selectedBg : (node.id === focusedId ? theme.toolbar.accent + '12' : 'transparent'),
       color: isSelected ? selectedText : hidden ? theme.toolbar.textMuted : theme.toolbar.text,
       fontWeight: isSelected || isGroup ? 500 : 400,
       opacity: hidden ? 0.5 : 1,
@@ -551,16 +645,16 @@ export function HierarchyPanelSidebar({
             <span style={{ width: 14, flexShrink: 0 }} />
           )}
 
-          {/* 类型缩略图/图标 — 图片/视频用缩略图,其余用图标 */}
+          {/* 类型缩略图/图标 — 图片/视频/堆叠用缩略图,其余用纯图标(无装饰容器,用户验收反馈保持简洁) */}
           {showThumbnail ? (
             <HierarchyThumbnail
-              storageKey={storageKey}
-              content={contentUrl}
-              isVideo={isVideo}
+              storageKey={isStackedMedia ? stackThumbStorageKey : storageKey}
+              content={isStackedMedia ? stackThumbContent : contentUrl}
+              isVideo={isStackedMedia ? stackThumbIsVideo : isVideo}
               theme={theme}
             />
           ) : (
-            <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ width: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {getTypeIcon(node)}
             </span>
           )}
@@ -605,29 +699,12 @@ export function HierarchyPanelSidebar({
             </span>
           ) : null}
 
-          {/* 资源查看器按钮(点击用Modal查看节点资源); 空组/不支持类型不显示 */}
-          {!(isGroup && childrenCount === 0) && canViewResource ? (
-            <Tooltip title={t('hierarchy.viewResource')}>
-              <button
-                type="button"
-                className="hierarchy-action"
-                onClick={(e) => { e.stopPropagation(); setViewerNode(fullNode ?? node); }}
-                style={{ ...actionBtnStyle, opacity: 0 }}
-              >
-                <Eye size={12} />
-              </button>
-            </Tooltip>
-          ) : <span style={{ width: 18, flexShrink: 0 }} />}
-            <Tooltip title={locked ? t('hierarchy.unlock') : t('hierarchy.lock')}>
-            <button
-              type="button"
-              className="hierarchy-action"
-              onClick={(e) => { e.stopPropagation(); props.onToggleLock(node.id); }}
-              style={{ ...actionBtnStyle, opacity: locked ? 0.5 : 0 }}
-            >
-              {locked ? <Lock size={12} /> : <Unlock size={12} />}
-            </button>
-            </Tooltip>
+          {/* 锁定状态指示(纯展示不可点;hover 操作按钮已按用户验收要求移除) */}
+          {locked && (
+            <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
+              <Lock size={11} />
+            </span>
+          )}
         </div>
       </div>
     );
@@ -635,43 +712,11 @@ export function HierarchyPanelSidebar({
 
   return (
     <div style={outerStyle}>
-      <style>{`.hierarchy-row:hover{background-color:rgba(128,128,128,0.09)}.hierarchy-row:hover .hierarchy-action{opacity:.55!important}.hierarchy-close-btn:hover{opacity:.85!important;background:rgba(128,128,128,0.15)!important}.hierarchy-search:focus-within{box-shadow:0 0 0 1px ${theme.toolbar.accent}55}.hierarchy-icon-btn:hover{background:rgba(128,128,128,0.15)!important;opacity:.9!important}`}</style>
+      <style>{`.hierarchy-row:hover{background-color:rgba(128,128,128,0.09)}.hierarchy-close-btn:hover{opacity:.85!important;background:rgba(128,128,128,0.15)!important}.hierarchy-search:focus-within{box-shadow:0 0 0 1px ${theme.toolbar.accent}55}.hierarchy-icon-btn:hover{background:rgba(128,128,128,0.15)!important;opacity:.9!important}`}</style>
       <div style={innerStyle}>
-        {/* 头部(仅桌面端显示) */}
-        {!modal && (
-          <div style={headerStyle}>
-            <Layers size={16} style={{ opacity: 0.6, flexShrink: 0 }} />
-            <span style={titleStyle}>{t('hierarchy.title')}</span>
-            <span style={{
-              flexShrink: 0, fontSize: 10, padding: '1px 7px', borderRadius: 999,
-              background: theme.toolbar.border + '55', color: theme.toolbar.textMuted,
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {props.tree.length}
-            </span>
-            {onClose && (
-              <Tooltip title={t('hierarchy.close')}>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  style={{
-                    width: 22, height: 22, flexShrink: 0, border: 'none', background: 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    cursor: 'pointer', color: theme.toolbar.text, opacity: 0.5, padding: 0, borderRadius: 4,
-                    transition: 'opacity 0.15s, background 0.15s',
-                  }}
-                  className="hierarchy-close-btn"
-                >
-                  <X size={14} />
-                </button>
-                </Tooltip>
-            )}
-          </div>
-        )}
-
-        {/* 顶部工具栏：搜索 + 类型筛选 + 批量选择（社区惯例：筛选与选择操作置于顶部） */}
+        {/* 顶部工具栏：搜索 + 类型筛选 + 批量选择 + 关闭按钮并排（关闭收入流式布局，避免 absolute 浮层遮挡 Select/批量按钮） */}
         <div style={{
-          padding: '6px 10px 10px',
+          padding: '8px 10px 10px',
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
         }}>
           {/* 搜索框 */}
@@ -679,7 +724,7 @@ export function HierarchyPanelSidebar({
             flex: 1, minWidth: 0,
             display: 'flex', alignItems: 'center', gap: 4,
             borderRadius: 6, padding: '0 8px',
-            background: theme.toolbar.border + '38',
+            background: 'transparent',
             transition: 'box-shadow 0.15s ease, background 0.15s ease',
           }}>
             <Search size={13} style={{ flexShrink: 0, opacity: 0.4 }} />
@@ -703,7 +748,7 @@ export function HierarchyPanelSidebar({
               </button>
             )}
           </div>
-          {/* 类型筛选 */}
+          {/* 类型筛选(borderless Select,与搜索/批量选择并排) */}
           <Select
             value={localTypeFilter}
             onChange={(val) => setLocalTypeFilter(val)}
@@ -732,6 +777,24 @@ export function HierarchyPanelSidebar({
               <CheckSquare size={13} />
             </button>
           </Tooltip>
+          {/* 关闭按钮(桌面端；原 header 已删,收入工具行末尾流式占位,不再遮挡任何控件) */}
+          {!modal && onClose && (
+            <Tooltip title={t('hierarchy.close')}>
+              <button
+                type="button"
+                onClick={onClose}
+                className="hierarchy-close-btn"
+                style={{
+                  width: 22, height: 22, flexShrink: 0, border: 'none', background: 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: theme.toolbar.text, opacity: 0.5, padding: 0, borderRadius: 4,
+                  transition: 'opacity 0.15s, background 0.15s',
+                }}
+              >
+                <X size={14} />
+              </button>
+            </Tooltip>
+          )}
         </div>
 
         {/* 选择模式工具栏 */}
@@ -803,6 +866,7 @@ export function HierarchyPanelSidebar({
             </div>
           ) : (
             <Virtuoso
+              ref={virtuosoRef}
               style={listStyle}
               data={filteredTree}
               itemContent={(index, item) => renderItem(item, index)}
@@ -811,13 +875,36 @@ export function HierarchyPanelSidebar({
             />
           )}
         </div>
-      </div>
 
-      {/* 资源查看器Modal */}
-      <AssetDetailViewer
-        node={viewerNode}
-        onClose={() => setViewerNode(null)}
-      />
+        {/* 底部快捷键栏(参照卡 card-footer:三段式键帽 + 右侧节点总数徽标,自原 header 迁入) */}
+        {!modal && (
+          <div style={{
+            height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12,
+            padding: '0 10px', background: theme.toolbar.border + '33',
+            fontSize: 10, color: theme.toolbar.textMuted,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={keycapStyle}>↑</kbd>
+              <kbd style={keycapStyle}>↓</kbd>
+              {t('hierarchy.hints.navigate')}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={keycapStyle}>Enter</kbd>
+              {t('hierarchy.hints.locate')}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <kbd style={keycapStyle}>Esc</kbd>
+              {t('hierarchy.hints.quit')}
+            </span>
+            <span style={{
+              marginLeft: 'auto', flexShrink: 0, fontSize: 10, padding: '1px 7px', borderRadius: 999,
+              background: theme.toolbar.border + '55', fontVariantNumeric: 'tabular-nums',
+            }}>
+              {props.tree.length}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

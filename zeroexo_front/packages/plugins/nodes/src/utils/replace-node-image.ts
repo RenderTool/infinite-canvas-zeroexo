@@ -145,6 +145,19 @@ export async function replaceNodeImage(
   options?.onStatusChange?.('loading');
 
   try {
+    // 预读取图片尺寸(在上传前完成,确保无论哪条上传路径成功都有有效尺寸)
+    // 修复: uploadToBackend 的 readImageMetaFromFile 静默失败时 width=0,height=0
+    // → ratio=NaN → ResizeNodeCommand 设 height=NaN → 节点渲染异常(1:1方块或不可见)
+    let fileWidth = 0;
+    let fileHeight = 0;
+    try {
+      const fileMeta = await readImageMetaFromFile(file);
+      fileWidth = fileMeta.width;
+      fileHeight = fileMeta.height;
+    } catch {
+      // 静默失败,后续使用默认 16:9 比例
+    }
+
     // 优先走后端 sharp 多尺寸管道,失败时降级到本地 localforage
     let storageKey: string;
     let url: string;
@@ -159,8 +172,9 @@ export async function replaceNodeImage(
         const backendResult = await uploadToBackend(file);
         storageKey = backendResult.storageKey;
         url = '';   // 后端 key 不需要 blob URL, hydrate 会通过 ?size= 参数加载
-        width = backendResult.width;
-        height = backendResult.height;
+        // 优先使用上传返回的尺寸,失败时用预读值兜底
+        width = backendResult.width > 0 ? backendResult.width : fileWidth;
+        height = backendResult.height > 0 ? backendResult.height : fileHeight;
         bytes = backendResult.bytes;
         mimeType = backendResult.mimeType;
       } catch (err) {
@@ -168,8 +182,8 @@ export async function replaceNodeImage(
         const img = await uploadImage(file);
         storageKey = img.storageKey;
         url = img.url;
-        width = img.width;
-        height = img.height;
+        width = img.width > 0 ? img.width : fileWidth;
+        height = img.height > 0 ? img.height : fileHeight;
         bytes = img.bytes;
         mimeType = img.mimeType;
       }
@@ -177,8 +191,8 @@ export async function replaceNodeImage(
       const img = await uploadImage(file);
       storageKey = img.storageKey;
       url = img.url;
-      width = img.width;
-      height = img.height;
+      width = img.width > 0 ? img.width : fileWidth;
+      height = img.height > 0 ? img.height : fileHeight;
       bytes = img.bytes;
       mimeType = img.mimeType;
     }
@@ -204,7 +218,8 @@ export async function replaceNodeImage(
     const currentWidth = node.size?.width ?? BASE_WIDTH;
     const useBaseWidth = Math.abs(currentWidth - 80) <= 5 || currentWidth < 200 || !node.size;
     const refWidth = useBaseWidth ? BASE_WIDTH : currentWidth;
-    const ratio = height / width;
+    // 安全兜底: 宽高均无效时默认 16:9 比例,避免 NaN 导致节点渲染异常
+    const ratio = (width > 0 && height > 0) ? height / width : 9 / 16;
     const newHeight = Math.round(refWidth * ratio);
     const oldRect = {
       x: node.position.x,
@@ -215,6 +230,10 @@ export async function replaceNodeImage(
     commandQueue.execute(
       new ResizeNodeCommand(node.id, oldRect, {
         ...oldRect,
+        // 修复: newRect.width 必须使用 refWidth(620 基准或当前宽度),
+        // 不能沿用 oldRect.width —— 空节点(size=undefined)时 oldRect 回退 340,
+        // 而 newHeight 按 refWidth=620 计算,宽高基准不一致 → 节点变成 1:1 方块
+        width: refWidth,
         height: newHeight,
       }),
     );

@@ -853,7 +853,12 @@
     "lock": "锁定",
     "unlock": "解锁",
     "close": "关闭",
-    "viewResource": "查看资源"
+    "viewResource": "查看资源",
+    "hints": {
+      "navigate": "导航",
+      "locate": "定位",
+      "quit": "退出"
+    }
   },
   "nodes": {
     "textTitle": "文本",

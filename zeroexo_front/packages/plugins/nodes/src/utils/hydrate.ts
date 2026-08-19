@@ -205,6 +205,52 @@ export function useHydratedContent(
 }
 
 /**
+ * 非 hook 版内容解析(供批量处理/缩略图链路使用,逻辑与 useHydratedContent 一致)
+ * @returns 可渲染 URL(认证后 blob URL / persistence 解析结果 / 原始 content)
+ */
+export async function resolveContentUrl(
+  storageKey: string | undefined,
+  content: string,
+): Promise<string> {
+  if (!storageKey) return content;
+  if (storageKey.startsWith('resources/')) {
+    const backendUrl = buildBackendUrl(storageKey, 'full');
+    if (backendUrl) {
+      const url = await authorizeMediaUrl(backendUrl);
+      if (url) return url;
+    }
+    return content;
+  }
+  const resolveFn = storageKey.startsWith('image:') ? resolveImageUrl : resolveMediaUrl;
+  try {
+    const url = await resolveFn(storageKey, content);
+    if (url) return url;
+  } catch (err) {
+    console.error('[resolveContentUrl] failed to resolve', storageKey, err);
+  }
+  return content;
+}
+
+/**
+ * 解析缩略图级 URL(resources/ 走后端 size=thumb 认证链路,本地键走 persistence 缩略图)
+ * 用于小尺寸场景(导航缩略图/参考槽位),避免拉取全量媒体
+ */
+export async function resolveAnyThumbUrl(
+  storageKey: string | undefined,
+): Promise<string | null> {
+  if (!storageKey) return null;
+  if (storageKey.startsWith('resources/')) {
+    const thumbUrl = buildBackendUrl(storageKey, 'thumb');
+    return thumbUrl ? authorizeMediaUrl(thumbUrl) : null;
+  }
+  try {
+    return await resolveThumbnailUrl(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 渐进式图片加载 hook(Phase VI.4)
  *
  * 根据视口缩放(invK = 1/viewport.k)智能选择加载策略:

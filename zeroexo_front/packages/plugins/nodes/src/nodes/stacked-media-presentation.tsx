@@ -6,50 +6,12 @@ import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { VideoNodeView } from './video-node-view.js';
 import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
-import { useHydratedContent } from '../utils/hydrate.js';
+import { useHydratedContent, resolveAnyThumbUrl, resolveContentUrl } from '../utils/hydrate.js';
+import { resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import type { StackCard } from './stacked-media-types.js';
 
 /** 最大缩略图数(容器宽度充足时) */
 const THUMB_COUNT_MAX = 5;
-
-/** 视频首帧 poster 缓存(按 hydrated src 键控,避免重复解码) */
-const VIDEO_POSTER_CACHE = new Map<string, string>();
-
-/** 抓取视频首帧作 poster:未播放的 <video> 元素在部分浏览器不显示帧画面(黑块),
- *  导航缩略图需要头像式首帧预览 */
-function useVideoPoster(src: string | undefined): string | undefined {
-  const [poster, setPoster] = useState<string | undefined>(src ? VIDEO_POSTER_CACHE.get(src) : undefined);
-  useEffect(() => {
-    if (!src) return;
-    const cached = VIDEO_POSTER_CACHE.get(src);
-    if (cached) { setPoster(cached); return; }
-    let cancelled = false;
-    const vid = document.createElement('video');
-    vid.muted = true;
-    vid.preload = 'auto';
-    vid.src = src;
-    vid.onloadeddata = () => {
-      try { vid.currentTime = Math.min(0.1, (vid.duration || 0.1) / 2); } catch { /* 部分源 seek 失败则用首帧 */ }
-    };
-    vid.onseeked = () => {
-      if (cancelled) return;
-      try {
-        const w = vid.videoWidth; const h = vid.videoHeight;
-        if (!w || !h) return;
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(vid, 0, 0, w, h);
-        const url = canvas.toDataURL('image/jpeg', 0.72);
-        VIDEO_POSTER_CACHE.set(src, url);
-        if (!cancelled) setPoster(url);
-      } catch { /* 跨域/解码失败静默降级为视频元素 */ }
-    };
-    return () => { cancelled = true; vid.src = ''; };
-  }, [src]);
-  return poster;
-}
 
 /** 未 hydrate 时的头像式占位：sourceType 图标骨架(不再显示灰块) */
 function ThumbSkeleton({ card, dark }: { card: StackCard; dark: boolean }): React.ReactElement {
@@ -57,22 +19,60 @@ function ThumbSkeleton({ card, dark }: { card: StackCard; dark: boolean }): Reac
   return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)', color: dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.35)' }}><Icon size={14} strokeWidth={1.8} /></div>;
 }
 
-function Thumbnail({ card, dark }: { card: StackCard; dark: boolean }): React.ReactElement {
-  const src = useHydratedContent(card.data.storageKey as string | undefined, (card.data.content as string | undefined) ?? '');
-  if (card.sourceType !== 'image' && card.sourceType !== 'video') return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.45)' }}><FileText size={15} /></div>;
-  if (!src) return <ThumbSkeleton card={card} dark={dark} />;
-  if (card.sourceType === 'image') {
-    return <img src={src} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
+/** 视频缩略图:回退链(持久化缩略图→后端 thumb→重建内容 URL video 首帧),不加载全量视频;
+ *  无缩略图时回退图标骨架,不渲染黑块 */
+function VideoCardThumb({ storageKey, content, dark }: { storageKey?: string; content?: string; dark: boolean }): React.ReactElement {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!storageKey) return;
+    let cancelled = false;
+    // 回退链:持久化缩略图 → 后端 thumb 级资源 → 重建内容 URL(video preload=metadata 首帧)
+    (async () => {
+      // 1. 持久化缩略图(video-node-view 上传/播放时经 storeVideoThumbnail 存入)
+      try {
+        const persisted = await resolveVideoThumbnail(storageKey);
+        if (persisted && !cancelled) { setThumbUrl(persisted); return; }
+      } catch { /* 继续下一级 */ }
+      // 2. 后端 thumb 级资源(resources/ 后端 size=thumb 认证链路)
+      const thumb = await resolveAnyThumbUrl(storageKey);
+      if (thumb && !cancelled) { setThumbUrl(thumb); return; }
+      // 3. 重建内容 URL(刷新后 blob 失效场景,本地键从 IndexedDB 读,零网络)
+      const src = await resolveContentUrl(storageKey, content ?? '');
+      if (src && !cancelled) setVideoSrc(src);
+    })();
+    return () => { cancelled = true; };
+  }, [storageKey, content]);
+  if (thumbUrl) {
+    return <img src={thumbUrl} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
   }
-  return <VideoThumb src={src} />;
+  if (videoSrc) {
+    // 小槽位 video 回退:preload=metadata 仅拉头部显示首帧,不加载全量视频
+    return <video src={videoSrc} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />;
+  }
+  return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)', color: dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.35)' }}><Video size={14} strokeWidth={1.8} /></div>;
 }
 
-/** 视频缩略图:优先首帧 poster(头像式预览),poster 未就绪时回退 video 元素 */
-function VideoThumb({ src }: { src: string }): React.ReactElement {
-  const poster = useVideoPoster(src);
-  return poster
-    ? <img src={poster} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-    : <video src={src} muted preload="auto" playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
+function Thumbnail({ card, dark }: { card: StackCard; dark: boolean }): React.ReactElement {
+  if (card.sourceType !== 'image' && card.sourceType !== 'video') return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.45)' }}><FileText size={15} /></div>;
+  if (card.sourceType === 'video') {
+    return <VideoCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} dark={dark} />;
+  }
+  return <ImageCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} card={card} dark={dark} />;
+}
+
+function ImageCardThumb({ storageKey, content, card, dark }: { storageKey?: string; content: string; card: StackCard; dark: boolean }): React.ReactElement {
+  const src = useHydratedContent(storageKey, content);
+  // 34px 槽位优先 thumb 级资源(resources/ 后端 size=thumb),回退全量 hydrate
+  const [thumb, setThumb] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    resolveAnyThumbUrl(storageKey).then((u) => { if (!cancelled) setThumb(u); });
+    return () => { cancelled = true; };
+  }, [storageKey]);
+  const final = thumb || src;
+  if (!final) return <ThumbSkeleton card={card} dark={dark} />;
+  return <img src={final} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
 }
 
 /** 文本卡片编辑:完整编辑状态机(移植 text-node-view 交互契约,见 .trae 早期文档经验)
@@ -166,7 +166,7 @@ function StackTextEditor({ html, isDark, onCommit }: { html: string; isDark: boo
   );
 }
 
-export function StackMediaContent({ card, width, height, isDark = false, onTextCommit }: { card: StackCard; width: number; height: number; isDark?: boolean; onTextCommit?: (cardId: string, html: string) => void }): React.ReactElement {
+export function StackMediaContent({ card, width, height, isDark = false, onTextCommit, invK = 1, isSelected = true, isHovered = true }: { card: StackCard; width: number; height: number; isDark?: boolean; onTextCommit?: (cardId: string, html: string) => void; invK?: number; isSelected?: boolean; isHovered?: boolean }): React.ReactElement {
   if (card.sourceType === 'image') {
     return <StackImageContent src={(card.data.content as string | undefined) ?? ''} storageKey={card.data.storageKey as string | undefined} isDark={isDark} />;
   }
@@ -180,13 +180,20 @@ export function StackMediaContent({ card, width, height, isDark = false, onTextC
     return <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', alignContent: 'center', gap: 10, color: isDark ? 'rgba(255,255,255,0.6)' : 'var(--color-text-secondary, #78716c)', background: isDark ? '#161616' : '#ffffff' }}><FileText size={28} strokeWidth={1.6} /><span style={{ maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{card.title || card.sourceType}</span></div>;
   }
   const node = { id: card.id, type: card.sourceType, title: card.title ?? '', data: card.data, size: { width, height }, position: { x: 0, y: 0 } } as NodeRendererProps['node'];
-  return <VideoNodeView node={node} pins={[]} isSelected={true} isHovered={true} forceShowPins={false} updateNode={() => {}} invK={1} connectionController={null} contentOnly forcePlayback emptyBackground={isDark ? '#161616' : '#ffffff'} />;
+  return <VideoNodeView node={node} pins={[]} isSelected={isSelected} isHovered={isHovered} forceShowPins={false} updateNode={() => {}} invK={invK} connectionController={null} contentOnly forcePlayback={isSelected && isHovered} emptyBackground={isDark ? '#161616' : '#ffffff'} />;
 }
 
 function StackImageContent({ src, storageKey, isDark = false }: { src: string; storageKey?: string; isDark?: boolean }): React.ReactElement {
   const hydrated = useHydratedContent(storageKey, src);
-  // 未 hydrate 占位底色统一为 contentSurface(与空文本卡一致,不再用 #555 灰块)
-  return hydrated ? <img src={hydrated} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} /> : <div style={{ width: '100%', height: '100%', background: isDark ? '#161616' : '#ffffff' }} />;
+  // 未 hydrate 时显示图标骨架而非空白
+  if (!hydrated) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDark ? '#161616' : '#ffffff', color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.35)' }}>
+        <ImageIcon size={28} strokeWidth={1.6} />
+      </div>
+    );
+  }
+  return <img src={hydrated} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />;
 }
 
 export function MainReplaceButton({ onClick, alwaysVisible = false }: { onClick: () => void; alwaysVisible?: boolean }): React.ReactElement {
@@ -268,7 +275,8 @@ export function StackBottomNav({ cards, activeIndex, onJump, onPrev, onNext }: {
     overflow: 'hidden',
     cursor: 'pointer',
     background: dark ? 'rgba(255,255,255,0.1)' : '#fff',
-    padding: 2,
+    // 头像式满幅:无内边距,缩略图 cover 填满圆形
+    padding: 0,
     transition: 'box-shadow 0.15s, transform 0.15s',
   };
   return <div ref={navRef} style={{ display: 'flex', alignItems: 'center', width: '100%', height: 48, padding: '0 8px', gap: 5, background: navBg, borderRadius: '0 0 8px 8px', minWidth: 0, overflow: 'hidden' }}>

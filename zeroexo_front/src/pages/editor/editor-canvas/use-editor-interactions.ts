@@ -7,7 +7,7 @@
 
 import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { App } from 'antd';
-import { Pencil, Group, Trash2, Copy as CopyIcon, Download, FolderOpen, X, Palette, Maximize2, Package } from 'lucide-react';
+import { Pencil, Group, Trash2, Copy as CopyIcon, Download, FolderOpen, X, Palette, Maximize2, Combine } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
@@ -643,7 +643,7 @@ export function useEditorInteractions({
             items.push({
               key: 'stackSelected',
               label: t('nodes.stackSelected', { count: stackableCount }),
-              icon: createElement(Package, { size: 14 }),
+              icon: createElement(Combine, { size: 14 }),
               onClick: () => {
                 const g = refs.store?.getGraph();
                 if (!g) return;
@@ -675,13 +675,13 @@ export function useEditorInteractions({
           items.push({
             key: 'convertToStack',
             label: t('nodes.stackConvertTo'),
-            icon: createElement(Package, { size: 14 }),
+            icon: createElement(Combine, { size: 14 }),
             onClick: () => { if (node) convertToStack(node, stackCtx); },
           });
           items.push({
             key: 'createStackNode',
             label: t('nodes.stackCreateNew'),
-            icon: createElement(Package, { size: 14 }),
+            icon: createElement(Combine, { size: 14 }),
             onClick: () => { if (node) createStackNode(node, stackCtx); },
           });
         }

@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Package } from 'lucide-react';
+import { Combine } from 'lucide-react';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -363,7 +363,7 @@ export function StackedMediaNodeView({
   }, [commandQueue, uploading, fileToCard, data.cards, node.id]);
 
   // 标题栏图标(尺寸乘 invK 反缩放,与 text/image/video 等节点标题图标同款 13/16)
-  const titleIcon = <Package size={Math.max(9, Math.min(13 * (invK ?? 1), 16))} />;
+  const titleIcon = <Combine size={Math.max(9, Math.min(13 * (invK ?? 1), 16))} />;
 
   /** 替换活跃卡片内容(主图区替换按钮) */
   const handleReplacePick = useCallback(async (files: FileList | null) => {
@@ -404,7 +404,7 @@ export function StackedMediaNodeView({
       borderRadius: 8,
       overflow: 'hidden',
     }}>
-      <Package size={22} strokeWidth={1.5} />
+      <Combine size={22} strokeWidth={1.5} />
       {/* 空态文案:对齐图片节点 AIStateView 空态(图标+小字描述),
           上传入口统一为左上角纯 icon 按钮(MainReplaceButton 常显) */}
       <span style={{ fontSize: 11, opacity: 0.7 }}>{uploading ? '上传中…' : '上传图片或视频'}</span>
@@ -445,7 +445,7 @@ export function StackedMediaNodeView({
               ['--ze-slide-from' as string]: `${switchDir * 14}%`,
             } as React.CSSProperties}
           >
-            <StackMediaContent card={activeCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} />
+            <StackMediaContent card={activeCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} invK={invK} isSelected={isSelected} isHovered={isHovered} />
           </div>
         )}
         {isAnimating && previousCard && (
@@ -462,7 +462,7 @@ export function StackedMediaNodeView({
               ['--ze-slide-to' as string]: `${-switchDir * 10}%`,
             } as React.CSSProperties}
           >
-            <StackMediaContent card={previousCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} />
+            <StackMediaContent card={previousCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} invK={invK} isSelected={isSelected} isHovered={isHovered} />
           </div>
         )}
       </div>
