@@ -272,6 +272,28 @@ export function StackedMediaNodeView({
     return () => ro.disconnect();
   }, [hasCards]);
 
+  // ===== T9: 文本卡活跃时自动 uniform 不锁等比 =====
+  // StackNode 恒 lockAspectRatio + GPU scale，文本卡被整体栅格化缩放会模糊且不重排。
+  // 活跃卡为文本时置位 data.scaleOverride='real'：渲染层强制真实尺寸(文本重排)，
+  // resize 同步解锁等比(对齐 text 节点自由宽高语义)；切回媒体卡时清除恢复 GPU 等比。
+  // 直接 updateNode 落 data(不入命令历史，与 B1 文本落盘同策略，避免切换卡污染撤销栈)。
+  // 依赖数组仅含 wantsRealSize:上层 updateNode 是每渲染新建的内联箭头,若入依赖
+  // 则「effect 写入 → node.data 新引用 → 重渲染 → effect 重跑」形成无限循环
+  // (用户验收反馈 Maximum update depth exceeded);条件内部读 node.data 均为最新值。
+  const wantsRealSize = activeCard?.sourceType === 'text';
+  useEffect(() => {
+    const dataRec = (node.data ?? {}) as Record<string, unknown>;
+    const hasOverride = dataRec.scaleOverride === 'real';
+    if (wantsRealSize && !hasOverride) {
+      updateNode({ data: { ...dataRec, scaleOverride: 'real' } });
+    } else if (!wantsRealSize && hasOverride) {
+      const next = { ...dataRec };
+      delete next.scaleOverride;
+      updateNode({ data: next });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsRealSize]);
+
   // ===== 上传:文件 → StackCard 追加(空态/有卡态均可) =====
   const [uploading, setUploading] = useState(false);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);

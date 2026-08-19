@@ -1,6 +1,6 @@
 /** StackNode 的纯呈现组件：媒体预览、替换按钮和导航，不持有图事务状态。 */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Upload, Video } from 'lucide-react';
 import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -75,27 +75,93 @@ function VideoThumb({ src }: { src: string }): React.ReactElement {
     : <video src={src} muted preload="auto" playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
 }
 
-/** 文本卡片编辑:本地草稿 + onBlur 落盘(避免每次按键污染命令历史)
- *  拖拽拦截对齐 text-node-view:编辑区外(pointer 落在 padding 空白)阻断冒泡,
- *  防止选中/划词时误触发节点拖拽;编辑器内部交互不拦截 */
+/** 文本卡片编辑:完整编辑状态机(移植 text-node-view 交互契约,见 .trae 早期文档经验)
+ *  - 非编辑态:静态渲染 HTML,不拦截指针 —— 单击选中/拖拽移动节点,与普通节点一致
+ *  - 双击进入编辑态:挂载 contentEditable + 拖拽拦截(保留划词能力)
+ *  - 退出白名单(document mousedown capture):胶囊工具栏渲染在节点树外部(canvas overlay,
+ *    与节点是兄弟关系),closest('[data-node-shell]') 无法命中 —— 必须用 data 属性白名单
+ *    [data-capsule-toolbar],否则点加粗等按钮会误退出编辑(早期文档核心经验)
+ *  - 本地草稿:退出/卸载(切卡)时差异落盘,避免逐键污染命令历史 */
 function StackTextEditor({ html, isDark, onCommit }: { html: string; isDark: boolean; onCommit: (html: string) => void }): React.ReactElement {
+  const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(html);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // ref 镜像供卸载 cleanup/退出回调读取最新值(避免 stale closure 丢落盘)
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const htmlRef = useRef(html);
+  htmlRef.current = html;
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
   useEffect(() => { setDraft(html); }, [html]);
+
+  const commitIfChanged = useCallback((): void => {
+    if (draftRef.current !== htmlRef.current) onCommitRef.current(draftRef.current);
+  }, []);
+
+  const exitEditing = useCallback((): void => {
+    setIsEditing(false);
+    commitIfChanged();
+  }, [commitIfChanged]);
+
+  // 进入编辑态后聚焦 contentEditable(对齐 text-node-view)
+  useEffect(() => {
+    if (!isEditing) return;
+    const editable = wrapperRef.current?.querySelector('.zxe-content-editable') as HTMLElement | null;
+    editable?.focus();
+  }, [isEditing]);
+
+  // 编辑态:点击节点外退出 —— 白名单机制(data 属性,不用 class 名)
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleMouseDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement;
+      if (wrapperRef.current?.contains(target)) return;
+      if (target.closest('[data-node-shell]')) return;
+      if (target.closest('[data-capsule-toolbar]')) return;
+      if (target.closest('.zxe-rt-wrap')) return;
+      exitEditing();
+    };
+    document.addEventListener('mousedown', handleMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleMouseDown, true);
+  }, [isEditing, exitEditing]);
+
+  // 卸载兜底:编辑中切卡/收纳导致组件卸载时落盘草稿
+  useEffect(() => () => {
+    if (draftRef.current !== htmlRef.current) onCommitRef.current(draftRef.current);
+  }, []);
+
+  // 编辑态拖拽拦截:编辑区外(padding 空白/工具条)阻断冒泡防节点拖拽,
+  // 编辑区内部放行保留划词;双通道(pointer+mouse)对齐 text-node-view
   const interceptDrag = (e: React.PointerEvent | React.MouseEvent): void => {
     const target = e.target as HTMLElement;
     if (!target.closest('.zxe-content-editable')) {
       e.stopPropagation();
     }
   };
+
+  if (!isEditing) {
+    // 非编辑态:静态 HTML —— 可单击选中/直接拖拽节点,双击才进编辑
+    return (
+      <div
+        style={{ width: '100%', height: '100%', overflowY: 'auto', padding: '12px 16px', boxSizing: 'border-box', fontSize: 14, lineHeight: 1.6, cursor: 'text' }}
+        onDoubleClick={() => setIsEditing(true)}
+        dangerouslySetInnerHTML={{ __html: html || '<span style="opacity:0.5">双击编辑文本</span>' }}
+      />
+    );
+  }
+
   return (
     <div
+      ref={wrapperRef}
       className="nodrag nopan nowheel"
       style={{ width: '100%', height: '100%', overflowY: 'auto', padding: '12px 16px', boxSizing: 'border-box', fontSize: 14, lineHeight: 1.6 }}
       onPointerDown={interceptDrag}
       onMouseDown={interceptDrag}
-      onBlur={() => { if (draft !== html) onCommit(draft); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); exitEditing(); } }}
     >
-      <SelfRichTextEditor value={draft} onChange={setDraft} hideToolbar isDark={isDark} />
+      <SelfRichTextEditor value={draft} onChange={setDraft} hideToolbar isDark={isDark} onEscape={exitEditing} />
     </div>
   );
 }
@@ -149,7 +215,21 @@ export function StackBottomNav({ cards, activeIndex, onJump, onPrev, onNext }: {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const thumbCount = navWidth >= 300 ? THUMB_COUNT_MAX : navWidth >= 220 ? 3 : 1;
+  // T10: 降档阈值 ±10px 滞回 —— resize 在阈值(300/220)附近逐帧抖动时，
+  // 无滞回会让缩略图数量 1/3/5 反复切换(图标来回跳动)；升档需越过 阈值+10，降档需跌破 阈值-10
+  const [thumbTier, setThumbTier] = useState<number>(THUMB_COUNT_MAX);
+  useEffect(() => {
+    setThumbTier((prev) => {
+      const H = 10;
+      let next = prev;
+      if (next === THUMB_COUNT_MAX && navWidth < 300 - H) next = navWidth < 220 - H ? 1 : 3;
+      else if (next === 3 && navWidth < 220 - H) next = 1;
+      else if (next === 1 && navWidth >= 220 + H) next = navWidth >= 300 + H ? THUMB_COUNT_MAX : 3;
+      else if (next === 3 && navWidth >= 300 + H) next = THUMB_COUNT_MAX;
+      return next;
+    });
+  }, [navWidth]);
+  const thumbCount = thumbTier;
   const half = Math.floor(thumbCount / 2);
   const start = Math.max(0, Math.min(activeIndex - half, Math.max(0, total - thumbCount)));
   // 导航底色对齐剧本节点「黑色标题栏」:暗色 #1b1b1b / 亮色 #fafaf7

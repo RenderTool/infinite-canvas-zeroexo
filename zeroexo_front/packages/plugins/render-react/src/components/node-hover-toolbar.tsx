@@ -192,10 +192,11 @@ export function NodeHoverToolbar({
   const textColor = theme?.toolbar.text ?? '#f5f5f4';
   const borderColor = theme?.toolbar.border ?? 'rgba(255,255,255,0.1)';
   const dangerColor = theme?.toolbar.danger ?? '#ff6b6b';
-  // 节点颜色作为 accent(组节点用 group 主题色,普通节点用 ext.color)
+  // 选中态 accent 统一走主题选中色系(不用 ext.color 类型色)——视频节点 ext.color
+  // 为蓝色 #3b82f6,会在选中/悬停工具栏出现蓝色样式(用户要求选中态零蓝色)
   const nodeAccent = isGroupNode
     ? (theme?.group.outlineSelectedColor ?? '#e94560')
-    : (ext?.color ?? theme?.toolbar.accent ?? '#e94560');
+    : (theme?.toolbar.accent ?? '#e94560');
   // hover 背景
   const hoverBg = theme?.mode === 'dark'
     ? 'rgba(255,255,255,0.08)'

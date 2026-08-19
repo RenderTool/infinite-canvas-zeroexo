@@ -247,10 +247,12 @@ export function NodeCapsuleToolbar({
   const borderColor = theme.toolbar.border ?? 'rgba(0,0,0,0.1)';
   const textColor = theme.toolbar.text ?? '#292524';
   const dangerColor = theme.toolbar.danger ?? '#dc2626';
+  const themeAccent = theme.toolbar.accent ?? '#e94560';
+  // 选中态 accent 统一走主题选中色系,不再用 ext.color 类型色 —— 视频节点 ext.color
+  // 为蓝色 #3b82f6,会在选中态工具栏出现蓝色样式(用户要求选中态零蓝色,仅保留卡片投影)
   const nodeAccent = isGroupNode
     ? (theme.group.outlineSelectedColor ?? '#e94560')
-    : (ext?.color ?? theme.toolbar.accent ?? '#e94560');
-  const themeAccent = theme.toolbar.accent ?? '#e94560';
+    : themeAccent;
   const hoverBg = theme.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
   const dividerBg = theme.mode === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
 

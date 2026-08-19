@@ -276,9 +276,15 @@ export function NodeShell({
   const tileMode = (node.borderRadius ?? 8) === 0;
   // opacity 不在此层应用(由外层 NodeItem 统一应用一次,避免双层叠加)
 
-  // 引脚可见性: hover 节点时显示,选中节点时也显示,或连线拖拽期间强制显示所有节点 Pin
-  // 默认隐藏,鼠标悬停节点时显示 Pin;拖拽连线时所有节点 Pin 可见
+  // 引脚可见性: hover 节点时显示，选中节点时也显示，或连线拖拽期间强制显示所有节点 Pin
+  // 默认隐藏，鼠标悬停节点时显示 Pin；拖拽连线时所有节点 Pin 可见
   const pinVisible = isHovered || isSelected || forceShowPins;
+  
+  // T8: 视口反缩放改走连续 CSS 变量(--zx-invk 由 NodeLayer 容器每帧写入，与视口
+  // transform 同源同帧)。量化 invK 仅用于 JS 计算(磁吸几何/缓存失效门控)，不再驱动
+  // 标题/PIN 的 CSS 几何，消除视口缩放时「桶内漂移 + 跨桶猛跳」的来回跳动。
+  // nodeScale 除法仍为 JS 数值(节点 resize 每帧重渲染，天然连续)。
+  const invKVar = 'var(--zx-invk, 1)';
 
   return (
     <div
@@ -300,15 +306,15 @@ export function NodeShell({
             position: 'absolute',
             // 标题栏:外层节点(带 viewport scale k) != 内层自身 transform scale(1/sx,1/sy)。
             // 视觉高 = height × (1/sy 自身) × sy(节点) × k(视口) = height × k → 屏幕恒定。
-            // 视觉位置 top 不受自身 transform 影响,只被节点缩放×视口缩放 → 需除 nodeScale.sy。
-            // fontSize 同理:视觉 = fontSize × k,按 invK 折算即可。
-            top: -(NODE_TITLE_HEIGHT + 2) * invK / nodeScale.sy,
+            // 视觉位置 top 不受自身 transform 影响，只被节点缩放×视口缩放 → 需除 nodeScale.sy。
+            // fontSize 同理:视觉 = fontSize × k，按连续 --zx-invk 折算即可。
+            top: `calc(${-(NODE_TITLE_HEIGHT + 2) / nodeScale.sy}px * ${invKVar})`,
             left: 0,
             // 宽度跟随节点缩放:布局宽 = NodeShell宽 × sx,自身 scale(1/sx) 缩回后
             // 视觉宽 = NodeShell宽 × sx × k = 节点视觉宽度。若用 left:0/right:0(固定100%)
             // 标题栏视觉宽恒定,节点放大时右侧 titleSize 不会跟随节点 → 文本停驻错位
             width: `${Math.max(0.2, nodeScale.sx) * 100}%`,
-            height: NODE_TITLE_HEIGHT * invK,
+            height: `calc(${NODE_TITLE_HEIGHT}px * ${invKVar})`,
             transform: `scale(${1 / nodeScale.sx}, ${1 / nodeScale.sy})`,
             transformOrigin: 'top left',
             padding: '0 6px',
@@ -316,8 +322,8 @@ export function NodeShell({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 4,
-            // fontSize 视觉 = fontSize × k:按 invK 折算保持屏幕恒定(下限同样折算)
-            fontSize: Math.max(8 * invK, 13 * invK),
+            // fontSize 视觉 = fontSize × k:按连续 --zx-invk 折算保持屏幕恒定(下限 8px 同步折算)
+            fontSize: `max(${8 * invK}px, calc(13px * ${invKVar}))`,
             color: titleColor,
             fontWeight: 600,
             userSelect: 'none',
@@ -364,9 +370,9 @@ export function NodeShell({
               {title ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span> : null}
             </span>
           )}
-          {/* 右:尺寸规格 — 使用 invK 自适应视口缩放,保持与标题文本的相对比例 */}
+          {/* 右:尺寸规格 — 使用连续 --zx-invk 自适应视口缩放，保持与标题文本的相对比例 */}
           {titleSize ? (
-            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: Math.max(6 * invK, 10 * invK) }}>{titleSize}</span>
+            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: `max(${6 * invK}px, calc(10px * ${invKVar}))` }}>{titleSize}</span>
           ) : null}
         </div>
       ) : null}
@@ -410,7 +416,7 @@ export function NodeShell({
               padding: contentPadding,
               overflow: 'auto',
               color: contentTextColor,
-              fontSize: Math.max(7, 11 * invK),
+              fontSize: `max(${7 * invK}px, calc(11px * ${invKVar}))`,
             }}
           >
             {children}
@@ -426,15 +432,15 @@ export function NodeShell({
         onPointerLeave={handlePinContainerPointerLeave}
         style={{
           position: 'absolute',
-          left: -40 * invK / nodeScale.sx,
+          left: `calc(${-40 / nodeScale.sx}px * ${invKVar})`,
           top: 0,
           bottom: 0,
-          width: 32 * invK / nodeScale.sx,
+          width: `calc(${32 / nodeScale.sx}px * ${invKVar})`,
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-around',
           alignItems: 'flex-end',
-          padding: `${8 * invK / nodeScale.sy}px 0`,
+          padding: `calc(${8 / nodeScale.sy}px * ${invKVar}) 0`,
           zIndex: 30,
           pointerEvents: 'auto',
         }}
@@ -490,15 +496,15 @@ export function NodeShell({
         onPointerLeave={handlePinContainerPointerLeave}
         style={{
           position: 'absolute',
-          right: -40 * invK / nodeScale.sx,
+          right: `calc(${-40 / nodeScale.sx}px * ${invKVar})`,
           top: 0,
           bottom: 0,
-          width: 32 * invK / nodeScale.sx,
+          width: `calc(${32 / nodeScale.sx}px * ${invKVar})`,
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-around',
           alignItems: 'flex-start',
-          padding: `${8 * invK / nodeScale.sy}px 0`,
+          padding: `calc(${8 / nodeScale.sy}px * ${invKVar}) 0`,
           zIndex: 30,
           pointerEvents: 'auto',
         }}

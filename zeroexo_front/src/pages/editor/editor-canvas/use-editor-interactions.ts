@@ -296,6 +296,9 @@ export function useEditorInteractions({
   );
 
   // 连线拖拽时高亮鼠标下方的节点(提示可自动连接)
+  // 仅 pending 期间返回 hoverNodeId:普通节点悬停(handleNodePointerEnter)也会写
+  // hoverNodeId 供 Pin 可见性使用,若不判 pending,普通 hover 会误触发 NodeShell
+  // 的蓝色 connectionHover 描边(用户验收反馈 Hover 变蓝)
   const connectionHoverNodeId = useSyncExternalStore(
     useCallback((cb: () => void) => {
       const ctrl = refs.connectionController;
@@ -304,7 +307,7 @@ export function useEditorInteractions({
     }, [refs.connectionController]),
     useCallback(() => {
       const ctrl = refs.connectionController;
-      return ctrl ? ctrl.getHoverNodeId() : null;
+      return ctrl && ctrl.getPending() !== null ? ctrl.getHoverNodeId() : null;
     }, [refs.connectionController]),
   );
 

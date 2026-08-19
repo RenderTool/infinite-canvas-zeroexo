@@ -168,8 +168,9 @@ export function createDefaultEditor(options: DefaultEditorOptions): DefaultEdito
     const ext = nodes.get(node.type);
     if (!ext || !ext.resizable) return null;
     // freeResize 数据属性可覆盖扩展的 lockAspectRatio(用户通过工具栏切换锁比例)
-    const nodeData = node.data as { freeResize?: boolean } | null;
-    const lockAspectRatio = ext.lockAspectRatio && !nodeData?.freeResize;
+    // T9: scaleOverride='real'(StackNode 文本卡活跃)同样解锁等比——文本查看期间自由宽高重排
+    const nodeData = node.data as { freeResize?: boolean; scaleOverride?: string } | null;
+    const lockAspectRatio = ext.lockAspectRatio && !nodeData?.freeResize && nodeData?.scaleOverride !== 'real';
     return {
       resizable: true,
       minSize: ext.minSize,

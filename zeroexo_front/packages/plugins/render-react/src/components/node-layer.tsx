@@ -245,12 +245,15 @@ const NodeItem = React.memo(
     // 旧扩展仍可使用 lockAspectRatio；新节点优先从 Runtime Contract 声明缩放策略。
     const scaleContract = ext?.runtime?.definition?.size;
     const canScale = ext?.lockAspectRatio === true || scaleContract?.mode === 'uniform';
+    // T9: per-node 缩放覆写 —— StackNode 文本卡活跃时置位 scaleOverride='real'，
+    // 强制真实尺寸渲染(文本重排不糊)，同步解锁 resize 等比(见 preset accessor)
+    const scaleOverrideReal = (node.data as { scaleOverride?: string } | undefined)?.scaleOverride === 'real';
     const rawSx = defaultSize && defaultSize.width > 0 ? size.width / defaultSize.width : 1;
     const rawSy = defaultSize && defaultSize.height > 0 ? size.height / defaultSize.height : 1;
     // resize 结果整数化会引入 ≤0.5px 高度舍入误差,固定比例容差 0.001 会把等比锁定的
     // 中间尺寸误判为非等比 → 回退真实尺寸渲染(内容挤压/字体跳跃)。改用高度偏差 ≤0.75px 判定
     const isUniformScale = Math.abs(rawSx - rawSy) * (defaultSize?.height ?? 1) <= 0.75;
-    const useScale = canScale && isUniformScale && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
+    const useScale = canScale && isUniformScale && !scaleOverrideReal && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
     const sx = useScale ? rawSx : 1;
     const sy = useScale ? rawSy : 1;
     const domW = useScale ? defaultSize.width : size.width;
@@ -359,7 +362,6 @@ const NodeItem = React.memo(
                 key={type}
                 type={type}
                 cursor={cursor}
-                invK={invK}
                 sx={sx}
                 sy={sy}
                 bottomInset={ext?.resizeHandleInset?.bottom}
@@ -401,7 +403,7 @@ const NodeItem = React.memo(
  * - 固定屏幕尺寸(不随视口缩放)
  *
  * 注意:此 handle 渲染在 NodeLayer 容器内(已应用 viewport scale),
- * 且位于节点自身 transform:scale 之内 —— handle 用 invK 反转视口缩放,
+ * 且位于节点自身 transform:scale 之内 —— handle 用连续 CSS 变量 --zx-invk 反转视口缩放,
  * 再用 1/sx, 1/sy 反转节点 GPU scale,双重叠加后保持屏幕 28px 恒定。
  * 特化外观节点(StackNode 外框含底部导航区)可用 bottomInset 指定底部
  * handle 的本地垂直位移,使命中区与可视媒体卡片对齐。
@@ -409,7 +411,6 @@ const NodeItem = React.memo(
 function NodeResizeHandle({
   type,
   cursor,
-  invK,
   sx,
   sy,
   bottomInset,
@@ -417,7 +418,6 @@ function NodeResizeHandle({
 }: {
   type: 'nw' | 'ne' | 'sw' | 'se';
   cursor: string;
-  invK: number;
   /** 节点 GPU scale 因子 X(useScale=false 时传 1) */
   sx: number;
   /** 节点 GPU scale 因子 Y(useScale=false 时传 1) */
@@ -426,14 +426,20 @@ function NodeResizeHandle({
   bottomInset?: number;
   onPointerDown: (e: React.PointerEvent) => void;
 }): React.ReactElement {
-  // 固定屏幕尺寸 28px,外偏 14px
-  // invK 反视口缩放; ÷sx/÷sy 反节点自身 GPU scale(仅角点用 sx,角点高度用 sy)
-  const szW = (28 * invK) / sx;
-  const szH = (28 * invK) / sy;
-  const offX = (14 * invK) / sx;
-  const offY = (14 * invK) / sy;
-  // 底部内缩:本地位移(世界坐标),底部 handle 的 bottom 需叠加该值
-  const inset = (bottomInset ?? 0) / sy;
+  // 固定屏幕尺寸 28px，外偏 14px
+  // T8: invK 部分改走连续 CSS 变量(--zx-invk 由 NodeLayer 容器每帧写入)，
+  // 视口缩放时 handle 尺寸/偏移逐帧连续跟随，不再随 5% 桶量化跳变；
+  // ÷sx/÷sy 仍为 JS 数值(节点 resize 每帧重渲染，天然连续)。
+  const invKVar = 'var(--zx-invk, 1)';
+  const szW = `calc(28px * ${invKVar} / ${sx})`;
+  const szH = `calc(28px * ${invKVar} / ${sy})`;
+  // 负号必须在 calc 内部：`-calc(...)` 会被 CSS 词法解析为不存在的函数名 `-calc`，
+  // 整条声明被丢弃导致 handle 落回静态位置(左上角错位)——验收反馈 T11 二次修复
+  const offY = `calc(14px * ${invKVar} / ${sy})`;
+  const negOffX = `calc(-14px * ${invKVar} / ${sx})`;
+  const negOffY = `calc(-14px * ${invKVar} / ${sy})`;
+  // 底部内缩:本地位移(世界坐标)，底部 handle 的 bottom 需叠加该值
+  const insetPx = (bottomInset ?? 0) / sy;
   // ne/se 用 right/bottom 定位(相对于节点右下角)
   const style: React.CSSProperties = {
     position: 'absolute',
@@ -445,17 +451,17 @@ function NodeResizeHandle({
     backgroundColor: 'transparent',
   };
   if (type === 'nw') {
-    style.left = -offX;
-    style.top = -offY;
+    style.left = negOffX;
+    style.top = negOffY;
   } else if (type === 'ne') {
-    style.right = -offX;
-    style.top = -offY;
+    style.right = negOffX;
+    style.top = negOffY;
   } else if (type === 'sw') {
-    style.left = -offX;
-    style.bottom = inset - offY;
+    style.left = negOffX;
+    style.bottom = `calc(${insetPx}px - ${offY})`;
   } else {
-    style.right = -offX;
-    style.bottom = inset - offY;
+    style.right = negOffX;
+    style.bottom = `calc(${insetPx}px - ${offY})`;
   }
   return (
     <div
@@ -463,13 +469,13 @@ function NodeResizeHandle({
       onPointerDown={onPointerDown}
       style={style}
     >
-      {/* 右下角可见 grip 提示可缩放(验收反馈 B7):屏幕恒定 12px,不可缩放节点不渲染 handle 即天然隐藏 */}
+      {/* 右下角可见 grip 提示可缩放(验收反馈 B7):屏幕恒定 12px，不可缩放节点不渲染 handle 即天然隐藏 */}
       {type === 'se' ? (
         <svg
-          width={12 * invK / sx}
-          height={12 * invK / sy}
           viewBox="0 0 12 12"
-          style={{ position: 'absolute', right: 7 * invK / sx, bottom: 7 * invK / sy, opacity: 0.45, pointerEvents: 'none', transition: 'opacity 0.15s' }}
+          // SVG 的 width/height 属性不支持 calc()/var()，必须走 CSS(style)；
+          // 属性值解析失败会退回默认固有尺寸导致 grip 位置错乱
+          style={{ position: 'absolute', width: `calc(12px * ${invKVar} / ${sx})`, height: `calc(12px * ${invKVar} / ${sy})`, right: `calc(7px * ${invKVar} / ${sx})`, bottom: `calc(7px * ${invKVar} / ${sy})`, opacity: 0.45, pointerEvents: 'none', transition: 'opacity 0.15s' }}
         >
           <path d="M10.5 5.5 L5.5 10.5 M10.5 8.5 L8.5 10.5 M10.5 2.5 L2.5 10.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
         </svg>
@@ -612,7 +618,12 @@ export const NodeLayer = React.memo(function NodeLayer({
           willChange: 'transform',
           WebkitBackfaceVisibility: 'hidden',
           backfaceVisibility: 'hidden',
-        }}
+          // T8: 连续 invK CSS 变量 —— 与容器 transform 同源同帧，供子树内反缩放元素
+          // (node-shell 标题/PIN、NodeResizeHandle) 用 calc(base × var(--zx-invk)) 连续跟随。
+          // 量化 invK(5% 桶)仅用于 NodeItem memo 重渲染门控，不再驱动几何，
+          // 消除「桶内漂移 ±2.5% + 跨桶猛跳」的图标/PIN/标题来回跳动。
+          ['--zx-invk' as string]: String(viewport.k > 0 ? 1 / viewport.k : 1),
+        } as React.CSSProperties}
       >
         {filteredNodes.map((node) => {
           const isSelected = selectedIds.has(node.id);

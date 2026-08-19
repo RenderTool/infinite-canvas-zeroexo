@@ -67,7 +67,9 @@ export function DragOffsetWriter({ store, extensions }: DragOffsetWriterProps): 
         const rawSy = defaultSize && defaultSize.height > 0 ? size.height / defaultSize.height : 1;
         // 与 node-layer 一致:高度偏差 ≤0.75px 判等比(容忍 resize 整数化的舍入误差)
         const isUniformScale = Math.abs(rawSx - rawSy) * (defaultSize?.height ?? 1) <= 0.75;
-        const useScale = canScale && isUniformScale && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
+        // T9: 与 node-layer 一致 —— scaleOverride='real'(StackNode 文本卡)强制真实尺寸
+        const scaleOverrideReal = (node.data as { scaleOverride?: string } | undefined)?.scaleOverride === 'real';
+        const useScale = canScale && isUniformScale && !scaleOverrideReal && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
         el.style.transform = buildNodeTransform(pos, useScale ? { sx: rawSx, sy: rawSy } : undefined);
       }
     });
