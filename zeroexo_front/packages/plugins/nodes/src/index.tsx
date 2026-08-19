@@ -148,7 +148,9 @@ function createTextExtension(controller: ConnectionController | null, store: Rea
     category: 'Basic',
     color: '#6b7280',
     defaultSize: { width: 620, height: 348 },
-    runtime: createNodeRuntime({ width: 620, height: 348 }),
+    // Plan#1 T3(验收修正): free→uniform 契约迁移,但**不锁等比**——用户要求自由宽高 resize(内容重排不变形);
+    // 非等比尺寸时 isUniformScale=false 自动回退真实尺寸渲染,等比时才走 GPU scale
+    runtime: createNodeRuntime({ width: 620, height: 348 }, { mode: 'uniform' }),
     capabilities: { stackable: true, capabilities: ['text'] },
     resizable: true,
     viewContract: {

@@ -43,14 +43,17 @@ const CREATION_CAPABILITIES: Record<CreationNodeType, NodeCapabilities> = {
   workbench: { stackable: false, capabilities: ['workbench'] },
 };
 
-/** 构建剧创节点 runtime contract(自由缩放 + 标准 NodeShell 外观) */
+/** 构建剧创节点 runtime contract(uniform 契约 + 标准 NodeShell 外观)
+ * Plan#1 T3(验收修正): free→uniform 契约迁移,但**不声明 lockAspectRatio**——
+ * 用户要求 script/storyboard/workbench 保持自由宽高 resize(内部列表重排不变形);
+ * 非等比尺寸 isUniformScale=false 自动回退真实尺寸渲染 */
 function createCreationRuntime(defaultSize: { width: number; height: number }): NodeRuntimeContract {
   return {
     definition: {
       schemaVersion: 1,
       size: {
-        basis: { ...defaultSize, referenceSize: 500 },
-        mode: 'free',
+        basis: { ...defaultSize },
+        mode: 'uniform',
         preserveAspectRatio: false,
       },
       visual: {

@@ -296,8 +296,9 @@ async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
     const data = (node as Record<string, unknown>).data as Record<string, unknown> | undefined;
     if (!data) continue;
     const storageKey = data.storageKey as string | undefined;
-    const content = data.content as string | undefined;
-    if (storageKey || !content || !content.startsWith('blob:')) continue;
+    // data.content 可能是非字符串(堆叠媒体节点为 cards 数组等),必须 typeof 收窄后再判前缀
+    const content = data.content;
+    if (storageKey || typeof content !== 'string' || !content.startsWith('blob:')) continue;
 
       // blob URL 仅在创建它的会话内有效。刷新/revokeObjectURL 后 fetch 会失败,
       // 且每次 fetch 都会触发浏览器控制台 net::ERR_FILE_NOT_FOUND。
