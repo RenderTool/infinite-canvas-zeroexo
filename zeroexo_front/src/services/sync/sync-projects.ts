@@ -30,7 +30,7 @@ import {
   takeChangedNodeIds,
   scheduleAutoRetry,
 } from './sync-utils.js';
-import { syncProjectResourcesToCloud, syncProjectResourcesFromCloud } from './sync-resources.js';
+import { syncProjectResourcesToCloud } from './sync-resources.js';
 
 export interface CloudProject {
   id: string;
@@ -452,7 +452,9 @@ export async function mergeCloudProjectToLocal(cloud: CloudProject, _force = fal
 
   const cloudNodes = (cloud.scene as GraphModel['nodes']) ?? [];
 
-  await syncProjectResourcesFromCloud(cloudNodes);
+  // 资源批量下载已移除(2026-08 下载策略重构):fullSync 只同步 scene JSON 快照。
+  // 节点资源由渲染层 useProgressiveImage 按可见性/缩放级别按需拉取 LOD 档位,
+  // 否则全项目全节点串行下载会在 fullSync 阶段直接打爆限流(429)。
 
   if (!local) {
     const graph: GraphModel = {

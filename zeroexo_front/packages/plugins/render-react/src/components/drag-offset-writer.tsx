@@ -9,7 +9,7 @@
  * 可选 GPU 等比 scale;低缩放 LOD 时仅 translate),保证两种路径产物字符串一致;
  * 拖动结束(偏移清空)后 interaction 提交 MoveNodesCommand,React 渲染最终位置,无跳变。
  */
-import { useEffect } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import type { NodeTypeExtension } from '@zeroexo/core';
 import type { ReactGraphStore } from '../store.js';
 
@@ -65,7 +65,8 @@ export function DragOffsetWriter({ store, extensions }: DragOffsetWriterProps): 
         const canScale = ext?.lockAspectRatio === true || scaleContract?.mode === 'uniform';
         const rawSx = defaultSize && defaultSize.width > 0 ? size.width / defaultSize.width : 1;
         const rawSy = defaultSize && defaultSize.height > 0 ? size.height / defaultSize.height : 1;
-        const isUniformScale = Math.abs(rawSx - rawSy) <= 0.001;
+        // 与 node-layer 一致:高度偏差 ≤0.75px 判等比(容忍 resize 整数化的舍入误差)
+        const isUniformScale = Math.abs(rawSx - rawSy) * (defaultSize?.height ?? 1) <= 0.75;
         const useScale = canScale && isUniformScale && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
         el.style.transform = buildNodeTransform(pos, useScale ? { sx: rawSx, sy: rawSy } : undefined);
       }

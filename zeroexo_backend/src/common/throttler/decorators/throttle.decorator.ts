@@ -28,21 +28,38 @@ import { THROTTLE_TIERS } from '../throttler.config';
 export const THROTTLE_TIER_META = 'throttler:tier';
 
 /**
+ * 业务档元数据载体:tier 名 + 生效的 ttl/limit。
+ * ApiThrottlerGuard 按此元数据动态执行独立计数。
+ */
+export interface BusinessTierConfig {
+  tier: string;
+  ttl: number;
+  limit: number;
+}
+
+/**
  * 通用装饰器工厂
+ *
+ * v6 语义修正(2026-08-19,二次修正):
+ * - 一版修正把业务档注册进 forRoot throttlers + SkipThrottle,但 v6 guard
+ *   会把 forRoot 数组应用到所有端点,导致 sms/register 等业务档叠加
+ *   卡死全部接口(fullSync 429 回归)。已回滚。
+ * - 现行方案:全局三档用 @Throttle 覆盖同名 throttler(v6 标准语义);
+ *   业务档仅写 THROTTLE_TIER_META 元数据(含 ttl/limit,支持
+ *   AiThrottle 参数覆盖),由 ApiThrottlerGuard.canActivate 动态执行
+ *   独立计数——不叠加全局三档、不叠加其它业务档,也不影响无装饰器端点。
  */
 function tierDecorator(
   tier: keyof typeof THROTTLE_TIERS,
   config: { ttl: number; limit: number },
 ) {
+  // 全局三档装饰器:直接覆盖同名全局 throttler,不跳过其它档
+  if (tier === 'short' || tier === 'medium' || tier === 'long') {
+    return applyDecorators(SetMetadata(THROTTLE_TIER_META, tier), Throttle({ [tier]: { ttl: config.ttl, limit: config.limit } }));
+  }
+  // 业务档位:只写元数据,由 ApiThrottlerGuard 动态独立计数
   return applyDecorators(
-    SetMetadata(THROTTLE_TIER_META, tier),
-    Throttle({
-      // 同时设置同名档(覆盖全局默认)+ 短/中/长档兜底
-      // 核心档覆盖(同名短档优先匹配自定义 ttl/limit)
-      short: { ttl: config.ttl, limit: config.limit },
-      medium: { ttl: config.ttl, limit: config.limit },
-      long: { ttl: config.ttl, limit: config.limit },
-    }),
+    SetMetadata(THROTTLE_TIER_META, { tier, ttl: config.ttl, limit: config.limit } satisfies BusinessTierConfig),
   );
 }
 
@@ -104,3 +121,11 @@ export const CanvasCreateThrottle = () =>
 /** 资源预签名:1000 次/分(覆盖批量 presign) */
 export const PresignThrottle = () =>
   tierDecorator('presign', THROTTLE_TIERS.presign);
+
+/**
+ * 媒体下载:3000 次/分。
+ * 资源加载是用户可感知的关键路径,必须远离限流体验;
+ * 仅作为匿名可读前缀与极端滥用的粗粒度防线。
+ */
+export const MediaReadThrottle = () =>
+  tierDecorator('mediaRead', THROTTLE_TIERS.mediaRead);

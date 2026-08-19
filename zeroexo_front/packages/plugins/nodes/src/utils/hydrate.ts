@@ -23,26 +23,74 @@ import { getToken } from '@/services/api-client.js';
 /** 后端媒体 URL 内存缓存(key = 原始 URL, value = 认证后的 blob URL),避免同一资源重复 fetch */
 const backendUrlCache = new Map<string, string>();
 
+/** 进行中认证请求去重(同 URL 并发挂载多节点时只发一次 fetch) */
+const inflightAuth = new Map<string, Promise<string | null>>();
+
+/** 全局媒体认证并发上限:大视口下可见节点众多时防止瞬时 burst 撞限流 */
+const MAX_MEDIA_FETCH = 6;
+let activeMediaFetch = 0;
+const mediaFetchQueue: Array<() => void> = [];
+
+function runWithMediaLimit<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = (): void => {
+      activeMediaFetch++;
+      fn().then(
+        (v) => { activeMediaFetch--; mediaFetchQueue.shift()?.(); resolve(v); },
+        (e) => { activeMediaFetch--; mediaFetchQueue.shift()?.(); reject(e); },
+      );
+    };
+    if (activeMediaFetch < MAX_MEDIA_FETCH) start();
+    else mediaFetchQueue.push(start);
+  });
+}
+
+/** 429 退避重试(优先尊重 Retry-After 头,否则指数退避;最多 2 次) */
+async function fetchMediaWithRetry(url: string, init: RequestInit, retries = 2): Promise<Response> {
+  let res = await fetch(url, init);
+  for (let i = 0; i < retries && res.status === 429; i++) {
+    const retryAfterSec = Number(res.headers.get('Retry-After') ?? 0);
+    const waitMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 500 * 2 ** i;
+    await new Promise((r) => setTimeout(r, waitMs));
+    res = await fetch(url, init);
+  }
+  return res;
+}
+
 /**
  * 带 JWT 认证的媒体 URL: fetch + Authorization header → blob URL
  * <img>/<video>/<audio> 标签不会发送 Authorization header,私有资源(resources/front/ 前缀)
  * 直接使用 URL 会返回 403,需先经 fetch 携带 token 换取 blob URL 再渲染。
  * 失败返回 null,由调用方降级到 content(可能是 blob/data URL)。
+ * 护栏:全局并发上限 + 同 URL 去重 + 429 退避重试(按需加载下可见节点可能很多)。
  */
 async function authorizeMediaUrl(url: string): Promise<string | null> {
   const cached = backendUrlCache.get(url);
   if (cached) return cached;
-  const token = getToken();
-  try {
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    backendUrlCache.set(url, blobUrl);
-    return blobUrl;
-  } catch {
-    return null;
-  }
+  const pending = inflightAuth.get(url);
+  if (pending) return pending;
+
+  const task = (async (): Promise<string | null> => {
+    try {
+      // token 在出队执行时读取(排队期间可能已完成无感刷新)
+      const res = await runWithMediaLimit(() => {
+        const token = getToken();
+        return fetchMediaWithRetry(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      backendUrlCache.set(url, blobUrl);
+      return blobUrl;
+    } catch {
+      return null;
+    } finally {
+      inflightAuth.delete(url);
+    }
+  })();
+
+  inflightAuth.set(url, task);
+  return task;
 }
 
 /** 缩略图阈值: invK ≥ 4(k ≤ 0.25)时只用缩略图 */

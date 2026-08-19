@@ -59,6 +59,8 @@ export interface VideoNodeViewProps extends NodeRendererProps {
   contentOnly?: boolean;
   /** 堆叠舞台中保持原生播放器可见,不以失焦缩略图覆盖。 */
   forcePlayback?: boolean;
+  /** 空态底色覆写(StackNode 内统一为 contentSurface,与空文本卡一致) */
+  emptyBackground?: string;
 }
 
 export function VideoNodeView({
@@ -75,6 +77,7 @@ export function VideoNodeView({
   store,
   contentOnly = false,
   forcePlayback = false,
+  emptyBackground,
 }: VideoNodeViewProps): React.ReactElement {
   const data = (node.data ?? {}) as Partial<VideoNodeData>;
   const status = data.status ?? 'idle';
@@ -506,7 +509,7 @@ export function VideoNodeView({
           hasContent={hasContent}
           onReplace={handleReplaceClick}
           replaceBtnPosition="left"
-          backgroundColor={nodeColor}
+          backgroundColor={emptyBackground ?? nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
         >
           {renderContent()}

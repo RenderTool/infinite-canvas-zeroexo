@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Package, Upload } from 'lucide-react';
+import { Package } from 'lucide-react';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -21,7 +21,7 @@ import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView } from '../base-node-view.js';
 import { StackCollectToast } from './stacked-media-toast.js';
-import { activateStackCard, appendCards, collectCard, mergeStacks, replaceCardContent, undoCollect as undoCollectModel } from './stacked-media-model.js';
+import { activateStackCard, appendCards, collectCard, dismissCollected, mergeStacks, replaceCardContent, updateCardData } from './stacked-media-model.js';
 import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
 import {
   parseStackedMediaData,
@@ -51,7 +51,20 @@ const STACK_DISPLAY_HEIGHT = 348;
 const STACK_NAVIGATION_HEIGHT = 56;
 
 /** 切换动画时长 */
-const SWITCH_ANIM_MS = 460;
+const SWITCH_ANIM_MS = 340;
+
+/** 卡片切换动画:方向感知滑动 + 淡入淡出 + 阴影层次(重做,原 rotateY 3D 翻页方案用户未认可)
+ * 仅 transform/opacity/box-shadow 参与动画,不触发全画布重排 */
+const STACK_SWITCH_CSS = `
+@keyframes ze-stack-card-in {
+  from { transform: translateX(var(--ze-slide-from, 14%)) scale(0.985); opacity: 0.25; box-shadow: 0 16px 40px rgba(0,0,0,0.28); }
+  to { transform: translateX(0) scale(1); opacity: 1; box-shadow: 0 0 0 rgba(0,0,0,0); }
+}
+@keyframes ze-stack-card-out {
+  from { transform: translateX(0) scale(1); opacity: 1; }
+  to { transform: translateX(var(--ze-slide-to, -10%)) scale(0.97); opacity: 0; }
+}
+`;
 
 /** prefers-reduced-motion：减少动画用户不参与翻页动效（降级为直接切换） */
 const IS_REDUCED_MOTION =
@@ -86,6 +99,9 @@ export function StackedMediaNodeView({
   const activeCard = hasCards ? data.cards[activeIndex] ?? null : null;
   /** 切换动画期间保留前一张卡片作为鬼影层。 */
   const [isAnimating, setIsAnimating] = useState(false);
+  /** 切换方向(1=下一张/从右入,-1=上一张/从左入)与切换序号(驱动 keyframes 重播) */
+  const [switchDir, setSwitchDir] = useState<1 | -1>(1);
+  const [switchEpoch, setSwitchEpoch] = useState(0);
   const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -151,9 +167,11 @@ export function StackedMediaNodeView({
   /** 开始切换动画(期间视频渲染静帧缩略图;减少动画用户直接切换) */
   const [previousCard, setPreviousCard] = useState<StackCard | null>(null);
 
-  const beginSwitchAnimation = useCallback(() => {
+  const beginSwitchAnimation = useCallback((dir: 1 | -1) => {
     if (IS_REDUCED_MOTION) return;
     setPreviousCard(activeCard);
+    setSwitchDir(dir);
+    setSwitchEpoch((e) => e + 1);
     setIsAnimating(true);
     if (animTimerRef.current) clearTimeout(animTimerRef.current);
     animTimerRef.current = setTimeout(() => setIsAnimating(false), SWITCH_ANIM_MS);
@@ -161,7 +179,7 @@ export function StackedMediaNodeView({
 
   const handlePrev = useCallback(() => {
     if (activeIndex > 0) {
-      beginSwitchAnimation();
+      beginSwitchAnimation(-1);
       const nextIndex = activeIndex - 1;
       if (commandQueue) {
         commandQueue.execute(activateStackCard(node, data, nextIndex).command);
@@ -174,7 +192,7 @@ export function StackedMediaNodeView({
 
   const handleNext = useCallback(() => {
     if (activeIndex < data.cards.length - 1) {
-      beginSwitchAnimation();
+      beginSwitchAnimation(1);
       const nextIndex = activeIndex + 1;
       if (commandQueue) {
         commandQueue.execute(activateStackCard(node, data, nextIndex).command);
@@ -187,7 +205,7 @@ export function StackedMediaNodeView({
 
   const handleJump = useCallback((index: number) => {
     if (index === activeIndex) return;
-    beginSwitchAnimation();
+    beginSwitchAnimation(index > activeIndex ? 1 : -1);
     if (commandQueue) {
       commandQueue.execute(activateStackCard(node, data, index).command);
     } else {
@@ -224,14 +242,35 @@ export function StackedMediaNodeView({
   const handleCollectRef = useRef(handleCollect);
   handleCollectRef.current = handleCollect;
 
-  // ===== 撤销收纳:恢复源节点 + 连线 + 卡片列表(快照反向命令,不依赖 undo 栈) =====
+  // ===== 收纳提示胶囊「移出」:与胶囊 eject 同语义(解绑为独立节点,不恢复连线) =====
   const handleUndoCollect = useCallback(() => {
     if (!collectToast || !commandQueue) return;
-    const { sourceNode, edge, prevActiveIndex, prevCards } = collectToast;
-    const result = undoCollectModel(node.id, sourceNode, edge, prevCards, prevActiveIndex);
+    const { sourceNode, cardId } = collectToast;
+    const result = dismissCollected(node.id, data.cards, data.activeIndex, cardId, sourceNode);
     commandQueue.execute(result.command);
     setActiveIndex(result.activeIndex);
-  }, [collectToast, commandQueue, node.id]);
+  }, [collectToast, commandQueue, node.id, data.cards, data.activeIndex]);
+
+  // ===== 文本卡片编辑落盘(失焦时单次写入,不逐键污染命令历史) =====
+  const handleTextCommit = useCallback((cardId: string, html: string) => {
+    if (!commandQueue) return;
+    const result = updateCardData(node.id, data.cards, cardId, { content: html });
+    commandQueue.execute(result.command);
+  }, [commandQueue, node.id, data.cards]);
+
+  // ===== 舞台容器实测尺寸:内容随容器走,resize/降档时不挤压上方内容 =====
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState({ width: 620 - 32, height: STACK_DISPLAY_HEIGHT });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (r && r.width > 0 && r.height > 0) setStageSize({ width: r.width, height: r.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasCards]);
 
   // ===== 上传:文件 → StackCard 追加(空态/有卡态均可) =====
   const [uploading, setUploading] = useState(false);
@@ -322,6 +361,11 @@ export function StackedMediaNodeView({
   }, [commandQueue, uploading, activeCard, fileToCard, data.cards, activeIndex, node.id]);
 
   // ===== 内容区 =====
+  const isDark = theme.mode === 'dark';
+  // 内容区表面:NodeTokens 无 contentBackground token,按明暗主题分支取中性表面色(修复暗色主题空态白底)
+  const contentSurface = isDark ? '#161616' : '#ffffff';
+  // 替换/上传文件过滤:活跃卡为视频时优先视频类型,空态/图片卡优先图片(B2)
+  const replaceAccept = activeCard?.sourceType === 'video' ? 'video/*,image/*' : 'image/*,video/*';
   const mainContent = !hasCards ? (
     <div style={{
       position: 'absolute',
@@ -332,37 +376,17 @@ export function StackedMediaNodeView({
       justifyContent: 'center',
       gap: 12,
       color: theme.toolbar.textMuted,
-      // 空态背景与有卡态主图区一致,消除"合入后发灰"
-      background: theme.node.contentBackground,
+      // 空态背景与有卡态主图区一致,消除"合入后发灰";明暗主题适配
+      background: contentSurface,
       border: 0,
       borderRadius: 8,
       overflow: 'hidden',
     }}>
-      <Package size={48} opacity={0.5} />
-      {/* 空态上传按钮:直接上传图片/视频生成卡片 */}
-      <button
-        type="button"
-        onClick={() => emptyFileInputRef.current?.click()}
-        onPointerDown={(e) => e.stopPropagation()}
-        disabled={uploading}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          marginTop: 4,
-          padding: '5px 14px',
-          borderRadius: 6,
-          border: `1px solid ${theme.mode === 'dark' ? 'rgba(255,255,255,0.25)' : 'var(--color-border, #e7e5e4)'}`,
-          background: 'transparent',
-          color: 'inherit',
-          fontSize: 12,
-          cursor: uploading ? 'not-allowed' : 'pointer',
-          opacity: uploading ? 0.5 : 1,
-        }}
-      >
-        <Upload size={13} />
-        {uploading ? '上传中…' : '上传图片/视频'}
-      </button>
+      <Package size={22} strokeWidth={1.5} />
+      {/* 空态文案:对齐图片节点 AIStateView 空态(图标+小字描述),
+          上传入口统一为左上角纯 icon 按钮(MainReplaceButton 常显) */}
+      <span style={{ fontSize: 11, opacity: 0.7 }}>{uploading ? '上传中…' : '上传图片或视频'}</span>
+      <MainReplaceButton onClick={() => emptyFileInputRef.current?.click()} alwaysVisible />
     </div>
   ) : (
     <div
@@ -374,72 +398,50 @@ export function StackedMediaNodeView({
     >
       {/* 主图区域(占满内容区) */}
       <div
+        ref={stageRef}
         style={{
           position: 'absolute',
           inset: 0,
           overflow: 'hidden',
           borderRadius: 8,
           border: 0,
-          background: theme.node.contentBackground,
-          // 3D 翻页动效所需的透视
-          perspective: 1100,
+          background: contentSurface,
         }}
       >
+        <style>{STACK_SWITCH_CSS}</style>
         {activeCard && (
           <div
+            key={`active-${activeCard.id}-${switchEpoch}`}
             style={{
               position: 'absolute',
               inset: 0,
-              // 切换时新卡片从右侧翻入(rotateY + 轻微缩放挡板),完成后归位
-              transform: isAnimating ? 'rotateY(24deg) scale(0.94)' : 'rotateY(0deg) scale(1)',
-              transformOrigin: 'left center',
-              opacity: isAnimating ? 0.55 : 1,
-              transition: `transform ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1), opacity ${SWITCH_ANIM_MS}ms ease`,
-              willChange: 'transform, opacity',
               zIndex: 2,
-              backfaceVisibility: 'hidden',
-            }}
+              // 方向感知滑动入场:key 变化触发 keyframes 重播,仅 transform/opacity 动画
+              animation: switchEpoch > 0
+                ? `ze-stack-card-in ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1)`
+                : undefined,
+              ['--ze-slide-from' as string]: `${switchDir * 14}%`,
+            } as React.CSSProperties}
           >
-            <StackMediaContent card={activeCard} width={(node.size?.width ?? 620) - 32} height={STACK_DISPLAY_HEIGHT} />
+            <StackMediaContent card={activeCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} />
           </div>
         )}
         {isAnimating && previousCard && (
           <div
             aria-hidden="true"
+            key={`ghost-${previousCard.id}-${switchEpoch}`}
             style={{
               position: 'absolute',
               inset: 0,
-              // 旧卡片向左翻出并缩小消失
-              opacity: isAnimating ? 0 : 1,
-              transform: isAnimating ? 'rotateY(-18deg) scale(0.9)' : 'rotateY(0deg) scale(1)',
-              transformOrigin: 'right center',
-              transition: `opacity ${SWITCH_ANIM_MS}ms ease, transform ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1)`,
-              willChange: 'transform, opacity',
               zIndex: 1,
               pointerEvents: 'none',
-              backfaceVisibility: 'hidden',
-            }}
+              // 旧卡片向反方向滑出并淡出(forwards 保持终态直到卸载)
+              animation: `ze-stack-card-out ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1) forwards`,
+              ['--ze-slide-to' as string]: `${-switchDir * 10}%`,
+            } as React.CSSProperties}
           >
-            <StackMediaContent card={previousCard} width={(node.size?.width ?? 620) - 32} height={STACK_DISPLAY_HEIGHT} />
+            <StackMediaContent card={previousCard} width={stageSize.width} height={stageSize.height} isDark={isDark} onTextCommit={handleTextCommit} />
           </div>
-        )}
-        {isAnimating && (
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              width: 22,
-              height: 22,
-              transform: 'translate(-50%, -50%)',
-              borderRadius: '50%',
-              border: '2px solid rgba(255,255,255,0.78)',
-              boxShadow: '0 0 0 8px rgba(255,255,255,0.12)',
-              zIndex: 3,
-              pointerEvents: 'none',
-            }}
-          />
         )}
       </div>
       {/* 活跃卡替换按钮(hover 主图区显示,复用 ReplaceButton 视觉) */}
@@ -524,7 +526,7 @@ export function StackedMediaNodeView({
       <input
         ref={replaceFileInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={replaceAccept}
         hidden
         onChange={(e) => {
           void handleReplacePick(e.target.files);

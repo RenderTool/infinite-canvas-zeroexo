@@ -14,6 +14,10 @@
  */
 import { apiPutBinary, getApiBaseUrl } from './api-client.js';
 import { apiFetch } from './api-client.js';
+import { netDebug } from '../features/dev-performance/net-debug.js';
+
+/** 调试埋点门控:仅 DEV 构建生效,生产包不残留埋点代码 */
+const DEV_DEBUG = import.meta.env.DEV;
 
 export type ImageSizeParam = 'thumb' | 'preview' | 'full';
 
@@ -80,14 +84,19 @@ export async function uploadToBackend(
   if (contentHash) presignBody.contentHash = contentHash;
 
   // 2. 获取预签名 URL(携带 contentHash 走 CAS 路径)
+  const presignStart = performance.now();
   const presign = await apiFetch<PresignResult>('/resources/presign', {
     method: 'POST',
     body: JSON.stringify(presignBody),
   });
+  if (DEV_DEBUG) netDebug.recordPresign(performance.now() - presignStart);
 
   // 3. 上传文件(uploadUrl 为 null 表示 CAS 去重命中,跳过上传)
   if (presign.uploadUrl) {
+    if (DEV_DEBUG) netDebug.recordCas(false);
     await apiPutBinary(presign.uploadUrl, file, file.type || 'application/octet-stream', onProgress);
+  } else {
+    if (DEV_DEBUG) netDebug.recordCas(true);
   }
 
   // 4. 读取尺寸元信息(从 file blob 中提取)

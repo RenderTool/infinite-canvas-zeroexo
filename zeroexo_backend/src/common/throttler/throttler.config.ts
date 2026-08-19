@@ -60,6 +60,10 @@ export const throttlerConfig = registerAs(THROTTLER_CONFIG_KEY, () => {
       { name: 'short', ttl: DEFAULT_TIERS.short.ttl, limit: DEFAULT_TIERS.short.limit },
       { name: 'medium', ttl: DEFAULT_TIERS.medium.ttl, limit: DEFAULT_TIERS.medium.limit },
       { name: 'long', ttl: DEFAULT_TIERS.long.ttl, limit: DEFAULT_TIERS.long.limit },
+      // ⚠️ 业务档位(login/upload/ai/…)禁止注册到此数组:v6 guard 会把 forRoot
+      //    throttlers 应用到所有端点,业务档(如 sms 1次/分、register 5次/天)
+      //    会叠加误伤全部接口。业务档由 ApiThrottlerGuard 按档位元数据
+      //    动态独立计数,详见 throttle.decorator.ts / api-throttler.guard.ts。
     ],
     /**
      * 全局 getTracker:优先用 userId,未登录时回退到 IP。
@@ -92,8 +96,13 @@ export const THROTTLE_TIERS = {
   long: { ttl: 3_600_000, limit: 3_000 },
   /** 登录:5 次/分(防爆破) */
   login: { ttl: 60_000, limit: 5 },
-  /** 上传:1000 次/分(覆盖项目资源批量同步上传,保留粗粒度防刷) */
-  upload: { ttl: 60_000, limit: 1000 },
+  /**
+   * 上传:2000 次/分。
+   * presign 已走批量端点(≤100 条/请求,前端同步推送仅需 ⌈N/100⌉ 次);
+   * 但 PUT 二进制仍是 1 资源 1 请求,1000 节点全量推送 = 1000 次 PUT 恰好压线,
+   * 叠加重试与其它上传端点后必然溢出,故留 2 倍余量,仍保留粗粒度防刷。
+   */
+  upload: { ttl: 60_000, limit: 2000 },
   /** AI:20 次/分(成本保护) */
   ai: { ttl: 60_000, limit: 20 },
   /** 邮件:10 次/小时(防垃圾邮件) */
@@ -118,10 +127,32 @@ export const THROTTLE_TIERS = {
    */
   canvasCreate: { ttl: 60_000, limit: 5 },
   /**
-   * 资源预签名:1000 次/分(覆盖同步时逐个 presign 的批量上传,
-   * 同时保留对异常高频 presign 的粗粒度拦截)
+   * 资源预签名:1000 次/分(单条端点兼容旧客户端;前端同步链路已改走
+   * presign-batch 批量端点,正常流量下此配额几乎不会被触碰)
    */
   presign: { ttl: 60_000, limit: 1000 },
+  /**
+   * 媒体下载:3000 次/分。资源加载是用户可感知的关键路径(画布平移/缩放时
+   * 节点按需拉取 LOD 档位),绝不能让正常浏览撞限流导致"图片加载不出来";
+   * 仅作为匿名可读前缀(resources/public/*)与极端滥用的粗粒度防线。
+   * 业务档独立计数,不叠加全局 short 100/分。
+   */
+  mediaRead: { ttl: 60_000, limit: 3000 },
 } as const;
 
 export type ThrottleTierName = keyof typeof THROTTLE_TIERS;
+
+/** 全局默认三档名(业务档装饰器端点由 Guard 动态处理,不再叠加全局档) */
+export const GLOBAL_TIER_NAMES = ['short', 'medium', 'long'] as const;
+
+/**
+ * 业务档位配置列表(排除全局三档)。
+ * ⚠️ 仅供 tierDecorator 兜底查表与 ApiThrottlerGuard 动态档位读取;
+ * 不得注册进 forRoot throttlers 数组(会导致所有端点叠加业务档限流,
+ * sms 1次/分/register 5次/天 会直接卡死正常请求)。
+ */
+export const BUSINESS_THROTTLERS = (
+  Object.entries(THROTTLE_TIERS) as Array<[string, { ttl: number; limit: number }]>
+)
+  .filter(([name]) => !(GLOBAL_TIER_NAMES as readonly string[]).includes(name))
+  .map(([name, cfg]) => ({ name, ttl: cfg.ttl, limit: cfg.limit }));

@@ -104,7 +104,9 @@ export function PinView({
           backgroundColor: 'transparent',
           border: `2px solid ${color}`,
           boxShadow: isConnecting ? `0 0 8px ${color}99` : `0 0 3px ${color}44`,
-          transition: 'box-shadow 0.15s cubic-bezier(0.22,1,0.36,1), border-color 0.15s cubic-bezier(0.22,1,0.36,1), transform 0.15s cubic-bezier(0.22,1,0.36,1)',
+          // 注意:transition 不包含 transform —— 节点 resize/视口缩放时反缩放 scale 逐帧变化,
+          // 若 transform 带过渡会导致 PIN 滞后动画(表现为"突然变大又回弹"的跳动)
+          transition: 'box-shadow 0.15s cubic-bezier(0.22,1,0.36,1), border-color 0.15s cubic-bezier(0.22,1,0.36,1)',
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',

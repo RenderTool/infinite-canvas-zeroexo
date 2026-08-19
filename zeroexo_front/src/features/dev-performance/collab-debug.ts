@@ -30,6 +30,13 @@ const LAG_BUF_SIZE = 60;
 /** 单次采样超过该值(ms)记为"超时采样"(用于持续异常判定) */
 const LAG_WARN_MS = 25;
 
+/**
+ * 监听总开关:默认关闭(面板默认收起 → 零监听开销)。
+ * DevPerformancePanel 展开时 setEnabled(true),收起时关闭;
+ * 关闭期间所有 record* 埋点立即返回。
+ */
+let enabled = false;
+
 const counter = {
   pointerEvents: 0,
   broadcasts: 0,
@@ -48,8 +55,14 @@ let lagCursor = 0;
 let lastLocalCursor: { x: number; y: number } | null = null;
 
 export const collabDebug = {
+  /** 监听开关(由面板展开/收起状态驱动;关闭时全部埋点 no-op) */
+  setEnabled(v: boolean): void {
+    enabled = v;
+  },
+
   /** 本地指针事件到达(原生事件线,零节流) */
   recordPointerEvent(cursor: { x: number; y: number } | null, now = performance.now()): void {
+    if (!enabled) return;
     counter.pointerEvents += 1;
     pendingEventAt = now;
     if (cursor) lastLocalCursor = cursor;
@@ -57,6 +70,7 @@ export const collabDebug = {
 
   /** 本地光标 rAF 实际渲染时刻(用于计算事件→渲染延迟) */
   recordLocalApply(now = performance.now()): void {
+    if (!enabled) return;
     if (pendingEventAt > 0) {
       const lag = now - pendingEventAt;
       if (lag >= 0) {
@@ -68,16 +82,19 @@ export const collabDebug = {
 
   /** 广播放行(stringify + 发送) */
   recordBroadcast(): void {
+    if (!enabled) return;
     counter.broadcasts += 1;
   },
 
   /** 进入节流窗口被合并(不发送,仅记录 p 最新位置) */
   recordThrottled(): void {
+    if (!enabled) return;
     counter.throttled += 1;
   },
 
   /** 远端 awareness 事件(WS/BC)到达条数 */
   recordWsAwareness(count: number): void {
+    if (!enabled) return;
     counter.wsAwarenessEvents += count;
   },
 

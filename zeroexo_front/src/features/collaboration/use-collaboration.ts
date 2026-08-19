@@ -173,7 +173,8 @@ export function useCollaboration(
 
   // 实际发送:写入 WS Awareness + 本地 store + 同源 BC 直达
   const applyLocalCursor = useCallback((state: Record<string, unknown>, clientId: number) => {
-    collabDebug.recordBroadcast();
+    // 调试埋点仅 DEV 构建生效,生产构建整块剔除(连同 collab-debug 模块)
+    if (import.meta.env.DEV) collabDebug.recordBroadcast();
     if (!canvasSync) return;
     canvasSync.setAwarenessField('cursor-data', state);
 
@@ -236,7 +237,7 @@ export function useCollaboration(
       applyLocalCursor(state, clientId);
     } else {
       // 节流窗口内:记录最新位置,由定时器补发(保证停止移动前的最终位置被广播)
-      collabDebug.recordThrottled();
+      if (import.meta.env.DEV) collabDebug.recordThrottled();
       cursorPendingRef.current = { ...state, lastUpdated: now };
       if (cursorSendTimerRef.current === null) {
         cursorSendTimerRef.current = window.setTimeout(() => {
@@ -257,7 +258,7 @@ export function useCollaboration(
     if (!sync) return () => {};
 
     const unsub = sync.subscribeAwareness((states: AwarenessStateInfo[]) => {
-      collabDebug.recordWsAwareness(states.length);
+      if (import.meta.env.DEV) collabDebug.recordWsAwareness(states.length);
       const awarenessStates = store.getState().awarenessStates;
       const localClientId = sync.getAwarenessClientId() ?? store.getState().localAwareness?.clientId ?? -1;
       const next = new Map(awarenessStates);

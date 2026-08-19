@@ -247,7 +247,9 @@ const NodeItem = React.memo(
     const canScale = ext?.lockAspectRatio === true || scaleContract?.mode === 'uniform';
     const rawSx = defaultSize && defaultSize.width > 0 ? size.width / defaultSize.width : 1;
     const rawSy = defaultSize && defaultSize.height > 0 ? size.height / defaultSize.height : 1;
-    const isUniformScale = Math.abs(rawSx - rawSy) <= 0.001;
+    // resize 结果整数化会引入 ≤0.5px 高度舍入误差,固定比例容差 0.001 会把等比锁定的
+    // 中间尺寸误判为非等比 → 回退真实尺寸渲染(内容挤压/字体跳跃)。改用高度偏差 ≤0.75px 判定
+    const isUniformScale = Math.abs(rawSx - rawSy) * (defaultSize?.height ?? 1) <= 0.75;
     const useScale = canScale && isUniformScale && !!(defaultSize && (size.width !== defaultSize.width || size.height !== defaultSize.height));
     const sx = useScale ? rawSx : 1;
     const sy = useScale ? rawSy : 1;
@@ -326,12 +328,12 @@ const NodeItem = React.memo(
           // 透明度:node.opacity(0-1),undefined 用 1;仅在此层应用一次(NodeShell 不再重复)
           opacity: node.opacity ?? 1,
           // box-shadow: 统一高质量阴影(拼接节点空闲时不投影)
-          // 参考image-viewer卡片效果:轻投影提升沉浸感
+          // hover 卡片式悬浮投影(验收反馈 B9:替代原蓝色描边观感,参考 .card:hover 风格)
           // 选中态由NodeShell的outline负责,此处仅保留hover阴影
           // 连线悬停蓝色指示也已下沉到NodeShell(与选中红色互斥,消除叠加态)
           // 契约: hoverEffect=custom 时 hover 阴影交由视图自绘,此处跳过
           boxShadow: (isHovered && ext?.viewContract?.hoverEffect !== 'custom')
-              ? '0 2px 6px rgba(0,0,0,0.08)'
+              ? '6px 8px 20px rgba(0,0,0,0.35)'
               : tileMode
                 ? 'none'
                 : '0 1px 2px rgba(0,0,0,0.04)',
@@ -460,7 +462,19 @@ function NodeResizeHandle({
       data-node-resize-handle={type}
       onPointerDown={onPointerDown}
       style={style}
-    />
+    >
+      {/* 右下角可见 grip 提示可缩放(验收反馈 B7):屏幕恒定 12px,不可缩放节点不渲染 handle 即天然隐藏 */}
+      {type === 'se' ? (
+        <svg
+          width={12 * invK / sx}
+          height={12 * invK / sy}
+          viewBox="0 0 12 12"
+          style={{ position: 'absolute', right: 7 * invK / sx, bottom: 7 * invK / sy, opacity: 0.45, pointerEvents: 'none', transition: 'opacity 0.15s' }}
+        >
+          <path d="M10.5 5.5 L5.5 10.5 M10.5 8.5 L8.5 10.5 M10.5 2.5 L2.5 10.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        </svg>
+      ) : null}
+    </div>
   );
 }
 

@@ -8,12 +8,11 @@
  * - 画布资源保存到素材库
  */
 
-import { getToken, apiPost, apiPutBinary, getApiBaseUrl } from '../api-client.js';
+import { apiPost, apiPutBinary } from '../api-client.js';
+import { netDebug } from '@/features/dev-performance/net-debug.js';
 import {
   getImageBlob,
-  setImageBlob,
   getMediaBlob,
-  setMediaBlob,
   resolveImageUrl,
   resolveMediaUrl,
 } from '@zeroexo/plugin-persistence';
@@ -67,6 +66,19 @@ interface CloudAsset {
   updatedAt: string;
 }
 
+/** 批量 presign 响应(与后端 assets.controller presignBatch 对齐,结果与请求等长同序) */
+interface PresignBatchResponse {
+  results: Array<
+    | { uploadUrl: string | null; storageKey: string }
+    | { error: string }
+  >;
+}
+
+/** 单次批量 presign 条数上限(与后端 PresignAssetsBatchDto ArrayMaxSize 一致) */
+const PRESIGN_BATCH_SIZE = 100;
+/** PUT 并发上限:受控并发避免瞬时 burst 撞限流,同时快于纯串行 */
+const PUT_CONCURRENCY = 6;
+
 // ===== SHA-256 哈希计算 =====
 
 /**
@@ -108,6 +120,7 @@ async function uploadBlobContentToCloud(
 
     const contentHash = await computeBlobHash(blob);
 
+    const presignStart = performance.now();
     const presign = await apiPost<PresignResponse>('/resources/presign', {
       filename,
       mimeType,
@@ -115,11 +128,15 @@ async function uploadBlobContentToCloud(
       contentHash,
       ...(metadata ?? {}),
     });
+    // 调试埋点仅 DEV 构建生效,生产包不残留
+    if (import.meta.env.DEV) netDebug.recordPresign(performance.now() - presignStart);
 
     if (presign.uploadUrl) {
+      if (import.meta.env.DEV) netDebug.recordCas(false);
       await apiPutBinary(presign.uploadUrl, blob, mimeType);
       debugLog(`[sync-resources] uploaded blob content to cloud: ${presign.storageKey}`);
     } else {
+      if (import.meta.env.DEV) netDebug.recordCas(true);
       debugLog(`[sync-resources] dedup hit for blob content, reuse: ${presign.storageKey}`);
     }
     return { storageKey: presign.storageKey };
@@ -129,64 +146,20 @@ async function uploadBlobContentToCloud(
   }
 }
 
-// ===== 节点资源上传辅助 =====
-
-/**
- * 上传节点资源(图片/视频/音频)到云端
- * 从 localforage 读取 blob,通过 CAS 去重上传到 MinIO
- */
-async function uploadNodeResourceToCloud(storageKey: string): Promise<string | null> {
-  try {
-    let blob: Blob | null;
-
-    if (storageKey.startsWith('image:')) {
-      blob = await getImageBlob(storageKey);
-    } else if (storageKey.startsWith('video:')) {
-      blob = await getMediaBlob(storageKey);
-    } else if (storageKey.startsWith('audio:')) {
-      blob = await getMediaBlob(storageKey);
-    } else {
-      return null;
-    }
-
-    if (!blob) {
-      // 跨浏览器场景: 另一浏览器上传的图片 blob 在当前浏览器 IndexedDB 中不存在,
-      // 属正常现象, 降级为 warn 避免误导用户以为同步失败。
-      debugLog(`[sync-resources] blob not found for storageKey ${storageKey} (cross-browser, skip)`);
-      return null;
-    }
-
-    // CAS 去重:计算内容哈希,相同内容后端只存一份
-    const contentHash = await computeBlobHash(blob);
-    const presign = await apiPost<PresignResponse>('/resources/presign', {
-      filename: storageKey,
-      mimeType: blob.type,
-      size: blob.size,
-      contentHash,
-    });
-
-    // uploadUrl 为 null 表示去重命中(同一资源已存在),跳过上传
-    if (presign.uploadUrl) {
-      await apiPutBinary(presign.uploadUrl, blob, blob.type);
-      debugLog(`[sync-resources] uploaded node resource ${storageKey} to cloud storage: ${presign.storageKey}`);
-    } else {
-      debugLog(`[sync-resources] dedup hit for ${storageKey}, reuse cloud storage: ${presign.storageKey}`);
-    }
-    return presign.storageKey;
-  } catch (err) {
-    debugError(`[sync-resources] upload node resource ${storageKey} failed:`, err);
-    return null;
-  }
-}
-
 // ===== 同步节点资源到云端 =====
 
 /**
- * 同步节点资源到云端
+ * 同步节点资源到云端(2026-08 批量化重构)
  *
  * 处理两类场景:
- * 1. 有本地 storageKey(image:/video:/audio: 前缀)的节点 → 上传 blob 到云端
+ * 1. 有本地 storageKey(image:/video:/audio: 前缀)的节点 → 批量 presign + 并发 PUT
  * 2. data.content 是 blob URL 但没有 storageKey 的节点 → fetch blob → 上传云端 → 设置 storageKey
+ *
+ * 批量化策略(修复 1000 节点推送 presign 429):
+ * - Phase 1: 收集去重后的本地资源(同一 storageKey 多节点共享只算一次)
+ * - Phase 2: 按 100 条/批调 presign-batch(1000 资源 → 10 次请求,原为 1000 次);
+ *   整批网络失败时逐条降级单条 presign,单条失败不阻断其余
+ * - Phase 3: 并发上限 6 的 PUT 池(apiPutBinary 自带 429 退避重试)
  *
  * 上传完成后将 data.storageKey 更新为云端 storageKey(cloud key),
  * 调用方需负责将更新后的 graph 持久化保存。
@@ -194,26 +167,138 @@ async function uploadNodeResourceToCloud(storageKey: string): Promise<string | n
 async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
   const storageKeyMap = new Map<string, string>();
 
+  // ---- Phase 1: 收集本地键资源(按 storageKey 去重,读 blob + 算哈希) ----
+  interface LocalResourceTask {
+    localKey: string;
+    blob: Blob;
+    contentHash: string;
+  }
+  const tasks = new Map<string, LocalResourceTask>();
+
   for (const node of nodes) {
     if (typeof node !== 'object' || !node) continue;
     const data = (node as Record<string, unknown>).data as Record<string, unknown> | undefined;
     if (!data) continue;
 
     const storageKey = data.storageKey as string | undefined;
-    const content = data.content as string | undefined;
+    if (!storageKey || !(storageKey.startsWith('image:') || storageKey.startsWith('video:') || storageKey.startsWith('audio:'))) continue;
+    if (tasks.has(storageKey)) continue;
 
-    // Case 1: 有本地 storageKey → 上传 storageKey 指向的 blob 到云端
-    if (storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('video:') || storageKey.startsWith('audio:'))) {
-      const cloudStorageKey = await uploadNodeResourceToCloud(storageKey);
-      if (cloudStorageKey) {
-        storageKeyMap.set(storageKey, cloudStorageKey);
+    try {
+      const blob = storageKey.startsWith('image:')
+        ? await getImageBlob(storageKey)
+        : await getMediaBlob(storageKey);
+      if (!blob) {
+        // 跨浏览器场景: 另一浏览器上传的图片 blob 在当前浏览器 IndexedDB 中不存在,
+        // 属正常现象, 降级为 warn 避免误导用户以为同步失败。
+        debugLog(`[sync-resources] blob not found for storageKey ${storageKey} (cross-browser, skip)`);
+        continue;
       }
+      // CAS 去重:计算内容哈希,相同内容后端只存一份
+      const contentHash = await computeBlobHash(blob);
+      tasks.set(storageKey, { localKey: storageKey, blob, contentHash });
+    } catch (err) {
+      debugError(`[sync-resources] prepare resource ${storageKey} failed:`, err);
+    }
+  }
+
+  // ---- Phase 2: 批量 presign(100 条/批;整批失败降级逐条单发) ----
+  interface PutJob { uploadUrl: string; blob: Blob; mimeType: string; }
+  const putJobs: PutJob[] = [];
+  const taskList = Array.from(tasks.values());
+
+  for (let i = 0; i < taskList.length; i += PRESIGN_BATCH_SIZE) {
+    const chunk = taskList.slice(i, i + PRESIGN_BATCH_SIZE);
+    const items = chunk.map((t) => ({
+      filename: t.localKey,
+      mimeType: t.blob.type,
+      size: t.blob.size,
+      contentHash: t.contentHash,
+    }));
+
+    let results: PresignBatchResponse['results'] | null = null;
+    const presignStart = performance.now();
+    try {
+      const res = await apiPost<PresignBatchResponse>('/resources/presign-batch', { items });
+      results = res.results;
+      if (import.meta.env.DEV) netDebug.recordPresign(performance.now() - presignStart);
+    } catch (err) {
+      debugError('[sync-resources] presign-batch failed, fallback to single presign:', err);
     }
 
-    // Case 2: data.content 是 blob URL 但没有 storageKey → fetch blob → 上传云端 → 设置 storageKey
-    // 场景: AI 生成图片/视频后, data.content 设为 blob URL, 但 blob 未存储到 localforage,
-    // 导致 storageKey 为空。不处理会导致推送的 scene 中含无效 blob URL(其他设备无法渲染)。
-    if (!storageKey && content && content.startsWith('blob:')) {
+    if (results && results.length === chunk.length) {
+      chunk.forEach((t, idx) => {
+        const r = results![idx];
+        if (!r || 'error' in r) {
+          debugError(`[sync-resources] presign item failed for ${t.localKey}: ${r?.error ?? 'missing result'}`);
+          return;
+        }
+        storageKeyMap.set(t.localKey, r.storageKey);
+        // uploadUrl 为 null 表示 CAS 去重命中(同一资源已存在),跳过 PUT
+        if (r.uploadUrl) {
+          if (import.meta.env.DEV) netDebug.recordCas(false);
+          putJobs.push({ uploadUrl: r.uploadUrl, blob: t.blob, mimeType: t.blob.type });
+        } else {
+          if (import.meta.env.DEV) netDebug.recordCas(true);
+          debugLog(`[sync-resources] dedup hit for ${t.localKey}, reuse cloud storage: ${r.storageKey}`);
+        }
+      });
+    } else {
+      // 整批失败降级:逐条单发 presign(单条失败不阻断其余)
+      for (const t of chunk) {
+        try {
+          const presign = await apiPost<PresignResponse>('/resources/presign', {
+            filename: t.localKey,
+            mimeType: t.blob.type,
+            size: t.blob.size,
+            contentHash: t.contentHash,
+          });
+          if (import.meta.env.DEV) netDebug.recordPresign(performance.now() - presignStart);
+          storageKeyMap.set(t.localKey, presign.storageKey);
+          if (presign.uploadUrl) {
+            if (import.meta.env.DEV) netDebug.recordCas(false);
+            putJobs.push({ uploadUrl: presign.uploadUrl, blob: t.blob, mimeType: t.blob.type });
+          } else {
+            if (import.meta.env.DEV) netDebug.recordCas(true);
+          }
+        } catch (err) {
+          debugError(`[sync-resources] single presign for ${t.localKey} failed:`, err);
+        }
+      }
+    }
+  }
+
+  // ---- Phase 3: 并发受控 PUT(上限 6,apiPutBinary 自带 429 退避重试) ----
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < putJobs.length) {
+      const job = putJobs[cursor++];
+      if (!job) break;
+      try {
+        await apiPutBinary(job.uploadUrl, job.blob, job.mimeType);
+      } catch (err) {
+        debugError('[sync-resources] PUT upload failed:', err);
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PUT_CONCURRENCY, putJobs.length) }, () => worker()),
+  );
+  if (putJobs.length > 0) {
+    debugLog(`[sync-resources] uploaded ${putJobs.length} blob(s) to cloud storage`);
+  }
+
+  // ---- Case 2: blob URL 但无 storageKey 的节点(少数场景,仍走单条链路) ----
+  // 场景: AI 生成图片/视频后, data.content 设为 blob URL, 但 blob 未存储到 localforage,
+  // 导致 storageKey 为空。不处理会导致推送的 scene 中含无效 blob URL(其他设备无法渲染)。
+  for (const node of nodes) {
+    if (typeof node !== 'object' || !node) continue;
+    const data = (node as Record<string, unknown>).data as Record<string, unknown> | undefined;
+    if (!data) continue;
+    const storageKey = data.storageKey as string | undefined;
+    const content = data.content as string | undefined;
+    if (storageKey || !content || !content.startsWith('blob:')) continue;
+
       // blob URL 仅在创建它的会话内有效。刷新/revokeObjectURL 后 fetch 会失败,
       // 且每次 fetch 都会触发浏览器控制台 net::ERR_FILE_NOT_FOUND。
       // 会话内已确认失效的 URL 直接跳过并清理,避免每次同步都重复 fetch。
@@ -262,7 +347,6 @@ async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
           debugError(`[sync-resources] upload blob content failed:`, err);
         }
       }
-    }
   }
 
   // 第二遍:将本地 storageKey 替换为云端 storageKey
@@ -284,8 +368,12 @@ async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
 /**
  * 从云端同步节点资源到本地
  *
- * 遍历节点,将云端 storageKey 指向的资源下载到本地 localforage,
- * 并将 data.content 更新为本地 blob URL。
+ * 职责边界(2026-08 下载策略重构):
+ * - 本地键(image:/video:/audio:) → 从 IndexedDB 重建 blob URL(零网络)
+ * - 云端键(resources/) → 不批量下载原图,交由渲染层 useProgressiveImage
+ *   按视口可见性 + 缩放级别按需拉取 LOD 档位(thumb/preview/full)。
+ *   历史教训:1000 节点画布打开时串行全图下载直接打爆限流(429),
+ *   且绝大多数资源对当前视口根本不可见。
  */
 async function syncProjectResourcesFromCloud(nodes: any[]): Promise<void> {
   for (const node of nodes) {
@@ -296,60 +384,26 @@ async function syncProjectResourcesFromCloud(nodes: any[]): Promise<void> {
     const storageKey = data.storageKey as string | undefined;
     if (!storageKey) continue;
 
-    let blobUrl: string | undefined;
-    let isLocalKey = false;
+    // 云端键:跳过批量下载。content 若为死 blob URL(仅创建它的会话内有效,
+    // 刷新后 fetch 会报 ERR_FILE_NOT_FOUND)则清理,渲染层会改走后端 LOD URL。
+    if (storageKey.startsWith('resources/')) {
+      if (typeof data.content === 'string' && data.content.startsWith('blob:')) {
+        delete data.content;
+      }
+      continue;
+    }
 
-    // Try to resolve from local storage first
+    let blobUrl: string | undefined;
+
+    // 本地键:从 IndexedDB 重建 blob URL(纯本地操作,无网络请求)
     if (storageKey.startsWith('image:')) {
       blobUrl = await resolveImageUrl(storageKey);
-      isLocalKey = true;
     } else if (storageKey.startsWith('video:') || storageKey.startsWith('audio:')) {
       blobUrl = await resolveMediaUrl(storageKey);
-      isLocalKey = true;
     }
 
     if (blobUrl) {
       data.content = blobUrl;
-      continue;
-    }
-
-    // Local key but not found locally - skip
-    if (isLocalKey) continue;
-
-    // Cloud storage key (统一前缀 resources/{userId}/{hashPrefix}/{hash}), download from MinIO
-    try {
-      const apiBase = getApiBaseUrl();
-      const downloadUrl = `${apiBase}/storage/get?key=${encodeURIComponent(storageKey)}`;
-      const token = getToken();
-      const res = await fetch(downloadUrl, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) {
-        debugLog(`[sync-resources] download resource ${storageKey} failed: ${res.status}`);
-        // 资源已丢失(404)，自动清理 storageKey
-        if (res.status === 404) {
-          delete data.storageKey;
-          if (data.content && typeof data.content === 'string' && data.content.includes('/storage/get?')) {
-            delete data.content;
-          }
-        } else if (!data.content) {
-          data.content = downloadUrl;
-        }
-        continue;
-      }
-      const blob = await res.blob();
-
-      if (blob.type.startsWith('image/')) {
-        blobUrl = await setImageBlob(storageKey, blob);
-      } else {
-        blobUrl = await setMediaBlob(storageKey, blob);
-      }
-
-      if (blobUrl) {
-        data.content = blobUrl;
-      }
-    } catch (err) {
-      debugError(`[sync-resources] download resource ${storageKey} from MinIO failed:`, err);
     }
   }
 }

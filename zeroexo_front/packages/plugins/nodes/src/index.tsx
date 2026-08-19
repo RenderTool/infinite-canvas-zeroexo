@@ -26,7 +26,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { ConnectionPlugin } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
-import { CircleX } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import type {
   TextNodeData,
   ImageNodeData,
@@ -319,11 +319,11 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
     resizable: true,
     // 舞台高度固定,不同卡片只在展示区内自适应。
     lockAspectRatio: true,
-    minSize: { width: 220, height: 160 },
+    // minSize 必须与 defaultSize 等比(620:404 ≈ 220:143):resize-geometry 先钳 minSize 后锁比例,
+    // 非等比下限会在触底时破坏宽高比 → isUniformScale=false → 回退真实尺寸渲染(挤压+字体跳跃)
+    minSize: { width: 220, height: 143 },
     specialAppearance: true,
-    // 底部导航区(STACK_NAVIGATION_HEIGHT=56)不属于可视卡片区,
-    // 声明 handle 内缩让右下/左下缩放手柄与卡片边界对齐
-    resizeHandleInset: { bottom: 56 },
+    // resize handle 回归节点四角标准位置(用户验收反馈:底部内缩使命中区落在内容上,语义反直觉)
     runtime: createNodeRuntime({ width: 620, height: 404 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
     capabilities: { stackable: true, mediaKinds: ['image', 'video', 'audio', 'text'], capabilities: ['stack', 'merge-stacks', 'media-edit'] },
     getPins: () => getStackedMediaPins(),
@@ -375,14 +375,13 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
         }
       }
 
-      // 移出按钮(仅 StackNode 显示;label 与 node-tools.tsx 其余工具一致,硬编码中文)
+      // 移出按钮(仅 StackNode 显示;LogOut 表达"移出为独立节点"语义,与删除区分)
       tools.push({
         id: 'eject',
         // 胶囊中统一使用图标按钮，title/tooltip 提供语义。
         label: '',
         title: '移出为独立节点',
-        icon: <CircleX size={14} />,
-        danger: true,
+        icon: <LogOut size={14} />,
         visible: () => data.cards.length > 0,
         run: () => {
           if (data.cards.length === 0) return;

@@ -42,6 +42,17 @@ export function PendingConnectionLayer({
   const pending = useSyncExternalStore(controller.subscribePending, controller.getPending);
   const hoverNodeId = useSyncExternalStore(controller.subscribePending, controller.getHoverNodeId);
   const validation = controller.getHoverNodeValidation();
+
+  // 组 pin 源端点屏幕位置缓存(强制重排缓解):
+  // 拖拽期间源节点不动,位置只随视口变化;避免每帧(pointermove 触发重渲染)
+  // 重复 querySelector + 3N 次 getBoundingClientRect 的写→读交错强制重排。
+  const groupPositions = React.useMemo(() => {
+    const eps = pending?.groupSourceEndpoints;
+    if (!eps || eps.length === 0) return null;
+    return eps.map((ep) => ({ ep, pos: getPinScreenPosition(ep.nodeId, ep.pinId, ep.direction) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending?.groupSourceEndpoints, viewport.x, viewport.y, viewport.k]);
+
   if (!pending) return null;
 
   // 将世界坐标转换为屏幕坐标(应用视口变换)
@@ -68,9 +79,8 @@ export function PendingConnectionLayer({
   };
 
   // 如果是组 pin 拖拽,渲染多条预览线(从每个叶子节点的 pin 到鼠标位置)
-  if (pending.groupSourceEndpoints && pending.groupSourceEndpoints.length > 0) {
-    const paths = pending.groupSourceEndpoints.map((ep) => {
-      const pos = getPinScreenPosition(ep.nodeId, ep.pinId, ep.direction);
+  if (groupPositions && groupPositions.length > 0) {
+    const paths = groupPositions.map(({ ep, pos }) => {
       if (!pos) return null;
       const sx = pos.x;
       const sy = pos.y;

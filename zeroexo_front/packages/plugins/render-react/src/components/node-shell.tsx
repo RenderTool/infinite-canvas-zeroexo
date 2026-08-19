@@ -135,11 +135,34 @@ export function NodeShell({
 
   // ===== PIN 磁吸悬浮: 计算最近 PIN 和偏移 =====
 
+  /**
+   * PIN 容器 rect 缓存(强制重排缓解):
+   * 磁吸悬浮期间 pointermove 高频触发且每次都会 setState 写 DOM,
+   * 若每帧都 getBoundingClientRect 会形成写→读交错的强制重排。
+   * 悬停会话内容器几何不变,首次测量后缓存,pointerleave/缩放变化时失效。
+   */
+  const pinRectCacheRef = React.useRef<{ side: 'left' | 'right'; rect: DOMRect } | null>(null);
+  React.useEffect(() => {
+    // 缩放变化时屏幕几何改变,失效缓存
+    pinRectCacheRef.current = null;
+  }, [invK]);
+  const getPinContainerRect = React.useCallback(
+    (side: 'left' | 'right'): DOMRect | null => {
+      const cached = pinRectCacheRef.current;
+      if (cached && cached.side === side) return cached.rect;
+      const container = side === 'left' ? leftPinRef.current : rightPinRef.current;
+      if (!container) return null;
+      const rect = container.getBoundingClientRect();
+      pinRectCacheRef.current = { side, rect };
+      return rect;
+    },
+    [],
+  );
+
   const getPinNaturalCenterY = React.useCallback(
     (side: 'left' | 'right', idx: number): number => {
-      const container = side === 'left' ? leftPinRef.current : rightPinRef.current;
-      if (!container) return 0;
-      const rect = container.getBoundingClientRect();
+      const rect = getPinContainerRect(side);
+      if (!rect) return 0;
       const N = side === 'left' ? inputPins.length : outputPins.length;
       if (N === 0) return 0;
       // 容器 padding:8px,flex space-around 等分内容区域
@@ -148,14 +171,13 @@ export function NodeShell({
       const contentH = rect.height - topPad - bottomPad;
       return topPad + (idx + 0.5) * (contentH / N);
     },
-    [inputPins.length, outputPins.length],
+    [inputPins.length, outputPins.length, getPinContainerRect],
   );
 
   const handlePinContainerPointerMove = React.useCallback(
     (side: 'left' | 'right', e: React.PointerEvent) => {
-      const container = side === 'left' ? leftPinRef.current : rightPinRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
+      const rect = getPinContainerRect(side);
+      if (!rect) return;
       const pointerX = e.clientX - rect.left;
       const pointerY = e.clientY - rect.top;
       const N = side === 'left' ? inputPins.length : outputPins.length;
@@ -205,10 +227,12 @@ export function NodeShell({
         pinHoverTimeoutRef.current = null;
       }
     },
-    [inputPins.length, outputPins.length, mergedPins, getPinNaturalCenterY],
+    [inputPins.length, outputPins.length, mergedPins, getPinNaturalCenterY, getPinContainerRect],
   );
 
   const handlePinContainerPointerLeave = React.useCallback(() => {
+    // 悬停会话结束,失效容器 rect 缓存
+    pinRectCacheRef.current = null;
     pinHoverTimeoutRef.current = setTimeout(() => {
       setPinHover(null);
     }, 50);
@@ -218,7 +242,7 @@ export function NodeShell({
   // 契约:selection/connectionHover/hover 设为 custom 时对应效果由节点视图自绘,此处跳过
   const selectionCustom = viewContract?.selectionEffect === 'custom';
   const connectionCustom = viewContract?.connectionHoverEffect === 'custom';
-  const hoverCustom = viewContract?.hoverEffect === 'custom';
+  // hover 投影已上移到外层 NodeItem 统一绘制(hoverEffect=custom 的跳过逻辑在外层)
 
   const theme = node.theme ?? 'dark';
   const isLight = theme === 'light';
@@ -234,9 +258,11 @@ export function NodeShell({
   // 外轮廓:node.outlineColor/outlineWidth 自定义,回退到 NodeDefaults 全局默认,再回退选中状态硬编码
   // 用 CSS outline(不占布局空间,支持 rgba 透明,跟随 border-radius 圆角)
   // 互斥状态优先级:连线悬停(蓝 1px) > 选中(红 2px),单一元素渲染,无叠加态
+  // 用户澄清:hover 仅保留卡片阴影,不再出现蓝色轮廓线 —— 非选中/非连线悬停时
+  // 轮廓宽仅当节点显式声明 node.outlineWidth 时生效,全局默认不再贡献常驻描边
   const shellOutlineWidth = connectionHover && !connectionCustom
     ? 1
-    : (!selectionCustom && (node.outlineWidth ?? (isSelected ? 2 : (nodeDefaults.outlineWidth ?? 0))));
+    : (!selectionCustom && (node.outlineWidth ?? (isSelected ? 2 : 0)));
   const shellOutlineColor = connectionHover && !connectionCustom
     ? '#4a9eff'
     : (!selectionCustom
@@ -360,11 +386,8 @@ export function NodeShell({
           // 选中态由 outline 颜色变红体现(选中光晕由外层 NodeItem box-shadow 负责)
           outline: `${shellOutlineWidth}px solid ${shellOutlineColor}`,
           outlineOffset: shellOutlineOffset,
-          boxShadow: (isHovered && !hoverCustom)
-            ? '0 2px 4px rgba(0,0,0,0.06)'
-            : tileMode
-              ? 'none'
-              : '0 1px 1px rgba(0,0,0,0.03)',
+          // hover 卡片投影统一由外层 NodeItem 负责(B9),内层不叠加第二层阴影
+          boxShadow: tileMode ? 'none' : '0 1px 1px rgba(0,0,0,0.03)',
           transition: 'box-shadow 0.15s cubic-bezier(0.22,1,0.36,1), outline-color 0.15s cubic-bezier(0.22,1,0.36,1)',
         }}
       >

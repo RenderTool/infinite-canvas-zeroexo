@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import type { NodeRecord } from '@zeroexo/core';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -25,7 +25,7 @@ export interface StackCollectToastProps {
   node: NodeRecord;
   /** 文案,如「已收纳 · 图片」 */
   label: string;
-  /** 点击「移除」撤销本次收纳 */
+  /** 点击「移出」把刚收纳的卡片解绑为独立节点(与胶囊 eject 行为一致) */
   onRemove: () => void;
   /** 完全消失后回调(清理快照) */
   onDismissed: () => void;
@@ -124,11 +124,12 @@ export function StackCollectToast({
       <span>{label}</span>
       <button
         type="button"
+        title="移出为独立节点"
         onClick={handleRemove}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 2,
+          gap: 4,
           border: 'none',
           background: 'transparent',
           color: 'var(--color-primary, #e94560)',
@@ -138,8 +139,8 @@ export function StackCollectToast({
           padding: 0,
         }}
       >
-        <X size={12} />
-        移除
+        <LogOut size={12} />
+        移出
       </button>
     </div>,
     document.body,

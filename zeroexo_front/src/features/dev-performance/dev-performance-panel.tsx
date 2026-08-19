@@ -4,6 +4,8 @@ import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { CommandQueue, GraphModel } from '@zeroexo/core';
 import { AddNodeCommand, BatchCommand } from '@zeroexo/core';
 import { collabDebug } from './collab-debug.js';
+import { netDebug } from './net-debug.js';
+import type { NetDebugSnapshot } from './net-debug.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 
 // ============================================================================
@@ -50,6 +52,7 @@ const NODE_TYPE_MAP: Record<Exclude<NodeType, 'empty'>, string> = {
  * 页签:
  * - CANVAS : 画布运行期采样(FPS / frame / heap / 规模 / 压力注入 / 采样导出)
  * - COLLAB : 协作光标/同步链路统计(埋点全部 O(1) 计数,1s 刷新)
+ * - NET    : 网络/上传链路(限流配额实时显示 / CAS 去重命中率 / 上传吞吐 / 429 诊断)
  *
  * 信息均以中文呈现:异常状态用红/黄高亮提示条 + 优化方向说明。
  */
@@ -79,7 +82,7 @@ interface CaptureSample {
 const MAX_CAPTURE_SAMPLES = 240;
 
 /** 调试页签(可扩展:后续调试模块在此追加) */
-type DebugTab = 'perf' | 'collab';
+type DebugTab = 'perf' | 'collab' | 'net';
 
 /** 协作光标链路调试快照 */
 interface CollabSnapshot {
@@ -199,6 +202,47 @@ function collabHint(c: CollabSnapshot, showSelfCursor: boolean): { color: string
   return { color: '#b8f2d0', text: '协作光标/同步链路正常,无异常(点击等操作的瞬时尖峰不计入)。' };
 }
 
+/** 字节数 → 可读文本 */
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/** 环形缓冲平均值 */
+function ringAvg(ring: number[]): number {
+  if (ring.length === 0) return 0;
+  let sum = 0;
+  for (const v of ring) sum += v;
+  return sum / ring.length;
+}
+
+/** NET 页签诊断:429/限流告警 + 正常态说明 */
+function netHint(s: NetDebugSnapshot): { color: string; text: string } {
+  if (s.last429) {
+    const e = s.last429;
+    return {
+      color: '#ff9d9d',
+      text: `检测到 429 限流:${e.path}(档位 ${e.tier}，上限 ${e.limit} 次/窗口，服务端建议等待 ${e.retryAfter}s)${e.autoRetried ? '，已自动退避重试' : '。优化方向:降低并发或启用批量端点。'}`,
+    };
+  }
+  // 配额告警:任一端点剩余 <10% 提前预警
+  const low = s.rateLimits.find((r) => r.limit > 0 && r.remaining / r.limit < 0.1);
+  if (low) {
+    return {
+      color: '#ffd28a',
+      text: `「${low.key}」端点限流配额即将耗尽(${low.remaining}/${low.limit})，客户端已自动降速。建议改用批量端点减少请求次数。`,
+    };
+  }
+  const total = s.totals.casHits + s.totals.casMisses;
+  const rate = total > 0 ? Math.round((s.totals.casHits / total) * 100) : 0;
+  return {
+    color: '#b8f2d0',
+    text: `网络/上传链路正常，无 429。CAS 去重命中率 ${rate}%(命中即跳过 PUT 上传)。`,
+  };
+}
+
 /** 诊断提示条:红=严重,黄=警告,绿=正常;附开发者优化方向 */
 function DbgHint({ color, text }: { color: string; text: string }): React.ReactElement {
   const danger = color === '#ff9d9d';
@@ -270,7 +314,24 @@ export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerf
   // 取消注入的 abort controller
   const injectAbortRef = useRef<AbortController | null>(null);
 
-  // 协作指标 1s 刷新(仅 COLLAB 页签展开时;折叠/暂停时数据总线仍持续累计,O(1) 计数)
+  // ---- NET 网络/上传页签状态 ----
+  const [netSnap, setNetSnap] = useState<NetDebugSnapshot>(() => netDebug.snapshot());
+
+  // 数据总线监听总开关:面板默认收起 → 全部埋点 no-op(零监听开销);
+  // 展开时开启累计,收起时立即关闭——收起状态不保留任何监听。
+  useEffect(() => {
+    netDebug.setEnabled(open);
+    collabDebug.setEnabled(open);
+  }, [open]);
+
+  // NET 指标 1s 刷新(仅 NET 页签展开时;面板收起时数据总线已整体停监听)
+  useEffect(() => {
+    if (!open || tab !== 'net') return;
+    const timer = window.setInterval(() => setNetSnap(netDebug.snapshot()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, tab]);
+
+  // 协作指标 1s 刷新(仅 COLLAB 页签展开时;面板收起时数据总线已整体停监听)
   useEffect(() => {
     if (!open || tab !== 'collab') return;
     const timer = window.setInterval(() => {
@@ -502,9 +563,13 @@ export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerf
       ? collabSnap.active
         ? `⌖${collabSnap.remoteCount}`
         : '○'
-      : recording
-        ? `${snapshot.fps} FPS`
-        : `${liveGraph.nodes.length}N`;
+      : tab === 'net'
+        ? netSnap.totals.http429 > 0
+          ? `429×${netSnap.totals.http429}`
+          : `${netSnap.uploadMBps.toFixed(1)}M/s`
+        : recording
+          ? `${snapshot.fps} FPS`
+          : `${liveGraph.nodes.length}N`;
 
   const t = collabSnap.totals;
   const roomColor = collabSnap.active ? '#b8f2d0' : '#ff9d9d';
@@ -536,13 +601,13 @@ export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerf
           border: '1px solid rgba(255,255,255,0.18)',
           borderRadius: 6,
           background: 'rgba(20,24,28,0.88)',
-          color: tab === 'collab' ? '#7fd8ff' : '#b8f2d0',
+          color: tab === 'collab' ? '#7fd8ff' : tab === 'net' ? '#c792ea' : '#b8f2d0',
           padding: '5px 8px',
           cursor: 'pointer',
           boxShadow: '0 8px 22px rgba(0,0,0,0.18)',
         }}
       >
-        {tab === 'collab' ? 'COLLAB' : 'PERF'} {buttonSuffix}
+        {tab === 'collab' ? 'COLLAB' : tab === 'net' ? 'NET' : 'PERF'} {buttonSuffix}
       </button>
       {open ? (
         <div
@@ -561,9 +626,98 @@ export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerf
           <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: 5, marginBottom: 8 }}>
             <button type="button" onClick={() => setTab('perf')} style={tabBtnStyle(tab, 'perf')}>CANVAS</button>
             <button type="button" onClick={() => setTab('collab')} style={tabBtnStyle(tab, 'collab')}>COLLAB</button>
+            <button type="button" onClick={() => setTab('net')} style={tabBtnStyle(tab, 'net')}>NET</button>
           </div>
 
-          {tab === 'collab' ? (
+          {tab === 'net' ? (
+            <>
+              <div style={{ color: '#c792ea', marginBottom: 4 }}>网络 / 上传链路(NET)</div>
+              {(() => {
+                const nt = netSnap.totals;
+                const casTotal = nt.casHits + nt.casMisses;
+                const casRate = casTotal > 0 ? Math.round((nt.casHits / casTotal) * 100) : 0;
+                const nowSec = Date.now() / 1000;
+                return (
+                  <>
+                    <DbgRow label="HTTP 请求" value={String(nt.requests)} />
+                    <DbgRow
+                      label="429 限流"
+                      value={nt.http429 === 0 ? '无' : `${nt.http429} 次(自动退避 ${nt.autoRetries} 次)`}
+                      color={nt.http429 === 0 ? '#b8f2d0' : '#ff9d9d'}
+                    />
+                    <DbgRow
+                      label="presign 调用"
+                      value={`${nt.presignCalls} 次 · 均 ${Math.round(ringAvg(netSnap.presignLatencyRing))}ms`}
+                    />
+                    {/* CAS 去重命中反馈(含命中率进度条) */}
+                    <DbgRow
+                      label="CAS 去重命中"
+                      value={casTotal === 0 ? '无上传' : `${nt.casHits}/${casTotal} · ${casRate}%`}
+                      color={casRate >= 50 ? '#7fd8ff' : '#e8edf2'}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '2px 0 4px' }}>
+                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                        <div style={{ width: `${casRate}%`, height: '100%', background: '#7fd8ff', borderRadius: 2 }} />
+                      </div>
+                      <span style={{ fontSize: 9, color: '#8a93a0', whiteSpace: 'nowrap' }}>命中率(命中=跳过 PUT)</span>
+                    </div>
+                    <DbgRow
+                      label="上传完成"
+                      value={`${nt.uploads} 个 · ${fmtBytes(nt.uploadBytes)}`}
+                    />
+                    <DbgRow
+                      label="瞬时吞吐"
+                      value={`${netSnap.uploadMBps.toFixed(1)} MB/s`}
+                      color="#7fd8ff"
+                    />
+
+                    {/* 限流配额实时显示(解析自后端 RateLimit-* 响应头) */}
+                    <div style={{ marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 6 }}>
+                      <div style={{ color: '#c792ea', marginBottom: 2, fontSize: 10 }}>限流配额(RFC 9239 响应头)</div>
+                      {netSnap.rateLimits.length === 0 ? (
+                        <div style={{ fontSize: 10, color: '#8a93a0' }}>暂无数据(发起任意 API 请求后显示)</div>
+                      ) : (
+                        netSnap.rateLimits.map((r) => {
+                          const pct = r.limit > 0 ? Math.round((r.remaining / r.limit) * 100) : 100;
+                          const resetSec = r.resetAt > 0 ? Math.max(0, Math.ceil(r.resetAt - nowSec)) : 0;
+                          const barColor = pct < 10 ? '#ff9d9d' : pct < 40 ? '#ffd28a' : '#b8f2d0';
+                          return (
+                            <div key={r.key} style={{ marginBottom: 3 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                                <span style={{ color: '#8a93a0' }}>/{r.key}</span>
+                                <span style={{ color: barColor }}>
+                                  {r.remaining}/{r.limit}{resetSec > 0 ? ` · ${resetSec}s 重置` : ''}
+                                </span>
+                              </div>
+                              <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                                <div style={{ width: `${pct}%`, height: '100%', background: barColor }} />
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* 429 事件诊断(后端返回的 tier/path/limit 透传) */}
+                    {netSnap.throttleEvents.length > 0 ? (
+                      <div style={{ marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 6 }}>
+                        <div style={{ color: '#ff9d9d', marginBottom: 2, fontSize: 10 }}>429 事件(最近 {netSnap.throttleEvents.length} 条)</div>
+                        {netSnap.throttleEvents.slice().reverse().slice(0, 4).map((e, i) => (
+                          <div key={`${e.at}-${i}`} style={{ fontSize: 9, color: '#ffd28a', lineHeight: 1.5 }}>
+                            {e.path} · 档位 {e.tier} · 限 {e.limit} · 退避 {e.retryAfter}s{e.autoRetried ? ' · 已重试' : ''}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
+              <DbgHint color={netHint(netSnap).color} text={netHint(netSnap).text} />
+              <div style={{ marginTop: 6, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 6, fontSize: 10, color: '#8a93a0' }}>
+                埋点在 api-client / upload 链路,O(1) · 429 自动指数退避+抖动重试
+              </div>
+            </>
+          ) : tab === 'collab' ? (
             <>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
                 <span style={{ color: '#7fd8ff' }}>协作同步</span>

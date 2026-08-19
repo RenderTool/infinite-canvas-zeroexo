@@ -15,7 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { MinioService } from './minio.service';
 import { ImageProcessorService } from './image-processor.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UploadThrottle } from '../../common/throttler/decorators/throttle.decorator';
+import { UploadThrottle, MediaReadThrottle } from '../../common/throttler/decorators/throttle.decorator';
 import { badRequest, forbidden, notFound } from '../../common/errors/app-exception.js';
 import { ErrorCode } from '../../common/errors/error-codes';
 
@@ -119,6 +119,7 @@ export class StorageController {
    * - 其它所有路径(含 resources/front/assets/*) - 需要 JWT 认证
    */
   @Get('get')
+  @MediaReadThrottle()
   async get(
     @Query('key') key: string,
     @Query('size') size: string = 'full',

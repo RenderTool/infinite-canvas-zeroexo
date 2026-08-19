@@ -211,6 +211,7 @@ export function ImageNodeView({
         emptyTextColor={theme.toolbar.textMuted}
         hasContent={hasContent}
         onReplace={handleReplaceClick}
+        replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
       >

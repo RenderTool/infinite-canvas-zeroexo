@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { nanoid } from 'nanoid';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -9,10 +9,12 @@ import { badRequest, notFound } from '../../common/errors/app-exception.js';
 import { ErrorCode } from '../../common/errors/error-codes';
 import {
   CreateAssetDto,
+  CreateAssetsBatchDto,
   CreateScriptAssetDto,
   CreateZeroexoAssetDto,
   CreateZeroexoStructuredDto,
   PresignAssetDto,
+  PresignAssetsBatchDto,
   UpdateAssetDto,
   UpdateZeroexoAssetDto,
 } from './dto/asset.dto';
@@ -61,6 +63,8 @@ function getExtension(filename: string): string {
  */
 @Injectable()
 export class AssetsService {
+  private readonly logger = new Logger(AssetsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly minio: MinioService,
@@ -110,6 +114,37 @@ export class AssetsService {
   }
 
   /**
+   * 批量预签名上传 - 逐条复用 presign 逻辑(CAS 去重同样生效)。
+   * 单条失败不阻断整批:失败项返回 error 字段,客户端可降级单条重试。
+   * 返回与 dto.items 等长、同序的结果数组。
+   */
+  async presignBatch(
+    userId: string,
+    dto: PresignAssetsBatchDto,
+  ): Promise<{
+    results: Array<
+      | { uploadUrl: string | null; storageKey: string }
+      | { error: string }
+    >;
+  }> {
+    const results: Array<
+      | { uploadUrl: string | null; storageKey: string }
+      | { error: string }
+    > = [];
+    for (const item of dto.items) {
+      try {
+        results.push(await this.presign(userId, item));
+      } catch (err) {
+        this.logger.warn(
+          `批量 presign 单条失败: ${item.filename} (${err instanceof Error ? err.message : String(err)})`,
+        );
+        results.push({ error: err instanceof Error ? err.message : 'presign failed' });
+      }
+    }
+    return { results };
+  }
+
+  /**
    * 创建资产元数据 - 上传完成后调用。
    * 同时增加对应 Resource 的引用计数。
    */
@@ -154,6 +189,45 @@ export class AssetsService {
     });
 
     return asset;
+  }
+
+  /**
+   * 批量创建资产元数据(Google Photos batchCreate 模式):
+   * 逐条复用 create 逻辑(校验/引用计数/日志),单条失败不中断整批,
+   * 返回每条的成功/失败明细,便于客户端对失败项单独重试。
+   */
+  async createBatch(userId: string, dto: CreateAssetsBatchDto) {
+    const results: Array<{
+      index: number;
+      filename: string;
+      ok: boolean;
+      asset?: Awaited<ReturnType<AssetsService['create']>>;
+      error?: string;
+    }> = [];
+    let ok = 0;
+    let failed = 0;
+    for (let i = 0; i < dto.items.length; i += 1) {
+      const item = dto.items[i]!;
+      try {
+        const asset = await this.create(userId, item);
+        results.push({ index: i, filename: item.filename, ok: true, asset });
+        ok += 1;
+      } catch (err) {
+        failed += 1;
+        results.push({
+          index: i,
+          filename: item.filename,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    this.logsService.log(
+      'asset',
+      `批量导入素材: ${ok} 成功 / ${failed} 失败`,
+      { userId, meta: { total: dto.items.length, ok, failed } },
+    );
+    return { total: dto.items.length, ok, failed, results };
   }
 
   /**

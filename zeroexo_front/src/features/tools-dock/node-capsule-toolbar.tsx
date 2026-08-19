@@ -63,9 +63,9 @@ export interface NodeCapsuleToolbarProps {
   isMobile?: boolean;
   /**
    * 纯图标模式开关
-   * - false（默认）: icon + 文本标签
-   * - true: 仅显示 icon，隐藏文本标签
-   * 后续如需切换纯 icon 模式，直接透传此 prop 即可。
+   * - true（默认）: 仅显示 icon，隐藏文本标签（语义保留在 title 悬浮提示）
+   * - false: icon + 文本标签
+   * 胶囊工具栏已全量统一为纯 icon（含分组工具），如需回退文案模式传 false。
    */
   usePureIcon?: boolean;
 }
@@ -176,7 +176,7 @@ export function NodeCapsuleToolbar({
   onAlign,
   onUnifySizes,
   onSort,
-  usePureIcon = false,
+  usePureIcon = true,
 }: NodeCapsuleToolbarProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -213,8 +213,9 @@ export function NodeCapsuleToolbar({
 
   if (!hasNodeTools && !isMultiSelect) return null;
 
-  // 文本节点自动使用纯图标模式(无文字标签)
-  const effectivePureIcon = usePureIcon || node?.type === 'text';
+  // 胶囊工具栏全量纯图标模式(含分组/聚合按钮):label 隐藏,语义保留在 title 悬浮提示。
+  // 保留 usePureIcon prop 作为回退开关(传 false 可恢复 icon+文案)。
+  const effectivePureIcon = usePureIcon;
 
   const ext = node ? getExtension(node.id) : undefined;
   const isGroupNode = node?.type === 'group';

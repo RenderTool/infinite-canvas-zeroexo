@@ -30,7 +30,8 @@ import {
   ThrottlerStorage,
 } from '@nestjs/throttler';
 import { ThrottlerMonitorService } from '../services/throttler-monitor.service';
-import { parseWhitelist } from '../throttler.config';
+import { parseWhitelist, THROTTLE_TIERS } from '../throttler.config';
+import { THROTTLE_TIER_META, type BusinessTierConfig } from '../decorators/throttle.decorator';
 
 /**
  * 接口:req.user 结构(取自 JwtAuthGuard)
@@ -57,6 +58,9 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
   private static cachedWhitelistAt = 0;
   private static readonly WHITELIST_CACHE_TTL_MS = 60_000;
 
+  /** 当前请求正在执行的业务档位名(供 429 响应诊断使用;请求结束后 context 被 GC,无泄漏) */
+  private readonly activeTierByContext = new WeakMap<ExecutionContext, string>();
+
   constructor(
     @Optional() options: any,
     @Optional() storageService: ThrottlerStorage,
@@ -77,6 +81,51 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
     }
     const ip = this.extractClientIp(req);
     return `ip:${ip}`;
+  }
+
+  /**
+   * 业务档动态限流(修复 2026-08-19 叠加误伤回归):
+   *
+   * v6 guard 会把 forRoot.throttlers 数组应用到所有端点。若把业务档
+   * (sms 1次/分、register 5次/天…)注册进该数组,所有接口都会被叠加
+   * 卡死(fullSync 等正常请求报 429)。因此业务档不进 forRoot,
+   * 改由本方法按档位元数据动态执行:命中业务档装饰器的端点仅受
+   * 自身档位约束(独立计数器),不叠加全局三档也不叠加其它业务档。
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const handler = context.getHandler();
+    const classRef = context.getClass();
+    const tierMeta = this.reflector?.getAllAndOverride<BusinessTierConfig | string>(
+      THROTTLE_TIER_META,
+      [handler, classRef],
+    );
+    const tierName = typeof tierMeta === 'string' ? tierMeta : tierMeta?.tier;
+    const isBusinessTier =
+      !!tierName && tierName !== 'short' && tierName !== 'medium' && tierName !== 'long';
+    if (!isBusinessTier) {
+      // 无装饰器 / 全局三档装饰器:走 v6 标准循环(short/medium/long)
+      return super.canActivate(context);
+    }
+    if (await this.shouldSkip(context)) return true;
+
+    const tierCfg =
+      typeof tierMeta === 'object' && typeof tierMeta.ttl === 'number' && typeof tierMeta.limit === 'number'
+        ? tierMeta
+        : THROTTLE_TIERS[tierName as keyof typeof THROTTLE_TIERS];
+    if (!tierCfg) {
+      // 未知档位元数据:退回全局三档标准循环,避免限流失效
+      return super.canActivate(context);
+    }
+    this.activeTierByContext.set(context, tierName);
+    return this.handleRequest({
+      context,
+      limit: tierCfg.limit,
+      ttl: tierCfg.ttl,
+      throttler: { name: tierName, ttl: tierCfg.ttl, limit: tierCfg.limit },
+      blockDuration: tierCfg.ttl,
+      getTracker: this.commonOptions.getTracker ?? this.getTracker.bind(this),
+      generateKey: this.commonOptions.generateKey ?? this.generateKey.bind(this),
+    });
   }
 
   /**
@@ -176,7 +225,9 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
     const userId = request.user?.id ?? request.user?.sub;
     const method = request.method ?? 'GET';
     const url = request.originalUrl ?? request.url ?? '';
-    const tier = (detail.key?.split('-').pop() ?? 'default').toString();
+    // 档位名:优先取本请求的业务档记录;全局三档触发时 v6 detail 未携带
+    // throttler 名,key 为 sha256 不可逆,回退 unknown(前端 NET 面板可辨)
+    const tier = this.activeTierByContext.get(context) ?? 'global';
 
     const retryAfter = Math.max(1, Math.ceil((detail.timeToBlockExpire ?? detail.timeToExpire) / 1000));
     const limit = detail.limit;

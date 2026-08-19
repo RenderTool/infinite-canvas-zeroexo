@@ -717,7 +717,8 @@ export function useEditorState(canvasId: string): {
           const worldX = (e.clientX - rect.left - vp.x) / vp.k;
           const worldY = (e.clientY - rect.top - vp.y) / vp.k;
           const selection = store.getSelection();
-          collabDebug.recordPointerEvent({ x: worldX, y: worldY });
+          // 调试埋点仅 DEV 构建生效,生产构建整块剔除(连同 collab-debug 模块)
+          if (import.meta.env.DEV) collabDebug.recordPointerEvent({ x: worldX, y: worldY });
           collaborationRef.current.setLocalCursor(
             { x: worldX, y: worldY },
             { x: vp.x, y: vp.y, width: rect.width, height: rect.height, scale: vp.k },

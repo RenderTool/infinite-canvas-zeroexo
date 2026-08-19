@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsInt,
   IsNumber,
@@ -6,7 +8,9 @@ import {
   IsString,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -42,6 +46,21 @@ export class PresignAssetDto {
   @IsOptional()
   @IsString()
   scope?: 'private' | 'public';
+}
+
+/**
+ * 批量预签名上传 DTO:
+ * 单次请求携带 ≤100 条 presign 请求,把批量同步上传场景的 N 次 presign 压缩到 ⌈N/100⌉ 次。
+ * 背景:1000 节点画布推送 = 1000 次 presign,恰好压线 upload 档 1000 次/分配额触发 429。
+ */
+export class PresignAssetsBatchDto {
+  @ApiProperty({ type: [PresignAssetDto], description: '预签名请求列表(1-100 条)' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => PresignAssetDto)
+  items!: PresignAssetDto[];
 }
 
 /**
@@ -111,6 +130,21 @@ export class CreateAssetDto {
   @IsOptional()
   @IsString()
   folderId?: string;
+}
+
+/**
+ * 批量创建资产 DTO(Google Photos batchCreate 模式):
+ * 单次请求携带 ≤50 条元数据,把批量上传场景的 N 次元数据请求压缩到 ⌈N/50⌉ 次,
+ * 大幅降低对 presign/资源端点限流配额的压力。
+ */
+export class CreateAssetsBatchDto {
+  @ApiProperty({ type: [CreateAssetDto], description: '资产元数据列表(1-50 条)' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateAssetDto)
+  items!: CreateAssetDto[];
 }
 
 /**

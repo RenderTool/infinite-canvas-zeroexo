@@ -13,10 +13,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AssetsService } from './assets.service';
 import {
   CreateAssetDto,
+  CreateAssetsBatchDto,
   CreateScriptAssetDto,
   CreateZeroexoAssetDto,
   CreateZeroexoStructuredDto,
   PresignAssetDto,
+  PresignAssetsBatchDto,
   UpdateAssetDto,
   UpdateZeroexoAssetDto,
 } from './dto/asset.dto';
@@ -57,11 +59,43 @@ export class AssetsController {
     return this.assetsService.presign(userId, dto);
   }
 
+  @Post('presign-batch')
+  @ApiOperation({
+    summary: '批量获取预签名上传 URL(≤100 条/次,批量同步场景压缩 presign 请求次数)',
+  })
+  @UploadThrottle()
+  presignBatch(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+    @Body() dto: PresignAssetsBatchDto,
+  ) {
+    if (
+      dto.items.some((item) => item.scope === 'public') &&
+      role !== 'admin' &&
+      role !== 'super_admin'
+    ) {
+      throw forbidden('FORBIDDEN', 'Only admins can upload public resources');
+    }
+    return this.assetsService.presignBatch(userId, dto);
+  }
+
   @Post()
   @ApiOperation({ summary: '创建资产元数据(上传完成后调用)' })
   @UploadThrottle()
   create(@CurrentUser('id') userId: string, @Body() dto: CreateAssetDto) {
     return this.assetsService.create(userId, dto);
+  }
+
+  @Post('batch')
+  @ApiOperation({
+    summary: '批量创建资产元数据(≤50 条/次,批量上传场景压缩请求次数)',
+  })
+  @UploadThrottle()
+  createBatch(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateAssetsBatchDto,
+  ) {
+    return this.assetsService.createBatch(userId, dto);
   }
 
   @Post('scripts')

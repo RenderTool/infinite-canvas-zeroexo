@@ -77,6 +77,42 @@ export class InteractionController {
   /** Helper Lines 回调(由 React 层注入,接收对齐线数据) */
   private helperLinesCallback: HelperLinesCallback | null = null;
 
+  /**
+   * 容器 rect 缓存(强制重排缓解):
+   * screenToWorld 在每次 pointermove(拖拽/框选/悬停)都会用到容器偏移,
+   * 拖拽帧又持续写 DOM(transform),若每次都 getBoundingClientRect 会形成
+   * 写→读交错的强制重排循环。改为 ResizeObserver 维护缓存,
+   * 容器位置/尺寸变化时才重新测量(面板开合/窗口 resize)。
+   */
+  private cachedContainerRect: { left: number; top: number } | null = null;
+  private cachedContainerEl: HTMLElement | null = null;
+  private containerResizeObserver: ResizeObserver | null = null;
+
+  private getContainerOffset(): { left: number; top: number } {
+    const container = this.getContainer();
+    if (!container) return { left: 0, top: 0 };
+    // 容器元素更换时重新绑定观察
+    if (this.cachedContainerEl !== container) {
+      this.containerResizeObserver?.disconnect();
+      this.cachedContainerEl = container;
+      this.cachedContainerRect = null;
+      this.containerResizeObserver = new ResizeObserver(() => {
+        this.cachedContainerRect = null;
+      });
+      this.containerResizeObserver.observe(container);
+    }
+    if (!this.cachedContainerRect) {
+      const rect = container.getBoundingClientRect();
+      this.cachedContainerRect = { left: rect.left, top: rect.top };
+    }
+    return this.cachedContainerRect;
+  }
+
+  /** 主动失效缓存(窗口滚动/面板开合等可能改变容器位置的场景可调用) */
+  invalidateContainerRect(): void {
+    this.cachedContainerRect = null;
+  }
+
   /** 对齐阈值(世界坐标像素) */
   private readonly HELPER_LINE_THRESHOLD = 5;
 
@@ -518,7 +554,7 @@ export class InteractionController {
     const container = this.getContainer();
     if (!container) return;
 
-    const rect = container.getBoundingClientRect();
+    const rect = this.getContainerOffset();
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
     const viewport = this.store.getViewport();
@@ -631,10 +667,9 @@ export class InteractionController {
    */
   private screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const vp = this.store.getViewport();
-    const container = this.getContainer();
-    const rect = container?.getBoundingClientRect();
-    const screenX = clientX - (rect?.left ?? 0);
-    const screenY = clientY - (rect?.top ?? 0);
+    const rect = this.getContainerOffset();
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
     return { x: (screenX - vp.x) / vp.k, y: (screenY - vp.y) / vp.k };
   }
 

@@ -132,7 +132,8 @@ export function CollabOverlay({ store, theme: _theme, extensions }: CollabOverla
         // 翻转时昵称右边缘贴箭头左侧 8px:calc(-100%) 相对自身宽度,任意长短昵称都不与鼠标分离
         if (labelEl) labelEl.style.transform = flip ? 'translateX(calc(-100% - 8px))' : 'translateX(14px)';
       }
-      collabDebug.recordLocalApply();
+      // 调试埋点仅 DEV 构建生效,生产构建整块剔除(连同 collab-debug 模块)
+      if (import.meta.env.DEV) collabDebug.recordLocalApply();
     };
     const schedule = () => {
       if (!ticking) {

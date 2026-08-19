@@ -6,11 +6,13 @@
     <title>ZeroExo - AI 创意无限画布</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <!-- Google Fonts CDN 备选（项目资源优先，CDN 作为回退） -->
+    <!-- display=optional：字体未在极短窗口内就绪则直接用系统回退且永不换入，
+         杜绝 font swap 引发的文本重排/布局位移（CLS）；代价是慢网下本次访问无品牌字体 -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=block" />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=optional" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=block"
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=optional"
       rel="stylesheet"
     />
     <style>

@@ -34,7 +34,8 @@ import { ThrottlerMonitorService } from './services/throttler-monitor.service';
       useFactory: (config: ConfigService) => {
         const cfg = config.get<ReturnType<typeof throttlerConfig>>(THROTTLER_CONFIG_KEY);
         if (!cfg) {
-          // 兜底:使用硬编码默认档位
+          // 兜底:仅全局三档(业务档由 ApiThrottlerGuard 动态处理,
+          // 不得注册进此数组,否则所有端点叠加业务档限流)
           return {
             throttlers: [
               { name: 'short', ttl: 60_000, limit: 100 },

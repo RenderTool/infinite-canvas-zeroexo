@@ -232,8 +232,48 @@ export interface UndoCollectResult {
 }
 
 /**
+ * 收纳提示胶囊「移出」:把刚收纳的卡片解绑为独立节点(与胶囊 eject 语义一致)。
+ * 不恢复原连线 —— 恢复连线会被入边自动收纳 effect 再次捕获形成循环,
+ * 且与用户心智「移出=断开关系的独立节点」不符。
+ */
+export function dismissCollected(
+  nodeId: string,
+  cards: StackCard[],
+  activeIndex: number,
+  cardId: string,
+  sourceNode: NodeRecord,
+): UndoCollectResult {
+  const newCards = cards.filter((c) => c.id !== cardId);
+  const nextActive = Math.min(activeIndex, Math.max(0, newCards.length - 1));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: newCards, activeIndex: nextActive } as Record<string, unknown>),
+      new AddNodeCommand(sourceNode),
+    ], 'stacked-media-dismiss-collected'),
+    activeIndex: nextActive,
+  };
+}
+
+/** 更新指定卡片的 data 字段(文本卡片编辑落盘等) */
+export function updateCardData(
+  nodeId: string,
+  cards: StackCard[],
+  cardId: string,
+  dataPatch: Record<string, unknown>,
+): { command: BatchCommand; cards: StackCard[] } {
+  const next = cards.map((c) => (c.id === cardId ? { ...c, data: { ...c.data, ...dataPatch } } : c));
+  return {
+    command: new BatchCommand([
+      new UpdateNodeDataCommand(nodeId, { cards: next } as Record<string, unknown>),
+    ], 'stacked-media-card-data'),
+    cards: next,
+  };
+}
+
+/**
  * 撤销收纳:恢复源节点 + 连线 + 卡片列表(快照反向命令,不依赖 undo 栈,
  * 避免 5 秒窗口内其他操作污染撤销历史)
+ * @deprecated 改用 dismissCollected —— 恢复连线与胶囊 eject 行为不一致且会触发自动收纳循环
  */
 export function undoCollect(
   nodeId: string,
