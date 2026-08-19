@@ -53,6 +53,8 @@ export { createAssetNode } from './asset-node-factory.js';
 
 // 图片替换 — 上传文件 → 替换节点图片(支持撤销/重做)
 export { replaceNodeImage } from './utils/replace-node-image.js';
+// 媒体替换模型 — video/audio 替换命令化(视图只消费命令,支持撤销/重做)
+export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
 export { convertToStack, createStackNode } from './node-tools.js';
 export { stackSelectedNodes } from './nodes/stacked-media-model.js';
 // 视图组件 import(供 extension factory 使用)
@@ -119,6 +121,20 @@ const NODE_TYPES = {
   stackedMedia: 'stacked-media',
 } as const;
 
+// 尺寸契约常量(单一事实源:扩展声明与包内工具统一引用,改契约只改 node-contracts.ts)
+import {
+  TEXT_DEFAULT_SIZE,
+  GENERATOR_DEFAULT_SIZE,
+  IMAGE_DEFAULT_SIZE,
+  VIDEO_DEFAULT_SIZE,
+  AUDIO_DEFAULT_SIZE,
+  AI_PLACEHOLDER_DEFAULT_SIZE,
+  STACKED_MEDIA_DEFAULT_SIZE,
+  MEDIA_MIN_SIZE,
+  STACKED_MEDIA_MIN_SIZE,
+  TEXT_MIN_SIZE,
+} from './utils/node-contracts.js';
+
 // ===== 扩展定义工厂 =====
 
 function createNodeRuntime(
@@ -147,12 +163,14 @@ function createTextExtension(controller: ConnectionController | null, store: Rea
     displayName: i18next.t('nodes.textTitle'),
     category: 'Basic',
     color: '#6b7280',
-    defaultSize: { width: 620, height: 348 },
+    defaultSize: TEXT_DEFAULT_SIZE,
     // Plan#1 T3(验收修正): free→uniform 契约迁移,但**不锁等比**——用户要求自由宽高 resize(内容重排不变形);
     // 非等比尺寸时 isUniformScale=false 自动回退真实尺寸渲染,等比时才走 GPU scale
-    runtime: createNodeRuntime({ width: 620, height: 348 }, { mode: 'uniform' }),
+    runtime: createNodeRuntime(TEXT_DEFAULT_SIZE, { mode: 'uniform' }),
     capabilities: { stackable: true, capabilities: ['text'] },
     resizable: true,
+    // 自由 resize 下限(契约显式化: 不声明则 resize 几何走隐式 80×60 兜底,违反契约自维护)
+    minSize: TEXT_MIN_SIZE,
     viewContract: {
       selectionEffect: 'default',
       focusEffect: 'default',
@@ -175,8 +193,9 @@ function createGeneratorExtension(controller: ConnectionController | null, store
     displayName: i18next.t('nodes.generatorTitle'),
     category: 'Generator',
     color: '#8b5cf6',
-    defaultSize: { width: 620, height: 348 },
-    runtime: createNodeRuntime({ width: 620, height: 348 }),
+    defaultSize: GENERATOR_DEFAULT_SIZE,
+    // 显式 uniform 契约(resizable:false 无行为差异,但契约语义与全节点统一)
+    runtime: createNodeRuntime(GENERATOR_DEFAULT_SIZE, { mode: 'uniform' }),
     capabilities: { stackable: false, capabilities: ['generation'] },
     resizable: false,
     viewContract: {
@@ -203,12 +222,12 @@ function createImageExtension(
     displayName: i18next.t('nodes.imageTitle'),
     category: 'Media',
     color: '#9b59b6',
-    defaultSize: { width: 620, height: 348 },
-    runtime: createNodeRuntime({ width: 620, height: 348, }, { mode: 'uniform', preserveAspectRatio: true }),
+    defaultSize: IMAGE_DEFAULT_SIZE,
+    runtime: createNodeRuntime(IMAGE_DEFAULT_SIZE, { mode: 'uniform', preserveAspectRatio: true }),
     capabilities: { stackable: true, mediaKinds: ['image'], capabilities: ['media', 'replace', 'crop', 'split'] },
     resizable: true,
     lockAspectRatio: true,
-    minSize: { width: 80, height: 80 },
+    minSize: MEDIA_MIN_SIZE,
     viewContract: {
       selectionEffect: 'default',
       focusEffect: 'default',
@@ -234,12 +253,12 @@ function createVideoExtension(
     displayName: i18next.t('nodes.videoTitle'),
     category: 'Media',
     color: '#3b82f6',
-    defaultSize: { width: 620, height: 348 },
-    runtime: createNodeRuntime({ width: 620, height: 348 }, { mode: 'uniform', preserveAspectRatio: true }),
+    defaultSize: VIDEO_DEFAULT_SIZE,
+    runtime: createNodeRuntime(VIDEO_DEFAULT_SIZE, { mode: 'uniform', preserveAspectRatio: true }),
     capabilities: { stackable: true, mediaKinds: ['video'], capabilities: ['media', 'replace'] },
     resizable: true,
     lockAspectRatio: true,
-    minSize: { width: 80, height: 80 },
+    minSize: MEDIA_MIN_SIZE,
     viewContract: {
       selectionEffect: 'default',
       focusEffect: 'default',
@@ -266,8 +285,9 @@ function createAudioExtension(
     category: 'Media',
     color: '#10b981',
     // 气泡比例(特化外观:不参与全局外观配置与尺寸统一)
-    defaultSize: { width: 360, height: 96 },
-    runtime: createNodeRuntime({ width: 360, height: 96 }, { appearance: 'custom' }),
+    defaultSize: AUDIO_DEFAULT_SIZE,
+    // 显式 uniform 契约(与全节点统一;resizable:false 无行为差异)
+    runtime: createNodeRuntime(AUDIO_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom' }),
     capabilities: { stackable: true, mediaKinds: ['audio'], capabilities: ['media', 'replace', 'playback'] },
     resizable: false,
     specialAppearance: true,
@@ -295,8 +315,8 @@ function createAiPlaceholderExtension(controller: ConnectionController | null, s
     category: '_hidden',
     color: '#8b5cf6',
     // 尺寸:网格179×101 + 四周8px留白 = 195×117
-    defaultSize: { width: 195, height: 117 },
-    runtime: createNodeRuntime({ width: 195, height: 117 }, { appearance: 'custom' }),
+    defaultSize: AI_PLACEHOLDER_DEFAULT_SIZE,
+    runtime: createNodeRuntime(AI_PLACEHOLDER_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom' }),
     capabilities: { stackable: false, capabilities: ['placeholder'] },
     resizable: false,
     getPins: () => [],
@@ -317,16 +337,16 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
     category: 'Basic',
     color: '#f59e0b',
     // 基准尺寸与 image/video 节点一致
-    defaultSize: { width: 620, height: 404 },
+    defaultSize: STACKED_MEDIA_DEFAULT_SIZE,
     resizable: true,
     // 舞台高度固定,不同卡片只在展示区内自适应。
     lockAspectRatio: true,
     // minSize 必须与 defaultSize 等比(620:404 ≈ 220:143):resize-geometry 先钳 minSize 后锁比例,
     // 非等比下限会在触底时破坏宽高比 → isUniformScale=false → 回退真实尺寸渲染(挤压+字体跳跃)
-    minSize: { width: 220, height: 143 },
+    minSize: STACKED_MEDIA_MIN_SIZE,
     specialAppearance: true,
     // resize handle 回归节点四角标准位置(用户验收反馈:底部内缩使命中区落在内容上,语义反直觉)
-    runtime: createNodeRuntime({ width: 620, height: 404 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
+    runtime: createNodeRuntime(STACKED_MEDIA_DEFAULT_SIZE, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
     capabilities: { stackable: true, mediaKinds: ['image', 'video', 'audio', 'text'], capabilities: ['stack', 'merge-stacks', 'media-edit'] },
     getPins: () => getStackedMediaPins(),
     createDefaultData: createStackedMediaDefaultData,

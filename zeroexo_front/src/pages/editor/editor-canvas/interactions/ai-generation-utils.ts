@@ -5,7 +5,7 @@
 import type { Shot } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import { Semaphore } from '@/utils/Semaphore.js';
 import { apiPost } from '@/services/api-client.js';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand, resolveNodeSize } from '@zeroexo/core';
 import type { NodeRecord, NodeTypeExtension } from '@zeroexo/core';
 import i18n from '@/i18n/config';
 
@@ -398,7 +398,8 @@ export function replacePlaceholderWithNode(
   // 创建新节点
   const newNodeId = `${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const ext = extensions.get(targetType);
-  const defaultSize = ext?.defaultSize ?? { width: 620, height: 348 };
+  // 尺寸契约: 占位替换节点用扩展 defaultSize(未知类型走统一兜底)
+  const defaultSize = resolveNodeSize({}, ext);
   q.execute(new AddNodeCommand({
     id: newNodeId,
     type: targetType,

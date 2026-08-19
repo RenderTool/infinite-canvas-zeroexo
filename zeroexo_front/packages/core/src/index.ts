@@ -51,6 +51,16 @@ export type {
   ToolContext,
 } from './extensions/types.js';
 
+// ===== 尺寸契约统一解析(Plan#11: 节点契约自维护,全入口读契约禁硬编码) =====
+export {
+  FALLBACK_NODE_SIZE,
+  MEDIA_MIN_HEIGHT,
+  RESIZE_MIN_FALLBACK_SIZE,
+  resolveNodeSize,
+  resolveBaseWidth,
+  resolveMinHeight,
+} from './extensions/size-contract.js';
+
 // ===== 节点视图契约(MVVM) =====
 export type { NodeViewContract } from './node-view-contract.js';
 export type {

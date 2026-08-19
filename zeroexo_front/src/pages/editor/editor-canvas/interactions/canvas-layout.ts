@@ -2,7 +2,7 @@
  * 画布布局相关逻辑 - 排列/对齐/分布/统一尺寸/自动布局
  */
 import type { NodeRecord, NodeTypeExtension, Command } from '@zeroexo/core';
-import { MoveNodeCommand, ResizeNodeCommand, BatchCommand } from '@zeroexo/core';
+import { MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize as resolveNodeSizeContract } from '@zeroexo/core';
 import { MoveGroupCommand, getChildren, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -16,9 +16,9 @@ export interface LayoutContext {
   getNodeSize: (node: NodeRecord) => { width: number; height: number };
 }
 
-/** 获取节点尺寸（含 defaultSize 回退） */
+/** 获取节点尺寸（含 defaultSize 回退,统一走 core 契约解析） */
 export function resolveNodeSize(node: NodeRecord, extensions: Map<string, NodeTypeExtension>): { width: number; height: number } {
-  return node.size ?? extensions.get(node.type)?.defaultSize ?? { width: 200, height: 80 };
+  return resolveNodeSizeContract(node, extensions.get(node.type));
 }
 
 /** 智能布局:新节点生成后自动布局 + 聚焦
@@ -123,7 +123,7 @@ export function applyLayoutToGroupMembers(
       const b = getGroupBoundsWithEmptyFallback(scene, child.id, getNodeSize);
       return { ...base, x: b?.x ?? child.position.x, y: b?.y ?? child.position.y, width: b?.width ?? 0, height: b?.height ?? 0 };
     }
-    const size = child.size ?? ext?.defaultSize ?? { width: 200, height: 80 };
+    const size = resolveNodeSize(child, extensions);
     return { ...base, x: child.position.x, y: child.position.y, width: size.width, height: size.height };
   });
 

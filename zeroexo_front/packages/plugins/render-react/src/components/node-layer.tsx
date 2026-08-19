@@ -15,6 +15,7 @@
 
 import React, { useRef, useLayoutEffect, useState, useMemo } from 'react';
 import type { NodeRecord, NodeTypeExtension, NodeRenderer, CommandQueue } from '@zeroexo/core';
+import { resolveNodeSize } from '@zeroexo/core';
 import type { ReactGraphStore } from '../store.js';
 import { useViewport, useNodeById } from '../store.js';
 import { useNodeDefaults } from '../pin-defaults.js';
@@ -161,7 +162,7 @@ const NodeItem = React.memo(
       // 使用节点底色(与 NodeShell shellColor 优先级一致: fillColor 优先于 ext.color)
       const nodeColor = node.backgroundColor ?? node.nodeColor ?? nodeDefaults.fillColor ?? ext?.color ?? '#16213e';
       const title = node.title ?? node.type;
-      const size = node.size ?? ext?.defaultSize ?? { width: 200, height: 100 };
+      const size = resolveNodeSize(node, ext);
       const nodeTransform = `translate(${node.position.x}px, ${node.position.y}px)`;
 
       return (
@@ -230,7 +231,7 @@ const NodeItem = React.memo(
     // 注意: nodeDefaults 已在上面无条件调用，此处不再重复声明
     // size 解析:node.size 优先(已 resize 过的节点用实际尺寸),回退到 ext.defaultSize,再回退默认
     // 必须与 edge-layer.tsx 的 size 解析保持一致,否则 resize 后节点视觉不变但连线缩放 bug)
-    const size = node.size ?? ext?.defaultSize ?? { width: 200, height: 100 };
+    const size = resolveNodeSize(node, ext);
     const resizable = ext?.resizable === true && !node.locked;
     const locked = node.locked === true;
     // 无缝拼接模式:borderRadius 显式为 0 的节点(如图片拆解切片)空闲时不渲染阴影,避免拼合时缝隙观感

@@ -14,8 +14,10 @@ import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { VideoNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { uploadMediaFile, storeVideoThumbnail, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
+import { storeVideoThumbnail, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import { resolveAnyThumbUrl } from '../utils/hydrate.js';
+import { replaceNodeVideo, stripFileExtension } from '../utils/media-replace-model.js';
+import { VIDEO_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView } from '../base-node-view.js';
 
@@ -71,6 +73,7 @@ export function VideoNodeView({
   isHovered,
   forceShowPins,
   updateNode,
+  commandQueue,
   invK,
   connectionController,
   externalRenaming,
@@ -116,39 +119,16 @@ export function VideoNodeView({
   };
 
   // Bug4: 替换后调整节点尺寸比例 + 刷新标题为文件名
+  // Plan#11 C2: 上传/尺寸/数据落盘收敛到 replaceNodeVideo(命令队列,支持撤销),视图只消费命令
   const handleFileReplace = async (file: File): Promise<void> => {
     if (!file.type.startsWith('video/')) return;
     updateData({ status: 'loading', errorDetails: undefined });
-    try {
-      const media = await uploadMediaFile(file, 'video');
-      const currentWidth = node.size?.width ?? 420;
-      const ratio = (media.height ?? 720) / (media.width ?? 1280);
-      const newHeight = Math.round(currentWidth * ratio);
-      const fileName = file.name.replace(/\.[^.]+$/, '');
-      updateNode({
-        size: { width: currentWidth, height: newHeight },
-        data: {
-          ...data,
-          content: media.url,
-          storageKey: media.storageKey,
-          status: 'success',
-          naturalWidth: media.width,
-          naturalHeight: media.height,
-          durationMs: media.durationMs,
-          mimeType: media.mimeType,
-          bytes: media.bytes,
-          title: fileName,
-          errorDetails: undefined,
-          thumbnailUrl: undefined,
-        },
-        title: fileName,
-      });
-    } catch (err) {
-      updateData({
-        status: 'error',
-        errorDetails: err instanceof Error ? err.message : String(err),
-      });
-    }
+    updateNode({ title: stripFileExtension(file.name) });
+    await replaceNodeVideo(commandQueue, node, file, {
+      onStatusChange: (s) => {
+        if (s === 'error') updateData({ status: 'error' });
+      },
+    });
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -352,6 +332,9 @@ export function VideoNodeView({
   // === 阻止双击全屏(click 事件防抖接管单击/双击行为) ===
   // 问题:Chrome 双击视频全屏行为无法通过 fullscreenchange 事件拦截
   // 解决:使用 click 事件防抖,手动区分单击(播放/暂停)和双击(不做任何事),阻止浏览器默认双击全屏
+  // 注意:禁止在此视图挂 onDoubleClick/onPointerDown 拦截——它们对浏览器原生全屏检测无效,
+  // 但会掐断 dblclick 冒泡,导致画布 NodeItem 的 onDoubleClick 收不到事件(双击聚焦失效)。
+  // 真正拦截全屏的是下方原生 click 捕获监听,dblclick 事件保持冒泡给画布层。
   useEffect(() => {
     const vid = videoRef.current;
     if (!vid) return;
@@ -391,10 +374,10 @@ export function VideoNodeView({
     };
   }, [hydratedContent]); // hydratedContent 变化时重新绑定(video 元素可能重新渲染)
 
-  // 问题5: 标题栏尺寸规格
+  // 问题5: 标题栏尺寸规格(尺寸缺失时读 video 契约,禁止裸数字)
   const titleSizeText = data.naturalWidth && data.naturalHeight
     ? `${data.naturalWidth} × ${data.naturalHeight}`
-    : `${node.size?.width ?? 420} × ${node.size?.height ?? 236}`;
+    : `${node.size?.width ?? VIDEO_DEFAULT_SIZE.width} × ${node.size?.height ?? VIDEO_DEFAULT_SIZE.height}`;
   const titleIconSize = Math.max(9, Math.min(13 * (invK ?? 1), 16));
   const titleIconEl = <svg xmlns="http://www.w3.org/2000/svg" width={titleIconSize} height={titleIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>;
 
@@ -471,8 +454,6 @@ export function VideoNodeView({
           style={{ ...mediaContainerStyle, background: '#000' }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
-          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onPointerDown={(e) => { if (e.detail > 1) { e.preventDefault(); e.stopPropagation(); } }}
         >
           <video
             ref={videoRef}
@@ -485,8 +466,6 @@ export function VideoNodeView({
             preload="metadata"
             playsInline
             disablePictureInPicture
-            onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onPointerDown={(e) => { if (e.detail > 1) { e.preventDefault(); e.stopPropagation(); } }}
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={handleTimeUpdate}
             style={{

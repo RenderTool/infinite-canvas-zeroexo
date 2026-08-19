@@ -9,10 +9,11 @@
  * 通过 CommandQueue 提交命令,支持撤销/重做。
  */
 
-import type { CommandQueue, NodeRecord } from '@zeroexo/core';
-import { UpdateNodeDataCommand, ResizeNodeCommand } from '@zeroexo/core';
+import type { CommandQueue, NodeRecord, NodeTypeExtension } from '@zeroexo/core';
+import { UpdateNodeDataCommand, ResizeNodeCommand, resolveBaseWidth } from '@zeroexo/core';
 import { uploadImage } from '@zeroexo/plugin-persistence';
 import { getToken } from '@/services/api-client.js';
+import { IMAGE_DEFAULT_SIZE, MEDIA_MIN_SIZE } from './node-contracts.js';
 
 // ===== 后端上传(纯 fetch,无第三方依赖) =====
 
@@ -134,6 +135,8 @@ export async function replaceNodeImage(
   file: File,
   options?: {
     onStatusChange?: (status: string) => void;
+    /** 节点类型扩展(读尺寸契约 defaultSize/minSize;不传时用 image 扩展契约常量兜底) */
+    ext?: NodeTypeExtension;
   },
 ): Promise<void> {
   if (!file.type.startsWith('image/')) return;
@@ -212,20 +215,23 @@ export async function replaceNodeImage(
       } as Record<string, unknown>),
     );
 
-    // 2. 调整节点尺寸为图片比例:使用基准宽度 620px(与 DEFAULT_SIZES['image'] 一致)
-    // 确保拖拽/空节点上传时图片按基准尺寸缩放,而非当前节点尺寸
-    const BASE_WIDTH = 620;
-    const currentWidth = node.size?.width ?? BASE_WIDTH;
-    const useBaseWidth = Math.abs(currentWidth - 80) <= 5 || currentWidth < 200 || !node.size;
-    const refWidth = useBaseWidth ? BASE_WIDTH : currentWidth;
+    // 2. 调整节点尺寸为图片比例:基准宽度读 image 扩展契约(defaultSize.width),
+    // 高度按图片宽高比缩放 —— 契约变更一处,所有入口自动跟随
+    const baseWidth = options?.ext ? resolveBaseWidth(options.ext) : IMAGE_DEFAULT_SIZE.width;
+    const baseHeight = options?.ext?.defaultSize?.height ?? IMAGE_DEFAULT_SIZE.height;
+    const minW = options?.ext?.minSize?.width ?? MEDIA_MIN_SIZE.width;
+    const currentWidth = node.size?.width ?? baseWidth;
+    // 节点接近最小尺寸或未设置尺寸时,以基准宽度为准(避免小节点上传后仍保持小尺寸)
+    const useBaseWidth = !node.size || currentWidth <= minW + 5 || currentWidth < 200;
+    const refWidth = useBaseWidth ? baseWidth : currentWidth;
     // 安全兜底: 宽高均无效时默认 16:9 比例,避免 NaN 导致节点渲染异常
     const ratio = (width > 0 && height > 0) ? height / width : 9 / 16;
     const newHeight = Math.round(refWidth * ratio);
     const oldRect = {
       x: node.position.x,
       y: node.position.y,
-      width: node.size?.width ?? 340,
-      height: node.size?.height ?? 240,
+      width: node.size?.width ?? baseWidth,
+      height: node.size?.height ?? baseHeight,
     };
     commandQueue.execute(
       new ResizeNodeCommand(node.id, oldRect, {

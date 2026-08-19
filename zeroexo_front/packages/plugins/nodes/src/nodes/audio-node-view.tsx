@@ -12,9 +12,9 @@ import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { uploadMediaFile } from '@zeroexo/plugin-persistence';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, AIStateView } from '../base-node-view.js';
+import { replaceNodeAudio, stripFileExtension } from '../utils/media-replace-model.js';
 import { useHydratedContent } from '../utils/hydrate.js';
 
 export function getAudioNodePins(): Pin[] {
@@ -69,6 +69,7 @@ export function AudioNodeView({
   isHovered,
   forceShowPins,
   updateNode,
+  commandQueue,
   invK,
   connectionController,
   externalRenaming,
@@ -171,37 +172,28 @@ export function AudioNodeView({
     fileInputRef.current?.click();
   };
 
+  // Plan#11 C2: 替换收敛到 replaceNodeAudio(命令队列,支持撤销);wavesurfer 销毁重建是视图副作用
   const handleFileReplace = async (file: File): Promise<void> => {
     if (!file.type.startsWith('audio/')) return;
     updateData({ status: 'loading', errorDetails: undefined });
-    try {
-      const media = await uploadMediaFile(file, 'audio');
-      const fileName = file.name.replace(/\.[^.]+$/, '');
-      updateNode({ title: fileName });
-      updateData({
-        content: media.url,
-        storageKey: media.storageKey,
-        status: 'success',
-        durationMs: media.durationMs,
-        mimeType: media.mimeType,
-        bytes: media.bytes,
-        title: fileName,
-        errorDetails: undefined,
-      });
-      // 如果 wavesurfer 已存在，销毁重建
-      if (wavesurferRef.current) {
-        wavesurferRef.current.destroy();
-        wavesurferRef.current = null;
-        isReadyRef.current = false;
-      }
-      setIsPlaying(false);
-      setCurrentTime(0);
-    } catch (err) {
-      updateData({
-        status: 'error',
-        errorDetails: err instanceof Error ? err.message : String(err),
-      });
-    }
+    updateNode({ title: stripFileExtension(file.name) });
+    await replaceNodeAudio(commandQueue, node, file, {
+      onStatusChange: (s) => {
+        if (s === 'error') {
+          updateData({ status: 'error' });
+        }
+        if (s === 'success') {
+          // 如果 wavesurfer 已存在，销毁重建
+          if (wavesurferRef.current) {
+            wavesurferRef.current.destroy();
+            wavesurferRef.current = null;
+            isReadyRef.current = false;
+          }
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }
+      },
+    });
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {

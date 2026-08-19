@@ -14,6 +14,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@zeroexo/core': path.resolve(__dirname, './packages/core/src/index.ts'),
+      '@zeroexo/plugin-persistence': path.resolve(
+        __dirname,
+        './packages/plugins/persistence-localforage/src/index.ts',
+      ),
     },
   },
   test: {

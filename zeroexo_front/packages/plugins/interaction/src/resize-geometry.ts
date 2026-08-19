@@ -8,6 +8,7 @@
  */
 
 import type { ResizeConfig, ResizeHandleType } from './types.js';
+import { RESIZE_MIN_FALLBACK_SIZE } from '@zeroexo/core';
 
 export interface ResizeRect {
   x: number;
@@ -52,8 +53,9 @@ export function computeResizeRect(
   }
 
   // 应用 minSize 约束(左/上角拖拽时反向修正 position)
-  const minW = config.minSize?.width ?? 80;
-  const minH = config.minSize?.height ?? 60;
+  // 兜底统一读 core 契约常量:所有 resizable 扩展都声明 minSize 后此兜底永不命中
+  const minW = config.minSize?.width ?? RESIZE_MIN_FALLBACK_SIZE.width;
+  const minH = config.minSize?.height ?? RESIZE_MIN_FALLBACK_SIZE.height;
   const maxW = config.maxSize?.width ?? Infinity;
   const maxH = config.maxSize?.height ?? Infinity;
 

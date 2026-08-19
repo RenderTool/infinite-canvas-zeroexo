@@ -23,6 +23,13 @@
 
 import type { NodeRecord } from '@zeroexo/core';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
+import {
+  TEXT_DEFAULT_SIZE,
+  IMAGE_DEFAULT_SIZE,
+  VIDEO_DEFAULT_SIZE,
+  AUDIO_DEFAULT_SIZE,
+  MEDIA_MIN_SIZE,
+} from './utils/node-contracts.js';
 
 // ===== 类型定义 =====
 
@@ -38,14 +45,8 @@ export type AssetNodePayload =
   | { kind: 'video'; url: string; title: string; storageKey?: string; width?: number; height?: number; durationMs?: number }
   | { kind: 'audio'; url: string; title: string; storageKey?: string; durationMs?: number };
 
-// ===== 节点默认尺寸(与 createXxxExtension 的 defaultSize 一致) =====
-
-const DEFAULT_SIZES: Record<string, { width: number; height: number }> = {
-  'text': { width: 620, height: 348 },
-  'image': { width: 620, height: 348 },
-  'video': { width: 620, height: 348 },
-  'audio': { width: 620, height: 150 },
-};
+// ===== 节点默认尺寸(与 createXxxExtension 的 defaultSize 同源: node-contracts.ts 单一事实源) =====
+// 禁止在此处自行声明尺寸 —— 改契约只改 node-contracts.ts,所有入口自动跟随
 
 // ===== 主入口 =====
 
@@ -84,7 +85,7 @@ export async function createAssetNode(
         }
       }
 
-      const size = computeNodeSize(naturalWidth, naturalHeight, DEFAULT_SIZES['image']);
+      const size = computeNodeSize(naturalWidth, naturalHeight, IMAGE_DEFAULT_SIZE);
       return {
         id,
         type: 'image',
@@ -122,7 +123,7 @@ export async function createAssetNode(
         }
       }
 
-      const size = computeNodeSize(naturalWidth, naturalHeight, DEFAULT_SIZES['video']);
+      const size = computeNodeSize(naturalWidth, naturalHeight, VIDEO_DEFAULT_SIZE);
       return {
         id,
         type: 'video',
@@ -157,7 +158,8 @@ export async function createAssetNode(
         }
       }
 
-      const size = DEFAULT_SIZES['audio'] ?? { width: 340, height: 120 };
+      // 音频气泡固定尺寸(读 audio 扩展契约 360×96,非 16:9)
+      const size = AUDIO_DEFAULT_SIZE;
       return {
         id,
         type: 'audio',
@@ -176,7 +178,7 @@ export async function createAssetNode(
     }
 
     case 'text': {
-      const size = DEFAULT_SIZES['text'] ?? { width: 340, height: 240 };
+      const size = TEXT_DEFAULT_SIZE;
       return {
         id,
         type: 'text',
@@ -206,24 +208,24 @@ export async function createAssetNode(
  * 若素材为 1:1 → 620 × 620(宽度 620,高度按比例)
  * 若素材为 16:9 → 620 × 349(宽度 620,高度按比例)
  * 若素材为 4:3 → 620 × 465(宽度 620,高度按比例)
- * 无原始尺寸时回退到 fallback(默认 620×348)。
+ * 无原始尺寸时回退到 fallback(类型契约 defaultSize)。
  */
 function computeNodeSize(
   naturalWidth?: number,
   naturalHeight?: number,
-  fallback?: { width: number; height: number },
+  fallback: { width: number; height: number } = IMAGE_DEFAULT_SIZE,
 ): { width: number; height: number } {
   if (!naturalWidth || !naturalHeight || naturalWidth <= 0 || naturalHeight <= 0) {
-    return fallback ?? { width: 620, height: 348 };
+    return fallback;
   }
 
   // 以 fallback 宽度为基准,保持宽高比按宽度缩放
-  const baseW = fallback?.width ?? 620;
+  const baseW = fallback.width;
   const ratio = naturalWidth / naturalHeight;
 
   return {
     width: baseW,
-    height: Math.max(80, Math.round(baseW / ratio)),
+    height: Math.max(MEDIA_MIN_SIZE.height, Math.round(baseW / ratio)),
   };
 }
 

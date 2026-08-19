@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useRef, useEffect } from 'react';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, resolveBaseWidth, resolveMinHeight } from '@zeroexo/core';
 import type { NodeRecord, NodeTypeExtension } from '@zeroexo/core';
 import type { ImageNodeData, VideoNodeData, AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
@@ -17,6 +17,7 @@ import { modelOptionLabel, decodeChannelModel } from '@/features/ai-config/use-a
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import type { Shot } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
+import { CREATION_COMPACT_SIZE, CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
 import { htmlToPlainText, generateStoryboardShots, buildTemplateShots, replacePlaceholderWithNode, restoreOldNode } from './ai-generation-utils.js';import { CanvasOpExecutor } from './canvas-op-executor.js';
 import type { ResourceReference } from '@/features/prompt-panel/resource-references.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
@@ -283,15 +284,18 @@ export function useAiGeneration({
             const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
             if (node) {
               const ext = extensions.get(node.type);
-              const baseW = ext?.defaultSize?.width ?? 620;
+              // 尺寸契约: 基准宽度/默认高度/最小高度读节点扩展声明(Plan#11 全入口读契约)
+              const baseW = resolveBaseWidth(ext);
+              const minH = resolveMinHeight(ext);
+              const baseH = ext?.defaultSize?.height ?? Math.round(baseW * 9 / 16);
               const ratio = first.width / first.height;
               const newW = baseW;
-              const newH = Math.max(80, Math.round(baseW / ratio));
+              const newH = Math.max(minH, Math.round(baseW / ratio));
               const oldRect = {
                 x: node.position.x,
                 y: node.position.y,
                 width: node.size?.width ?? baseW,
-                height: node.size?.height ?? 348,
+                height: node.size?.height ?? baseH,
               };
               refs.commandQueue.execute(new ResizeNodeCommand(nodeId, oldRect, {
                 ...oldRect,
@@ -346,15 +350,18 @@ export function useAiGeneration({
             const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
             if (node) {
               const ext = extensions.get(node.type);
-              const baseW = ext?.defaultSize?.width ?? 620;
+              // 尺寸契约: 基准宽度/默认高度/最小高度读节点扩展声明(Plan#11 全入口读契约)
+              const baseW = resolveBaseWidth(ext);
+              const minH = resolveMinHeight(ext);
+              const baseH = ext?.defaultSize?.height ?? Math.round(baseW * 9 / 16);
               const ratio = result.width / result.height;
               const newW = baseW;
-              const newH = Math.max(80, Math.round(baseW / ratio));
+              const newH = Math.max(minH, Math.round(baseW / ratio));
               const oldRect = {
                 x: node.position.x,
                 y: node.position.y,
                 width: node.size?.width ?? baseW,
-                height: node.size?.height ?? 348,
+                height: node.size?.height ?? baseH,
               };
               refs.commandQueue.execute(new ResizeNodeCommand(nodeId, oldRect, {
                 ...oldRect,
@@ -582,8 +589,8 @@ export function useAiGeneration({
         const g = q.getState();
         const n = g.nodes.find((n: any) => n.id === storyboardId);
         const nodePos = n ? { x: n.position.x, y: n.position.y } : { x: 400, y: 200 };
-        const compactSize = { width: 200, height: 150 };
-        const defaultSize = extensions.get('storyboard')?.defaultSize ?? { width: 744, height: 558 };
+        const compactSize = { ...CREATION_COMPACT_SIZE };
+        const defaultSize = extensions.get('storyboard')?.defaultSize ?? CREATION_DEFAULT_SIZE.storyboard;
 
         for (const epId of episodeIds) {
           const targetEp = episodes.find((e) => e.id === epId);
@@ -642,8 +649,8 @@ export function useAiGeneration({
       const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
       const title = `${i18n.t('canvasNodes.stage.storyboard')}${sameTypeCount + 1}`;
       const storyboardId = `storyboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const compactSize = { width: 200, height: 150 };
-      const pos = { x: scriptNode.position.x + (scriptNode.size?.width ?? 720) + 96, y: scriptNode.position.y };
+      const compactSize = { ...CREATION_COMPACT_SIZE };
+      const pos = { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: scriptNode.position.y };
       q.execute(new AddNodeCommand({
         id: storyboardId,
         type: 'storyboard',
@@ -661,7 +668,7 @@ export function useAiGeneration({
 
       // 范文态 → 直接填入模板分镜并展开到默认尺寸
       if (event.mode === 'template') {
-        const defaultSize = extensions.get('storyboard')?.defaultSize ?? { width: 744, height: 558 };
+        const defaultSize = extensions.get('storyboard')?.defaultSize ?? CREATION_DEFAULT_SIZE.storyboard;
         q.execute(new UpdateNodeDataCommand(storyboardId, {
           shots: buildTemplateShots(), status: 'ready', isSample: true,
         }));
@@ -759,8 +766,8 @@ export function useAiGeneration({
       const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
       const title = `${i18n.t('canvasNodes.stage.storyboard')}${sameTypeCount + 1}`;
       const storyboardId = `storyboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const compactSize = { width: 200, height: 150 };
-      const pos = { x: scriptNode.position.x + (scriptNode.size?.width ?? 720) + 96, y: scriptNode.position.y };
+      const compactSize = { ...CREATION_COMPACT_SIZE };
+      const pos = { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: scriptNode.position.y };
       q.execute(new AddNodeCommand({
         id: storyboardId,
         type: 'storyboard',
@@ -783,7 +790,7 @@ export function useAiGeneration({
         triggerAutoLayoutAndFocusRef.current([storyboardId]);
       } else {
         // 仅关联:展开到默认尺寸 + 更新为 idle 状态
-        const defaultSize = extensions.get('storyboard')?.defaultSize ?? { width: 744, height: 558 };
+        const defaultSize = extensions.get('storyboard')?.defaultSize ?? CREATION_DEFAULT_SIZE.storyboard;
         q.execute(new ResizeNodeCommand(storyboardId,
           { x: pos.x, y: pos.y, width: compactSize.width, height: compactSize.height },
           { x: pos.x, y: pos.y, width: defaultSize.width, height: defaultSize.height },

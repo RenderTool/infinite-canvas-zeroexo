@@ -15,15 +15,14 @@ import {
 } from '@zeroexo/core';
 import type { Command, NodeRecord, EdgeRecord } from '@zeroexo/core';
 import type { StackedMediaData, StackCard } from './stacked-media-types.js';
+import { STACKED_MEDIA_DEFAULT_SIZE, IMAGE_DEFAULT_SIZE } from '../utils/node-contracts.js';
 
 /** 兄弟垂直队列间距 */
 const SIBLING_GAP = 40;
 /** 移出节点放置在 StackNode 前方的间距 */
 const EJECT_OFFSET_X = 40;
-/** 图片节点展示区基准高度 + 堆叠底部导航高度。 */
-const STACK_DISPLAY_HEIGHT = 348;
-const STACK_NAVIGATION_HEIGHT = 56;
-const STACK_BASE_HEIGHT = STACK_DISPLAY_HEIGHT + STACK_NAVIGATION_HEIGHT;
+/** StackNode 总高 = 扩展契约 defaultSize.height(展示区 + 底部导航)。 */
+const STACK_BASE_HEIGHT = STACKED_MEDIA_DEFAULT_SIZE.height;
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -111,7 +110,7 @@ export function stackSelectedNodes(
     id: stackNodeId,
     type: 'stacked-media',
     position,
-    size: { width: 620, height: 404 },
+    size: { ...STACKED_MEDIA_DEFAULT_SIZE },
     title: '堆叠媒体',
     data: { cards: [], activeIndex: 0 },
   };
@@ -321,7 +320,7 @@ export function ejectCard(
     ? Math.max(...siblings.map((s) => s.position.y + (s.size?.height ?? 0)))
     : node.position.y;
   const position = {
-    x: node.position.x - (card.size?.width ?? 620) - EJECT_OFFSET_X,
+    x: node.position.x - (card.size?.width ?? IMAGE_DEFAULT_SIZE.width) - EJECT_OFFSET_X,
     y: Math.max(node.position.y, siblingBottom + SIBLING_GAP),
   };
 
@@ -330,7 +329,7 @@ export function ejectCard(
     type: card.sourceType,
     title: card.title ?? '',
     position,
-    size: card.size ?? { width: 620, height: 348 },
+    size: card.size ?? { ...IMAGE_DEFAULT_SIZE },
     data: { ...card.data },
   };
   return {

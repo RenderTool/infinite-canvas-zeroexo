@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App } from 'antd';
 import type { NodeTypeExtension, NodeRecord } from '@zeroexo/core';
-import { AddNodeCommand, RemoveNodeCommand, BatchCommand } from '@zeroexo/core';
+import { AddNodeCommand, RemoveNodeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
 import { createDefaultEditor } from '@zeroexo/preset-default';
 import type { DefaultEditor } from '@zeroexo/preset-default';
 import { getDescendantIds, getLeafDescendants, ReplaceSceneCommand } from '@zeroexo/plugin-group';
@@ -342,8 +342,8 @@ export function useEditorState(canvasId: string): {
             for (const node of g.nodes) {
               const nx = node.position?.x ?? 0;
               const ny = node.position?.y ?? 0;
-              const nw = node.size?.width ?? 200;
-              const nh = node.size?.height ?? 80;
+              // fit-to-view 包围盒估算:无尺寸节点统一走契约兜底
+              const { width: nw, height: nh } = resolveNodeSize(node);
               if (nx < minX) minX = nx;
               if (ny < minY) minY = ny;
               if (nx + nw > maxX) maxX = nx + nw;
@@ -444,7 +444,8 @@ export function useEditorState(canvasId: string): {
       resizable?: boolean;
     } => {
       const ext = extMap.get(node.type);
-      const size = node.size ?? ext?.defaultSize ?? { width: 200, height: 80 };
+      // 尺寸统一走 core 契约解析(node.size > 扩展 defaultSize > 统一兜底)
+      const size = resolveNodeSize(node, ext);
       return {
         width: size.width,
         height: size.height,

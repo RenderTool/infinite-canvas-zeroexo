@@ -12,6 +12,7 @@ import type { CSSProperties, ReactElement } from 'react';
 import { useGraph, useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { NodeTypeExtension, NodeRecord } from '@zeroexo/core';
+import { resolveNodeSize } from '@zeroexo/core';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { AwarenessState, CollaborationMember } from './collaboration-types.js';
 import { useCollaborationStore, fastLocalCursor } from './use-collaboration-store.js';
@@ -48,8 +49,7 @@ function colorForUser(userId: string): string {
   return CURSOR_COLORS[hash % CURSOR_COLORS.length]! ?? CURSOR_COLORS[0];
 }
 
-/** 节点默认尺寸回退(与编辑器 getNodeSize 一致) */
-const FALLBACK_SIZE = { width: 200, height: 80 };
+/** 节点默认尺寸回退统一走 resolveNodeSize(Plan#11: 全入口读契约,禁本地 fallback) */
 
 export interface CollabOverlayProps {
   store: ReactGraphStore;
@@ -216,7 +216,7 @@ export function CollabOverlay({ store, theme: _theme, extensions }: CollabOverla
       for (const nodeId of state.selectedNodeIds) {
         const node = nodeMap.get(nodeId);
         if (!node || node.hidden) continue;
-        const size2 = node.size ?? extensions.get(node.type)?.defaultSize ?? FALLBACK_SIZE;
+        const size2 = resolveNodeSize(node, extensions.get(node.type));
         result.push({
           key: `${clientId}-${nodeId}`,
           color,

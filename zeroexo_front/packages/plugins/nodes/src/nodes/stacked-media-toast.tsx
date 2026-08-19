@@ -13,6 +13,7 @@ import { LogOut } from 'lucide-react';
 import type { NodeRecord } from '@zeroexo/core';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
+import { STACKED_MEDIA_DEFAULT_SIZE } from '../utils/node-contracts.js';
 
 /** 自动淡出延时(毫秒) */
 const AUTO_DISMISS_MS = 5000;
@@ -89,8 +90,8 @@ export function StackCollectToast({
     onDismissed();
   };
 
-  // 世界坐标 → 屏幕坐标:节点顶部中央上方
-  const cx = (node.position.x + (node.size?.width ?? 620) / 2) * viewport.k + viewport.x;
+  // 世界坐标 → 屏幕坐标:节点顶部中央上方(宽度兜底读 StackNode 扩展契约)
+  const cx = (node.position.x + (node.size?.width ?? STACKED_MEDIA_DEFAULT_SIZE.width) / 2) * viewport.k + viewport.x;
   const cy = node.position.y * viewport.k + viewport.y;
 
   return createPortal(

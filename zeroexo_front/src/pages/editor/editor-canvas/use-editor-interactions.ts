@@ -9,7 +9,7 @@ import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternal
 import { App } from 'antd';
 import { Pencil, Group, Trash2, Copy as CopyIcon, Download, FolderOpen, X, Palette, Maximize2, Combine } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
 import type {
   ImageNodeData,
@@ -18,7 +18,7 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, convertToStack, createStackNode, stackSelectedNodes } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -26,13 +26,14 @@ import { configToPinDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import { buildResourceReferences } from '@/features/prompt-panel/resource-references.js';
 import type { GenerationMode } from '@/features/prompt-panel/components/prompt-panel';
-import { uploadAsset, assetInputFromNode, nodeDataPatchFromAssetInput, serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
+import { assetInputFromNode, serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
+import { CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
 import i18n from '@/i18n/config';
 
 // ===== 反推提示词预设 =====
@@ -80,8 +81,8 @@ function computeNodesBounds(nodes: NodeRecord[]): { minX: number; minY: number; 
   for (const n of nodes) {
     const x = n.position?.x ?? 0;
     const y = n.position?.y ?? 0;
-    const w = n.size?.width ?? 200;
-    const h = n.size?.height ?? 80;
+    // 包围盒估算:无尺寸节点统一走契约兜底(FALLBACK_NODE_SIZE)
+    const { width: w, height: h } = resolveNodeSize(n);
     if (x < minX) minX = x;
     if (y < minY) minY = y;
     if (x + w > maxX) maxX = x + w;
@@ -403,10 +404,10 @@ export function useEditorInteractions({
     return buildResourceReferences(graph.nodes, graph.edges, state.selectedNodeId, t);
   }, [state.selectedNodeType, state.selectedNodeId, refs.store, selectedNodeData, t]);
 
-  // 节点尺寸访问器
+  // 节点尺寸访问器(统一走 resolveNodeSize: node.size > 扩展契约 > 兜底)
   const getNodeSize = useMemo(
     () => (node: NodeRecord): { width: number; height: number } => {
-      return node.size ?? state.extensions.get(node.type)?.defaultSize ?? { width: 200, height: 80 };
+      return resolveNodeSize(node, state.extensions.get(node.type));
     },
     [state.extensions],
   );
@@ -1079,7 +1080,7 @@ export function useEditorInteractions({
       q.execute(new AddNodeCommand({
         id,
         type: 'storyboard',
-        position: { x: scriptNode.position.x + (scriptNode.size?.width ?? 720) + 96, y: scriptNode.position.y },
+        position: { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: scriptNode.position.y },
         title,
         data: { title, status: 'idle' },
       }));
@@ -1182,7 +1183,7 @@ export function useEditorInteractions({
         q.execute(new AddNodeCommand({
           id,
           type: 'storyboard',
-          position: { x: scriptNode.position.x + (scriptNode.size?.width ?? 720) + 96, y: batchPosY(i) },
+          position: { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: batchPosY(i) },
           title,
           data: { title, status: 'idle', sourceScriptId: event.scriptNodeId, activeEpisodeId: epId },
         }));
@@ -1405,7 +1406,7 @@ export function useEditorInteractions({
             height: b?.height ?? 0,
           };
         }
-        const size = child.size ?? ext?.defaultSize ?? { width: 200, height: 80 };
+        const size = resolveNodeSize(child, ext);
         return {
           id: child.id,
           ...baseMeta,
@@ -1547,16 +1548,15 @@ export function useEditorInteractions({
       const graph = refs.store.getGraph();
       const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
       if (!node) return;
-      // 图片类型走统一替换 API(保持比例 + 命令队列)
+      // 图片类型走统一替换 API(保持比例 + 命令队列,读节点扩展尺寸契约)
       if (file.type.startsWith('image/')) {
-        await replaceNodeImage(refs.commandQueue, node, file);
-      } else {
-        // 非图片类型(视频/音频)保持原有逻辑
-        const input = await uploadAsset(file);
-        const patch = nodeDataPatchFromAssetInput(input);
-        if (patch) {
-          refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, patch));
-        }
+        await replaceNodeImage(refs.commandQueue, node, file, { ext: state.extensions.get(node.type) });
+      } else if (file.type.startsWith('video/')) {
+        // 视频:命令化替换(保宽调高读扩展契约,支持撤销/重做)
+        await replaceNodeVideo(refs.commandQueue, node, file, { ext: state.extensions.get(node.type) });
+      } else if (file.type.startsWith('audio/')) {
+        // 音频:命令化替换(气泡尺寸固定,仅 data 落盘)
+        await replaceNodeAudio(refs.commandQueue, node, file);
       }
     } catch (err) {
       console.error('replace failed:', err);

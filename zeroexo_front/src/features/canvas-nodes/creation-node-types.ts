@@ -32,6 +32,9 @@ export const CREATION_MIN_SIZE: Record<CreationNodeType, { width: number; height
   workbench: { width: 480, height: 360 },
 };
 
+/** 分镜节点生成中的紧凑占位尺寸(生成完成后展开到 defaultSize) */
+export const CREATION_COMPACT_SIZE = { width: 200, height: 150 };
+
 /** 各剧创节点引脚定义(剧本:1 输出;分镜:1 输入 + 1 输出;出片:1 输入) */
 export const CREATION_PINS: Record<
   CreationNodeType,

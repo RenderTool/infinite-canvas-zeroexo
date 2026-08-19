@@ -23,6 +23,7 @@ import { AddNodeCommand, AddEdgeCommand, BatchCommand } from '@zeroexo/core';
 import { setImageBlob } from '@zeroexo/plugin-persistence';
 import { collectCard } from './nodes/stacked-media-model.js';
 import { parseStackedMediaData } from './nodes/stacked-media-types.js';
+import { STACKED_MEDIA_DEFAULT_SIZE, IMAGE_DEFAULT_SIZE } from './utils/node-contracts.js';
 
 // ===== 通用工具(所有节点共用) =====
 
@@ -408,13 +409,13 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
   } else {
     // 无 StackNode → 一个原子命令完成创建与收纳，避免 setTimeout 和 View effect 竞争。
     const nodePos = node.position ?? { x: 0, y: 0 };
-    const nodeWidth = node.size?.width ?? 620;
+    const nodeWidth = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
     const stackNodeId = genId('stack-node');
     const stackNode: NodeRecord = {
       id: stackNodeId,
       type: 'stacked-media',
       position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
-      size: { width: 620, height: 348 },
+      size: { ...STACKED_MEDIA_DEFAULT_SIZE },
       title: '堆叠媒体',
       data: { cards: [], activeIndex: 0 },
     };
@@ -443,13 +444,13 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
  */
 export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
   const nodePos = node.position ?? { x: 0, y: 0 };
-  const nodeWidth = node.size?.width ?? 620;
+  const nodeWidth = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
   const stackNodeId = genId('stack-node');
   const stackNode: NodeRecord = {
     id: stackNodeId,
     type: 'stacked-media',
     position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
-    size: { width: 620, height: 348 },
+    size: { ...STACKED_MEDIA_DEFAULT_SIZE },
     title: '堆叠媒体',
     data: { cards: [], activeIndex: 0 },
   };

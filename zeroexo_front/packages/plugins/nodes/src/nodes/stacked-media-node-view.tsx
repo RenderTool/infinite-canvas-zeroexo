@@ -20,6 +20,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView } from '../base-node-view.js';
+import { IMAGE_DEFAULT_SIZE, STACKED_MEDIA_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { StackCollectToast } from './stacked-media-toast.js';
 import { activateStackCard, appendCards, collectCard, dismissCollected, mergeStacks, replaceCardContent, updateCardData } from './stacked-media-model.js';
 import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
@@ -46,9 +47,9 @@ interface CollectSnapshot {
 
 // ===== 布局常量 =====
 
-/** 堆叠总高度固定为图片/视频节点基准高度,导航栏占用其中的底部区域。 */
-const STACK_DISPLAY_HEIGHT = 348;
+/** 堆叠总高读扩展契约(620×404),导航栏固定高 56,展示区 = 总高 - 导航高 */
 const STACK_NAVIGATION_HEIGHT = 56;
+const STACK_DISPLAY_HEIGHT = STACKED_MEDIA_DEFAULT_SIZE.height - STACK_NAVIGATION_HEIGHT;
 
 /** 切换动画时长 */
 const SWITCH_ANIM_MS = 340;
@@ -260,7 +261,8 @@ export function StackedMediaNodeView({
 
   // ===== 舞台容器实测尺寸:内容随容器走,resize/降档时不挤压上方内容 =====
   const stageRef = useRef<HTMLDivElement>(null);
-  const [stageSize, setStageSize] = useState({ width: 620 - 32, height: STACK_DISPLAY_HEIGHT });
+  // 初始占位 = 扩展契约宽 - 容器左右 padding(ResizeObserver 首帧后即实测纠正)
+  const [stageSize, setStageSize] = useState({ width: STACKED_MEDIA_DEFAULT_SIZE.width - 32, height: STACK_DISPLAY_HEIGHT });
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -316,7 +318,7 @@ export function StackedMediaNodeView({
           mimeType: img.mimeType,
         },
         title: fileName,
-        size: node.size ?? { width: 620, height: 348 },
+        size: node.size ?? { ...IMAGE_DEFAULT_SIZE },
       };
     }
     if (file.type.startsWith('video/')) {
@@ -334,7 +336,7 @@ export function StackedMediaNodeView({
           mimeType: media.mimeType,
         },
         title: fileName,
-        size: node.size ?? { width: 620, height: 348 },
+        size: node.size ?? { ...IMAGE_DEFAULT_SIZE },
       };
     }
     return null;

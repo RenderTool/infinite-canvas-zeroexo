@@ -23,6 +23,7 @@ import type { TFunction } from 'i18next';
 import { useGraph, useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import type { NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
+import { resolveNodeSize } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import {
   Group, LayoutPanelLeft, LayoutGrid, Rows, Columns, GitBranch,
@@ -258,7 +259,7 @@ export function NodeCapsuleToolbar({
 
   // 计算锚点(世界坐标) → 屏幕坐标
   const liveBounds = getAnchorBounds ? getAnchorBounds() : null;
-  const size = node?.size ?? ext?.defaultSize ?? { width: 200, height: 80 };
+  const size = resolveNodeSize(node ?? {}, ext);
   const boundsX = liveBounds?.x ?? node?.position.x ?? 0;
   const boundsY = liveBounds?.y ?? node?.position.y ?? 0;
   const boundsW = liveBounds?.width ?? size.width;
