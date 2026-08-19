@@ -26,6 +26,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { ConnectionPlugin } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
+import { CircleX } from 'lucide-react';
 import type {
   TextNodeData,
   ImageNodeData,
@@ -314,13 +315,16 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
     category: 'Basic',
     color: '#f59e0b',
     // 基准尺寸与 image/video 节点一致
-    defaultSize: { width: 620, height: 348 },
+    defaultSize: { width: 620, height: 404 },
     resizable: true,
-    // 用户缩放沿当前显示卡片比例进行；切换卡片时由领域命令重新计算比例。
+    // 舞台高度固定,不同卡片只在展示区内自适应。
     lockAspectRatio: true,
     minSize: { width: 220, height: 160 },
     specialAppearance: true,
-    runtime: createNodeRuntime({ width: 500, height: 500 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
+    // 底部导航区(STACK_NAVIGATION_HEIGHT=56)不属于可视卡片区,
+    // 声明 handle 内缩让右下/左下缩放手柄与卡片边界对齐
+    resizeHandleInset: { bottom: 56 },
+    runtime: createNodeRuntime({ width: 620, height: 404 }, { mode: 'uniform', appearance: 'custom', preserveAspectRatio: false }),
     capabilities: { stackable: true, mediaKinds: ['image', 'video', 'audio', 'text'], capabilities: ['stack', 'merge-stacks', 'media-edit'] },
     getPins: () => getStackedMediaPins(),
     createDefaultData: createStackedMediaDefaultData,
@@ -377,7 +381,7 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
         // 胶囊中统一使用图标按钮，title/tooltip 提供语义。
         label: '',
         title: '移出为独立节点',
-        icon: 'x-circle',
+        icon: <CircleX size={14} />,
         danger: true,
         visible: () => data.cards.length > 0,
         run: () => {

@@ -121,7 +121,7 @@ export default function AiProvidersTab() {
   };
 
   const handleSave = () => {
-    setSubView('list');
+    // ★ 保存后停留在详情页，仅刷新列表数据（由返回拦截中的保存负责跳回列表）
     loadData();
   };
 

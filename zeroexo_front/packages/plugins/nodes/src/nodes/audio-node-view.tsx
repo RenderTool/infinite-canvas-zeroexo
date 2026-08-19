@@ -338,7 +338,7 @@ export function AudioNodeView({
           onReplace={handleReplaceClick}
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
-          replaceBtnPosition="top-right"
+          replaceBtnPosition="left"
         >
           {bubbleContent}
         </AIStateView>
@@ -378,7 +378,7 @@ export function AudioNodeView({
         onReplace={handleReplaceClick}
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
-        replaceBtnPosition="top-right"
+        replaceBtnPosition="left"
       >
         {bubbleContent}
       </AIStateView>

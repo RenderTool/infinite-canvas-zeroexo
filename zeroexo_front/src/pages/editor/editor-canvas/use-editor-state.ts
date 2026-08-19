@@ -27,6 +27,8 @@ import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
 import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
 import { useCollaboration } from '@/features/collaboration/use-collaboration.js';
 import type { AwarenessState } from '@/features/collaboration/collaboration-types.js';
+// 光标链路调试埋点(左上角调试面板数据总线,O(1) 计数)
+import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
 import { canConnect } from '@/shared/connection-rules.js';
 import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT, PROJECT_CONFLICT_EVENT } from '@/services/sync/broadcast-channel-service.js';
@@ -138,6 +140,10 @@ export function useEditorState(canvasId: string): {
   const { pushGraph, subscribeRemote } = canvasSync;
   // 协作系统（auto-join + Awareness 光标同步 + 成员管理）
   const collaboration = useCollaboration(canvasId, canvasSync);
+  // 协作引用：onPointerMove 等一次性注册的闭包需要读取最新协作状态(active/userId)，
+  // 直接引用 collaboration 会捕获首个渲染的旧值(此时 active=false,远端光标永远收不到本地广播)
+  const collaborationRef = useRef(collaboration);
+  collaborationRef.current = collaboration;
   // tRef: 保存最新 t 供 useEffect 内部使用(避免把 t 加入 useEffect 依赖导致 editor 重建)
   const tRef = useRef(t);
   tRef.current = t;
@@ -588,22 +594,13 @@ export function useEditorState(canvasId: string): {
           }
         }
 
-        // 先上传本地资源(图片/视频/音频)到云端,将 storageKey 替换为 cloud key,
-        // 再通过 Yjs 广播,避免其他浏览器收到 local storageKey 后找不到 blob。
-        // 使用 fire-and-forget 避免阻塞 UI,资源上传完成后才推送 Yjs。
-        (async () => {
-          try {
-            await syncProjectResourcesToCloud(nodes);
-          } catch {
-            // 资源上传失败不影响后续推送(带 local storageKey 总比不推送好)
-          }
-          pushGraph({ nodes: store.getGraph().nodes, edges: store.getGraph().edges });
-        })();
-
-        // 拖拽节点/resize 期间不推送云同步(避免每帧 rawFetch 消耗性能)
-        // 拖拽结束后的 pointerup 会触发一次完整推送
+        // 拖拽/resize 期间:Yjs 广播限频(见下方节流器),HTTP 快照仍跳过(避免每帧 rawFetch)
+        // 释放(pointerup)时 flush 补发最终位置,与 HTTP 快照"拖拽中不推"策略对齐
         const trans = ic.getTransient();
-        if (!trans.draggingNode && !trans.resizing) {
+        if (trans.draggingNode || trans.resizing) {
+          scheduleDragYjsPush();
+        } else {
+          flushDragYjsPush();
           onProjectUpdated(canvasId);
           // 标记项目有未推送修改
           markProjectDirty(canvasId);
@@ -664,19 +661,64 @@ export function useEditorState(canvasId: string): {
       return endpoints;
     };
     cc.setGroupPinExpander(groupPinExpander);
+
+    // ===== 拖拽/缩放期间 Yjs 广播节流 =====
+    // 拖动每 tick 触发 onGraphChanged → 若每帧 pushGraph,协作者每帧收到整图快照:
+    // 60Hz 拖 3s ≈ 180 次 WS 广播。限频到 ~200ms并丢弃中间帧,
+    // pointerup 时 flush 补发最终位置(面布协作非实时游戏,可接受)。
+    // 拖拽中跳过资源上传:移动不产生新资源,仅最终帧做资源同步 + cloud key 替换。
+    const DRAG_PUSH_THROTTLE_MS = 200;
+    let dragPushTimer: ReturnType<typeof setTimeout> | null = null;
+    let dragPushPending = false;
+    const pushYjs = (skipResourceSync: boolean) => {
+      dragPushTimer = null;
+      dragPushPending = false;
+      // fire-and-forget:先上传本地资源(图片/视频/音频)到云端,将 storageKey 替换为 cloud key,
+      // 再通过 Yjs 广播,避免其他浏览器收到 local storageKey 后找不到 blob。
+      (async () => {
+        try {
+          if (!skipResourceSync) {
+            await syncProjectResourcesToCloud(store.getGraph().nodes);
+          }
+        } catch {
+          // 资源上传失败不影响后续推送(带 local storageKey 总比不推送好)
+        }
+        pushGraph({ nodes: store.getGraph().nodes, edges: store.getGraph().edges });
+      })();
+    };
+    /** 拖拽中:合并连续 tick 为一次限频广播,丢弃中间帧 */
+    const scheduleDragYjsPush = () => {
+      dragPushPending = true;
+      if (dragPushTimer) return;
+      dragPushTimer = setTimeout(() => {
+        dragPushTimer = null;
+        if (dragPushPending) pushYjs(true);
+      }, DRAG_PUSH_THROTTLE_MS);
+    };
+    /** 非拖拽/释放时:清挂起帧并立即推送最新图(含资源同步) */
+    const flushDragYjsPush = () => {
+      if (dragPushTimer) {
+        clearTimeout(dragPushTimer);
+        dragPushTimer = null;
+      }
+      dragPushPending = false;
+      pushYjs(false);
+    };
     const onPointerMove = (e: PointerEvent) => {
       ic.handlePointerMove(e);
       cc.handlePointerMove(e);
       // 协作:广播光标位置/视口/选中态到远端 Awareness
       // 统一通过 collaboration.setLocalCursor 写入 'cursor-data' key(与订阅端一致)
-      if (collaboration.active) {
+      // 必须经 ref 读取最新协作状态:闭包中的 collaboration 是首次渲染的旧对象(active 恒为 false)
+      if (collaborationRef.current.active) {
         const rect = containerRef.current?.getBoundingClientRect();
         const vp = store.getViewport();
         if (rect) {
           const worldX = (e.clientX - rect.left - vp.x) / vp.k;
           const worldY = (e.clientY - rect.top - vp.y) / vp.k;
           const selection = store.getSelection();
-          collaboration.setLocalCursor(
+          collabDebug.recordPointerEvent({ x: worldX, y: worldY });
+          collaborationRef.current.setLocalCursor(
             { x: worldX, y: worldY },
             { x: vp.x, y: vp.y, width: rect.width, height: rect.height, scale: vp.k },
             Array.from(selection.selectedNodeIds),
@@ -693,7 +735,9 @@ export function useEditorState(canvasId: string): {
       cc.handlePointerUp();
       ed.plugins.history.breakMergeChain();
       // 拖拽/resize 结束后触发一次云同步推送(避免拖拽期间每帧 rawFetch)
+      // 同时 flush Yjs 节流帧:丢弃拖拽中间帧,补发最终位置
       if (isInitialized && !suppressNextSync && (wasDraggingNode || wasResizing)) {
+        flushDragYjsPush();
         onProjectUpdated(canvasId);
         markProjectDirty(canvasId);
       }
@@ -789,14 +833,20 @@ export function useEditorState(canvasId: string): {
         return;
       }
       // Ctrl/Cmd + +/-/0: 缩放(以屏幕中心为源,与UI按钮一致)
+      // Bug: 闭包捕获了首次渲染的 containerSize({0,0}),导致缩放在左上角锚定。
+      // 改为每次按键读取容器当前实时尺寸(containerRef.current 为稳定引用,读到最新 DOM)。
       if (e.ctrlKey || e.metaKey) {
+        const zoomAnchorSize = (): { width: number; height: number } => {
+          const rect = containerRef.current?.getBoundingClientRect();
+          return { width: rect?.width ?? 0, height: rect?.height ?? 0 };
+        };
         if (e.code === 'Equal' || e.code === 'NumpadAdd') {
           e.preventDefault();
           const store = ed?.store;
           if (!store) return;
           const vp = store.getViewport();
           const newK = Math.min(vp.k * 1.2, 5);
-          const { width: cw, height: ch } = containerSize;
+          const { width: cw, height: ch } = zoomAnchorSize();
           const wx = (cw / 2 - vp.x) / vp.k;
           const wy = (ch / 2 - vp.y) / vp.k;
           store.setViewport({ x: cw / 2 - wx * newK, y: ch / 2 - wy * newK, k: newK });
@@ -808,7 +858,7 @@ export function useEditorState(canvasId: string): {
           if (!store) return;
           const vp = store.getViewport();
           const newK = Math.max(vp.k / 1.2, 0.05);
-          const { width: cw, height: ch } = containerSize;
+          const { width: cw, height: ch } = zoomAnchorSize();
           const wx = (cw / 2 - vp.x) / vp.k;
           const wy = (ch / 2 - vp.y) / vp.k;
           store.setViewport({ x: cw / 2 - wx * newK, y: ch / 2 - wy * newK, k: newK });
@@ -871,6 +921,10 @@ export function useEditorState(canvasId: string): {
       unsubRemote?.();
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      // 清理拖拽节流中可能仍挂起的 Yjs 广播定时器
+      if (dragPushTimer) clearTimeout(dragPushTimer);
+      dragPushTimer = null;
+      dragPushPending = false;
       containerRef.current?.removeEventListener('wheel', onWheel);
       containerRef.current?.removeEventListener('touchstart', onTouchStart);
       containerRef.current?.removeEventListener('touchmove', onTouchMove);

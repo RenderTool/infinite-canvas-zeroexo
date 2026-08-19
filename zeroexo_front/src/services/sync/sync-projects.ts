@@ -201,10 +201,10 @@ export async function syncProjectToCloud(
         if (err instanceof ApiError && err.status === 429) {
           debugLog(`[sync-service] push rate-limited (429) for ${projectId}, marking sync error + scheduling auto-retry.`);
           setSyncStatus('error');
-          // 自动退避重试(2s→4s→8s→...→60s,最多 5 次)
+          // 自动退避重试;优先采用服务端 Retry-After,无提示时按指数退避(2s→4s→8s→...→60s,最多 5 次)
           scheduleAutoRetry(projectId, async () => {
             await syncProjectToCloud(projectId, { reason: 'rate-limit-retry' });
-          });
+          }, err.retryAfter);
           return;
         }
 

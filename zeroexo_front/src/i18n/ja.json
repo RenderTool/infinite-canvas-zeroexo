@@ -125,7 +125,7 @@
     "redo": "やり直し",
     "selectMode": "選択モード",
     "panMode": "パンモード",
-    "appearance": "キャンバス外観",
+    "appearance": "外観設定",
     "devLog": "開発ログ",
     "toggleAgent": "Agentパネルの切り替え",
     "openMenu": "キャンバスメニューを開く",
@@ -133,7 +133,9 @@
     "collaboration": "コラボレーション",
     "collaborationChat": "コラボチャット",
     "saveVersion": "バージョンを保存",
-    "versionHistory": "バージョン履歴"
+    "versionHistory": "バージョン履歴",
+    "more": "その他",
+    "renameHint": "ダブルクリックでキャンバス名を編集"
   },
   "menu": {
     "home": "ホーム",
@@ -545,6 +547,8 @@
   "config": {
     "hints": "操作ヒント",
     "hintsEnabled": "有効",
+    "hintsEnabledToast": "操作ヒントを有効にしました",
+    "hintsDisabledToast": "操作ヒントを無効にしました",
     "nodeStyle": "ノード",
     "groupStyle": "グループ",
     "pinDefault": "ピンデフォルト",
@@ -909,13 +913,13 @@
     "errorTypeValidation": "パラメータエラー",
     "replace": "置換",
     "opacity": "透明",
-    "stackedMediaTitle": "リソースブラウザ",
-    "stackEmptyHint": "画像/動画ノードを接続",
+    "stackedMediaTitle": "スタック",
+    "stackEmptyHint": "",
     "stackEmptySubHint": "接続後、スタックに参加するを選択",
     "stackCollectTitle": "スタックに収納(元ノードを削除)",
     "stackEject": "取り出す",
     "stackEjectTitle": "個別ノードとして取り出し自動接続",
-    "stackOnlyAcceptsMedia": "リソースブラウザは画像/動画の接続のみ受け付けます",
+    "stackOnlyAcceptsMedia": "スタックは画像/動画のみ接続できます",
     "stackConvertTo": "スタックに変換",
     "stackCreateNew": "スタックノードを作成",
     "stackSelected": "選択ノードをスタック",
@@ -1247,7 +1251,7 @@
     "versionFolderShortcut": "バージョングループ化",
     "dblclickFocus": "ダブルクリックでフォーカス",
     "canvasCreate": "タイプを選んで作成",
-    "stackRemoveCard": "現在のカードを取り出す",
+    "stackRemoveCard": "スタックから取り出す",
     "stackPreviewThumbnail": "ダブルクリックでサムネイルをプレビュー",
     "stackCollectHint": "収納ボタンをクリックしてスタックに追加",
     "stackableMediaHint": "カプセルツールバーの「堆叠」をクリックしてスタックノードを作成"
@@ -1353,6 +1357,7 @@
     "userLabel": "あなた",
     "inputPlaceholder": "{{role}}に質問…",
     "closePanel": "Agentパネルを閉じる",
+    "collapsePanel": "Agentパネルを収納",
     "online": "オンライン"
   },
   "promptPanel": {

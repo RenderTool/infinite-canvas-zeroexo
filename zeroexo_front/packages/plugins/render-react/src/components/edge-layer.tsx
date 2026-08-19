@@ -19,7 +19,7 @@
  * - 点击连线弹出工具栏:裁剪(支持移动端)
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useRef } from 'react';
 import type { EdgeRecord, NodeRecord, NodeTypeExtension, Pin } from '@zeroexo/core';
 import type { ReactGraphStore } from '../store.js';
 import { useViewport } from '../store.js';
@@ -38,6 +38,24 @@ import type { PinDefaults } from '../pin-defaults.js';
  * 连线端点吸附至节点外轮廓边缘,消除留白间隙。
  */
 const NODE_PIN_PADDING = 8;
+
+/**
+ * 缩放系数的相对量化(百分比桶)。
+ * 缩放动画中 viewport.k 每帧连续变化(约 1-2%/帧),直接用 k 做 useMemo 依赖会令
+ * 每条边路径每帧重建;量化到 5% 桶后,同一手势内仅跨桶帧才重建。
+ * 桶心取整保证停止缩放后回到精确值,无残留误差。
+ * 返回与 k 同单位,调用方可用 1/返回 值作为 invK 派生量(如 4672 边路径缓存)。
+ */
+export function quantizeZoom(k: number, bucket = 0.05): number {
+  if (!Number.isFinite(k) || k <= 0) return k;
+  const exp = Math.floor(Math.log(k) / Math.LN2);
+  const base = Math.pow(2, exp); // k = base * mantissa, mantissa ∈ [1, 2)
+  const mantissa = k / base;
+  // +1e-9 微扰动:桶心值(如 1.65)因浮点舍入得 (m-1)=0.6499... 会跌入上一桶,
+  // 破坏幂等性;扰动量远小于桶宽,不会越过真实边界。
+  const step = Math.min(1 + Math.floor((mantissa - 1 + 1e-9) / bucket) * bucket, 2 - bucket);
+  return base * step;
+}
 
 export interface EdgeLayerProps {
   edges: EdgeRecord[];
@@ -186,6 +204,13 @@ function smoothstepPath(endpoints: EdgeEndpoints): string {
           C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
 }
 
+/** 生成直线路径(边 LOD 低缩放档位使用):低缩放时贝塞尔细节不可见,直线段
+ *  d 字符串更短、光栅化更便宜(4854 条边合并 path 的解析/绘制成本显著下降)。 */
+function linePath(endpoints: EdgeEndpoints): string {
+  const { sourceX, sourceY, targetX, targetY } = endpoints;
+  return `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+}
+
 /** 计算贝塞尔 t=0.5 中点 */
 function bezierMidpoint(endpoints: EdgeEndpoints): { x: number; y: number } {
   const { sourceX, sourceY, targetX, targetY } = endpoints;
@@ -206,6 +231,16 @@ const TOOLBAR_W = 32;
 const TOOLBAR_H = 32;
 
 /**
+ * 边 LOD 阈值:低于此缩放时
+ * 1) 视觉合并 path 直线化(linePath)——贝塞尔细节在低缩放不可见,直线段光栅化便宜;
+ * 2) 非活跃边命中区(hit path)整层降级为不渲染——低缩放时 18px(世界坐标)的透明
+ *    粗 stroke 在屏幕上不足 6px 且命中不可靠,光栅化面积却巨大(4854 条 path 是
+ *    paint 瓶颈),去掉既省成本又不牺牲可用交互(低缩放下用户也不做边级点选)。
+ * 与节点层 LOD(k<0.35 占位)同一阈值,缩放感知节奏一致。
+ */
+const EDGE_LOD_THRESHOLD = 0.35;
+
+/**
  * EdgeItem - 单条边(memo 包裹,P0-3 per-edge 增量重算)。
  * 路径仅在两端节点记录引用/几何参数变化时重算;
  * 拖拽时只有与被拖节点相连的边拿到新 source/target 引用。
@@ -221,6 +256,7 @@ const EdgeItem = React.memo(function EdgeItem({
   stroke,
   sw,
   isActive,
+  store,
   onEdgePointerDown,
   onEdgePointerEnter,
   onEdgePointerLeave,
@@ -235,6 +271,7 @@ const EdgeItem = React.memo(function EdgeItem({
   stroke: string;
   sw: number;
   isActive: boolean;
+  store: ReactGraphStore;
   onEdgePointerDown?: (e: React.PointerEvent, edgeId: string) => void;
   onEdgePointerEnter?: (e: React.PointerEvent, edgeId: string) => void;
   onEdgePointerLeave?: (e: React.PointerEvent, edgeId: string) => void;
@@ -242,8 +279,60 @@ const EdgeItem = React.memo(function EdgeItem({
   const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
   if (!endpoints) return null;
   const d = pathFn(endpoints);
+
+  // P0-2 拖动瞬态通道:interaction 拖动期间 graph 不变,这里订阅偏移表,
+  // 每帧用「起点 position + 偏移」重算 path 并直写 SVG d(连线实时跟随拖动集)。
+  const gRef = useRef<SVGGElement | null>(null);
+  const latestSourceRef = useRef(source);
+  latestSourceRef.current = source;
+  const latestTargetRef = useRef(target);
+  latestTargetRef.current = target;
+  const latestEdgeRef = useRef(edge);
+  latestEdgeRef.current = edge;
+  const latestExtRef = useRef(extensions);
+  latestExtRef.current = extensions;
+  const latestPinRef = useRef(pinDefaults);
+  latestPinRef.current = pinDefaults;
+  const latestInvKRef = useRef(invK);
+  latestInvKRef.current = invK;
+  const latestPathFnRef = useRef(pathFn);
+  latestPathFnRef.current = pathFn;
+  useEffect(() => {
+    return store.subscribeDragOffsets(() => {
+      const g = gRef.current;
+      if (!g) return;
+      const offsets = store.getDragOffsets();
+      if (offsets.size === 0) return;
+      const s = latestSourceRef.current;
+      const t = latestTargetRef.current;
+      const e = latestEdgeRef.current;
+      if (!s || !t) return;
+      const offS = offsets.get(s.id);
+      const offT = offsets.get(t.id);
+      if (!offS && !offT) return;
+      const shiftedS = offS
+        ? { ...s, position: { x: s.position.x + offS.dx, y: s.position.y + offS.dy } }
+        : s;
+      const shiftedT = offT
+        ? { ...t, position: { x: t.position.x + offT.dx, y: t.position.y + offT.dy } }
+        : t;
+      const shiftedEndpoints = getEdgeEndpointsFor(
+        shiftedS,
+        shiftedT,
+        e,
+        latestExtRef.current,
+        latestPinRef.current,
+        latestInvKRef.current,
+      );
+      if (!shiftedEndpoints) return;
+      const shiftedD = latestPathFnRef.current(shiftedEndpoints);
+      // 光晕/命中/主线(及激活脉冲)全部同步(d 相同)
+      g.querySelectorAll('path').forEach((p) => p.setAttribute('d', shiftedD));
+    });
+  }, [store]);
+
   return (
-    <g>
+    <g ref={gRef}>
       {/* 光辉底层:粗 stroke + 低 opacity(non-scaling-stroke:屏幕恒定线宽) */}
       <path
         d={d}
@@ -362,8 +451,21 @@ export const EdgeLayer = React.memo(function EdgeLayer({
     hoveredId === edge.id ||
     !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId));
 
+  // 性能(批次2):invK 相对量化(5% 桶)——缩放动画中 invK 每帧连续变化时,若原样进
+  // useMemo 依赖,4672 条非活跃边的路径会每帧全量重建(字符串拼接 + hit 元素重建 +
+  // 4672 个 d 属性更新,dev-performance 采集中 k 连续变化段帧率跌至 13-30fps)。
+  // 量化后同一手势内仅跨桶的帧才重跑 memo body(约手势帧数的 1/20),其余命中缓存。
+  // 注意:此处量化对象是 invK=1/k(computePinPoint 的 NODE_PIN_PADDING*invK 是屏幕恒定
+  // 间距补偿),与 node-layer 的 NodeItem invK 量化保持同一函数、同一节奏。
+  // 误差有界:端点世界坐标相对误差 ≤ ±bucket/2=2.5%,换算屏幕 ≈ ≤1px,仅动画期间可感知;
+  // 停止缩放后 invKc 与真实值一致(落回桶心),无残留误差。
+  const invKc = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
+  // 边 LOD:低缩放(k < EDGE_LOD_THRESHOLD)时视觉边直线化 + 命中区整层降级。
+  const edgeLod = viewport.k < EDGE_LOD_THRESHOLD;
+  // 非活跃边视觉路径生成:低缩放用直线(linePath),正常档位保持曲线(pathFn)。
+  const visualPathFn = edgeLod ? linePath : pathFn;
   // 性能(批次1):非活跃边计算提取为 useMemo,避免平移帧(k 不变时端点不变)全量重算。
-  // 依赖含 invK/edges/nodesById/选中态;平移帧这些不变 → 命中缓存,零重算。
+  // 依赖含 invKc(量化)/edges/nodesById/选中态;平移帧这些不变 → 命中缓存,零重算。
   const inactiveMergedPath = useMemo(() => {
     const inactivePaths: string[] = [];
     for (const edge of edges) {
@@ -371,22 +473,25 @@ export const EdgeLayer = React.memo(function EdgeLayer({
       const source = nodesById.get(edge.source.nodeId);
       const target = nodesById.get(edge.target.nodeId);
       if (!source || !target) continue;
-      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
+      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invKc);
       if (!endpoints) continue;
-      inactivePaths.push(pathFn(endpoints));
+      inactivePaths.push(visualPathFn(endpoints));
     }
     return inactivePaths.length > 0 ? inactivePaths.join(' ') : null;
-  }, [edges, nodesById, extensions, pinDefaults, invK, pathFn, selectedIds, hoveredId, selectedNodeIds]);
+  }, [edges, nodesById, extensions, pinDefaults, invKc, visualPathFn, selectedIds, hoveredId, selectedNodeIds]);
 
   // 性能(批次1):非活跃边透明命中区域(每边独立,保证点击/悬停可正常交互)也 memo 化。
+  // 边 LOD:低缩放时整层降级为空 —— 透明粗 stroke 屏幕命中不足 6px 且光栅化面积巨大,
+  // 是低缩放 paint 的主要来源;去掉后边级点选在低缩放不可用(视觉边仍显示)。
   const inactiveHitTargets = useMemo(() => {
+    if (edgeLod) return [];
     const targets: React.ReactElement[] = [];
     for (const edge of edges) {
       if (isEdgeActive(edge)) continue;
       const source = nodesById.get(edge.source.nodeId);
       const target = nodesById.get(edge.target.nodeId);
       if (!source || !target) continue;
-      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invK);
+      const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invKc);
       if (!endpoints) continue;
       const d = pathFn(endpoints);
       targets.push(
@@ -404,7 +509,7 @@ export const EdgeLayer = React.memo(function EdgeLayer({
       );
     }
     return targets;
-  }, [edges, nodesById, extensions, pinDefaults, invK, pathFn, selectedIds, hoveredId, selectedNodeIds, onEdgePointerDown, onEdgePointerEnter, onEdgePointerLeave]);
+  }, [edges, nodesById, extensions, pinDefaults, invKc, pathFn, edgeLod, selectedIds, hoveredId, selectedNodeIds, onEdgePointerDown, onEdgePointerEnter, onEdgePointerLeave]);
 
   return (
     <svg
@@ -419,7 +524,6 @@ export const EdgeLayer = React.memo(function EdgeLayer({
         overflow: 'visible',
       }}
     >
-      
       <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.k})`}>
         {/* P1-4: 非活跃边合并为单 path(视觉),减少 SVG 元素数量 (批次1: useMemo 化) */}
         {inactiveMergedPath && (
@@ -461,6 +565,7 @@ export const EdgeLayer = React.memo(function EdgeLayer({
               stroke={stroke}
               sw={sw}
               isActive={isActive}
+              store={store}
               onEdgePointerDown={onEdgePointerDown}
               onEdgePointerEnter={onEdgePointerEnter}
               onEdgePointerLeave={onEdgePointerLeave}
@@ -468,7 +573,6 @@ export const EdgeLayer = React.memo(function EdgeLayer({
           );
         })}
       </g>
-      {/* 工具栏 */}
       {toolbarData && (
         <foreignObject
           x={toolbarData.x - TOOLBAR_W / 2}

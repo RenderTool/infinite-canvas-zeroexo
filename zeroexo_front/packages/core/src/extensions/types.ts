@@ -184,6 +184,15 @@ export interface NodeTypeExtension {
   viewContract?: NodeViewContract;
 
   /**
+   * resize handle 内缩(可选)。
+   *
+   * 当节点外框包含视觉内容区之外的附加区域(如 StackNode 底部导航区)时,
+   * 声明底部 handle 相对外框底边的内缩量(世界坐标),让手柄命中区与
+   * 用户可见的内容边界对齐,避免「外框可拖但内容区拖不动」的错位。
+   */
+  resizeHandleInset?: { bottom?: number };
+
+  /**
    * 连线约束钩子(可选)。允许节点类型自定义连线规则。
    *
    * 调用时机:ConnectionController.validate 在通过默认规则(自连/方向/重复)后调用。

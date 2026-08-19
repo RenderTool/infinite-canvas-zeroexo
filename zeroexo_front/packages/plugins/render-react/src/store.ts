@@ -20,6 +20,12 @@ export interface SelectionState {
   selectedEdgeIds: Set<string>;
 }
 
+/** 拖动瞬态偏移(nodeId → 世界坐标增量)。拖动中由 interaction 写入,渲染层 rAF 直改 DOM */
+export type DragOffsets = ReadonlyMap<string, { dx: number; dy: number }>;
+
+/** 空偏移表(常量引用,避免无拖动时反复创建) */
+const EMPTY_DRAG_OFFSETS: DragOffsets = new Map();
+
 /**
  * React 友好的状态存储
  * - graph: 节点 + 边 + 元数据(来自 CommandQueue)
@@ -44,8 +50,13 @@ export class ReactGraphStore {
   private readonly nodeSubscribers = new Map<string, Set<() => void>>();
   /** P1-1: 最近一次 graph 变更中发生变化的节点 ID 集合 */
   private changedNodeIds: ReadonlySet<string> = new Set();
-  /** P1-1: 最近一次 graph 变更中发生变化的边 ID 集合 */
+  /** 最近一次 graph 变更中发生变化的边 ID 集合 */
   private changedEdgeIds: ReadonlySet<string> = new Set();
+
+  /** 拖动瞬态偏移表 + 订阅(rAF 合帧通知,渲染层 NodeItem/EdgeItem 直改 DOM) */
+  private dragOffsets: DragOffsets = EMPTY_DRAG_OFFSETS;
+  private readonly dragOffsetListeners = new Set<() => void>();
+  private dragOffsetNotifyScheduled = false;
 
   /** P1-5: 网格空间索引 — graph 变更时自动重建 */
   private readonly spatialIndex = new GridSpatialIndex();
@@ -173,6 +184,31 @@ export class ReactGraphStore {
     } else {
       flush();
     }
+  };
+
+  // ===== 拖动瞬态偏移(拖动中不重建 graph,渲染层每帧直改 DOM) =====
+
+  /** 写入偏移表:立即生效(getDragOffsets 同步返回),通知延迟到下一帧统一发布(rAF 合帧) */
+  setDragOffsets = (offsets: DragOffsets): void => {
+    this.dragOffsets = offsets;
+    if (this.dragOffsetNotifyScheduled) return;
+    this.dragOffsetNotifyScheduled = true;
+    const flush = (): void => {
+      this.dragOffsetNotifyScheduled = false;
+      this.dragOffsetListeners.forEach((l) => l());
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(flush);
+    } else {
+      flush();
+    }
+  };
+
+  getDragOffsets = (): DragOffsets => this.dragOffsets;
+
+  subscribeDragOffsets = (listener: () => void): (() => void) => {
+    this.dragOffsetListeners.add(listener);
+    return () => this.dragOffsetListeners.delete(listener);
   };
 
   /** 平滑动画过渡到目标视口(300ms easeInOutCubic) */

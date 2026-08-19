@@ -11,7 +11,7 @@
  * - 移除 BottomToolbar(模式切换并入 LeftSideToolBar,成组/解组/排列并入 ToolsDock)
  * - 移除 ImageToolSettingsModal(换列/工具勾选配置不再需要)
  * - 移除 LayoutToolbar/ArrangeDropdown 自定义工具栏页面(排列改由 ToolsDock 聚合按钮承担)
- * - 设置弹窗(ConfigDialog,画布样式)由本页直接渲染,TopBar 通过 onOpenSettings 触发
+ * - 配置弹窗(ConfigDialog,画布样式)由本页直接渲染,TopBar 通过 onOpenSettings 触发
  * - 组重命名通过 externalRenamingGroupId 触发 GroupLayer 的 inline input(聚焦+全选)
  *
  * 交互回调最简委托给 interactionController。
@@ -372,7 +372,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
-          onOpenCollaborationDock={dialogs.onOpenCollaborationDock}
           onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
           syncBadge={
@@ -430,7 +429,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           {/* 画布区域(flex-1 自适应) */}
           <div ref={containerRef} style={canvasAreaStyle}>
             {state.loading ? (
-              <LoadingOverlay background={theme.canvas.background} onBackToHome={onBack} />
+              <LoadingOverlay background={theme.canvas.background} logoSize={48} onBackToHome={onBack} />
             ) : state.editor ? (
           <>
           <PinDefaultsProvider value={interactions.pinDefaults}>
@@ -516,14 +515,13 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
                 connectionController={refs.connectionController}
               />
             ) : null}
-            {/* 协作覆盖层:远端光标 + 远端选中节点高亮(仅在协作活跃时渲染) */}
-            {(state as any).collaborationActive ? (
-              <CollabOverlay
-                store={state.editor.store}
-                theme={theme}
-                extensions={state.extensions}
-              />
-            ) : null}
+            {/* 协作覆盖层:远端光标 + 远端选中节点高亮 */}
+            {/* 调色调试:临时去掉 collaborationActive 门控,overlay 常驻,方便定位房间/光标问题 */}
+            <CollabOverlay
+              store={state.editor.store}
+              theme={theme}
+              extensions={state.extensions}
+            />
           </CanvasView>
           </GroupDefaultsProvider>
           </NodeDefaultsProvider>

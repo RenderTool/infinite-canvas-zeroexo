@@ -10,7 +10,6 @@ import {
   AddEdgeCommand,
   RemoveEdgeCommand,
   RemoveNodeCommand,
-  ResizeNodeCommand,
   UpdateNodeDataCommand,
   BatchCommand,
 } from '@zeroexo/core';
@@ -21,8 +20,10 @@ import type { StackedMediaData, StackCard } from './stacked-media-types.js';
 const SIBLING_GAP = 40;
 /** 移出节点放置在 StackNode 前方的间距 */
 const EJECT_OFFSET_X = 40;
-/** 导航栏是 StackNode 内容的一部分，尺寸计算必须显式纳入。 */
+/** 图片节点展示区基准高度 + 堆叠底部导航高度。 */
+const STACK_DISPLAY_HEIGHT = 348;
 const STACK_NAVIGATION_HEIGHT = 56;
+const STACK_BASE_HEIGHT = STACK_DISPLAY_HEIGHT + STACK_NAVIGATION_HEIGHT;
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -110,7 +111,7 @@ export function stackSelectedNodes(
     id: stackNodeId,
     type: 'stacked-media',
     position,
-    size: { width: 620, height: 348 },
+    size: { width: 620, height: 404 },
     title: '堆叠媒体',
     data: { cards: [], activeIndex: 0 },
   };
@@ -352,39 +353,22 @@ export interface SwitchResult {
 }
 
 /**
- * 按当前素材比例推导 StackNode 高度。
- * 这是派生布局，而不是把 500x500 设计基准固化为相册容器。
+ * 返回固定舞台高度:图片/视频展示区基准高度加底部导航高度。
  */
-export function getStackDisplayHeight(card: StackCard | undefined, width: number): number | null {
-  if (!card || width <= 0) return null;
-  const naturalWidth = Number(card.data.naturalWidth);
-  const naturalHeight = Number(card.data.naturalHeight);
-  if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
-    return null;
-  }
-  return Math.max(220, Math.round(width * (naturalHeight / naturalWidth) + STACK_NAVIGATION_HEIGHT));
+export function getStackDisplayHeight(_card: StackCard | undefined, _width: number): number {
+  return STACK_BASE_HEIGHT;
 }
 
-/** 切换活跃卡片，并在同一事务中同步派生尺寸。 */
+/** 切换活跃卡片,只更新内容索引,舞台高度和导航位置保持不变。 */
 export function activateStackCard(node: NodeRecord, data: StackedMediaData, index: number): SwitchResult & { command: BatchCommand } {
   const activeIndex = Math.max(0, Math.min(index, Math.max(0, data.cards.length - 1)));
-  const commands: Command[] = [
+  const command = new BatchCommand([
     new UpdateNodeDataCommand(node.id, { cards: data.cards, activeIndex } as Record<string, unknown>),
-  ];
-  const width = node.size?.width ?? 620;
-  const targetHeight = getStackDisplayHeight(data.cards[activeIndex], width);
-  const currentHeight = node.size?.height ?? 348;
-  if (targetHeight !== null && Math.abs(currentHeight - targetHeight) > 2) {
-    commands.push(new ResizeNodeCommand(
-      node.id,
-      { x: node.position.x, y: node.position.y, width, height: currentHeight },
-      { x: node.position.x, y: node.position.y, width, height: targetHeight },
-    ));
-  }
+  ], 'stacked-media-activate-card');
   return {
     patch: { cards: data.cards, activeIndex },
     activeIndex,
-    command: new BatchCommand(commands, 'stacked-media-activate-card'),
+    command,
   };
 }
 

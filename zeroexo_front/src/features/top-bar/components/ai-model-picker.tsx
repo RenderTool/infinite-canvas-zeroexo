@@ -1,7 +1,7 @@
 /**
  * AiModelPicker - AI 渠道/模型选择器（收纳式）
  *
- * 显示在顶部工具栏，收纳为单个 Cpu 图标按钮（32x32，与语言切换按钮一致）。
+ * 显示在 AgentDock 顶部右上角，收纳为单个 Cpu 图标按钮(32x32，与工具栏图标一致)。
  * 点击弹出居中 Modal，双列展示渠道列表 + 模型列表，操作即时生效。
  *
  * 相比原 Select 方案（渠道 130px + 模型 140px + 刷新 24px ≈ 300px），
@@ -128,13 +128,14 @@ export function AiModelPicker(): React.ReactElement {
   return (
     <>
       {/* 触发按钮：Cpu 图标 + 当前渠道/模型提示 */}
-      <Button
-        type="text"
-        icon={<Cpu size={16} />}
-        onClick={() => setOpen(true)}
-        title={displayName}
-        style={{ width: 32, height: 32, padding: 0, color: text }}
-      />
+      <Tooltip title={displayName}>
+        <Button
+          type="text"
+          icon={<Cpu size={16} />}
+          onClick={() => setOpen(true)}
+          style={{ width: 32, height: 32, padding: 0, color: text }}
+        />
+      </Tooltip>
 
       {/* 居中弹窗：渠道 + 模型双列选择 */}
       <Modal
@@ -333,24 +334,25 @@ function SelectableItem({
   const [hover, setHover] = useState(false);
 
   return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={title}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '8px 10px',
-        borderRadius: 6,
-        cursor: 'pointer',
-        background: selected ? selectedBg : hover ? hoverBg : 'transparent',
-        color: selected ? accent : text,
-        transition: 'background 0.15s ease',
-      }}
-    >
-      {children}
-    </div>
+    <Tooltip title={title}>
+      <div
+        onClick={onClick}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 10px',
+          borderRadius: 6,
+          cursor: 'pointer',
+          background: selected ? selectedBg : hover ? hoverBg : 'transparent',
+          color: selected ? accent : text,
+          transition: 'background 0.15s ease',
+        }}
+      >
+        {children}
+      </div>
+    </Tooltip>
   );
 }

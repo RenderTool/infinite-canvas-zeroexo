@@ -520,8 +520,7 @@ export default function ImageWorkbench({
         display: 'flex',
         flexWrap: 'wrap',
         gap: 12,
-        height: 'calc(100vh - 155px)',
-        minHeight: 500,
+        minHeight: 'max(calc(100vh - 155px), 500px)',
         width: '100%',
       }}
     >

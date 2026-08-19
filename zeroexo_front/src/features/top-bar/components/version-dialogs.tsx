@@ -7,10 +7,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { App, Drawer, Input, List, Modal, Button, Empty, Tag, Tooltip } from 'antd';
+import { App, Drawer, Input, Modal, Button, Empty, Tag, Tooltip, Spin } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTranslation } from 'react-i18next';
 import { History, RotateCcw, Trash2 } from 'lucide-react';
+import { Virtuoso } from 'react-virtuoso';
 import { apiGet, apiPost, apiDelete, ApiError } from '@/services/api-client.js';
 
 interface VersionRecord {
@@ -52,8 +53,8 @@ export function VersionDialogs({
   theme,
 }: VersionDialogsProps): React.ReactElement {
   const { t } = useTranslation();
-  // App.useApp() 的 modal 实例可消费 ConfigProvider 动态主题(静态 Modal 函数无法消费)
-  const { modal } = App.useApp();
+  // App.useApp() 的 message/modal 实例可消费 ConfigProvider 动态主题(静态函数无法消费)
+  const { message, modal } = App.useApp();
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [versions, setVersions] = useState<VersionRecord[]>([]);
@@ -89,17 +90,11 @@ export function VersionDialogs({
       });
       setLabel('');
       onSaveClose();
-      modal.success({
-        title: t('versions.saveSuccessTitle'),
-        centered: true,
-      });
+      message.success(t('versions.saveSuccessTitle'));
     } catch (err) {
       // 新画布尚未同步到云端时版本接口返回 404,给出明确提示而非笼统失败
       const notSynced = err instanceof ApiError && err.status === 404;
-      modal.error({
-        title: t(notSynced ? 'versions.notSyncedTitle' : 'versions.saveFailedTitle'),
-        centered: true,
-      });
+      message.error(t(notSynced ? 'versions.notSyncedTitle' : 'versions.saveFailedTitle'));
     } finally {
       setSaving(false);
     }
@@ -215,53 +210,41 @@ export function VersionDialogs({
             {t('versions.historyTitle')}
           </span>
         }
-        width={360}
+        size={360}
         placement="right"
-        styles={{ body: { padding: 12 } }}
+        styles={{ body: { padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 } }}
       >
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
           <Button size="small" onClick={() => void loadVersions()} disabled={loading}>
             {t('versions.refresh')}
           </Button>
         </div>
-        <List
-          loading={loading}
-          dataSource={versions}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={t('versions.emptyHint')}
-              />
-            ),
-          }}
-          renderItem={(v) => (
-            <List.Item
-              style={{ padding: '10px 4px', borderBottom: `1px solid ${theme.toolbar.border}` }}
-              actions={[
-                <Tooltip key="rollback" title={t('versions.rollback')}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<RotateCcw size={14} />}
-                    loading={rollbacking === v.version}
-                    onClick={() => handleRollback(v.version)}
-                  />
-                </Tooltip>,
-                <Tooltip key="delete" title={t('versions.delete')}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Trash2 size={14} />}
-                    onClick={() => handleDelete(v.version)}
-                  />
-                </Tooltip>,
-              ]}
-            >
-              <List.Item.Meta
-                title={
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
+            <Spin />
+          </div>
+        ) : versions.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t('versions.emptyHint')}
+          />
+        ) : (
+          <Virtuoso
+            style={{ flex: 1, minHeight: 0 }}
+            data={versions}
+            itemContent={(_index, v) => (
+              <div
+                style={{
+                  padding: '10px 4px',
+                  borderBottom: `1px solid ${theme.toolbar.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {t('versions.versionLabel', { version: v.version })}
                     </span>
                     {v.label ? (
@@ -270,9 +253,7 @@ export function VersionDialogs({
                       </Tag>
                     ) : null}
                     <Tag style={{ marginInlineEnd: 0 }}>{t(`versions.source.${SOURCE_LABEL[v.source] ?? 'manual'}`)}</Tag>
-                  </span>
-                }
-                description={
+                  </div>
                   <div style={{ fontSize: 12, lineHeight: '20px', color: theme.toolbar.text }}>
                     <div>{new Date(v.createdAt).toLocaleString()}</div>
                     <div>
@@ -280,11 +261,28 @@ export function VersionDialogs({
                       {(v.size / 1024).toFixed(1)} KB
                     </div>
                   </div>
-                }
-              />
-            </List.Item>
-          )}
-        />
+                </div>
+                <Tooltip title={t('versions.rollback')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<RotateCcw size={14} />}
+                    loading={rollbacking === v.version}
+                    onClick={() => handleRollback(v.version)}
+                  />
+                </Tooltip>
+                <Tooltip title={t('versions.delete')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Trash2 size={14} />}
+                    onClick={() => handleDelete(v.version)}
+                  />
+                </Tooltip>
+              </div>
+            )}
+          />
+        )}
       </Drawer>
     </>
   );

@@ -88,7 +88,19 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
 
     const item = json?.data?.[0];
     if (!item) {
-      throw new Error('中转 API 响应缺失 data[0]');
+      // 提取网关错误信息(new-api 等中转常返回 { error: { message } } 或 { code, message })
+      const errInfo =
+        json?.error?.message ??
+        json?.error?.msg ??
+        json?.message ??
+        json?.msg ??
+        '';
+      const preview = JSON.stringify(json).slice(0, 500);
+      throw new Error(
+        errInfo
+          ? `中转 API 返回错误: ${errInfo}`
+          : `中转 API 响应缺失 data[0] (响应预览: ${preview})`,
+      );
     }
 
     let buffer: Buffer;

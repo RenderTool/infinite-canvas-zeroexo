@@ -272,10 +272,17 @@ export function NodeShell({
         <div
           style={{
             position: 'absolute',
+            // 标题栏:外层节点(带 viewport scale k) != 内层自身 transform scale(1/sx,1/sy)。
+            // 视觉高 = height × (1/sy 自身) × sy(节点) × k(视口) = height × k → 屏幕恒定。
+            // 视觉位置 top 不受自身 transform 影响,只被节点缩放×视口缩放 → 需除 nodeScale.sy。
+            // fontSize 同理:视觉 = fontSize × k,按 invK 折算即可。
             top: -(NODE_TITLE_HEIGHT + 2) * invK / nodeScale.sy,
             left: 0,
-            right: 0,
-            height: NODE_TITLE_HEIGHT * invK / nodeScale.sy,
+            // 宽度跟随节点缩放:布局宽 = NodeShell宽 × sx,自身 scale(1/sx) 缩回后
+            // 视觉宽 = NodeShell宽 × sx × k = 节点视觉宽度。若用 left:0/right:0(固定100%)
+            // 标题栏视觉宽恒定,节点放大时右侧 titleSize 不会跟随节点 → 文本停驻错位
+            width: `${Math.max(0.2, nodeScale.sx) * 100}%`,
+            height: NODE_TITLE_HEIGHT * invK,
             transform: `scale(${1 / nodeScale.sx}, ${1 / nodeScale.sy})`,
             transformOrigin: 'top left',
             padding: '0 6px',
@@ -283,9 +290,8 @@ export function NodeShell({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 4,
-            // 使用 invK 反缩放保持屏幕恒定，移除上限 clamp 让标题随缩放正确等比变化
-            // 下限 8px 防止高倍放大时标题过小
-            fontSize: Math.max(8, 13 * invK),
+            // fontSize 视觉 = fontSize × k:按 invK 折算保持屏幕恒定(下限同样折算)
+            fontSize: Math.max(8 * invK, 13 * invK),
             color: titleColor,
             fontWeight: 600,
             userSelect: 'none',
@@ -334,7 +340,7 @@ export function NodeShell({
           )}
           {/* 右:尺寸规格 — 使用 invK 自适应视口缩放,保持与标题文本的相对比例 */}
           {titleSize ? (
-            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: Math.max(6, 10 * invK) }}>{titleSize}</span>
+            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: Math.max(6 * invK, 10 * invK) }}>{titleSize}</span>
           ) : null}
         </div>
       ) : null}
@@ -413,7 +419,11 @@ export function NodeShell({
         {inputPins.map((pin, idx) => {
           const isHoveredPin = pinHover?.side === 'left' && pinHover.pinIndex === idx;
           const pinSize = mergedPins[0]?.size ?? 14;
-          const circleR = (2.2 * pinSize) / 2;
+          // 磁吸圆:本地 CSS 尺寸 = 目标视觉(2.2*pinSize*k)/节点缩放(sx) —与 PinView 视觉
+          // (pinSize*k,随视口缩放)保持一致,避免节点缩放时圆与 PIN 比例失调/跳动
+          const magnetW = (2.2 * pinSize) / nodeScale.sx;
+          const magnetH = (2.2 * pinSize) / nodeScale.sy;
+          const circleR = magnetH / 2;
           return (
             <React.Fragment key={pin.id}>
               {/* 可视化圆形边界(调试用) */}
@@ -421,10 +431,11 @@ export function NodeShell({
                 <div
                   style={{
                     position: 'absolute',
-                    left: 32 - pinSize / 2 - circleR,
+                    // 容器本地宽 = 32*invK/nodeScale.sx;圆中心对齐 pin 中心(右缘 - pinSizeScreen/2)
+                    left: (32 * invK / nodeScale.sx) - (pinSize * invK / nodeScale.sx) / 2 - magnetW / 2,
                     top: (getPinNaturalCenterY('left', idx) * invK) / nodeScale.sy - circleR,
-                    width: 2.2 * pinSize,
-                    height: 2.2 * pinSize,
+                    width: magnetW,
+                    height: magnetH,
                     borderRadius: '50%',
                     border: '1px dashed rgba(233,69,96,0.5)',
                     background: 'rgba(233,69,96,0.04)',
@@ -472,7 +483,10 @@ export function NodeShell({
         {outputPins.map((pin, idx) => {
           const isHoveredPin = pinHover?.side === 'right' && pinHover.pinIndex === idx;
           const pinSize = mergedPins[0]?.size ?? 14;
-          const circleR = (2.2 * pinSize) / 2;
+          // 磁吸圆:本地 CSS 尺寸 = 目标视觉(2.2*pinSize*k)/节点缩放(sx) —与 PinView 视觉一致
+          const magnetW = (2.2 * pinSize) / nodeScale.sx;
+          const magnetH = (2.2 * pinSize) / nodeScale.sy;
+          const circleR = magnetH / 2;
           return (
             <React.Fragment key={pin.id}>
               {/* 可视化圆形边界(调试用) */}
@@ -480,10 +494,11 @@ export function NodeShell({
                 <div
                   style={{
                     position: 'absolute',
-                    left: pinSize / 2 - circleR,
+                    // 输出端 pin 中心在容器左缘 + pinSizeScreen/2,圆以该点居中
+                    left: (pinSize * invK / nodeScale.sx) / 2 - magnetW / 2,
                     top: (getPinNaturalCenterY('right', idx) * invK) / nodeScale.sy - circleR,
-                    width: 2.2 * pinSize,
-                    height: 2.2 * pinSize,
+                    width: magnetW,
+                    height: magnetH,
                     borderRadius: '50%',
                     border: '1px dashed rgba(233,69,96,0.5)',
                     background: 'rgba(233,69,96,0.04)',

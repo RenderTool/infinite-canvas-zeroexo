@@ -22,6 +22,15 @@ import type { Asset, AssetKind } from '@/features/asset-picker/index.js';
 import type { NodeRecord } from '@zeroexo/core';
 import { debugLog, debugError } from './sync-utils.js';
 
+/**
+ * 本次会话内已确认失效的 blob URL。
+ * blob URL 在页面刷新或 URL.revokeObjectURL 后无法再次 fetch,
+ * 且每次 fetch 都会触发浏览器控制台 net::ERR_FILE_NOT_FOUND。
+ * 记录失效 URL,避免后续同步反复 fetch 同一死引用。
+ * 仅存会话内存,刷新页面后自动清空。
+ */
+const failedBlobUrls = new Set<string>();
+
 // ===== 类型定义 =====
 
 interface PresignResponse {
@@ -205,6 +214,14 @@ async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
     // 场景: AI 生成图片/视频后, data.content 设为 blob URL, 但 blob 未存储到 localforage,
     // 导致 storageKey 为空。不处理会导致推送的 scene 中含无效 blob URL(其他设备无法渲染)。
     if (!storageKey && content && content.startsWith('blob:')) {
+      // blob URL 仅在创建它的会话内有效。刷新/revokeObjectURL 后 fetch 会失败,
+      // 且每次 fetch 都会触发浏览器控制台 net::ERR_FILE_NOT_FOUND。
+      // 会话内已确认失效的 URL 直接跳过并清理,避免每次同步都重复 fetch。
+      if (failedBlobUrls.has(content)) {
+        delete data.content;
+        debugLog(`[sync-resources] skip dead blob URL (already failed this session), cleared content`);
+        continue;
+      }
       try {
         const response = await fetch(content);
         if (!response.ok) {
@@ -234,9 +251,13 @@ async function syncProjectResourcesToCloud(nodes: any[]): Promise<void> {
           debugLog(`[sync-resources] set storageKey for blob content node: ${result.storageKey}`);
         }
       } catch (err) {
-        // 跨浏览器场景: blob URL 仅在当前会话有效,其他浏览器 fetch 时 TypeError 是预期行为
+        // blob URL 失效: 跨浏览器/页面刷新后不可 fetch(TypeError 是预期行为)。
+        // 记录失效 URL 并清理死引用, 后续同步不再重复 fetch(控制台不会被
+        // net::ERR_FILE_NOT_FOUND 刷屏), 推送的 scene 也不含无效 blob URL。
         if (content?.startsWith('blob:') && (err instanceof TypeError || err instanceof DOMException)) {
-          debugLog(`[sync-resources] blob URL not available in this session (cross-browser), skip`);
+          failedBlobUrls.add(content);
+          delete data.content;
+          debugLog(`[sync-resources] blob URL not available in this session, cleared dead content`);
         } else {
           debugError(`[sync-resources] upload blob content failed:`, err);
         }

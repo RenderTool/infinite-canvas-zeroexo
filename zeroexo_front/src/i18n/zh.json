@@ -65,7 +65,7 @@
     "renamePrompt": "组名称"
   },
   "settings": {
-    "title": "设置",
+    "title": "配置",
     "tabCanvas": "画布样式",
     "tabAiProviders": "AI 渠道",
     "tabShortcuts": "快捷键",
@@ -124,7 +124,7 @@
     "redo": "重做",
     "selectMode": "选择模式",
     "panMode": "平移模式",
-    "appearance": "换肤",
+    "appearance": "外观设置",
     "devLog": "开发日志",
     "toggleAgent": "切换 Agent 面板",
     "openMenu": "打开画布菜单",
@@ -132,7 +132,9 @@
     "collaboration": "协作",
     "collaborationChat": "协作聊天",
     "saveVersion": "保存版本",
-    "versionHistory": "版本历史"
+    "versionHistory": "版本历史",
+    "more": "更多",
+    "renameHint": "双击修改画布名称"
   },
   "menu": {
     "home": "主页",
@@ -544,6 +546,8 @@
   "config": {
     "hints": "操作提示",
     "hintsEnabled": "启用",
+    "hintsEnabledToast": "操作提示已开启",
+    "hintsDisabledToast": "操作提示已关闭",
     "nodeStyle": "节点",
     "groupStyle": "分组",
     "pinDefault": "引脚",
@@ -908,13 +912,13 @@
     "errorTypeValidation": "参数错误",
     "replace": "替换",
     "opacity": "透明",
-    "stackedMediaTitle": "资源浏览器",
-    "stackEmptyHint": "连接图片/视频节点",
-    "stackEmptySubHint": "连入后选择加入堆叠",
+    "stackedMediaTitle": "堆叠",
+    "stackEmptyHint": "",
+    "stackEmptySubHint": "",
     "stackCollectTitle": "收纳进堆叠(移除源节点)",
     "stackEject": "移出",
     "stackEjectTitle": "移出为独立节点并自动连线",
-    "stackOnlyAcceptsMedia": "资源浏览器仅接受图片/视频连入",
+    "stackOnlyAcceptsMedia": "堆叠仅接受图片/视频连入",
     "stackConvertTo": "转入堆叠",
     "stackCreateNew": "生成堆叠节点",
     "stackSelected": "堆叠所选节点",
@@ -1284,7 +1288,7 @@
     "versionFolderShortcut": "收纳版本组",
     "dblclickFocus": "双击聚焦",
     "canvasCreate": "选择创建",
-    "stackRemoveCard": "移出当前卡片",
+    "stackRemoveCard": "移出堆叠",
     "stackPreviewThumbnail": "双击缩略图预览",
     "stackCollectHint": "点击收纳按钮加入堆叠",
     "stackableMediaHint": "点击胶囊工具栏「堆叠」生成堆叠节点"
@@ -1390,6 +1394,7 @@
     "userLabel": "你",
     "inputPlaceholder": "向{{role}}提问…",
     "closePanel": "关闭 Agent 面板",
+    "collapsePanel": "收起 Agent 面板",
     "online": "在线"
   },
   "promptPanel": {

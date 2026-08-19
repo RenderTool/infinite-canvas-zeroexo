@@ -16,6 +16,7 @@
 
 import React, { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { LogOut } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { HINT_ENTRIES, type HintEntry } from './hint-entries.js';
 import { useHintsEnabled } from './hints-settings.js';
@@ -249,6 +250,9 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           ) : null}
           {entry.gesture === 'drag' ? (
             <MouseDragIcon stroke={iconStroke} accent={accent} />
+          ) : null}
+          {entry.id === 'stack-remove-card' ? (
+            <LogOut size={16} strokeWidth={1.8} color={accent} aria-hidden />
           ) : null}
           <span style={{ color: textColor, fontSize: 12, fontWeight: 500 }}>
             {t(entry.labelKey)}

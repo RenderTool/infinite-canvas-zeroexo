@@ -53,6 +53,8 @@ export interface CollaborationState {
     toolName?: string;
     senderName?: string;
   } | null;
+  /** 是否显示本地光标(自检):默认关闭,仅调试面板可开启 */
+  showSelfCursor: boolean;
 }
 
 /** 协作 actions */
@@ -85,6 +87,8 @@ export interface CollaborationActions {
   setActive: (active: boolean) => void;
   /** 设置 Agent 执行状态 */
   setAgentStatus: (status: CollaborationState['agentStatus']) => void;
+  /** 切换本地光标(自检)显示 */
+  setShowSelfCursor: (show: boolean) => void;
 }
 
 export type CollaborationStore = CollaborationState & CollaborationActions;
@@ -101,6 +105,7 @@ const initialState: CollaborationState = {
   error: null,
   localAwareness: null,
   agentStatus: null,
+  showSelfCursor: false,
 };
 
 /**
@@ -221,11 +226,45 @@ export function createCollaborationStore() {
     setAgentStatus: (status) => {
       set({ agentStatus: status });
     },
+
+    setShowSelfCursor: (show) => {
+      set({ showSelfCursor: show });
+    },
   }));
 }
 
 /** 全局 store 实例（单画布场景） */
 export const useCollaborationStore = createCollaborationStore();
+
+/**
+ * 本地光标"即时"通道:pointermove 每帧直写,不经过 40ms 广播节流。
+ * 仅用于 CanvasOverlay 本地光标 DOM 渲染(每帧读取,与 OS 鼠标同步);
+ * 不触发 store 变更/React 重渲染,真实广播仍走节流后的 localAwareness。
+ * t 为最近一次写入的 performance.now(),-1 表示尚无数据。
+ *
+ * 订阅:写入时通知订阅者(本地光标 rAF 渲染调度用),避免空转自续帧。
+ */
+type CursorSubscriber = () => void;
+const cursorListeners = new Set<CursorSubscriber>();
+
+export const fastLocalCursor = {
+  x: 0,
+  y: 0,
+  t: -1,
+  set(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.t = performance.now();
+    for (const fn of cursorListeners) fn();
+  },
+  /** 订阅光标写入事件,返回取消订阅函数 */
+  subscribe(fn: CursorSubscriber): () => void {
+    cursorListeners.add(fn);
+    return () => {
+      cursorListeners.delete(fn);
+    };
+  },
+};
 
 /** 工具：从 store 获取远端 Awareness 列表（排除自己） */
 export function getRemoteAwarenessStates(

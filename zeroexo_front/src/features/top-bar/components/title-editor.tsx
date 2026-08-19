@@ -7,6 +7,8 @@
 
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
+import { Tooltip } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 
 export interface TitleEditorProps {
@@ -30,6 +32,7 @@ export function TitleEditor({
   onFinishTitleEditing,
   onCancelTitleEditing,
 }: TitleEditorProps): React.ReactElement {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,20 +94,21 @@ export function TitleEditor({
 
   return (
     <div style={wrapperStyle}>
-      <button
-        type="button"
-        onDoubleClick={onStartTitleEditing}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.borderBottomColor = theme.toolbar.text;
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.borderBottomColor = 'transparent';
-        }}
-        title="双击修改画布名称"
-        style={displayStyle}
-      >
-        {title}
-      </button>
+      <Tooltip title={t('topbar.renameHint')}>
+        <button
+          type="button"
+          onDoubleClick={onStartTitleEditing}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.borderBottomColor = theme.toolbar.text;
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.borderBottomColor = 'transparent';
+          }}
+          style={displayStyle}
+        >
+          {title}
+        </button>
+      </Tooltip>
     </div>
   );
 }

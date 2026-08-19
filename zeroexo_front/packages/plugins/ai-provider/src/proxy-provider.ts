@@ -48,7 +48,7 @@ export type LocaleGetter = () => string;
 /** 后端 /api/ai/generate 响应 */
 interface GenerateResponse {
   generationId: string;
-  assetId: string;
+  assetId?: string;
   kind: 'text' | 'image' | 'video' | 'audio';
   text?: string;
   mimeType?: string;
@@ -58,6 +58,16 @@ interface GenerateResponse {
   costTokens?: number;
   costMs?: number;
   url?: string;
+}
+
+/** /api/ai/generations/:id 响应(轮询异步任务时使用) */
+interface GenerationRecord {
+  id: string;
+  status: string;
+  kind: string;
+  errorMessage?: string | null;
+  resultAssetId?: string | null;
+  params?: Record<string, any>;
 }
 
 /** /api/assets/:id/download 响应 */
@@ -174,15 +184,16 @@ export class ProxyProvider implements AIProvider {
       },
       req.signal,
     );
-    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const completed = await this.waitForTask(result.generationId, 'image', req.signal);
+    const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal);
     const dataUrl = await blobToDataUrl(blob);
     return [
       {
         dataUrl,
-        width: result.width ?? 0,
-        height: result.height ?? 0,
-        mimeType: result.mimeType ?? 'image/png',
+        width: completed.width ?? 0,
+        height: completed.height ?? 0,
+        mimeType: completed.mimeType ?? 'image/png',
         bytes: blob.size,
       },
     ];
@@ -235,7 +246,8 @@ export class ProxyProvider implements AIProvider {
       },
       req.signal,
     );
-    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const completed = await this.waitForTask(result.generationId, 'video', req.signal);
+    const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal);
     return readVideoMetaFromBlob(blob);
   }
@@ -256,7 +268,8 @@ export class ProxyProvider implements AIProvider {
       },
       req.signal,
     );
-    const downloadUrl = result.url ?? (await this.getAssetDownloadUrl(result.assetId, req.signal));
+    const completed = await this.waitForTask(result.generationId, 'audio', req.signal);
+    const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal);
     return readAudioMetaFromBlob(blob);
   }
@@ -372,6 +385,53 @@ export class ProxyProvider implements AIProvider {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } finally {
       clearTimeout(timeoutTimer);
+    }
+  }
+
+  /**
+   * 轮询等待异步生成任务完成(非 text 任务 POST /ai/generate 仅返回 generationId，
+   * 由后端 Worker 异步处理，完成后需轮询 GET /ai/generations/:id 获取产物 URL)
+   *
+   * @param generationId 任务 ID
+   * @param kind 生成类型(用于超时判断)
+   * @param signal 外部取消信号
+   * @returns 含产物 url/assetId/元信息的响应(供下载)
+   */
+  private async waitForTask(
+    generationId: string,
+    kind: 'image' | 'video' | 'audio',
+    signal?: AbortSignal,
+  ): Promise<GenerateResponse> {
+    const timeoutMs = timeoutMsByKind(kind);
+    const startedAt = Date.now();
+    while (true) {
+      if (signal?.aborted) throw new AiError('TIMEOUT', '已取消');
+      const record = await this.fetcher<GenerationRecord>(
+        `/ai/generations/${generationId}`,
+        { method: 'GET', signal },
+      );
+      if (record.status === 'success') {
+        const p = record.params ?? {};
+        return {
+          generationId,
+          kind,
+          url: (p._resultUrl as string | undefined) ?? undefined,
+          assetId: record.resultAssetId ?? undefined,
+          mimeType: (p._resultMime as string | undefined) ?? undefined,
+          width: (p._resultWidth as number | undefined) ?? undefined,
+          height: (p._resultHeight as number | undefined) ?? undefined,
+        };
+      }
+      if (record.status === 'failed') {
+        throw new AiError('PROVIDER_ERROR', record.errorMessage || '生成失败，请重试');
+      }
+      if (record.status === 'cancelled') {
+        throw new AiError('TIMEOUT', '任务已取消');
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new AiError('TIMEOUT', `生成超时(${timeoutMs / 1000}s)，请稍后重试`);
+      }
+      await sleep(1000, signal);
     }
   }
 

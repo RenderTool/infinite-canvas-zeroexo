@@ -368,8 +368,11 @@ export function useCanvasSync(canvasId: string | undefined): CanvasSyncResult {
     const entry = entryRef.current;
     if (!entry?.provider) return () => {};
 
-    const handler = ({ states }: { states: Array<{ clientId: number; state: Record<string, unknown> }> }) => {
-      cb(states.map((s) => ({ clientId: s.clientId, state: s.state })));
+    // 注意: HocuspocusProvider 的 'awarenessUpdate' 事件 states 已由
+    // @hocuspocus/common 的 awarenessStatesToArray 平铺展开为 { clientId, ...state },
+    // 不能再按 { clientId, state } 嵌套结构解析,否则 cursor-data 永远取不到。
+    const handler = ({ states }: { states: Array<{ clientId: number } & Record<string, unknown>> }) => {
+      cb(states.map((s) => ({ clientId: s.clientId, state: s })));
     };
 
     entry.provider.on('awarenessUpdate', handler);

@@ -6,7 +6,7 @@
  * - @MediumThrottle()   5 分钟 500 次
  * - @LongThrottle()     1 小时 3000 次
  * - @LoginThrottle()    5 次/分/IP(防爆破)
- * - @UploadThrottle()   30 次/分/用户(防滥用)
+ * - @UploadThrottle()   1000 次/分/用户(覆盖批量上传,保留粗粒度防刷)
  * - @AiThrottle()       20 次/分/用户(成本保护)
  * - @EmailThrottle()    10 次/小时/IP(防垃圾邮件)
  * - @SmsThrottle()      1 次/分/手机号
@@ -58,7 +58,7 @@ export const LongThrottle = () => tierDecorator('long', THROTTLE_TIERS.long);
 /** 登录:5 次/分(防爆破) */
 export const LoginThrottle = () => tierDecorator('login', THROTTLE_TIERS.login);
 
-/** 上传:30 次/分 */
+/** 上传:1000 次/分(覆盖批量上传) */
 export const UploadThrottle = () => tierDecorator('upload', THROTTLE_TIERS.upload);
 
 /**
@@ -89,7 +89,11 @@ export const SmsThrottle = () => tierDecorator('sms', THROTTLE_TIERS.sms);
 export const RegisterThrottle = () =>
   tierDecorator('register', THROTTLE_TIERS.register);
 
-/** 画布写操作:10 次/分(防恶意高频修改) */
+/** 画布读操作:300 次/分(列表/详情/graph 分页,高频但轻量) */
+export const CanvasReadThrottle = () =>
+  tierDecorator('canvasRead', THROTTLE_TIERS.canvasRead);
+
+/** 画布写操作:120 次/分(防抖快照落库 PATCH + 删除,防恶意高频写) */
 export const CanvasWriteThrottle = () =>
   tierDecorator('canvasWrite', THROTTLE_TIERS.canvasWrite);
 
@@ -97,6 +101,6 @@ export const CanvasWriteThrottle = () =>
 export const CanvasCreateThrottle = () =>
   tierDecorator('canvasCreate', THROTTLE_TIERS.canvasCreate);
 
-/** 资源预签名:20 次/分(防批量 presign 攻击) */
+/** 资源预签名:1000 次/分(覆盖批量 presign) */
 export const PresignThrottle = () =>
   tierDecorator('presign', THROTTLE_TIERS.presign);

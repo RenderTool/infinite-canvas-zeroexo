@@ -114,7 +114,7 @@ function HierarchyThumbnail({
   return (
     <div
       style={{
-        width: 40, height: 40, flexShrink: 0, borderRadius: 6, overflow: 'hidden',
+        width: 32, height: 32, flexShrink: 0, borderRadius: 4, overflow: 'hidden',
         background: theme.toolbar.border + '33',
       }}
     >
@@ -471,7 +471,7 @@ export function HierarchyPanelSidebar({
     const rowStyle: CSSProperties = {
       display: 'flex', alignItems: 'stretch', gap: 0,
       margin: '2px 8px', padding: 0,
-      minHeight: showThumbnail ? 52 : 30, cursor: 'pointer', borderRadius: 6,
+      minHeight: 36, cursor: 'pointer', borderRadius: 6,
       backgroundColor: isSelected ? selectedBg : 'transparent',
       color: isSelected ? selectedText : hidden ? theme.toolbar.textMuted : theme.toolbar.text,
       fontWeight: isSelected || isGroup ? 500 : 400,

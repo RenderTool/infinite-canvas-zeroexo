@@ -259,16 +259,13 @@ export function useAiBrandState({
     onBack: _onBack,
     initializedRef,
     enabledModels,
-    setEnabledModels,
     modelTypes,
     modelIcons,
     fetchedModels,
-    setFetchedModels,
     fetchedModelsRef,
     savedSchemaMap,
     savedProviderId,
     setSavedProviderId,
-    setRawModelIds,
     handleApplyModels: modelOperations.handleApplyModels,
     watchedApiKey,
     watchedFormValues,
@@ -313,6 +310,7 @@ export function useAiBrandState({
     toggleModel,
     // 模型删除
     handleDeleteModel: modelOperations.handleDeleteModel,
+    handleBatchDeleteModels: modelOperations.handleBatchDeleteModels,
     // 分类弹窗
     classifyModalOpen: modelOperations.classifyModalOpen,
     setClassifyModalOpen: modelOperations.setClassifyModalOpen,
@@ -356,6 +354,10 @@ export function useAiBrandState({
     setCustomSchema: modelOperations.setCustomSchema,
     handleSchemaSaved: modelOperations.handleSchemaSaved,
     handleOpenSchemaModal: modelOperations.handleOpenSchemaModal,
+    // 手动添加模型
+    addModelModalOpen: modelOperations.addModelModalOpen,
+    setAddModelModalOpen: modelOperations.setAddModelModalOpen,
+    handleAddModels: modelOperations.handleAddModels,
     // savedProviderId（供主组件判断是否已创建）
     savedProviderId,
   };

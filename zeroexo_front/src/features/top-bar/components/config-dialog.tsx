@@ -1,8 +1,10 @@
 /**
  * ConfigDialog - 画布样式设置弹窗
  *
- * 标题区:标题("画布样式") + 右侧"重置默认"按钮
+ * 标题区:标题("配置") + 右侧"重置默认"按钮
  * 主体区:左侧预览(分组卡片 + 节点卡片)+ 右侧配置卡片(节点/分组/引脚)
+ *
+ * mask 完全透明,面板底色只作用于 content,画布依然可见。
  *
  * 节点统一使用 theme.node.fill(dark/light 主题切换),移除按类型独立配色。
  *
@@ -11,7 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Modal } from 'antd';
+import { App, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { PinDefaults } from '@zeroexo/plugin-render-react';
@@ -204,6 +206,7 @@ export function ConfigDialog({
   open, onClose, theme, config, onConfirm,
 }: ConfigDialogProps): React.ReactElement {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const { theme: currentTheme } = useTheme();
   const isMobile = useIsMobile();
   // 教育提示开关(localStorage 持久化,切换立即生效)
@@ -226,6 +229,12 @@ export function ConfigDialog({
   const handleCancel = (): void => {
     setDraft(config);
     onClose();
+  };
+
+  /** 教育提示开关:切换立即生效,并用 toast 明示当前状态 */
+  const toggleHints = (next: boolean): void => {
+    setHintsEnabled(next);
+    message.success(next ? t('config.hintsEnabledToast') : t('config.hintsDisabledToast'));
   };
 
   // 移动端:上下布局(预览在上,配置在下);桌面端:左右布局(预览在左,配置在右)
@@ -303,7 +312,7 @@ export function ConfigDialog({
       open={open}
       title={(
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingRight: 8 }}>
-          <span>{t('settings.tabCanvas')}</span>
+          <span>{t('settings.title')}</span>
           <button type="button" style={resetBtnStyle}
             onClick={() => setDraft(DEFAULT_CANVAS_CONFIG)}>
             {t('common.reset')}
@@ -351,6 +360,9 @@ export function ConfigDialog({
         },
         wrapper: {
           padding: 0,
+        },
+        /* 面板底色只作用于弹窗卡片本身(content),不再铺满整个 wrapper;mask 保持全透明,露出画布 */
+        content: {
           background: theme.toolbar.panel,
           color: theme.toolbar.text,
           borderRadius: 12,
@@ -376,9 +388,9 @@ export function ConfigDialog({
               <span style={labelStyle}>{t('config.hintsEnabled')}</span>
               <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
                 <button type="button" style={shapeBtnStyle(hintsEnabled)}
-                  onClick={() => setHintsEnabled(true)}>{t('common.on')}</button>
+                  onClick={() => toggleHints(true)}>{t('common.on')}</button>
                 <button type="button" style={shapeBtnStyle(!hintsEnabled)}
-                  onClick={() => setHintsEnabled(false)}>{t('common.off')}</button>
+                  onClick={() => toggleHints(false)}>{t('common.off')}</button>
               </div>
             </div>
           </div>

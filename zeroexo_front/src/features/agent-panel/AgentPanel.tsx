@@ -15,7 +15,7 @@
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { PanelRightClose } from 'lucide-react';
+import { PanelRightClose, PanelLeftClose } from 'lucide-react';
 import { Tooltip } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import {
@@ -335,6 +335,16 @@ export function AgentPanel({
 
       <div style={overlayStyle}>
         <div style={panelStyle(theme)}>
+          {/* 收起按钮（贴在顶部左侧,与右上角关闭按钮对称） */}
+          <Tooltip title={t('agentPanel.collapsePanel')}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ ...closeBtnStyle, left: 8, right: 'auto' }}
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          </Tooltip>
           {/* 关闭按钮（贴在右上角） */}
           <Tooltip title={t('agentPanel.closePanel')}>
             <button

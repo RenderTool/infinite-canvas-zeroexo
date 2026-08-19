@@ -1692,6 +1692,21 @@ export function useEditorInteractions({
       const scene = refs.store.getGraph().nodes;
       const ids = [...refs.store.getSelection().selectedNodeIds];
       if (ids.length === 0) return null;
+      // 拖拽瞬态偏移(P0-2):拖动中节点 position 不更新,锚点需并入 dragOffsets 才能跟手
+      // 同一拖拽集偏移一致,取首个命中选中节点的偏移叠加到整包围盒
+      let dragDx = 0;
+      let dragDy = 0;
+      const offsets = refs.store.getDragOffsets();
+      if (offsets.size > 0) {
+        for (const id of ids) {
+          const off = offsets.get(id);
+          if (off) {
+            dragDx = off.dx;
+            dragDy = off.dy;
+            break;
+          }
+        }
+      }
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
@@ -1718,7 +1733,7 @@ export function useEditorInteractions({
         }
       }
       if (!Number.isFinite(minX)) return null;
-      return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      return { x: minX + dragDx, y: minY + dragDy, width: maxX - minX, height: maxY - minY };
     },
     [refs.store, refs.groupPlugin, getNodeSize],
   );

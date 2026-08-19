@@ -9,7 +9,7 @@ function createStackNode(): NodeRecord {
     id: 'stack',
     type: 'stacked-media',
     position: { x: 80, y: 120 },
-    size: { width: 500, height: 337 },
+    size: { width: 500, height: 404 },
     data: {},
   };
 }
@@ -19,12 +19,12 @@ function createGraph(node: NodeRecord): GraphModel {
 }
 
 describe('StackNode model', () => {
-  it('derives height from active media ratio plus navigation', () => {
-    expect(getStackDisplayHeight({ id: 'wide', sourceType: 'image', data: { naturalWidth: 1000, naturalHeight: 500 } }, 500)).toBe(306);
-    expect(getStackDisplayHeight({ id: 'invalid', sourceType: 'image', data: {} }, 500)).toBeNull();
+  it('uses the fixed image display baseline plus navigation', () => {
+    expect(getStackDisplayHeight({ id: 'wide', sourceType: 'image', data: { naturalWidth: 1000, naturalHeight: 500 } }, 500)).toBe(404);
+    expect(getStackDisplayHeight({ id: 'invalid', sourceType: 'image', data: {} }, 500)).toBe(404);
   });
 
-  it('switches active card and resizes in one undoable command', () => {
+  it('switches active card without moving the stage', () => {
     const node = createStackNode();
     const data = {
       activeIndex: 0,
@@ -38,7 +38,7 @@ describe('StackNode model', () => {
     const stack = after.nodes[0]!;
 
     expect((stack.data as { activeIndex: number }).activeIndex).toBe(1);
-    expect(stack.size).toEqual({ width: 500, height: 1056 });
+    expect(stack.size).toEqual({ width: 500, height: 404 });
     expect(result.command.undo(after, context)).toEqual(createGraph(node));
   });
 
@@ -79,7 +79,7 @@ describe('StackNode model', () => {
 
   it('flattens source stack cards into the new stack and rebases downstream edges', () => {
     const srcStack: NodeRecord = {
-      id: 'stack-src', type: 'stacked-media', position: { x: 0, y: 0 }, size: { width: 500, height: 337 }, title: '源堆叠',
+      id: 'stack-src', type: 'stacked-media', position: { x: 0, y: 0 }, size: { width: 500, height: 404 }, title: '源堆叠',
       data: { cards: [{ id: 'c1', sourceType: 'image', data: { content: 'blob:a' } }, { id: 'c2', sourceType: 'video', data: { content: 'blob:b' } }], activeIndex: 0 },
     };
     const gen: NodeRecord = { id: 'gen2', type: 'generator', position: { x: 700, y: 0 }, size: { width: 300, height: 200 }, title: '下游生成器', data: {} };

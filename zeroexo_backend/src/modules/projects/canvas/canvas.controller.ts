@@ -14,7 +14,11 @@ import { CanvasService } from './canvas.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/canvas.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
-import { CanvasCreateThrottle } from '../../../common/throttler/decorators/throttle.decorator';
+import {
+  CanvasCreateThrottle,
+  CanvasReadThrottle,
+  CanvasWriteThrottle,
+} from '../../../common/throttler/decorators/throttle.decorator';
 
 @ApiTags('Projects')
 @ApiBearerAuth()
@@ -24,6 +28,7 @@ export class CanvasController {
   constructor(private readonly canvasService: CanvasService) {}
 
   @Get()
+  @CanvasReadThrottle()
   @ApiOperation({ summary: '分页查询项目列表(游标分页)' })
   list(
     @CurrentUser('id') userId: string,
@@ -47,12 +52,14 @@ export class CanvasController {
   }
 
   @Get(':id')
+  @CanvasReadThrottle()
   @ApiOperation({ summary: '获取项目详情' })
   findOne(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.canvasService.findOne(userId, id);
   }
 
   @Patch(':id')
+  @CanvasWriteThrottle()
   @ApiOperation({ summary: '更新项目' })
   update(
     @CurrentUser('id') userId: string,
@@ -63,12 +70,14 @@ export class CanvasController {
   }
 
   @Delete(':id')
+  @CanvasWriteThrottle()
   @ApiOperation({ summary: '删除项目' })
   remove(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.canvasService.remove(userId, id);
   }
 
   @Get(':id/graph')
+  @CanvasReadThrottle()
   @ApiOperation({ summary: '分页获取画布 graph 节点(offset/limit 分页)' })
   getGraph(
     @CurrentUser('id') userId: string,

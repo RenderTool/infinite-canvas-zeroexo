@@ -121,6 +121,9 @@ export class GroupPlugin implements Plugin {
       // 拖拽移动:实时计算悬停目标组(拖入组吸附提示)
       interaction.getController().setDragMoveHook((nodeIds) => {
         ctrl.handleDragMove(nodeIds);
+        // P0-2: 拖动中预览框跟随(整体平移 bounds,不动 graph;pointerup 由 handleDragEnd 校正)
+        const off = interaction.getController().getDragOffset();
+        if (off) ctrl.movePreviewSilent(off.dx, off.dy);
       });
     }
 

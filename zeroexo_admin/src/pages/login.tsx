@@ -1,7 +1,7 @@
 import { useNavigate, Link } from 'react-router-dom';
 import { ProForm, ProFormText } from '@ant-design/pro-components';
 import { LockOutlined, MailOutlined } from '@ant-design/icons';
-import { Button, Dropdown, message } from 'antd';
+import { Button, Dropdown } from 'antd';
 import { Languages } from 'lucide-react';
 import { useAuth } from '@/contexts/auth';
 import { showApiError } from '@/services/api-client';

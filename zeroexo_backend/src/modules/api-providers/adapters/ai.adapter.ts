@@ -64,25 +64,6 @@ const SUPPORTED = [
 type ProviderType = (typeof SUPPORTED)[number];
 
 /**
- * Custom 渠道(中转 API)在 /models 端点不可用(404/405)时的预设图像模型兜底列表。
- *
- * 许多中转服务商(如 Grsai)不实现 GET /models 端点,但支持 /images/generations。
- * 此时返回此预设列表,让用户能在图像测试页直接选用,避免因缺少模型列表而无法测试。
- * 列表覆盖常见 OpenAI 兼容图像模型,用户仍可在渠道详情中手动增删。
- */
-const CUSTOM_FALLBACK_IMAGE_MODELS = [
-  'nano-banana',
-  'nano-banana-2',
-  'nano-banana-pro',
-  'gpt-image-2',
-  'gpt-image-1',
-  'dall-e-3',
-  'flux-pro',
-  'flux-dev',
-  'flux-schnell',
-];
-
-/**
  * AI 适配器 - 统一 AI 渠道的连接校验与操作
  *
  * 实现:
@@ -295,19 +276,15 @@ export class AiAdapter extends BaseApiAdapter {
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         // Custom 渠道(中转 API)常不实现 /models 端点(返回 404/405)。
-        // 此时降级返回预设图像模型,保证图像测试页可用。
+        // 此时不返回任何预设模型,由用户在渠道详情中手动添加模型 ID。
         if (
           provider === 'custom' &&
           (res.status === 404 || res.status === 405)
         ) {
-          const categorized = this.categorizeModels(
-            CUSTOM_FALLBACK_IMAGE_MODELS,
-            provider,
-            config,
-          );
           return {
-            ...categorized,
-            message: `/models 端点不可用(HTTP ${res.status}),已加载 ${CUSTOM_FALLBACK_IMAGE_MODELS.length} 个预设图像模型`,
+            ok: false,
+            message: `/models 端点不可用(HTTP ${res.status}),请点击「添加模型」手动录入模型 ID`,
+            models: { llm: [], image: [], video: [], audio: [], unclassified: [] },
           };
         }
         return {
@@ -620,7 +597,7 @@ export class AiAdapter extends BaseApiAdapter {
         const detail = text.slice(0, 200);
         // Custom 渠道(中转 API)常不实现 /models 端点(404/405)。
         // 服务本身可达且 API Key 已通过长度校验,视为连通正常,
-        // 模型列表由 fetchModels 降级返回预设图像模型。
+        // 但不返回任何预设模型,由用户在渠道详情中手动添加。
         if (
           provider === 'custom' &&
           (res.status === 404 || res.status === 405)
@@ -628,13 +605,12 @@ export class AiAdapter extends BaseApiAdapter {
           pushStep(
             '解析响应',
             'pass',
-            `HTTP ${res.status} (/models 端点不可用,中转服务常见,将使用预设模型)`,
+            `HTTP ${res.status} (/models 端点不可用,中转服务常见)`,
             Date.now() - step5Start,
           );
           return {
             ok: true,
-            message: '连接成功(/models 端点不可用,已加载预设图像模型)',
-            models: CUSTOM_FALLBACK_IMAGE_MODELS,
+            message: '连接成功(/models 端点不可用,请在详情页手动添加模型)',
             steps,
           };
         }

@@ -32,8 +32,8 @@ import { forbidden } from '../../common/errors/app-exception.js';
  * 资源控制器 - 资产(素材)上传与元数据管理
  *
  * 安全加固(Stage H.1 - API 速率限制):
- * - 上传相关端点(presign / create)使用 @UploadThrottle(30 次/分),
- *   防止刷量与滥用存储。
+ * - 上传相关端点(presign / create)使用 @UploadThrottle(1000 次/分),
+ *   覆盖项目资源批量同步上传,同时保留粗粒度防刷。
  * - 删除端点使用 @MediumThrottle(5 分钟 500 次),防止批量刷删。
  */
 @ApiTags('Resources')

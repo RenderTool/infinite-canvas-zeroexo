@@ -58,10 +58,30 @@ export class ApiError extends Error {
     message: string,
     /** 后端业务错误码(如 AUTH_INVALID_CREDENTIALS),无则 undefined */
     public readonly code?: string,
+    /** 429 限流时服务端建议的等待秒数(Retry-After / body.retryAfter),无则 undefined */
+    public readonly retryAfter?: number,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * 从 429 响应中解析服务端建议的重试等待秒数。
+ * 优先级:body.retryAfter(后端标准化 429 响应) > Retry-After 响应头 > undefined
+ */
+function parseRetryAfter(res: Response, body: unknown): number | undefined {
+  const fromBody = (body as { retryAfter?: number })?.retryAfter;
+  if (typeof fromBody === 'number' && Number.isFinite(fromBody) && fromBody >= 0) {
+    return Math.ceil(fromBody);
+  }
+  const header = res.headers.get('Retry-After');
+  if (header) {
+    const sec = Number(header);
+    if (Number.isFinite(sec) && sec >= 0) return Math.ceil(sec);
+    // HTTP-date 格式的 Retry-After 暂不支持,忽略
+  }
+  return undefined;
 }
 
 /** 原始 fetch 封装(不自动刷新) */
@@ -91,7 +111,10 @@ async function rawFetch<T>(
         message = message === `HTTP ${res.status}` ? '请先登录后再操作' : message;
       }
     }
-    throw new ApiError(res.status, body, message, code);
+    // 429 限流:附带服务端建议的重试等待秒数,供调用方按 Retry-After 自节流
+    const retryAfter =
+      res.status === 429 ? parseRetryAfter(res, body) : undefined;
+    throw new ApiError(res.status, body, message, code, retryAfter);
   }
   // 后端 TransformInterceptor 统一返回 { data: T }
   const wrapped = body as { data?: T };

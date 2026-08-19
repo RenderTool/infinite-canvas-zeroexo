@@ -9,6 +9,7 @@ import type { NodeTypeExtension, NodeRecord, CommandQueue } from '@zeroexo/core'
 import { Viewport_ } from './viewport.js';
 import { NodeLayer } from './node-layer.js';
 import { EdgeLayer } from './edge-layer.js';
+import { DragOffsetWriter } from './drag-offset-writer.js';
 import {
   ReactGraphStore,
   ReactGraphStoreContext,
@@ -240,6 +241,8 @@ export function CanvasView({
         mode={mode}
         onNodeDoubleClick={onNodeDoubleClick}
       />
+      {/* P0-2: 拖动瞬态直写(节点 transform 不重建 graph;连线由 EdgeItem 内订阅处理) */}
+      <DragOffsetWriter store={store} extensions={extensions} />
       {/* 覆盖层:连线预览/框选等(最上层) */}
       {children}
       {/* 空画布指引 */}

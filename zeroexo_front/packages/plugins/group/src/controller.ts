@@ -232,6 +232,30 @@ export class GroupController {
     return this.previewSelectedIds !== null;
   }
 
+  /** 预览框平移的起始基准 bounds(拖动开始时缓存,避免平移累计误差) */
+  private previewDragBase: Rect | null = null;
+
+  /**
+   * P0-2: 拖动中预览框跟随 —— 用总偏移平移缓存的起始 bounds(不动 graph,
+   * 无需每帧重算节点 bounds;pointerup 由 finalizePreviewDrag 基于最新 graph 校正)。
+   */
+  movePreviewSilent(dx: number, dy: number): void {
+    if (!this.previewSelectedIds || !this.previewBounds) return;
+    if (!this.previewDragBase) this.previewDragBase = { ...this.previewBounds };
+    this.previewBounds = {
+      ...this.previewDragBase,
+      x: this.previewDragBase.x + dx,
+      y: this.previewDragBase.y + dy,
+    };
+    this.notify();
+  }
+
+  /** 拖动结束:基于最新 graph 重算真实 bounds,清除平移基准 */
+  finalizePreviewDrag(): void {
+    this.previewDragBase = null;
+    this.refreshPreview();
+  }
+
   /** 设置预览组模式 */
   setPreviewGroupMode(mode: 'normal' | 'version-folder'): void {
     this.previewGroupMode = mode;
@@ -705,6 +729,8 @@ export class GroupController {
    *   - 已有父组的节点不跨组转移(只能先脱离再加入)
    */
   handleDragEnd(nodeIds: string[], shiftKey: boolean, hasMoved: boolean): void {
+    // 拖拽结束:基于最新 graph 校正预览框 bounds(拖动期间为平移态)
+    this.finalizePreviewDrag();
     // 拖拽结束:无论是否移动,都清除临时脱离标记(避免纯点击 Shift 残留)
     // 永久移出逻辑不依赖临时标记(直接读 parentId),先清除安全
     this.clearDragDetachedIds();

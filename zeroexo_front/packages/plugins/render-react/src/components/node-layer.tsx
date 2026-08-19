@@ -18,6 +18,7 @@ import type { NodeRecord, NodeTypeExtension, NodeRenderer, CommandQueue } from '
 import type { ReactGraphStore } from '../store.js';
 import { useViewport, useNodeById } from '../store.js';
 import { useNodeDefaults } from '../pin-defaults.js';
+import { quantizeZoom } from './edge-layer.js';
 import { NodeScaleContext } from './node-scale-context.js';
 import { NodeConnectionHoverContext } from './node-connection-hover-context.js';
 import { NodeViewContractContext } from './node-view-contract-context.js';
@@ -357,6 +358,9 @@ const NodeItem = React.memo(
                 type={type}
                 cursor={cursor}
                 invK={invK}
+                sx={sx}
+                sy={sy}
+                bottomInset={ext?.resizeHandleInset?.bottom}
                 onPointerDown={(e) => onResizeHandlePointerDown(e, node.id, type)}
               />
             ))
@@ -395,45 +399,61 @@ const NodeItem = React.memo(
  * - 固定屏幕尺寸(不随视口缩放)
  *
  * 注意:此 handle 渲染在 NodeLayer 容器内(已应用 viewport scale),
- * handle 用 invK 反向缩放,保持屏幕尺寸恒定 28px。
+ * 且位于节点自身 transform:scale 之内 —— handle 用 invK 反转视口缩放,
+ * 再用 1/sx, 1/sy 反转节点 GPU scale,双重叠加后保持屏幕 28px 恒定。
+ * 特化外观节点(StackNode 外框含底部导航区)可用 bottomInset 指定底部
+ * handle 的本地垂直位移,使命中区与可视媒体卡片对齐。
  */
 function NodeResizeHandle({
   type,
   cursor,
   invK,
+  sx,
+  sy,
+  bottomInset,
   onPointerDown,
 }: {
   type: 'nw' | 'ne' | 'sw' | 'se';
   cursor: string;
   invK: number;
+  /** 节点 GPU scale 因子 X(useScale=false 时传 1) */
+  sx: number;
+  /** 节点 GPU scale 因子 Y(useScale=false 时传 1) */
+  sy: number;
+  /** 底部 handle 本地内缩(世界坐标;如 StackNode 导航区高度),默认 0 */
+  bottomInset?: number;
   onPointerDown: (e: React.PointerEvent) => void;
 }): React.ReactElement {
   // 固定屏幕尺寸 28px,外偏 14px
-  // 用 invK 转换到世界坐标,NodeLayer 容器 scale 后保持屏幕 28px
-  const sz = 28 * invK;
-  const off = 14 * invK;
+  // invK 反视口缩放; ÷sx/÷sy 反节点自身 GPU scale(仅角点用 sx,角点高度用 sy)
+  const szW = (28 * invK) / sx;
+  const szH = (28 * invK) / sy;
+  const offX = (14 * invK) / sx;
+  const offY = (14 * invK) / sy;
+  // 底部内缩:本地位移(世界坐标),底部 handle 的 bottom 需叠加该值
+  const inset = (bottomInset ?? 0) / sy;
   // ne/se 用 right/bottom 定位(相对于节点右下角)
   const style: React.CSSProperties = {
     position: 'absolute',
-    width: sz,
-    height: sz,
+    width: szW,
+    height: szH,
     cursor,
     pointerEvents: 'auto',
     zIndex: 20,
     backgroundColor: 'transparent',
   };
   if (type === 'nw') {
-    style.left = -off;
-    style.top = -off;
+    style.left = -offX;
+    style.top = -offY;
   } else if (type === 'ne') {
-    style.right = -off;
-    style.top = -off;
+    style.right = -offX;
+    style.top = -offY;
   } else if (type === 'sw') {
-    style.left = -off;
-    style.bottom = -off;
+    style.left = -offX;
+    style.bottom = inset - offY;
   } else {
-    style.right = -off;
-    style.bottom = -off;
+    style.right = -offX;
+    style.bottom = inset - offY;
   }
   return (
     <div
@@ -469,7 +489,11 @@ export const NodeLayer = React.memo(function NodeLayer({
 }: NodeLayerProps): React.ReactElement {
   // 内部订阅 viewport: viewport 变化时仅更新容器 transform,NodeItem 因 memo 跳过
   const viewport = useViewport(store);
-  const invK = viewport.k > 0 ? 1 / viewport.k : 1;
+  // 缩放动画帧率优化:invK 量化(5% 桶)后传给 NodeItem ——
+  // NodeItem memo 比较器含 invK 相等判断,量化后缩放帧仅跨桶时重渲染,
+  // 避免 915 个节点每帧全量重渲染(renderer 内容/Context Provider 全重建)。
+  // 与 edge-layer 的 invK 量化保持同一函数,两层的缩放感知节奏一致。
+  const invK = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
 
   // P0-7: 可见性过滤(类型/hidden/hidden祖先)按 graph 引用缓存 ——
   // 祖先链遍历仅在 graph 变更时执行一次,viewport 平移/缩放帧内只做矩形相交 culling

@@ -187,6 +187,14 @@ export function NodeCapsuleToolbar({
   const navBtnRef = useRef<HTMLButtonElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
 
+  // 拖拽期间跟随节点:拖动走 P0-2 瞬态通道(node.position 不更新,仅 dragOffsets 变化),
+  // 必须订阅偏移表强制重算锚点,否则胶囊工具栏在节点移动时停留在原地
+  const [, setDragTick] = useState(0);
+  useEffect(() => {
+    if (!store.subscribeDragOffsets) return;
+    return store.subscribeDragOffsets(() => setDragTick((v) => v + 1));
+  }, [store]);
+
   // 点击外部关闭菜单
   useEffect(() => {
     if (!openMenu) return;

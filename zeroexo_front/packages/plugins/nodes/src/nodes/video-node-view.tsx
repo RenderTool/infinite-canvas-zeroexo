@@ -57,6 +57,8 @@ export interface VideoNodeViewProps extends NodeRendererProps {
   store?: ReactGraphStore | null;
   /** contentOnly 模式:跳过 BaseNodeView 外壳,仅渲染媒体内容(用于 StackNode 等容器) */
   contentOnly?: boolean;
+  /** 堆叠舞台中保持原生播放器可见,不以失焦缩略图覆盖。 */
+  forcePlayback?: boolean;
 }
 
 export function VideoNodeView({
@@ -72,6 +74,7 @@ export function VideoNodeView({
   onRenameFinish,
   store,
   contentOnly = false,
+  forcePlayback = false,
 }: VideoNodeViewProps): React.ReactElement {
   const data = (node.data ?? {}) as Partial<VideoNodeData>;
   const status = data.status ?? 'idle';
@@ -347,10 +350,10 @@ export function VideoNodeView({
   useEffect(() => {
     const vid = videoRef.current;
     if (!vid) return;
-    if (!isSelected && !isHovered) {
+    if (!forcePlayback && !isSelected && !isHovered) {
       vid.pause();
     }
-  }, [isSelected, isHovered]);
+  }, [forcePlayback, isSelected, isHovered]);
 
   // === 有内容时的渲染逻辑:原生 <video controls> + 反向缩放 ===
   // 渐进式加载: invK >= 4(画布缩小)时不渲染 <video>,仅显示缩略图
@@ -437,7 +440,7 @@ export function VideoNodeView({
           />
         </div>
         {/* 失焦时缩略图覆盖层:video 仍在后台暂停,但用户看到的是缩略图 */}
-        {!isSelected && !isHovered && thumbnailUrl && (
+        {!forcePlayback && !isSelected && !isHovered && thumbnailUrl && (
           <div
             style={{
               position: 'absolute',

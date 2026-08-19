@@ -12,7 +12,7 @@
  *
  * 注意：本文件无 JSX，handleBack 的 Modal.confirm content 为纯文本，故使用 .ts 扩展名。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction, MutableRefObject } from 'react';
 import { message, Modal } from 'antd';
 import type { FormInstance } from 'antd';
@@ -42,11 +42,9 @@ interface UseBrandConnectionParams {
   initializedRef: MutableRefObject<boolean>;
   // ---- 模型状态（来自主 Hook） ----
   enabledModels: Record<string, boolean>;
-  setEnabledModels: Dispatch<SetStateAction<Record<string, boolean>>>;
   modelTypes: Record<string, string>;
   modelIcons: Record<string, string>;
   fetchedModels: Record<string, string[]> | null;
-  setFetchedModels: Dispatch<SetStateAction<Record<string, string[]> | null>>;
   /** fetchedModels 的 ref，避免闭包过期 */
   fetchedModelsRef: MutableRefObject<Record<string, string[]> | null>;
   /** 已保存的参数 Schema 映射（保存时写入 config） */
@@ -54,8 +52,6 @@ interface UseBrandConnectionParams {
   /** 已保存的 provider ID（新建后记录，后续保存走 PATCH） */
   savedProviderId: string | null;
   setSavedProviderId: Dispatch<SetStateAction<string | null>>;
-  /** 原始模型 ID 列表 setter（清空模型列表时联动重置） */
-  setRawModelIds: Dispatch<SetStateAction<string[] | null>>;
   // ---- 来自 useModelOperations ----
   /** 应用获取到的模型列表（测试连接成功后调用） */
   handleApplyModels: (newModels: Record<string, string[]>, rawIds: string[] | null) => void;
@@ -94,16 +90,13 @@ export function useBrandConnection({
   onBack: _onBack,
   initializedRef,
   enabledModels,
-  setEnabledModels,
   modelTypes,
   modelIcons,
   fetchedModels,
-  setFetchedModels,
   fetchedModelsRef,
   savedSchemaMap,
   savedProviderId,
   setSavedProviderId,
-  setRawModelIds,
   handleApplyModels,
   watchedApiKey,
   watchedFormValues,
@@ -131,16 +124,6 @@ export function useBrandConnection({
 
   // 最新测试过的 API Key（用于避免重复测试）
   const lastTestedKeyRef = useRef<string>('');
-
-  /** 清空模型列表（获取失败时） */
-  const clearModels = useCallback(() => {
-    setFetchedModels(null);
-    setEnabledModels({});
-    setTestResult(null);
-    setRawModelIds(null);
-    // 不清空 API Key，让用户可重试或修改
-    lastTestedKeyRef.current = '';
-  }, [form]);
 
   /* ---------- 测试连接 ---------- */
 
@@ -186,15 +169,14 @@ export function useBrandConnection({
         );
       }
 
-      setTestResult({ ok: result.ok, message: result.message });
       if (result.ok && result.models) {
         handleApplyModels(result.models, (result as any).rawModelIds ?? null);
-      } else {
-        clearModels();
       }
+      // ★ 获取失败/服务商不支持时保留当前模型列表（含用户手动添加的），仅更新提示
+      setTestResult({ ok: result.ok, message: result.message });
     } catch (err) {
       showApiError(err, t('ai.testFailed'));
-      clearModels();
+      setTestResult(null);
     } finally {
       setTesting(false);
     }
@@ -372,8 +354,9 @@ export function useBrandConnection({
         okText: t('ai.saveFirst'),
         cancelText: t('ai.dontSave'),
         onOk: async () => {
-          // 保存后返回
+          // 保存后返回（onSave 只刷新数据不负责跳转，这里显式返回列表）
           await handleSaveRef.current(false);
+          _onBack();
         },
         onCancel: () => {
           _onBack();

@@ -136,7 +136,8 @@ export function ShortcutsDialog({ theme, onClose }: ShortcutsDialogProps): React
       styles={{
         mask: { background: 'transparent' },
         body: shortcutsBodyStyle,
-        wrapper: {
+        /* 面板底色只作用于弹窗卡片本身(content),不再铺满整个 wrapper,避免纯色背板 */
+        content: {
           background: theme.toolbar.panel,
           color: theme.toolbar.text,
           borderRadius: 12,

@@ -65,7 +65,7 @@
     "renamePrompt": "Group Name"
   },
   "settings": {
-    "title": "Settings",
+    "title": "Config",
     "tabCanvas": "Canvas Style",
     "tabAiProviders": "AI Providers",
     "tabShortcuts": "Shortcuts",
@@ -125,7 +125,7 @@
     "redo": "Redo",
     "selectMode": "Select Mode",
     "panMode": "Pan Mode",
-    "appearance": "Canvas Appearance",
+    "appearance": "Appearance Settings",
     "devLog": "Dev Log",
     "toggleAgent": "Toggle Agent Panel",
     "openMenu": "Open Canvas Menu",
@@ -133,7 +133,9 @@
     "collaboration": "Collaboration",
     "collaborationChat": "Collaboration Chat",
     "saveVersion": "Save Version",
-    "versionHistory": "Version History"
+    "versionHistory": "Version History",
+    "more": "More",
+    "renameHint": "Double-click to edit canvas name"
   },
   "menu": {
     "home": "Home",
@@ -545,6 +547,8 @@
   "config": {
     "hints": "Interaction hints",
     "hintsEnabled": "Enabled",
+    "hintsEnabledToast": "Interaction hints enabled",
+    "hintsDisabledToast": "Interaction hints disabled",
     "nodeStyle": "Node",
     "groupStyle": "Group",
     "pinDefault": "Pin Defaults",
@@ -909,13 +913,13 @@
     "errorTypeValidation": "Invalid parameters",
     "replace": "Replace",
     "opacity": "Opacity",
-    "stackedMediaTitle": "Resource Browser",
-    "stackEmptyHint": "Connect image/video nodes",
+    "stackedMediaTitle": "Stack",
+    "stackEmptyHint": "",
     "stackEmptySubHint": "After connecting, choose to join the stack",
     "stackCollectTitle": "Collect into stack (removes source node)",
     "stackEject": "Eject",
     "stackEjectTitle": "Eject as an independent node with auto connection",
-    "stackOnlyAcceptsMedia": "Resource browser only accepts image/video inputs",
+    "stackOnlyAcceptsMedia": "Stack only accepts image/video inputs",
     "stackConvertTo": "Convert to Stack",
     "stackCreateNew": "Create Stack Node",
     "stackSelected": "Stack Selected Nodes",
@@ -1285,7 +1289,7 @@
     "versionFolderShortcut": "Version group",
     "dblclickFocus": "Double-click to focus",
     "canvasCreate": "Pick a type",
-    "stackRemoveCard": "Eject current card",
+    "stackRemoveCard": "Eject from stack",
     "stackPreviewThumbnail": "Double-click thumbnail to preview",
     "stackCollectHint": "Click collect button to add to stack",
     "stackableMediaHint": "Click capsule toolbar「堆叠」to create a stack node"
@@ -1391,6 +1395,7 @@
     "userLabel": "You",
     "inputPlaceholder": "Ask {{role}}…",
     "closePanel": "Close Agent Panel",
+    "collapsePanel": "Collapse Agent Panel",
     "online": "Online"
   },
   "promptPanel": {

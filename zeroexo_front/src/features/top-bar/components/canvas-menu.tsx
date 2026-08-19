@@ -12,11 +12,12 @@
 
 import { useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { Home, Plus, Copy, Trash2 } from 'lucide-react';
+import { Home, Plus, Copy, Trash2, LogOut, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Dropdown } from 'antd';
+import { Dropdown, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
+import { useAuth } from '../../auth/auth-store.js';
 import { LogoIcon } from '@/assets/ico/index.js';
 
 export interface CanvasMenuProps {
@@ -35,18 +36,31 @@ export function CanvasMenu({
   onDeleteProject,
 }: CanvasMenuProps): React.ReactElement {
   const { t } = useTranslation();
+  const { user, isAuthenticated, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
   const handleHome = useCallback(() => { setOpen(false); onHome(); }, [onHome]);
   const handleNew = useCallback(() => { setOpen(false); onNewProject(); }, [onNewProject]);
   const handleCopy = useCallback(() => { setOpen(false); onCopyProject(); }, [onCopyProject]);
   const handleDelete = useCallback(() => { setOpen(false); onDeleteProject(); }, [onDeleteProject]);
+  const handleLogout = useCallback(async () => {
+    setOpen(false);
+    await logout();
+  }, [logout]);
 
   const items: MenuProps['items'] = [
     { key: 'home', label: t('menu.backHome'), icon: <Home size={14} />, onClick: handleHome },
     { key: 'new', label: t('menu.newProject'), icon: <Plus size={14} />, onClick: handleNew },
     { key: 'copy', label: t('menu.copyProject'), icon: <Copy size={14} />, onClick: handleCopy },
     { key: 'delete', label: t('menu.deleteCanvas'), icon: <Trash2 size={14} />, danger: true, onClick: handleDelete },
+    // 底部区域: 登录态显示账号信息与退出登录
+    ...(isAuthenticated && user
+      ? [
+          { type: 'divider' as const },
+          { key: 'user', label: user.username, icon: <User size={14} />, disabled: true },
+          { key: 'logout', label: t('auth.logout'), icon: <LogOut size={14} />, danger: true, onClick: handleLogout },
+        ]
+      : []),
   ];
 
   return (
@@ -55,14 +69,15 @@ export function CanvasMenu({
       onOpenChange={setOpen}
       menu={{ items }}
     >
-      <button
-        type="button"
-        aria-label={t('topbar.home')}
-        title={t('topbar.home')}
-        style={logoBtnStyle(theme)}
-      >
-        <LogoIcon size={28} />
-      </button>
+      <Tooltip title={t('topbar.home')}>
+        <button
+          type="button"
+          aria-label={t('topbar.home')}
+          style={logoBtnStyle(theme)}
+        >
+          <LogoIcon size={28} />
+        </button>
+      </Tooltip>
     </Dropdown>
   );
 }

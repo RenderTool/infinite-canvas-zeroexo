@@ -23,6 +23,7 @@ import AiBrandSchemaModal from './AiBrandSchemaModal';
 import TemplateEditor from './TemplateEditor';
 import ModelListSection from './ModelListSection';
 import ClassifyModal from './ClassifyModal';
+import AddModelModal from './AddModelModal';
 import IconSelectModal from './IconSelectModal';
 import BrandHeader from './BrandHeader';
 import CredentialsForm from './CredentialsForm';
@@ -71,6 +72,7 @@ export default function AiBrandDetail(props: AiBrandDetailProps) {
     toggleSelectAll,
     toggleModel,
     handleDeleteModel,
+    handleBatchDeleteModels,
     // 分类弹窗
     classifyModalOpen,
     setClassifyModalOpen,
@@ -114,6 +116,10 @@ export default function AiBrandDetail(props: AiBrandDetailProps) {
     setCustomSchema,
     handleSchemaSaved,
     handleOpenSchemaModal,
+    // 手动添加模型
+    addModelModalOpen,
+    setAddModelModalOpen,
+    handleAddModels,
     // 测试连接
     handleTest,
   } = useAiBrandState({ ...props, watchedApiKey, watchedFormValues });
@@ -181,11 +187,13 @@ export default function AiBrandDetail(props: AiBrandDetailProps) {
             onOpenClassifyModal={openClassifyModal}
             onOpenSchemaModal={handleOpenSchemaModal}
             onDeleteModel={handleDeleteModel}
+            onBatchDeleteModels={handleBatchDeleteModels}
             onOpenIconModal={(modelId) => {
               setIconModalModelId(modelId);
               setIconModalOpen(true);
             }}
             onRefreshModels={handleTest}
+            onOpenAddModel={() => setAddModelModalOpen(true)}
           />
         </CredentialsForm>
 
@@ -256,6 +264,13 @@ export default function AiBrandDetail(props: AiBrandDetailProps) {
           onClose={() => { setIconModalOpen(false); setIconModalModelId(null); }}
           onSelect={handleIconSelect}
           onReset={handleIconReset}
+        />
+
+        {/* 手动添加模型弹窗（服务商 /models 端点不可用时的兜底录入） */}
+        <AddModelModal
+          open={addModelModalOpen}
+          onClose={() => setAddModelModalOpen(false)}
+          onConfirm={handleAddModels}
         />
       </Card>
     </>

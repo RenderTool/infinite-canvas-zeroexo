@@ -46,8 +46,17 @@ interface CollectSnapshot {
 
 // ===== 布局常量 =====
 
-/** 切换动画时长(期间视频渲染静帧缩略图) */
-const SWITCH_ANIM_MS = 300;
+/** 堆叠总高度固定为图片/视频节点基准高度,导航栏占用其中的底部区域。 */
+const STACK_DISPLAY_HEIGHT = 348;
+const STACK_NAVIGATION_HEIGHT = 56;
+
+/** 切换动画时长 */
+const SWITCH_ANIM_MS = 460;
+
+/** prefers-reduced-motion：减少动画用户不参与翻页动效（降级为直接切换） */
+const IS_REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -75,7 +84,7 @@ export function StackedMediaNodeView({
   const hasCards = data.cards.length > 0;
   // 派生状态必须在所有 effect 之前声明，避免 effect 依赖数组读取 TDZ 变量。
   const activeCard = hasCards ? data.cards[activeIndex] ?? null : null;
-  /** 切换动画期间(true 时所有卡片渲染静帧缩略图,视频暂停渲染) */
+  /** 切换动画期间保留前一张卡片作为鬼影层。 */
   const [isAnimating, setIsAnimating] = useState(false);
   const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -139,12 +148,16 @@ export function StackedMediaNodeView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingPreviews.length]);
 
-  /** 开始切换动画(期间视频渲染静帧缩略图) */
+  /** 开始切换动画(期间视频渲染静帧缩略图;减少动画用户直接切换) */
+  const [previousCard, setPreviousCard] = useState<StackCard | null>(null);
+
   const beginSwitchAnimation = useCallback(() => {
+    if (IS_REDUCED_MOTION) return;
+    setPreviousCard(activeCard);
     setIsAnimating(true);
     if (animTimerRef.current) clearTimeout(animTimerRef.current);
     animTimerRef.current = setTimeout(() => setIsAnimating(false), SWITCH_ANIM_MS);
-  }, []);
+  }, [activeCard]);
 
   const handlePrev = useCallback(() => {
     if (activeIndex > 0) {
@@ -288,8 +301,8 @@ export function StackedMediaNodeView({
     setUploading(false);
   }, [commandQueue, uploading, fileToCard, data.cards, node.id]);
 
-  // 标题栏图标
-  const titleIcon = <Package size={14} />;
+  // 标题栏图标(尺寸乘 invK 反缩放,与 text/image/video 等节点标题图标同款 13/16)
+  const titleIcon = <Package size={Math.max(9, Math.min(13 * (invK ?? 1), 16))} />;
 
   /** 替换活跃卡片内容(主图区替换按钮) */
   const handleReplacePick = useCallback(async (files: FileList | null) => {
@@ -326,10 +339,6 @@ export function StackedMediaNodeView({
       overflow: 'hidden',
     }}>
       <Package size={48} opacity={0.5} />
-      <span style={{ fontSize: 14 }}>{t('nodes.stackEmptyHint') ?? '连接图片/视频节点'}</span>
-      <span style={{ fontSize: 12, opacity: 0.7 }}>
-        {t('nodes.stackEmptySubHint') ?? '连入后选择加入堆叠'}
-      </span>
       {/* 空态上传按钮:直接上传图片/视频生成卡片 */}
       <button
         type="button"
@@ -372,9 +381,66 @@ export function StackedMediaNodeView({
           borderRadius: 8,
           border: 0,
           background: theme.node.contentBackground,
+          // 3D 翻页动效所需的透视
+          perspective: 1100,
         }}
       >
-        {activeCard && <StackMediaContent card={activeCard} width={(node.size?.width ?? 620) - 32} height={(node.size?.height ?? 348) - 80} />}
+        {activeCard && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              // 切换时新卡片从右侧翻入(rotateY + 轻微缩放挡板),完成后归位
+              transform: isAnimating ? 'rotateY(24deg) scale(0.94)' : 'rotateY(0deg) scale(1)',
+              transformOrigin: 'left center',
+              opacity: isAnimating ? 0.55 : 1,
+              transition: `transform ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1), opacity ${SWITCH_ANIM_MS}ms ease`,
+              willChange: 'transform, opacity',
+              zIndex: 2,
+              backfaceVisibility: 'hidden',
+            }}
+          >
+            <StackMediaContent card={activeCard} width={(node.size?.width ?? 620) - 32} height={STACK_DISPLAY_HEIGHT} />
+          </div>
+        )}
+        {isAnimating && previousCard && (
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              // 旧卡片向左翻出并缩小消失
+              opacity: isAnimating ? 0 : 1,
+              transform: isAnimating ? 'rotateY(-18deg) scale(0.9)' : 'rotateY(0deg) scale(1)',
+              transformOrigin: 'right center',
+              transition: `opacity ${SWITCH_ANIM_MS}ms ease, transform ${SWITCH_ANIM_MS}ms cubic-bezier(0.22,1,0.36,1)`,
+              willChange: 'transform, opacity',
+              zIndex: 1,
+              pointerEvents: 'none',
+              backfaceVisibility: 'hidden',
+            }}
+          >
+            <StackMediaContent card={previousCard} width={(node.size?.width ?? 620) - 32} height={STACK_DISPLAY_HEIGHT} />
+          </div>
+        )}
+        {isAnimating && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: 22,
+              height: 22,
+              transform: 'translate(-50%, -50%)',
+              borderRadius: '50%',
+              border: '2px solid rgba(255,255,255,0.78)',
+              boxShadow: '0 0 0 8px rgba(255,255,255,0.12)',
+              zIndex: 3,
+              pointerEvents: 'none',
+            }}
+          />
+        )}
       </div>
       {/* 活跃卡替换按钮(hover 主图区显示,复用 ReplaceButton 视觉) */}
       <MainReplaceButton onClick={() => replaceFileInputRef.current?.click()} />
@@ -413,26 +479,24 @@ export function StackedMediaNodeView({
         </BaseNodeView>
       </div>
 
-      {/* 导航栏(节点下方,独立于 BaseNodeView 之外,高度固定) */}
-      {hasCards && (
-        <div
-          style={{
-            flexShrink: 0,
-            height: 56,
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 4px',
-          }}
-        >
-          <StackBottomNav
-            cards={data.cards}
-            activeIndex={activeIndex}
-            onJump={handleJump}
-            onPrev={handlePrev}
-            onNext={handleNext}
-          />
-        </div>
-      )}
+      {/* 导航栏始终占位,空堆叠也保持完整舞台结构。 */}
+      <div
+        style={{
+          flexShrink: 0,
+          height: STACK_NAVIGATION_HEIGHT,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 4px',
+        }}
+      >
+        <StackBottomNav
+          cards={data.cards}
+          activeIndex={activeIndex}
+          onJump={handleJump}
+          onPrev={handlePrev}
+          onNext={handleNext}
+        />
+      </div>
 
       {/* 收纳提示胶囊(画布锚定,portal 到 body,不受节点容器裁剪) */}
       {collectToast && store && (

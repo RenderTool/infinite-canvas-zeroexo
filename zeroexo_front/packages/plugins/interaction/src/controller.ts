@@ -141,6 +141,12 @@ export class InteractionController {
     this.transientListeners.forEach((l) => l());
   }
 
+  /** 读取当前节点拖拽的世界偏移(group 插件拖动中平移预览框用),无拖拽时返回 null */
+  getDragOffset = (): { dx: number; dy: number } | null => {
+    if (this.drag.type !== 'node') return null;
+    return { dx: this.drag.lastWorldDx, dy: this.drag.lastWorldDy };
+  };
+
   // ===== 框选控制器注入 =====
 
   /** 注入框选控制器(由 selection 插件调用) */
@@ -417,8 +423,9 @@ export class InteractionController {
     }
 
     if (this.drag.type === 'node') {
-      // P0-1 瞬态拖拽通道: 拖拽期间不走命令队列(避免每帧 N 次 undo/redo 全量状态重建),
-      // 通过 setStateSilent 直写绝对位置(起点+累积偏移,无累积误差),
+      // P0-2 瞬态拖拽通道: 拖拽期间不走命令队列、也不重建 graph —— 只把
+      // 「拖动集节点 → 世界偏移」写入 store 的偏移表,渲染层(NodeItem/EdgeItem)
+      // 经 rAF 订阅直改 DOM transform/path,避免每次 pointermove 全量重建节点树;
       // pointerup 时提交一条 MoveNodesCommand 入历史。
       const k = this.store.getViewport().k;
       const worldDx = dx / k;
@@ -427,7 +434,11 @@ export class InteractionController {
       this.drag.lastWorldDy = worldDy;
 
       if (worldDx !== 0 || worldDy !== 0) {
-        this.applyDragPositionsSilent(worldDx, worldDy);
+        const offsets: Map<string, { dx: number; dy: number }> = new Map();
+        for (const id of this.drag.nodeIds) {
+          offsets.set(id, { dx: worldDx, dy: worldDy });
+        }
+        this.store.setDragOffsets(offsets);
       }
 
       // 计算 Helper Lines(对齐辅助线)
@@ -461,6 +472,8 @@ export class InteractionController {
         this.marqueeController.endMarquee(this.drag.additive);
       }
     } else if (this.drag.type === 'node') {
+      // P0-2: 先清除瞬态偏移表(DOM 直改归一),再提交批量移动命令入历史
+      this.store.setDragOffsets(new Map());
       // P0-1: 拖拽结束,提交一条批量移动命令入历史(幂等:状态已被 silent 更新到终点,
       // execute 仅作为历史记录;undo 一次恢复全部节点起点)
       if (this.drag.hasMoved) {
@@ -546,22 +559,6 @@ export class InteractionController {
   };
 
   // ===== 内部方法 =====
-
-  /**
-   * P0-1: 瞬态拖拽位置直写。
-   * 用「起点 + 累积偏移」计算绝对位置(无增量累积误差),通过 setStateSilent
-   * 替换 graph(发布 GraphEvents.NODE_UPDATED 驱动渲染,不触发持久化/历史)。
-   */
-  private applyDragPositionsSilent(worldDx: number, worldDy: number): void {
-    const graph = this.commandQueue.getState();
-    const { startPositions } = this.drag;
-    const nextNodes = graph.nodes.map((n) => {
-      const start = startPositions.get(n.id);
-      if (!start) return n;
-      return { ...n, position: { x: start.x + worldDx, y: start.y + worldDy } };
-    });
-    this.commandQueue.setStateSilent({ ...graph, nodes: nextNodes });
-  }
 
   private beginPan(clientX: number, clientY: number): void {
     const viewport = this.store.getViewport();

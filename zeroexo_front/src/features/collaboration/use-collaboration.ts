@@ -34,6 +34,13 @@ import {
 import type { AgentExecuteRequest, AgentExecuteResponse } from './collaboration-types.js';
 import type { CanvasSyncResult, AwarenessStateInfo } from '@/shared/hooks/use-doc-sync.js';
 import { useAuth } from '@/features/auth/auth-store.js';
+import { publishCursorBc, subscribeCursorBc, type CursorBcMessage } from './collaboration-bc.js';
+// 调试埋点(左上角调试面板数据总线,全部 O(1) 计数,不污染运行时)
+import { collabDebug } from '@/features/dev-performance/collab-debug.js';
+import { fastLocalCursor } from './use-collaboration-store.js';
+
+/** 光标广播节流间隔(ms):pointermove 可达 60~120Hz,合并到该间隔发送,减少 WS/BC 消息量 */
+const CURSOR_THROTTLE_MS = 40;
 
 export interface UseCollaborationResult {
   /** 房间信息 */
@@ -92,6 +99,10 @@ export function useCollaboration(
   const store = useCollaborationStore;
   const { user } = useAuth();
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  // 光标节流状态(仅最新位置会被补发,保证最终位置不丢)
+  const lastCursorSentAtRef = useRef(0);
+  const cursorPendingRef = useRef<Record<string, unknown> | undefined>(undefined);
+  const cursorSendTimerRef = useRef<number | null>(null);
 
   // 初始化协作（auto-join）
   const initCollaboration = useCallback(async (id: string) => {
@@ -119,8 +130,38 @@ export function useCollaboration(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId, user?.id]);
 
+  // 订阅同源标签页的光标直连频道(绕过服务器,按 clientId 去重)
+  useEffect(() => {
+    if (!canvasId || !canvasSync) return;
+    const unsubBc = subscribeCursorBc(canvasId, (msg) => {
+      const localClientId = canvasSync.getAwarenessClientId();
+      if (localClientId !== null && msg.clientId === localClientId) return;
+      store.getState().updateAwareness({
+        clientId: msg.clientId,
+        userId: msg.userId,
+        sessionIndex: msg.sessionIndex,
+        deviceType: msg.deviceType,
+        cursor: msg.cursor,
+        viewport: msg.viewport,
+        selectedNodeIds: msg.selectedNodeIds ?? [],
+        online: true,
+        lastUpdated: msg.lastUpdated,
+      });
+    });
+    return unsubBc;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId, canvasSync]);
+
   // 清理
   const cleanup = useCallback(() => {
+    // 清理未发送的光标节流定时器
+    if (cursorSendTimerRef.current !== null) {
+      clearTimeout(cursorSendTimerRef.current);
+      cursorSendTimerRef.current = null;
+    }
+    cursorPendingRef.current = undefined;
+    lastCursorSentAtRef.current = 0;
+
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
@@ -130,7 +171,42 @@ export function useCollaboration(
     store.getState().cleanup();
   }, [store]);
 
-  // 设置本地光标/视口
+  // 实际发送:写入 WS Awareness + 本地 store + 同源 BC 直达
+  const applyLocalCursor = useCallback((state: Record<string, unknown>, clientId: number) => {
+    collabDebug.recordBroadcast();
+    if (!canvasSync) return;
+    canvasSync.setAwarenessField('cursor-data', state);
+
+    const sessionIndex = (state.sessionIndex as number) ?? 0;
+    const deviceType = (state.deviceType as DeviceType) ?? deviceTypeFromUA();
+    store.getState().setLocalAwareness({
+      clientId,
+      userId: (state.userId as string) ?? '',
+      sessionIndex,
+      deviceType,
+      cursor: (state.cursor as { x: number; y: number }) ?? null,
+      viewport: state.viewport as AwarenessState['viewport'] | undefined,
+      selectedNodeIds: (state.selectedNodeIds as string[]) ?? [],
+      online: true,
+      lastUpdated: (state.lastUpdated as number) ?? Date.now(),
+    });
+
+    // 同源标签页直连(不走服务器)
+    publishCursorBc(canvasId ?? '', {
+      type: 'cursor',
+      canvasId: canvasId ?? '',
+      clientId,
+      userId: (state.userId as string) ?? '',
+      sessionIndex,
+      deviceType,
+      cursor: (state.cursor as { x: number; y: number }) ?? null,
+      viewport: state.viewport as CursorBcMessage['viewport'],
+      selectedNodeIds: (state.selectedNodeIds as string[]) ?? [],
+      lastUpdated: (state.lastUpdated as number) ?? Date.now(),
+    });
+  }, [canvasSync, store, canvasId]);
+
+  // 设置本地光标/视口(节流到 CURSOR_THROTTLE_MS 合并发送,尾部补发最新位置)
   const setLocalCursor = useCallback((
     cursor: { x: number; y: number } | null,
     viewport?: AwarenessState['viewport'],
@@ -148,32 +224,42 @@ export function useCollaboration(
     if (viewport) state.viewport = viewport;
     if (selectedNodeIds) state.selectedNodeIds = selectedNodeIds;
 
-    canvasSync.setAwarenessField('cursor-data', state);
-
-    // 更新 store
     const clientId = canvasSync.getAwarenessClientId();
-    if (clientId !== null) {
-      store.getState().setLocalAwareness({
-        clientId,
-        userId: user?.id ?? '',
-        sessionIndex: store.getState().localAwareness?.sessionIndex ?? 0,
-        deviceType: (store.getState().localAwareness?.deviceType as DeviceType) ?? deviceTypeFromUA(),
-        cursor,
-        viewport,
-        selectedNodeIds: selectedNodeIds ?? [],
-        online: true,
-        lastUpdated: Date.now(),
-      });
+    if (clientId === null) return;
+
+    // 即时光标通道:不经过节流直接写入,供本地 canvas overlay 逐帧渲染(与 OS 鼠标同步)
+    if (cursor) fastLocalCursor.set(cursor.x, cursor.y);
+
+    const now = Date.now();
+    if (now - lastCursorSentAtRef.current >= CURSOR_THROTTLE_MS) {
+      lastCursorSentAtRef.current = now;
+      applyLocalCursor(state, clientId);
+    } else {
+      // 节流窗口内:记录最新位置,由定时器补发(保证停止移动前的最终位置被广播)
+      collabDebug.recordThrottled();
+      cursorPendingRef.current = { ...state, lastUpdated: now };
+      if (cursorSendTimerRef.current === null) {
+        cursorSendTimerRef.current = window.setTimeout(() => {
+          cursorSendTimerRef.current = null;
+          const pending = cursorPendingRef.current;
+          cursorPendingRef.current = undefined;
+          if (pending) {
+            lastCursorSentAtRef.current = Date.now();
+            applyLocalCursor(pending, canvasSync.getAwarenessClientId() ?? clientId);
+          }
+        }, CURSOR_THROTTLE_MS);
+      }
     }
-  }, [canvasSync, store, user?.id]);
+  }, [canvasSync, user?.id, store, applyLocalCursor]);
 
   // 订阅远端 Awareness 变化
   const subscribeRemoteAwareness = useCallback((sync: CanvasSyncResult | null): (() => void) => {
     if (!sync) return () => {};
 
     const unsub = sync.subscribeAwareness((states: AwarenessStateInfo[]) => {
+      collabDebug.recordWsAwareness(states.length);
       const awarenessStates = store.getState().awarenessStates;
-      const localClientId = store.getState().localAwareness?.clientId ?? -1;
+      const localClientId = sync.getAwarenessClientId() ?? store.getState().localAwareness?.clientId ?? -1;
       const next = new Map(awarenessStates);
 
       for (const s of states) {

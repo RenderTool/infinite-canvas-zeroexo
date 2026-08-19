@@ -92,8 +92,8 @@ export const THROTTLE_TIERS = {
   long: { ttl: 3_600_000, limit: 3_000 },
   /** 登录:5 次/分(防爆破) */
   login: { ttl: 60_000, limit: 5 },
-  /** 上传:30 次/分 */
-  upload: { ttl: 60_000, limit: 30 },
+  /** 上传:1000 次/分(覆盖项目资源批量同步上传,保留粗粒度防刷) */
+  upload: { ttl: 60_000, limit: 1000 },
   /** AI:20 次/分(成本保护) */
   ai: { ttl: 60_000, limit: 20 },
   /** 邮件:10 次/小时(防垃圾邮件) */
@@ -103,9 +103,14 @@ export const THROTTLE_TIERS = {
   /** 注册:5 次/天(防批量注册) */
   register: { ttl: 86_400_000, limit: 5 },
   /**
-   * 画布写操作档位不再绑定 PATCH /projects/:id。
-   * 实时编辑走 Yjs WebSocket,HTTP PATCH 只负责防抖后的快照落库。
-   * 保留该档位供未来明确的控制面端点使用。
+   * 画布读操作:60 秒 300 次(列表 / 详情 / graph 分页)。
+   * 读取轻量且高频(编辑器轮询 + 多项目切换),全局 100/分 会误伤正常交互。
+   */
+  canvasRead: { ttl: 60_000, limit: 300 },
+  /**
+   * 画布写操作:60 秒 120 次(防抖后的快照落库 PATCH + 删除)。
+   * 实时编辑走 Yjs WebSocket,HTTP 写只负责防抖落库与删除,
+   * 120/分 覆盖 2s 防抖的理论峰值(~30/分),并保留对恶意高频写的拦截。
    */
   canvasWrite: { ttl: 60_000, limit: 120 },
   /**
@@ -113,10 +118,10 @@ export const THROTTLE_TIERS = {
    */
   canvasCreate: { ttl: 60_000, limit: 5 },
   /**
-   * 资源预签名:20 次/分(防批量 presign 攻击)
-   * 比 upload 档位稍宽松(正常粘贴多个图片节点时会连续 presign)
+   * 资源预签名:1000 次/分(覆盖同步时逐个 presign 的批量上传,
+   * 同时保留对异常高频 presign 的粗粒度拦截)
    */
-  presign: { ttl: 60_000, limit: 20 },
+  presign: { ttl: 60_000, limit: 1000 },
 } as const;
 
 export type ThrottleTierName = keyof typeof THROTTLE_TIERS;

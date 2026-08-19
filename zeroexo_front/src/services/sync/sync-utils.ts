@@ -217,8 +217,13 @@ const MAX_AUTO_RETRIES = 5;
  * 调度一次自动重试。
  * @param projectId 项目 id
  * @param fn 重试时要执行的回调(通常为再次调用 syncProjectToCloud)
+ * @param preferredDelaySec 服务端建议的等待秒数(429 的 Retry-After),无则按指数退避
  */
-export function scheduleAutoRetry(projectId: string, fn: () => Promise<void>): void {
+export function scheduleAutoRetry(
+  projectId: string,
+  fn: () => Promise<void>,
+  preferredDelaySec?: number,
+): void {
   // 已有未完成的调度 → 直接跳过(避免重复调度)
   if (retryTimers.has(projectId)) return;
 
@@ -230,8 +235,17 @@ export function scheduleAutoRetry(projectId: string, fn: () => Promise<void>): v
   }
   retryAttempts.set(projectId, attempt);
 
-  // 指数退避:2s → 4s → 8s → 16s → 32s(封顶 60s)
-  const delay = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+  // 延迟计算:
+  // - 有 Retry-After(秒)时优先采用,但要限制在 [BASE, MAX] 内(避免服务端提示过短/过长)
+  // - 无提示时按指数退避:2s → 4s → 8s → 16s → 32s(封顶 60s)
+  const exponential = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+  let delay = exponential;
+  if (typeof preferredDelaySec === 'number' && Number.isFinite(preferredDelaySec) && preferredDelaySec >= 0) {
+    delay = Math.min(
+      Math.max(preferredDelaySec * 1000, RETRY_BASE_DELAY_MS),
+      RETRY_MAX_DELAY_MS,
+    );
+  }
   debugLog(`[sync] scheduling auto-retry #${attempt} for ${projectId} in ${delay}ms (rate-limit / transient failure)`);
 
   const timer = setTimeout(async () => {

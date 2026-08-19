@@ -24,6 +24,8 @@ import {
   BarsOutlined,
   QuestionCircleOutlined,
   SearchOutlined,
+  PlusOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import type { ModelEntry } from './ai-brand-types';
 import {
@@ -80,10 +82,14 @@ export interface ModelListSectionProps {
   onOpenSchemaModal: (modelId: string, modelType: string) => void;
   /** 删除自定义模型 */
   onDeleteModel: (modelId: string) => void;
+  /** 批量删除选中的模型 */
+  onBatchDeleteModels: (ids: string[]) => void;
   /** 打开图标选择弹窗 */
   onOpenIconModal: (modelId: string) => void;
   /** 重新获取模型列表 */
   onRefreshModels: () => void;
+  /** 打开手动添加模型弹窗 */
+  onOpenAddModel: () => void;
 }
 
 export default function ModelListSection({
@@ -110,14 +116,47 @@ export default function ModelListSection({
   onOpenClassifyModal,
   onOpenSchemaModal,
   onDeleteModel,
+  onBatchDeleteModels,
   onOpenIconModal,
   onRefreshModels,
+  onOpenAddModel,
 }: ModelListSectionProps) {
   /* ---------- 模型列表工具栏（始终显示） ---------- */
   const renderToolbar = () => {
     const hasData = fetchedModels !== null;
     const totalCount = flatModelList.length;
     const enabledCount = flatModelList.filter((m) => m.enabled).length;
+
+    // ★ 尚未获取/服务商不支持自动获取模型列表时：不展示分类 Tab 等预设骨架，
+    //   只提供「添加模型」手动录入 + 「获取列表」重试入口
+    if (!hasData) {
+      return (
+        <div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #8c8c8c)' }}>
+              尚未获取到模型列表；若服务商不支持自动获取，可点击「添加模型」手动录入模型 ID
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={onOpenAddModel}>
+                添加模型
+              </Button>
+              <Button icon={<ReloadOutlined />} onClick={onRefreshModels} loading={testing}>
+                获取列表
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div>
@@ -159,46 +198,70 @@ export default function ModelListSection({
         </div>
 
         {/* 搜索 + 操作（Tab 下方，同用户列表同款尺寸） */}
-        {hasData && totalCount > 0 && (
-          <div style={{ marginTop: 12, marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Select
-              value={filterEnabled}
-              onChange={onFilterEnabledChange}
-              style={{ width: 140 }}
-              options={[
-                { value: 'all', label: '全部状态' },
-                { value: 'enabled', label: '已启用' },
-                { value: 'disabled', label: '已禁用' },
-              ]}
-            />
-            <Input
-              placeholder="搜索模型名称或 ID..."
-              prefix={<SearchOutlined />}
-              value={searchKeyword}
-              onChange={(e) => onSearchKeywordChange(e.target.value)}
-              allowClear
-              style={{ width: 240 }}
-            />
-            {hasData && selectedModels.length > 0 && (
-              <Tag color="blue" style={{ margin: 0 }}>
-                已选 {selectedModels.length} 个
-              </Tag>
-            )}
-            <div style={{ flex: 1 }} />
-            {hasData && selectedModels.length > 0 && (
-              <Button
-                type="primary"
-                icon={<ArrowRightOutlined />}
-                onClick={() => onOpenClassifyModal(selectedModels)}
-              >
-                批量归类（{selectedModels.length}）
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={onRefreshModels} loading={testing}>
-              获取列表
-            </Button>
-          </div>
-        )}
+        <div style={{ marginTop: 12, marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {hasData && totalCount > 0 && (
+            <>
+              <Select
+                value={filterEnabled}
+                onChange={onFilterEnabledChange}
+                style={{ width: 140 }}
+                options={[
+                  { value: 'all', label: '全部状态' },
+                  { value: 'enabled', label: '已启用' },
+                  { value: 'disabled', label: '已禁用' },
+                ]}
+              />
+              <Input
+                placeholder="搜索模型名称或 ID..."
+                prefix={<SearchOutlined />}
+                value={searchKeyword}
+                onChange={(e) => onSearchKeywordChange(e.target.value)}
+                allowClear
+                style={{ width: 240 }}
+              />
+              {selectedModels.length > 0 && (
+                <Tag color="blue" style={{ margin: 0 }}>
+                  已选 {selectedModels.length} 个
+                </Tag>
+              )}
+              <div style={{ flex: 1 }} />
+              {selectedModels.length > 0 && (
+                <Button
+                  type="primary"
+                  icon={<ArrowRightOutlined />}
+                  onClick={() => onOpenClassifyModal(selectedModels)}
+                >
+                  批量归类（{selectedModels.length}）
+                </Button>
+              )}
+              {selectedModels.length > 0 && (
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => {
+                    Modal.confirm({
+                      title: `确认删除选中的 ${selectedModels.length} 个模型？`,
+                      content: '删除后将无法恢复（服务商 API 中仍存在的模型，重新获取列表后会重新出现）。',
+                      okText: '删除',
+                      okButtonProps: { danger: true },
+                      cancelText: '取消',
+                      onOk: () => onBatchDeleteModels(selectedModels),
+                    });
+                  }}
+                >
+                  批量删除（{selectedModels.length}）
+                </Button>
+              )}
+            </>
+          )}
+          {!(hasData && totalCount > 0) && <div style={{ flex: 1 }} />}
+          <Button icon={<PlusOutlined />} onClick={onOpenAddModel}>
+            添加模型
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={onRefreshModels} loading={testing}>
+            获取列表
+          </Button>
+        </div>
       </div>
     );
   };
@@ -208,7 +271,7 @@ export default function ModelListSection({
     if (!fetchedModels) {
       return (
         <div style={{ color: '#8c8c8c', padding: '40px 0', textAlign: 'center', minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          输入 API Key 后将自动获取模型列表
+          请点击上方「添加模型」手动录入模型 ID，或点击「获取列表」重新尝试自动获取
         </div>
       );
     }

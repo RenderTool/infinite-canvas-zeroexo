@@ -68,6 +68,7 @@ interface UseModelOperationsResult {
   handleAutoClassify: () => Promise<void>;
   // 模型删除
   handleDeleteModel: (modelId: string) => Promise<void>;
+  handleBatchDeleteModels: (ids: string[]) => Promise<void>;
   // 图标弹窗
   iconModalOpen: boolean;
   setIconModalOpen: Dispatch<SetStateAction<boolean>>;
@@ -87,6 +88,10 @@ interface UseModelOperationsResult {
   handleOpenSchemaModal: (modelId: string, modelType?: string) => void;
   // 模型应用
   handleApplyModels: (newModels: Record<string, string[]>, rawIds: string[] | null) => void;
+  // 手动添加模型
+  addModelModalOpen: boolean;
+  setAddModelModalOpen: Dispatch<SetStateAction<boolean>>;
+  handleAddModels: (ids: string[], type: string) => void;
 }
 
 /**
@@ -129,6 +134,9 @@ export function useModelOperations({
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedModelType, setSelectedModelType] = useState<string>('image');
   const [customSchema, setCustomSchema] = useState<ParameterDef[]>([]);
+
+  // 手动添加模型弹窗（服务商 /models 端点不可用时的兜底录入）
+  const [addModelModalOpen, setAddModelModalOpen] = useState(false);
 
   // schema 保存成功回调 → 更新本地映射
   const handleSchemaSaved = (modelId: string, persistedConfig: PersistedParamConfig) => {
@@ -330,6 +338,57 @@ export function useModelOperations({
     }
   };
 
+  /* ---------- 批量删除选中模型 ---------- */
+
+  const handleBatchDeleteModels = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (!existingRecord?.id) {
+      message.warning(t('ai.saveChannelFirst'));
+      return;
+    }
+    try {
+      // 依次调用单删接口，任何一条失败不阻塞其余删除
+      const results = await Promise.allSettled(
+        ids.map((modelId) =>
+          apiDelete<{ ok: boolean; message: string }>(
+            `/admin/api-providers/${existingRecord.id}/custom-models/${encodeURIComponent(modelId)}`,
+          ),
+        ),
+      );
+      const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+
+      const deleteSet = new Set(ids);
+      // 从 fetchedModels 中移除
+      if (fetchedModels) {
+        const newModels = { ...fetchedModels };
+        for (const type of Object.keys(newModels)) {
+          newModels[type] = newModels[type].filter((id) => !deleteSet.has(id));
+        }
+        setFetchedModels(newModels);
+      }
+      // 移除启用状态、类型、图标
+      setEnabledModels((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      setModelTypes((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id.toLowerCase()]);
+        return next;
+      });
+      setModelIcons((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id.toLowerCase()]);
+        return next;
+      });
+      setSelectedModels([]);
+      message.success(succeeded > 0 ? `已删除 ${succeeded} 个模型` : '未删除任何模型');
+    } catch (err) {
+      showApiError(err, t('ai.deleteFailed'));
+    }
+  };
+
   /** 应用模型列表：已有模型保留原启用状态，新增模型默认关闭 */
   const applyFetchedModels = (models: Record<string, string[]>) => {
     setFetchedModels(models);
@@ -449,6 +508,58 @@ export function useModelOperations({
     setSchemaModalOpen(true);
   };
 
+  /* ---------- 手动添加模型（服务商 /models 端点不可用时的兜底录入） ---------- */
+
+  const handleAddModels = (ids: string[], type: string) => {
+    const normalized = Array.from(
+      new Set(ids.map((s) => s.trim()).filter(Boolean)),
+    );
+    if (normalized.length === 0) {
+      message.warning('请输入至少一个模型 ID');
+      return;
+    }
+
+    const current = fetchedModelsRef.current ?? {
+      llm: [],
+      image: [],
+      video: [],
+      audio: [],
+      unclassified: [],
+    };
+    const existing = new Set(
+      Object.values(current).flat().map((id) => id.toLowerCase()),
+    );
+
+    const newModels = { ...current };
+    if (!Array.isArray(newModels[type])) {
+      newModels[type] = [];
+    }
+    const added: string[] = [];
+    normalized.forEach((id) => {
+      if (!existing.has(id.toLowerCase())) {
+        newModels[type].push(id);
+        added.push(id);
+      }
+    });
+
+    if (added.length === 0) {
+      message.info('模型已全部存在');
+      return;
+    }
+
+    setFetchedModels(newModels);
+    setEnabledModels((prev) => {
+      const next = { ...prev };
+      added.forEach((id) => {
+        next[id] = true;
+      });
+      return next;
+    });
+    setAddModelModalOpen(false);
+    message.success(`已添加 ${added.length} 个模型`);
+    // ★ 由 useEffect([fetchedModels, enabledModels]) 自动保存
+  };
+
   /* ---------- 图标选择弹窗回调 ---------- */
 
   const handleIconSelect = (key: string) => {
@@ -502,6 +613,7 @@ export function useModelOperations({
     handleAutoClassify,
     // 模型删除
     handleDeleteModel,
+    handleBatchDeleteModels,
     // 图标弹窗
     iconModalOpen,
     setIconModalOpen,
@@ -521,5 +633,9 @@ export function useModelOperations({
     handleOpenSchemaModal,
     // 模型应用
     handleApplyModels,
+    // 手动添加模型
+    addModelModalOpen,
+    setAddModelModalOpen,
+    handleAddModels,
   };
 }
