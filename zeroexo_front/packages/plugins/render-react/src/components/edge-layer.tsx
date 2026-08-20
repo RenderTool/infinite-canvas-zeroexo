@@ -241,6 +241,31 @@ const TOOLBAR_H = 32;
 const EDGE_LOD_THRESHOLD = 0.35;
 
 /**
+ * 活跃边动画层上限(Plan#14 T2):活跃边数量超过该值时关闭 SMIL 动画脉冲层。
+ * 阈值常量模块级定义,便于调参(Plan#14 约束 4)。
+ */
+const ACTIVE_EDGE_ANIM_LIMIT = 60;
+/** 活跃边光辉层上限(Plan#14 T2):超过该值时光辉层 opacity 减半降级。 */
+const ACTIVE_EDGE_GLOW_LIMIT = 150;
+
+/**
+ * 边的活跃判定:选中/悬停/任一端节点被选中(容器循环与 ActiveVisualLayer 共用)。
+ * 原为容器内闭包,提取为模块级避免两处判定漂移。
+ */
+function isEdgeActive(
+  edge: EdgeRecord,
+  selectedIds: Set<string>,
+  hoveredId: string | undefined,
+  selectedNodeIds: Set<string> | undefined,
+): boolean {
+  return (
+    selectedIds.has(edge.id) ||
+    hoveredId === edge.id ||
+    !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId))
+  );
+}
+
+/**
  * EdgeItem - 单条边(memo 包裹,P0-3 per-edge 增量重算)。
  * 路径仅在两端节点记录引用/几何参数变化时重算;
  * 拖拽时只有与被拖节点相连的边拿到新 source/target 引用。
@@ -255,7 +280,6 @@ const EdgeItem = React.memo(function EdgeItem({
   pathFn,
   stroke,
   sw,
-  isActive,
   store,
   onEdgePointerDown,
   onEdgePointerEnter,
@@ -270,7 +294,6 @@ const EdgeItem = React.memo(function EdgeItem({
   pathFn: (endpoints: EdgeEndpoints) => string;
   stroke: string;
   sw: number;
-  isActive: boolean;
   store: ReactGraphStore;
   onEdgePointerDown?: (e: React.PointerEvent, edgeId: string) => void;
   onEdgePointerEnter?: (e: React.PointerEvent, edgeId: string) => void;
@@ -333,16 +356,6 @@ const EdgeItem = React.memo(function EdgeItem({
 
   return (
     <g ref={gRef}>
-      {/* 光辉底层:粗 stroke + 低 opacity(non-scaling-stroke:屏幕恒定线宽) */}
-      <path
-        d={d}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={sw * 2.8}
-        vectorEffect="non-scaling-stroke"
-        opacity={isActive ? 0.35 : 0.18}
-        style={{ pointerEvents: 'none' }}
-      />
       {/* 透明加宽命中区域(世界坐标宽度,与改造前行为一致) */}
       <path
         d={d}
@@ -354,7 +367,7 @@ const EdgeItem = React.memo(function EdgeItem({
         onPointerEnter={onEdgePointerEnter ? (e) => onEdgePointerEnter(e, edge.id) : undefined}
         onPointerLeave={onEdgePointerLeave ? (e) => onEdgePointerLeave(e, edge.id) : undefined}
       />
-      {/* 主线 */}
+      {/* 主线(光辉层与动画脉冲层已由 ActiveVisualLayer 按色合并渲染,见 Plan#14 T1) */}
       <path
         data-edge-id={edge.id}
         d={d}
@@ -364,29 +377,144 @@ const EdgeItem = React.memo(function EdgeItem({
         vectorEffect="non-scaling-stroke"
         style={{ pointerEvents: 'none' }}
       />
-      {/* 能量流动特效:SMIL stroke-dashoffset 流动(选中/关联节点选中时)
-           * 红色脉冲,加长脉冲:dasharray "16 80"(周期 96) */}
-      {isActive && (
-        <path
-          d={d}
-          fill="none"
-          stroke="#e94560"
-          strokeWidth={sw * 2}
-          vectorEffect="non-scaling-stroke"
-          strokeDasharray="16 80"
-          strokeLinecap="round"
-          opacity={0.85}
-        >
-          <animate
-            attributeName="stroke-dashoffset"
-            from="96"
-            to="0"
-            dur="1.5s"
-            repeatCount="indefinite"
-          />
-        </path>
-      )}
     </g>
+  );
+});
+
+/** 活跃边按颜色分组后的合并单元(光辉/动画同色同 opacity 才能合并) */
+interface ActiveVisualGroup {
+  stroke: string;
+  edges: EdgeRecord[];
+}
+
+/**
+ * ActiveVisualLayer - 活跃边视觉合并层(Plan#14 T1/T2)。
+ *
+ * 原实现中每条活跃边渲染 4 层 path(光辉 2.8× + 命中区 + 主线 + SMIL 动画脉冲),
+ * 星形拓扑(1 中心节点连 500+ 边)或框选大片节点时 N 条边同时动画 × 3 层 paint
+ * → 主线程饱和卡顿。本层将全部活跃边的「光辉底层 + 动画脉冲」按颜色分组合并为
+ * 单 path + 单 <animate>(N→1),复用 inactiveMergedPath 的合并模式。
+ *
+ * 视觉保证:
+ * - 合并 path 的 stroke-dashoffset 对多子路径天然各自流动(Plan#14 约束 1);
+ * - 命中区/主线仍留在 EdgeItem(每边独立,保证点选/悬停/裁剪交互);
+ * - 拖动瞬态通道与 EdgeItem 同模式:订阅偏移表直写合并 d(Plan#14 约束 2)。
+ */
+const ActiveVisualLayer = React.memo(function ActiveVisualLayer({
+  groups,
+  nodesById,
+  extensions,
+  pinDefaults,
+  invKc,
+  visualPathFn,
+  store,
+  animEnabled,
+  glowOpacity,
+}: {
+  groups: ActiveVisualGroup[];
+  nodesById: Map<string, NodeRecord>;
+  extensions: Map<string, NodeTypeExtension>;
+  pinDefaults: PinDefaults;
+  invKc: number;
+  visualPathFn: (endpoints: EdgeEndpoints) => string;
+  store: ReactGraphStore;
+  /** 动画脉冲层开关(T2 数量上限 / T3 边 LOD 时关闭,静态高亮不受影响) */
+  animEnabled: boolean;
+  /** 光辉层透明度(T2 超过 GLOW_LIMIT 时减半降级) */
+  glowOpacity: number;
+}): React.ReactElement | null {
+  // 合并 d:每组边路径拼接为单条 path(与 inactiveMergedPath 同模式)
+  const merged = useMemo(() => {
+    const out: { stroke: string; d: string }[] = [];
+    for (const g of groups) {
+      const ds: string[] = [];
+      for (const edge of g.edges) {
+        const source = nodesById.get(edge.source.nodeId);
+        const target = nodesById.get(edge.target.nodeId);
+        if (!source || !target) continue;
+        const endpoints = getEdgeEndpointsFor(source, target, edge, extensions, pinDefaults, invKc);
+        if (!endpoints) continue;
+        ds.push(visualPathFn(endpoints));
+      }
+      if (ds.length > 0) out.push({ stroke: g.stroke, d: ds.join(' ') });
+    }
+    return out;
+  }, [groups, nodesById, extensions, pinDefaults, invKc, visualPathFn]);
+
+  // 拖动瞬态通道(与 EdgeItem 同模式):graph 不变,偏移表直写合并 d
+  const gRefs = useRef<(SVGGElement | null)[]>([]);
+  const latestRef = useRef({ groups, nodesById, extensions, pinDefaults, invKc, visualPathFn });
+  latestRef.current = { groups, nodesById, extensions, pinDefaults, invKc, visualPathFn };
+  useEffect(() => {
+    return store.subscribeDragOffsets(() => {
+      const offsets = store.getDragOffsets();
+      if (offsets.size === 0) return;
+      const { groups: gs, nodesById: nb, extensions: ext, pinDefaults: pd, invKc: ik, visualPathFn: vpf } = latestRef.current;
+      gs.forEach((g, gi) => {
+        const el = gRefs.current[gi];
+        if (!el) return;
+        const ds: string[] = [];
+        for (const edge of g.edges) {
+          const s = nb.get(edge.source.nodeId);
+          const t = nb.get(edge.target.nodeId);
+          if (!s || !t) continue;
+          const offS = offsets.get(s.id);
+          const offT = offsets.get(t.id);
+          if (!offS && !offT) continue;
+          const shiftedS = offS
+            ? { ...s, position: { x: s.position.x + offS.dx, y: s.position.y + offS.dy } }
+            : s;
+          const shiftedT = offT
+            ? { ...t, position: { x: t.position.x + offT.dx, y: t.position.y + offT.dy } }
+            : t;
+          const endpoints = getEdgeEndpointsFor(shiftedS, shiftedT, edge, ext, pd, ik);
+          if (!endpoints) continue;
+          ds.push(vpf(endpoints));
+        }
+        if (ds.length > 0) el.querySelectorAll('path').forEach((p) => p.setAttribute('d', ds.join(' ')));
+      });
+    });
+  }, [store]);
+
+  return (
+    <>
+      {merged.map((m, i) => (
+        <g key={m.stroke} ref={(el) => { gRefs.current[i] = el; }}>
+          {/* 光辉底层:合并同色边(宽度 7 = 原 2.5×2.8,非缩放描边屏幕恒定) */}
+          <path
+            d={m.d}
+            fill="none"
+            stroke={m.stroke}
+            strokeWidth={7}
+            vectorEffect="non-scaling-stroke"
+            opacity={glowOpacity}
+            style={{ pointerEvents: 'none' }}
+          />
+          {/* 能量流动特效:合并单 path + 单 <animate>(N→1,红色脉冲 dasharray "16 80" 周期 96) */}
+          {animEnabled && (
+            <path
+              d={m.d}
+              fill="none"
+              stroke="#e94560"
+              strokeWidth={5}
+              vectorEffect="non-scaling-stroke"
+              strokeDasharray="16 80"
+              strokeLinecap="round"
+              opacity={0.85}
+              style={{ pointerEvents: 'none' }}
+            >
+              <animate
+                attributeName="stroke-dashoffset"
+                from="96"
+                to="0"
+                dur="1.5s"
+                repeatCount="indefinite"
+              />
+            </path>
+          )}
+        </g>
+      ))}
+    </>
   );
 });
 
@@ -442,15 +570,6 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   // 路径生成函数(模块级函数引用稳定,可作为 EdgeItem memo 依赖)
   const pathFn = edgePathType === 'smoothstep' ? smoothstepPath : bezierPath;
 
-  /**
-   * 非活跃边的可见性判定:选中/悬停/关联节点选中 → 活跃。
-   * 复用统一判定,避免两处循环内重复计算。
-   */
-  const isEdgeActive = (edge: EdgeRecord): boolean =>
-    selectedIds.has(edge.id) ||
-    hoveredId === edge.id ||
-    !!(selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId));
-
   // 性能(批次2):invK 相对量化(5% 桶)——缩放动画中 invK 每帧连续变化时,若原样进
   // useMemo 依赖,4672 条非活跃边的路径会每帧全量重建(字符串拼接 + hit 元素重建 +
   // 4672 个 d 属性更新,dev-performance 采集中 k 连续变化段帧率跌至 13-30fps)。
@@ -463,13 +582,14 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   // 边 LOD:低缩放(k < EDGE_LOD_THRESHOLD)时视觉边直线化 + 命中区整层降级。
   const edgeLod = viewport.k < EDGE_LOD_THRESHOLD;
   // 非活跃边视觉路径生成:低缩放用直线(linePath),正常档位保持曲线(pathFn)。
-  const visualPathFn = edgeLod ? linePath : pathFn;
+  // useMemo 稳定引用:直接三元会每渲染重建,破坏 EdgeItem 的 memo 命中(Plan#14 T3 直线化)。
+  const visualPathFn = useMemo(() => (edgeLod ? linePath : pathFn), [edgeLod, pathFn]);
   // 性能(批次1):非活跃边计算提取为 useMemo,避免平移帧(k 不变时端点不变)全量重算。
   // 依赖含 invKc(量化)/edges/nodesById/选中态;平移帧这些不变 → 命中缓存,零重算。
   const inactiveMergedPath = useMemo(() => {
     const inactivePaths: string[] = [];
     for (const edge of edges) {
-      if (isEdgeActive(edge)) continue;
+      if (isEdgeActive(edge, selectedIds, hoveredId, selectedNodeIds)) continue;
       const source = nodesById.get(edge.source.nodeId);
       const target = nodesById.get(edge.target.nodeId);
       if (!source || !target) continue;
@@ -487,7 +607,7 @@ export const EdgeLayer = React.memo(function EdgeLayer({
     if (edgeLod) return [];
     const targets: React.ReactElement[] = [];
     for (const edge of edges) {
-      if (isEdgeActive(edge)) continue;
+      if (isEdgeActive(edge, selectedIds, hoveredId, selectedNodeIds)) continue;
       const source = nodesById.get(edge.source.nodeId);
       const target = nodesById.get(edge.target.nodeId);
       if (!source || !target) continue;
@@ -510,6 +630,33 @@ export const EdgeLayer = React.memo(function EdgeLayer({
     }
     return targets;
   }, [edges, nodesById, extensions, pinDefaults, invKc, pathFn, edgeLod, selectedIds, hoveredId, selectedNodeIds, onEdgePointerDown, onEdgePointerEnter, onEdgePointerLeave]);
+
+  // Plan#14 T1:活跃边按颜色分组的合并单元(光辉/动画合并粒度)。
+  // 活跃边颜色实际只有两档(选中/关联 → edgeSelectedColor,悬停 → edgeHoverColor)。
+  const activeGroups = useMemo(() => {
+    const byColor = new Map<string, EdgeRecord[]>();
+    for (const edge of edges) {
+      if (!isEdgeActive(edge, selectedIds, hoveredId, selectedNodeIds)) continue;
+      const stroke =
+        selectedIds.has(edge.id) || selectedNodeIds?.has(edge.source.nodeId) || selectedNodeIds?.has(edge.target.nodeId)
+          ? edgeSelectedColor
+          : hoveredId === edge.id
+            ? edgeHoverColor
+            : edgeColor;
+      const list = byColor.get(stroke);
+      if (list) list.push(edge);
+      else byColor.set(stroke, [edge]);
+    }
+    return [...byColor.entries()].map(([stroke, list]) => ({ stroke, edges: list }));
+  }, [edges, selectedIds, hoveredId, selectedNodeIds, edgeSelectedColor, edgeHoverColor, edgeColor]);
+
+  // Plan#14 T2:活跃边数量阈值降级——>60 关动画脉冲,>150 光辉 opacity 减半。
+  const activeCount = useMemo(
+    () => activeGroups.reduce((n, g) => n + g.edges.length, 0),
+    [activeGroups],
+  );
+  const animEnabled = !edgeLod && activeCount > 0 && activeCount <= ACTIVE_EDGE_ANIM_LIMIT;
+  const glowOpacity = activeCount > ACTIVE_EDGE_GLOW_LIMIT ? 0.35 * 0.5 : 0.35;
 
   return (
     <svg
@@ -539,7 +686,21 @@ export const EdgeLayer = React.memo(function EdgeLayer({
         )}
         {/* P1-4: 非活跃边透明命中区域(每边独立,保证点击/悬停可正常交互) (批次1: useMemo 化) */}
         {inactiveHitTargets.length > 0 ? <>{inactiveHitTargets}</> : null}
-        {/* P0-3: per-edge memo EdgeItem —— 仅活跃边保留多层结构(光晕/命中/主线/动画) */}
+        {/* Plan#14 T1: 活跃边光辉/动画合并层(按色分组 N→1,渲染在 EdgeItem 之前:光辉在主线底层,脉冲两侧露出) */}
+        {activeGroups.length > 0 && (
+          <ActiveVisualLayer
+            groups={activeGroups}
+            nodesById={nodesById}
+            extensions={extensions}
+            pinDefaults={pinDefaults}
+            invKc={invKc}
+            visualPathFn={visualPathFn}
+            store={store}
+            animEnabled={animEnabled}
+            glowOpacity={glowOpacity}
+          />
+        )}
+        {/* P0-3: per-edge memo EdgeItem —— 活跃边仅保留命中区/主线(光辉/动画已合并) */}
         {edges.map((edge) => {
           const source = nodesById.get(edge.source.nodeId);
           const target = nodesById.get(edge.target.nodeId);
@@ -561,10 +722,9 @@ export const EdgeLayer = React.memo(function EdgeLayer({
               extensions={extensions}
               pinDefaults={pinDefaults}
               invK={invK}
-              pathFn={pathFn}
+              pathFn={visualPathFn}
               stroke={stroke}
               sw={sw}
-              isActive={isActive}
               store={store}
               onEdgePointerDown={onEdgePointerDown}
               onEdgePointerEnter={onEdgePointerEnter}
