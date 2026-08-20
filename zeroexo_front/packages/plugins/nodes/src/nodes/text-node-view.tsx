@@ -20,6 +20,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 
 import { BaseNodeView } from '../base-node-view.js';
 import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
+import { buildTextContentCommand } from '../utils/text-model.js';
 
 export interface TextNodeViewProps extends NodeRendererProps {
   connectionController: ConnectionController | null;
@@ -40,6 +41,7 @@ export function TextNodeView({
   isHovered,
   forceShowPins,
   updateNode,
+  commandQueue,
   invK,
   connectionController,
   externalRenaming,
@@ -51,6 +53,14 @@ export function TextNodeView({
   const [isEditing, setIsEditing] = useState(false);
   const { t } = useTranslation();
   const { theme } = useTheme();
+
+  // Plan#12: 编辑期草稿本地化——onChange 只写 draft,退出编辑时一次性提交命令
+  // (一次编辑 = 一个撤销点,避免高频输入撑爆撤销栈)
+  const [draft, setDraft] = useState(content);
+  const draftRef = useRef(content);
+  const startContentRef = useRef(content);
+  const contentRef = useRef(content);
+  contentRef.current = content;
 
   // 非编辑态:直接渲染 HTML 保留富文本样式(加粗/斜体/下划线等)
   // 使用 content 作为 key 强制 React 重新挂载 div 以更新 innerHTML
@@ -65,15 +75,25 @@ export function TextNodeView({
     }
   }, [isEditing]);
 
-  // 双击进入编辑模式
+  // 双击进入编辑模式(初始化草稿快照,退出时以此判定是否产生命令)
   const handleDoubleClick = useCallback(() => {
+    startContentRef.current = contentRef.current;
+    draftRef.current = contentRef.current;
+    setDraft(contentRef.current);
     setIsEditing(true);
   }, []);
 
-  // 退出编辑模式
+  // 退出编辑模式:草稿与进入时快照不同才提交(无变化不产生命令)
   const exitEditing = useCallback(() => {
     setIsEditing(false);
-  }, []);
+    const next = draftRef.current;
+    if (next === startContentRef.current) return;
+    if (commandQueue) {
+      commandQueue.execute(buildTextContentCommand(node.id, next));
+    } else {
+      updateNode({ data: { ...data, content: next } });
+    }
+  }, [commandQueue, node.id, updateNode, data]);
 
   // 编辑态:监听 document mousedown,检测点击是否在节点外,避免 onBlur 过早退出
   // 解决:点击节点标题栏/胶囊工具栏时不退出,仅点击节点外部才退出
@@ -96,10 +116,6 @@ export function TextNodeView({
     document.addEventListener('mousedown', handleMouseDown, true);
     return () => document.removeEventListener('mousedown', handleMouseDown, true);
   }, [isEditing, exitEditing]);
-
-  const updateData = (patch: Partial<TextNodeData>): void => {
-    updateNode({ data: { ...data, ...patch } });
-  };
 
   // 节点颜色使用 theme.node.fill(所有类型共用)
   const nodeColor = theme.node.fill;
@@ -163,13 +179,13 @@ export function TextNodeView({
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.preventDefault();
-                setIsEditing(false);
+                exitEditing();
               }
             }}
           >
             <SelfRichTextEditor
-              value={content}
-              onChange={(html) => updateData({ content: html })}
+              value={draft}
+              onChange={(html) => { draftRef.current = html; setDraft(html); }}
               placeholder={t('nodes.doubleClickToEdit')}
               isDark={theme.mode === 'dark'}
               hideToolbar
