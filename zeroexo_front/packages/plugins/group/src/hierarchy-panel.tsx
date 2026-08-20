@@ -26,7 +26,7 @@ import type { SceneNode } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useGraph, useSelection } from '@zeroexo/plugin-render-react';
 import type { GroupController } from './controller.js';
-import { getRoots, getChildren } from './scene-graph.js';
+import { getRoots, buildById } from './scene-graph.js';
 
 // ===== Bug7: 节点类型 → i18n 标题 key 映射 =====
 const NODE_TYPE_TITLE_KEY: Record<string, string> = {
@@ -55,6 +55,8 @@ export interface HierarchyTreeNode {
   node: SceneNode;
   depth: number;
   hasChildren: boolean;
+  /** 直接子节点数量(组节点徽标用;树构建时一次算好,避免消费端 O(N) 重扫) */
+  childrenCount: number;
 }
 
 /** 层级过滤条件(内置封装,方便外部调用) */
@@ -421,17 +423,28 @@ export function useHierarchyPanelProps(
 
   // 构建 flattened tree(DFS,跳过折叠子树,应用过滤)
   // useMemo 避免每次渲染重建整棵树 —— 动画期间如果 store 未变,直接复用缓存
+  // T1: 一次 buildById 复用 —— getChildren 每节点重复构建 O(N) Map 会使 DFS 退化 O(N²),
+  // 3000 节点时展开/折叠/筛选一次就是百万级构建。内部 childrenOf 复用 byId + childrenIds。
   const tree = useMemo<HierarchyTreeNode[]>(() => {
     const result: HierarchyTreeNode[] = [];
     const scene = graph.nodes;
-    const roots = getRoots(scene);
+    const byId = buildById(scene);
+    const childrenOf = (parentId: string): SceneNode[] => {
+      const parent = byId.get(parentId);
+      const childrenIds = parent?.childrenIds;
+      if (!parent || !childrenIds || !childrenIds.length) return [];
+      return childrenIds
+        .map((cid) => byId.get(cid))
+        .filter((n): n is SceneNode => Boolean(n))
+        .sort((a, b) => (a.siblingOrder ?? 0) - (b.siblingOrder ?? 0));
+    };
     const dfs = (nodes: SceneNode[], depth: number): void => {
       for (const node of nodes) {
         const matches = matchHierarchyFilter(node, filter);
-        const children = getChildren(scene, node.id);
+        const children = childrenOf(node.id);
         const hasChildren = children.length > 0;
         if (matches) {
-          result.push({ node, depth, hasChildren });
+          result.push({ node, depth, hasChildren, childrenCount: children.length });
         }
         const shouldRecurse = hasChildren && (filter.search !== '' || !collapsedIds.has(node.id));
         if (shouldRecurse) {
@@ -439,7 +452,7 @@ export function useHierarchyPanelProps(
         }
       }
     };
-    dfs(roots, 0);
+    dfs(getRoots(scene), 0);
     return result;
   }, [graph.nodes, filter, collapsedIds]);
 

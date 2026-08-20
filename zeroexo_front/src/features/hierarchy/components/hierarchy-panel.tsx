@@ -12,7 +12,7 @@
  * 渲染样式: stone 暖色 + Lucide 图标 + 44px 行高 + 选中 alpha 态。
  */
 
-import { useRef, useState, useLayoutEffect, useCallback, useMemo, useEffect } from 'react';
+import { useRef, useState, useLayoutEffect, useCallback, useMemo, useEffect, memo, createContext, useContext } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
@@ -81,6 +81,30 @@ function getTypeIcon(node: SceneNode): ReactNode {
   }
 }
 
+// T2: 缩略图解析结果 LRU 缓存 —— 滚动时行挂载/卸载频繁,每次挂载重复异步解析
+// IndexedDB + createObjectURL 是滚动卡顿与 blob URL 泄漏来源;命中缓存同步恢复,
+// 淘汰时 revoke blob URL(避免内存泄漏)。
+const thumbCache = new Map<string, { thumbSrc: string; videoSrc: string }>();
+const THUMB_CACHE_LIMIT = 256;
+
+function evictThumb(key: string): void {
+  const entry = thumbCache.get(key);
+  if (entry) {
+    if (entry.thumbSrc.startsWith('blob:')) URL.revokeObjectURL(entry.thumbSrc);
+    if (entry.videoSrc.startsWith('blob:')) URL.revokeObjectURL(entry.videoSrc);
+  }
+  thumbCache.delete(key);
+}
+
+function cacheThumb(key: string, entry: { thumbSrc: string; videoSrc: string }): void {
+  thumbCache.delete(key); // 更新顺序(近似 LRU)
+  thumbCache.set(key, entry);
+  if (thumbCache.size > THUMB_CACHE_LIMIT) {
+    const oldest = thumbCache.keys().next().value;
+    if (oldest !== undefined) evictThumb(oldest);
+  }
+}
+
 /**
  * 层级面板缩略图 — 仅加载缩略图,绝不加载原图
  * 后端键(resources/): 同步构造 ?size=thumb URL
@@ -91,22 +115,35 @@ function HierarchyThumbnail({
   storageKey,
   content,
   isVideo,
-  theme,
+  borderColor,
+  mutedColor,
 }: {
   storageKey?: string;
   content?: string;
   isVideo: boolean;
-  theme: ThemeConfig;
+  borderColor: string;
+  mutedColor: string;
 }): React.ReactElement {
-  const [thumbSrc, setThumbSrc] = useState('');
+  // T2: 渲染期同步读缓存 —— 滚动回滚时首帧即显示(useEffect 之前),避免闪烁
+  const cacheKey0 = storageKey ? `${isVideo ? 'v' : 'i'}|${storageKey}` : '';
+  const cached0 = cacheKey0 ? thumbCache.get(cacheKey0) : undefined;
+  const [thumbSrc, setThumbSrc] = useState(cached0?.thumbSrc ?? '');
   // 重建后的有效内容 URL(刷新后 blob URL 失效场景,video 回退用)
-  const [videoSrc, setVideoSrc] = useState('');
+  const [videoSrc, setVideoSrc] = useState(cached0?.videoSrc ?? '');
 
   useEffect(() => {
-    // 无 storageKey(AI 生成未保存): content 通常是 dataURL,直接用
+    // 无 storageKey(AI 生成未保存): content 通常是 dataURL,直接用(不缓存,避免大字符串驻留)
     if (!storageKey) {
       setThumbSrc(content || '');
       setVideoSrc(content || '');
+      return;
+    }
+    // T2: 命中缓存直接恢复(滚动回滚零异步等待 + 零重复 createObjectURL)
+    const cacheKey = `${isVideo ? 'v' : 'i'}|${storageKey}`;
+    const cached = thumbCache.get(cacheKey);
+    if (cached) {
+      setThumbSrc(cached.thumbSrc);
+      setVideoSrc(cached.videoSrc);
       return;
     }
     // 视频: 优先 localforage 首帧(video-node-view 上传/播放时经 storeVideoThumbnail 存入);
@@ -116,11 +153,18 @@ function HierarchyThumbnail({
       (async () => {
         try {
           const persisted = await resolveVideoThumbnail(storageKey);
-          if (persisted && !cancelled) { setThumbSrc(persisted); return; }
+          if (persisted && !cancelled) {
+            setThumbSrc(persisted);
+            cacheThumb(cacheKey, { thumbSrc: persisted, videoSrc: '' });
+            return;
+          }
         } catch { /* 继续 */ }
         // 无持久化首帧: 重建内容 URL(本地键从 IndexedDB 读,后端键走认证链路)
         const src = await resolveContentUrl(storageKey, content ?? '');
-        if (!cancelled) setVideoSrc(src || '');
+        if (!cancelled) {
+          setVideoSrc(src || '');
+          cacheThumb(cacheKey, { thumbSrc: '', videoSrc: src || '' });
+        }
       })();
       return () => { cancelled = true; };
     }
@@ -135,10 +179,17 @@ function HierarchyThumbnail({
     (async () => {
       try {
         const persisted = await resolveThumbnailUrl(storageKey);
-        if (persisted && !cancelled) { setThumbSrc(persisted); return; }
+        if (persisted && !cancelled) {
+          setThumbSrc(persisted);
+          cacheThumb(cacheKey, { thumbSrc: persisted, videoSrc: '' });
+          return;
+        }
       } catch { /* 继续下一级 */ }
       const thumb = await resolveAnyThumbUrl(storageKey);
-      if (!cancelled) setThumbSrc(thumb || '');
+      if (!cancelled) {
+        setThumbSrc(thumb || '');
+        cacheThumb(cacheKey, { thumbSrc: thumb || '', videoSrc: '' });
+      }
     })();
     return () => { cancelled = true; };
   }, [storageKey, content, isVideo]);
@@ -150,7 +201,7 @@ function HierarchyThumbnail({
     <div
       style={{
         width: 36, height: 36, flexShrink: 0, borderRadius: 4, overflow: 'hidden',
-        background: theme.toolbar.border + '33',
+        background: borderColor + '33',
       }}
     >
       {useVideoElement ? (
@@ -171,7 +222,7 @@ function HierarchyThumbnail({
         />
       ) : (
         // 无缩略图时回退图标(避免空白)
-        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.toolbar.textMuted, opacity: 0.6 }}>
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: mutedColor, opacity: 0.6 }}>
           {isVideo ? <Video size={14} /> : <ImageIcon size={14} />}
         </div>
       )}
@@ -179,145 +230,13 @@ function HierarchyThumbnail({
   );
 }
 
-export function HierarchyPanelSidebar({
-  closing, store, groupPlugin, theme, modal, onClose, onFocusNode,
-}: HierarchyPanelSidebarProps): React.ReactElement {
-  const props = useHierarchyPanelProps(store, groupPlugin.getController());
-  const dragIdRef = useRef<string | null>(null);
-  const { t } = useTranslation();
+// 引导线配置(每列14px,使用CSS border绘制树形连接线)
+const GUIDE_COL_WIDTH = 14;
+const LINE_COLOR = 'rgba(128,128,128,0.2)';
 
-  // 展开动画:useLayoutEffect 确保初始 DOM 状态提交后再触发过渡
-  // React 18 生产模式下,useEffect 的批处理可能导致双 rAF 不稳定
-  // useLayoutEffect 在 paint 前同步执行,配合单次 rAF 即可可靠触发 transition
-  const [expanded, setExpanded] = useState(false);
-  useLayoutEffect(() => {
-    if (closing) { setExpanded(false); return; }
-    let rafId: number;
-    const id = requestAnimationFrame(() => {
-      rafId = requestAnimationFrame(() => setExpanded(true));
-    });
-    return () => { cancelAnimationFrame(id); cancelAnimationFrame(rafId); };
-  }, [closing]);
-
-  // 本地类型筛选(不依赖插件 HierarchyFilter.typeFilter 的 'all'|'group'|'node' 限制)
-  const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
-
-  // 选择模式（类似主页批量选择）
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectIds, setSelectIds] = useState<Set<string>>(new Set());
-
-  const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
-    setSelectIds(new Set());
-  }, []);
-
-  // 键盘导航(底部快捷键栏 ↑↓/Enter/Esc):焦点行索引 + Virtuoso 滚动跟随
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const [focusIndex, setFocusIndex] = useState(-1);
-
-  // 对 props.tree 做本地类型过滤
-  const filteredTree = localTypeFilter === 'all'
-    ? props.tree
-    : props.tree.filter((item) => item.node.type === localTypeFilter);
-
-  // 键盘导航:筛选结果变化后钳制/重置焦点索引
-  useEffect(() => {
-    setFocusIndex((prev) => (filteredTree.length === 0 ? -1 : Math.min(prev, filteredTree.length - 1)));
-  }, [filteredTree.length]);
-
-  // ↑↓ 导航 / Enter 定位 / Esc 退出:仅展开且事件源非输入控件时消费(不与重命名/搜索/画布快捷键冲突)
-  useEffect(() => {
-    if (closing || !expanded) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (filteredTree.length === 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const base = focusIndex < 0 ? 0 : focusIndex;
-        const next = e.key === 'ArrowDown'
-          ? Math.min(base + 1, filteredTree.length - 1)
-          : Math.max(base - 1, 0);
-        setFocusIndex(next);
-        virtuosoRef.current?.scrollToIndex({ index: next, behavior: 'smooth', align: 'center' });
-      } else if (e.key === 'Enter') {
-        const item = focusIndex >= 0 ? filteredTree[focusIndex] : undefined;
-        if (!item) return;
-        e.preventDefault();
-        e.stopPropagation();
-        props.onSelect(item.node.id, false);
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => onFocusNode?.(item.node.id));
-        });
-      } else if (e.key === 'Escape') {
-        // 选择模式下 Esc 先退出选择,再退出面板
-        if (selectMode) { e.preventDefault(); e.stopPropagation(); exitSelectMode(); return; }
-        if (onClose) { e.preventDefault(); e.stopPropagation(); onClose(); }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closing, expanded, filteredTree, focusIndex, selectMode, exitSelectMode, onClose, onFocusNode, props]);
-
-  // O-1: 预计算子节点数量(组节点用) — 避免每帧 O(n) filter
-  const childrenCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const node of store.getGraph().nodes) {
-      if (node.parentId) {
-        map.set(node.parentId, (map.get(node.parentId) ?? 0) + 1);
-      }
-    }
-    return map;
-  }, [store.getGraph()]);
-
-  // 引导线配置(每列14px,使用CSS border绘制树形连接线)
-  const GUIDE_COL_WIDTH = 14;
-  const LINE_COLOR = 'rgba(128,128,128,0.2)';
-
-  // 预计算每个节点的引导线信息(祖先竖线延续 + 是否最后子节点)
-  const guideLineInfo = useMemo(() => {
-    const items = filteredTree;
-    const result: Array<{
-      continues: boolean[];
-      isLastChild: boolean;
-    }> = [];
-
-    for (let i = 0; i < items.length; i++) {
-      const depth = items[i]!.depth;
-      const continues: boolean[] = new Array(depth).fill(false);
-
-      // 检查每个祖先层级是否有后续兄弟(竖线需要延续)
-      for (let d = 0; d < depth; d++) {
-        for (let j = i + 1; j < items.length; j++) {
-          const sibling = items[j]!;
-          if (sibling.depth === d) {
-            continues[d] = true;
-            break;
-          }
-          if (sibling.depth < d) break;
-        }
-      }
-
-      // 检查当前节点是否为该父级的最后一个子节点
-      let isLastChild = true;
-      for (let j = i + 1; j < items.length; j++) {
-        const sibling = items[j]!;
-        if (sibling.depth === depth) {
-          isLastChild = false;
-          break;
-        }
-        if (sibling.depth < depth) break;
-      }
-
-      result.push({ continues, isLastChild });
-    }
-
-    return result;
-  }, [filteredTree]);
-
-  // 渲染树形引导线(CSS 实现,参照目录结构.html 同款样式)
-  function renderGuideLines(info: { continues: boolean[]; isLastChild: boolean }): ReactNode {
+// 渲染树形引导线(CSS 实现,参照目录结构.html 同款样式)
+// T2: 从组件内提升到模块级 —— 组件内定义每次渲染重建函数引用,行 memo 无法共享。
+function renderGuideLines(info: { continues: boolean[]; isLastChild: boolean }): ReactNode {
     const cols: ReactNode[] = [];
 
     // 祖先层竖线（仅延续可见）
@@ -384,6 +303,386 @@ export function HierarchyPanelSidebar({
 
     return <>{cols}</>;
   }
+
+// ===== T2: 重命名状态 context =====
+// renamingValue 每次按键变化,若作为 props 传入所有行,memo 浅比较会整体失效(每键全量重渲染);
+// context 化后仅重命名输入框消费,输入时只有该输入框重渲染(context 更新独立于 props 通道)。
+interface RenameContextValue {
+  value: string;
+  onRenameChange: (value: string) => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+}
+const RenameContext = createContext<RenameContextValue | null>(null);
+
+function RenameInput({ accent }: { accent: string }): React.ReactElement {
+  const ctx = useContext(RenameContext);
+  // context 未提供时降级为只读(正常路径总在 Provider 内)
+  const onRenameChange = ctx?.onRenameChange ?? (() => {});
+  const onCommitRename = ctx?.onCommitRename ?? (() => {});
+  const onCancelRename = ctx?.onCancelRename ?? (() => {});
+  return (
+    <input
+      autoFocus
+      value={ctx?.value ?? ''}
+      onChange={(e) => onRenameChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); onCommitRename(); }
+        else if (e.key === 'Escape') { e.preventDefault(); onCancelRename(); }
+      }}
+      onBlur={onCommitRename}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      style={{
+        flex: 1, minWidth: 0, fontSize: 12, borderRadius: 4,
+        border: `1px solid ${accent}`, background: 'transparent',
+        color: 'inherit', padding: '0 4px', outline: 'none',
+      }}
+    />
+  );
+}
+
+// ===== T2: 行组件 memo 化 =====
+// 滚动/焦点/选中变化时仅受影响行重渲染:
+// - props 原子化(boolean/字符串/稳定引用),theme 对象不传入(引用不稳定会全量失效)
+// - 回调来自 useHierarchyPanelProps(useCallback 稳定)或经 ref 稳定化(onFocusNode)
+// - 重命名状态经 RenameContext 传递,输入时仅输入框重渲染
+interface HierarchyRowProps {
+  node: SceneNode;
+  depth: number;
+  hasChildren: boolean;
+  childrenCount: number;
+  guide?: { continues: boolean[]; isLastChild: boolean };
+  isSelected: boolean;
+  isCollapsed: boolean;
+  isRenaming: boolean;
+  isFocused: boolean;
+  selectMode: boolean;
+  inSelectIds: boolean;
+  store: ReactGraphStore;
+  // theme 原子值(行内用到的派生字符串)
+  accent: string;
+  selectedBg: string;
+  accentSoft: string;
+  text: string;
+  textMuted: string;
+  border: string;
+  // 稳定回调
+  onSelect: (id: string, additive: boolean) => void;
+  onToggleCollapse: (id: string) => void;
+  onStartRename: (id: string) => void;
+  onReparent: (nodeId: string, newParentId: string | null) => void;
+  onFocusNode: (id: string) => void;
+  toggleSelectId: (id: string) => void;
+  dragIdRef: { current: string | null };
+}
+
+const HierarchyRow = memo(function HierarchyRow({
+  node, depth, hasChildren, childrenCount, guide,
+  isSelected, isCollapsed, isRenaming, isFocused, selectMode, inSelectIds, store,
+  accent, selectedBg, accentSoft, text, textMuted, border,
+  onSelect, onToggleCollapse, onStartRename, onReparent, onFocusNode, toggleSelectId, dragIdRef,
+}: HierarchyRowProps): React.ReactElement {
+  const { t } = useTranslation();
+  const hidden = node.hidden ?? false;
+  const locked = node.locked ?? false;
+
+  // O-1: 使用 P0-2 节点索引 O(1) 查找,替代 O(n) nodes.find()
+  const fullNode = store.getNode(node.id);
+  const nodeData = fullNode?.data as Record<string, unknown> | undefined;
+  const contentUrl = nodeData?.content as string | undefined;
+  const storageKey = nodeData?.storageKey as string | undefined;
+  const isImage = node.type === 'image';
+  const isVideo = node.type === 'video';
+  const isStackedMedia = node.type === 'stacked-media';
+
+  // 堆叠节点:从活跃卡片提取缩略图信息
+  let stackThumbContent: string | undefined;
+  let stackThumbStorageKey: string | undefined;
+  let stackThumbIsVideo = false;
+  if (isStackedMedia && nodeData) {
+    const cards = (nodeData.cards as Array<{ sourceType: string; data?: Record<string, unknown> }>) ?? [];
+    const activeIndex = (nodeData.activeIndex as number) ?? 0;
+    const activeCard = cards[activeIndex];
+    if (activeCard?.data) {
+      stackThumbContent = activeCard.data.content as string | undefined;
+      stackThumbStorageKey = activeCard.data.storageKey as string | undefined;
+      stackThumbIsVideo = activeCard.sourceType === 'video';
+    }
+  }
+
+  const showThumbnail = (isImage || isVideo) && (!!storageKey || !!contentUrl)
+    || (isStackedMedia && (!!stackThumbStorageKey || !!stackThumbContent));
+
+  const rowStyle: CSSProperties = {
+    display: 'flex', alignItems: 'stretch', gap: 0,
+    margin: '2px 8px', padding: 0,
+    minHeight: 44, cursor: 'pointer', borderRadius: 6,
+    backgroundColor: isSelected ? selectedBg : (isFocused ? accentSoft : 'transparent'),
+    color: isSelected ? accent : hidden ? textMuted : text,
+    fontWeight: isSelected || node.type === 'group' ? 500 : 400,
+    opacity: hidden ? 0.5 : 1,
+    fontSize: 12, userSelect: 'none',
+    transition: 'background-color 0.12s ease',
+    boxShadow: isSelected ? `inset 2px 0 0 ${accent}` : undefined,
+  };
+
+  return (
+    <div
+      className="hierarchy-row"
+      data-hierarchy-id={node.id}
+      draggable={!isRenaming && !selectMode}
+      onDragStart={(e) => { dragIdRef.current = node.id; e.dataTransfer.effectAllowed = 'move'; }}
+      onDragOver={(e) => {
+        if (node.type === 'group' && dragIdRef.current && dragIdRef.current !== node.id) {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+        }
+      }}
+      onDrop={(e) => {
+        if (node.type !== 'group') return;
+        e.preventDefault(); e.stopPropagation();
+        if (dragIdRef.current && dragIdRef.current !== node.id) {
+          onReparent(dragIdRef.current, node.id);
+        }
+        dragIdRef.current = null;
+      }}
+      onClick={(e) => {
+        if (selectMode) {
+          e.stopPropagation();
+          toggleSelectId(node.id);
+          return;
+        }
+        onSelect(node.id, e.shiftKey);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => onFocusNode(node.id));
+        });
+      }}
+      onDoubleClick={() => { if (!selectMode) onStartRename(node.id); }}
+      style={rowStyle}
+    >
+      {/* 树形引导线(类似目录结构) */}
+      {depth > 0 && guide && renderGuideLines(guide)}
+
+      {/* 内容区域(垂直居中) */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        flex: 1, minWidth: 0, padding: '0 6px', alignSelf: 'stretch',
+      }}>
+        {/* 选择模式复选框 */}
+        {selectMode && (
+          <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {inSelectIds ? <CheckSquare size={14} color={accent} /> : <Square size={14} style={{ opacity: 0.4 }} />}
+          </span>
+        )}
+        {/* 折叠/展开箭头 */}
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCollapse(node.id); }}
+            style={{
+              width: 14, height: 14, flexShrink: 0, border: 'none', background: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', opacity: 0.5, color: 'inherit', padding: 0, borderRadius: 3,
+            }}
+          >
+            {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          </button>
+        ) : (
+          <span style={{ width: 14, flexShrink: 0 }} />
+        )}
+
+        {/* 类型缩略图/图标 — 图片/视频/堆叠用缩略图,其余用纯图标(无装饰容器,用户验收反馈保持简洁) */}
+        {showThumbnail ? (
+          <HierarchyThumbnail
+            storageKey={isStackedMedia ? stackThumbStorageKey : storageKey}
+            content={isStackedMedia ? stackThumbContent : contentUrl}
+            isVideo={isStackedMedia ? stackThumbIsVideo : isVideo}
+            borderColor={border}
+            mutedColor={textMuted}
+          />
+        ) : (
+          <span style={{ width: 36, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {getTypeIcon(node)}
+          </span>
+        )}
+
+        {/* 标题 / 重命名输入(RenameInput 经 context 取状态,输入时仅其重渲染) */}
+        {isRenaming ? (
+          <RenameInput accent={accent} />
+        ) : (
+          <span style={{
+            flex: 1, minWidth: 0, marginLeft: 4,
+            overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+          }}>
+            {node.type === 'group'
+              ? (node.title?.trim() ? node.title : t('hierarchy.defaultGroup'))
+              : (node.title?.trim()
+                  ? node.title
+                  : t(`nodeTypes.${node.type.replace('ai.', '')}`, { defaultValue: node.type }))}
+          </span>
+        )}
+
+        {/* 子节点计数(组且未重命名时) */}
+        {node.type === 'group' && !isRenaming && childrenCount > 0 ? (
+          <span style={{ flexShrink: 0, fontSize: 10, opacity: 0.4, fontVariantNumeric: 'tabular-nums' }}>
+            {childrenCount}
+          </span>
+        ) : null}
+
+        {/* 锁定状态指示(纯展示不可点;hover 操作按钮已按用户验收要求移除) */}
+        {locked && (
+          <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
+            <Lock size={11} />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
+export function HierarchyPanelSidebar({
+  closing, store, groupPlugin, theme, modal, onClose, onFocusNode,
+}: HierarchyPanelSidebarProps): React.ReactElement {
+  const props = useHierarchyPanelProps(store, groupPlugin.getController());
+  const dragIdRef = useRef<string | null>(null);
+  const { t } = useTranslation();
+
+  // 展开动画:useLayoutEffect 确保初始 DOM 状态提交后再触发过渡
+  // React 18 生产模式下,useEffect 的批处理可能导致双 rAF 不稳定
+  // useLayoutEffect 在 paint 前同步执行,配合单次 rAF 即可可靠触发 transition
+  const [expanded, setExpanded] = useState(false);
+  useLayoutEffect(() => {
+    if (closing) { setExpanded(false); return; }
+    let rafId: number;
+    const id = requestAnimationFrame(() => {
+      rafId = requestAnimationFrame(() => setExpanded(true));
+    });
+    return () => { cancelAnimationFrame(id); cancelAnimationFrame(rafId); };
+  }, [closing]);
+
+  // 本地类型筛选(不依赖插件 HierarchyFilter.typeFilter 的 'all'|'group'|'node' 限制)
+  const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
+
+  // 选择模式（类似主页批量选择）
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectIds, setSelectIds] = useState<Set<string>>(new Set());
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectIds(new Set());
+  }, []);
+
+  // T2: onCommitRename 依赖 renamingValue(输入时引用变化),直接作行 props 会随按键全量重渲染;
+  // ref 模式稳定引用,行 memo 只按 isRenaming 原子值决定重渲染。
+  const commitRenameRef = useRef(props.onCommitRename);
+  commitRenameRef.current = props.onCommitRename;
+  const onCommitRenameStable = useCallback(() => { commitRenameRef.current(); }, []);
+
+  // T2: onFocusNode 为外部回调(调用方可能内联,引用不稳定),ref 稳定化避免行 memo 失效。
+  const focusNodeRef = useRef(onFocusNode);
+  focusNodeRef.current = onFocusNode;
+  const onFocusNodeStable = useCallback((id: string) => { focusNodeRef.current?.(id); }, []);
+
+  // T2: 重命名状态经 context 传递 —— 仅重命名输入框消费,输入时其余行不重渲染。
+  const renameContextValue = useMemo<RenameContextValue>(() => ({
+    value: props.renamingValue,
+    onRenameChange: props.onRenameChange,
+    onCommitRename: onCommitRenameStable,
+    onCancelRename: props.onCancelRename,
+  }), [props.renamingValue, props.onRenameChange, onCommitRenameStable, props.onCancelRename]);
+
+  // T2: 批量选择切换回调(稳定,行组件用)
+  const toggleSelectId = useCallback((id: string) => {
+    setSelectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // 键盘导航(底部快捷键栏 ↑↓/Enter/Esc):焦点行索引 + Virtuoso 滚动跟随
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [focusIndex, setFocusIndex] = useState(-1);
+
+  // 对 props.tree 做本地类型过滤
+  // T2: useMemo 稳定引用 —— 原内联 filter 每次渲染新建数组,Virtuoso data 引用变化
+  // 会触发列表项全量重建(即使内容相同);typeFilter/tree 不变时直接复用。
+  const filteredTree = useMemo(
+    () => localTypeFilter === 'all'
+      ? props.tree
+      : props.tree.filter((item) => item.node.type === localTypeFilter),
+    [localTypeFilter, props.tree],
+  );
+
+  // 键盘导航:筛选结果变化后钳制/重置焦点索引
+  useEffect(() => {
+    setFocusIndex((prev) => (filteredTree.length === 0 ? -1 : Math.min(prev, filteredTree.length - 1)));
+  }, [filteredTree.length]);
+
+  // ↑↓ 导航 / Enter 定位 / Esc 退出:仅展开且事件源非输入控件时消费(不与重命名/搜索/画布快捷键冲突)
+  useEffect(() => {
+    if (closing || !expanded) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (filteredTree.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const base = focusIndex < 0 ? 0 : focusIndex;
+        const next = e.key === 'ArrowDown'
+          ? Math.min(base + 1, filteredTree.length - 1)
+          : Math.max(base - 1, 0);
+        setFocusIndex(next);
+        virtuosoRef.current?.scrollToIndex({ index: next, behavior: 'smooth', align: 'center' });
+      } else if (e.key === 'Enter') {
+        const item = focusIndex >= 0 ? filteredTree[focusIndex] : undefined;
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        props.onSelect(item.node.id, false);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => onFocusNode?.(item.node.id));
+        });
+      } else if (e.key === 'Escape') {
+        // 选择模式下 Esc 先退出选择,再退出面板
+        if (selectMode) { e.preventDefault(); e.stopPropagation(); exitSelectMode(); return; }
+        if (onClose) { e.preventDefault(); e.stopPropagation(); onClose(); }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closing, expanded, filteredTree, focusIndex, selectMode, exitSelectMode, onClose, onFocusNode, props]);
+
+  // T1: childrenCount 已并入树构建(HierarchyTreeNode.childrenCount,group 插件一次算好),
+  // 删除此处独立 useMemo —— 原实现每次 graph 变化全量 O(N) 重扫,与树构建重复计算。
+
+  // 预计算每个节点的引导线信息(祖先竖线延续 + 是否最后子节点)
+  // T1: 线性化 —— 原实现每行向后扫描(O(N²)),深树 3000 节点时展开/折叠/筛选一次即百万级比较。
+  // 改为反向单遍:维护「已见深度集合」判竖线延续(等价旧语义)+「下一个 depth≤d 位置」判最后子节点。
+  const guideLineInfo = useMemo(() => {
+    const items = filteredTree;
+    const n = items.length;
+    const result: Array<{ continues: boolean[]; isLastChild: boolean }> = new Array(n);
+    const seenDepth = new Set<number>();
+    // nextShallower[d]: 当前下标之后第一个 depth ≤ d 的 item 下标(-1 = 无)
+    const nextShallower: number[] = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const depth = items[i]!.depth;
+      const ns = depth < nextShallower.length ? nextShallower[depth]! : -1;
+      const isLastChild = ns === -1 || items[ns]!.depth < depth;
+      const continues: boolean[] = new Array(depth);
+      for (let d = 0; d < depth; d++) continues[d] = seenDepth.has(d);
+      result[i] = { continues, isLastChild };
+      seenDepth.add(depth);
+      // 阈值 ≥ depth 的最近位置更新为 i
+      for (let d = depth; d < nextShallower.length; d++) nextShallower[d] = i;
+      for (let d = nextShallower.length; d <= depth; d++) nextShallower.push(i);
+    }
+    return result;
+  }, [filteredTree]);
 
   // 类型筛选下拉选项
   const FILTER_OPTIONS = [
@@ -460,9 +759,6 @@ export function HierarchyPanelSidebar({
   // translate3d 触发 GPU 合成层,生产环境动画更流畅
   const translate3d = closing ? `translate3d(${-PANEL_WIDTH}px, 0, 0)` : expanded ? 'translate3d(0, 0, 0)' : `translate3d(${-PANEL_WIDTH}px, 0, 0)`;
 
-  // 选中色 + 20% alpha
-  const selectedBg = theme.toolbar.accent + '22';
-  const selectedText = theme.toolbar.accent;
   // 快捷键栏键帽样式(footer 三段式提示)
   const keycapStyle: CSSProperties = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -522,194 +818,38 @@ export function HierarchyPanelSidebar({
     ? filteredTree[focusIndex]!.node.id
     : undefined;
 
-  const renderItem = (item: HierarchyTreeNode, index: number): ReactNode => {
-    const { node, depth, hasChildren } = item;
-    const isSelected = props.selectedIds.has(node.id);
-    const isCollapsed = props.collapsedIds.has(node.id);
-    const isRenaming = props.renamingId === node.id;
-    const isGroup = node.type === 'group';
-    const hidden = node.hidden ?? false;
-    const locked = node.locked ?? false;
-    // O-1: 使用预计算 childrenCountMap,避免每帧 O(n) filter
-    const childrenCount = childrenCountMap.get(node.id) ?? 0;
-
-    // O-1: 使用 P0-2 节点索引 O(1) 查找,替代 O(n) nodes.find()
-    const fullNode = store.getNode(node.id);
-    const nodeData = fullNode?.data as Record<string, unknown> | undefined;
-    const contentUrl = nodeData?.content as string | undefined;
-    const storageKey = nodeData?.storageKey as string | undefined;
-    const isImage = node.type === 'image';
-    const isVideo = node.type === 'video';
-    const isStackedMedia = node.type === 'stacked-media';
-
-    // 堆叠节点:从活跃卡片提取缩略图信息
-    let stackThumbContent: string | undefined;
-    let stackThumbStorageKey: string | undefined;
-    let stackThumbIsVideo = false;
-    if (isStackedMedia && nodeData) {
-      const cards = (nodeData.cards as Array<{ sourceType: string; data?: Record<string, unknown> }>) ?? [];
-      const activeIndex = (nodeData.activeIndex as number) ?? 0;
-      const activeCard = cards[activeIndex];
-      if (activeCard?.data) {
-        stackThumbContent = activeCard.data.content as string | undefined;
-        stackThumbStorageKey = activeCard.data.storageKey as string | undefined;
-        stackThumbIsVideo = activeCard.sourceType === 'video';
-      }
-    }
-
-    const showThumbnail = (isImage || isVideo) && (!!storageKey || !!contentUrl)
-      || (isStackedMedia && (!!stackThumbStorageKey || !!stackThumbContent));
-
-    // 引导线
-    const glInfo = guideLineInfo[index];
-
-    const rowStyle: CSSProperties = {
-      display: 'flex', alignItems: 'stretch', gap: 0,
-      margin: '2px 8px', padding: 0,
-      minHeight: 44, cursor: 'pointer', borderRadius: 6,
-      backgroundColor: isSelected ? selectedBg : (node.id === focusedId ? theme.toolbar.accent + '12' : 'transparent'),
-      color: isSelected ? selectedText : hidden ? theme.toolbar.textMuted : theme.toolbar.text,
-      fontWeight: isSelected || isGroup ? 500 : 400,
-      opacity: hidden ? 0.5 : 1,
-      fontSize: 12, userSelect: 'none',
-      transition: 'background-color 0.12s ease',
-      boxShadow: isSelected ? `inset 2px 0 0 ${theme.toolbar.accent}` : undefined,
-    };
-
-    return (
-      <div
-        key={node.id}
-        className="hierarchy-row"
-        data-hierarchy-id={node.id}
-        draggable={!isRenaming && !selectMode}
-        onDragStart={(e) => { dragIdRef.current = node.id; e.dataTransfer.effectAllowed = 'move'; }}
-        onDragOver={(e) => {
-          if (isGroup && dragIdRef.current && dragIdRef.current !== node.id) {
-            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-          }
-        }}
-        onDrop={(e) => {
-          if (!isGroup) return;
-          e.preventDefault(); e.stopPropagation();
-          if (dragIdRef.current && dragIdRef.current !== node.id) {
-            props.onReparent(dragIdRef.current, node.id);
-          }
-          dragIdRef.current = null;
-        }}
-        onClick={(e) => {
-          if (selectMode) {
-            e.stopPropagation();
-            setSelectIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(node.id)) next.delete(node.id);
-              else next.add(node.id);
-              return next;
-            });
-            return;
-          }
-          props.onSelect(node.id, e.shiftKey);
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => onFocusNode?.(node.id));
-          });
-        }}
-        onDoubleClick={() => { if (!selectMode) props.onStartRename(node.id); }}
-        style={rowStyle}
-      >
-        {/* 树形引导线(类似目录结构) */}
-        {depth > 0 && glInfo && renderGuideLines(glInfo)}
-
-        {/* 内容区域(垂直居中) */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          flex: 1, minWidth: 0, padding: '0 6px', alignSelf: 'stretch',
-        }}>
-          {/* 选择模式复选框 */}
-          {selectMode && (
-            <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {selectIds.has(node.id) ? <CheckSquare size={14} color={theme.toolbar.accent} /> : <Square size={14} style={{ opacity: 0.4 }} />}
-            </span>
-          )}
-          {/* 折叠/展开箭头 */}
-          {hasChildren ? (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); props.onToggleCollapse(node.id); }}
-              style={{
-                width: 14, height: 14, flexShrink: 0, border: 'none', background: 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', opacity: 0.5, color: 'inherit', padding: 0, borderRadius: 3,
-              }}
-            >
-              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-            </button>
-          ) : (
-            <span style={{ width: 14, flexShrink: 0 }} />
-          )}
-
-          {/* 类型缩略图/图标 — 图片/视频/堆叠用缩略图,其余用纯图标(无装饰容器,用户验收反馈保持简洁) */}
-          {showThumbnail ? (
-            <HierarchyThumbnail
-              storageKey={isStackedMedia ? stackThumbStorageKey : storageKey}
-              content={isStackedMedia ? stackThumbContent : contentUrl}
-              isVideo={isStackedMedia ? stackThumbIsVideo : isVideo}
-              theme={theme}
-            />
-          ) : (
-            <span style={{ width: 36, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {getTypeIcon(node)}
-            </span>
-          )}
-
-          {/* 标题 / 重命名输入 */}
-          {isRenaming ? (
-            <input
-              autoFocus
-              value={props.renamingValue}
-              onChange={(e) => props.onRenameChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); props.onCommitRename(); }
-                else if (e.key === 'Escape') { e.preventDefault(); props.onCancelRename(); }
-              }}
-              onBlur={() => props.onCommitRename()}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              style={{
-                flex: 1, minWidth: 0, fontSize: 12, borderRadius: 4,
-                border: `1px solid ${theme.toolbar.accent}`, background: 'transparent',
-                color: 'inherit', padding: '0 4px', outline: 'none',
-              }}
-            />
-          ) : (
-            <span style={{
-              flex: 1, minWidth: 0, marginLeft: 4,
-              overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
-            }}>
-              {isGroup
-                ? (node.title?.trim() ? node.title : t('hierarchy.defaultGroup'))
-                : (node.title?.trim()
-                    ? node.title
-                    : t(`nodeTypes.${node.type.replace('ai.', '')}`, { defaultValue: node.type }))}
-            </span>
-          )}
-
-          {/* 子节点计数(组且未重命名时) */}
-          {isGroup && !isRenaming && childrenCount > 0 ? (
-            <span style={{ flexShrink: 0, fontSize: 10, opacity: 0.4, fontVariantNumeric: 'tabular-nums' }}>
-              {childrenCount}
-            </span>
-          ) : null}
-
-          {/* 锁定状态指示(纯展示不可点;hover 操作按钮已按用户验收要求移除) */}
-          {locked && (
-            <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-              <Lock size={11} />
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
+  // T2: itemContent 稳定化 —— 行组件已 memo 化,仅受影响行重渲染。
+  // props 原子化(selected/collapsed/renaming/focus 均传 boolean),theme 拆字符串传。
+  const itemContent = useCallback((index: number, item: HierarchyTreeNode) => (
+    <HierarchyRow
+      key={item.node.id}
+      node={item.node}
+      depth={item.depth}
+      hasChildren={item.hasChildren}
+      childrenCount={item.childrenCount}
+      guide={guideLineInfo[index]}
+      isSelected={props.selectedIds.has(item.node.id)}
+      isCollapsed={props.collapsedIds.has(item.node.id)}
+      isRenaming={props.renamingId === item.node.id}
+      isFocused={item.node.id === focusedId}
+      selectMode={selectMode}
+      inSelectIds={selectIds.has(item.node.id)}
+      store={store}
+      accent={theme.toolbar.accent}
+      selectedBg={theme.toolbar.accent + '22'}
+      accentSoft={theme.toolbar.accent + '12'}
+      text={theme.toolbar.text}
+      textMuted={theme.toolbar.textMuted}
+      border={theme.toolbar.border}
+      onSelect={props.onSelect}
+      onToggleCollapse={props.onToggleCollapse}
+      onStartRename={props.onStartRename}
+      onReparent={props.onReparent}
+      onFocusNode={onFocusNodeStable}
+      toggleSelectId={toggleSelectId}
+      dragIdRef={dragIdRef}
+    />
+  ), [guideLineInfo, props.selectedIds, props.collapsedIds, props.renamingId, props.onSelect, props.onToggleCollapse, props.onStartRename, props.onReparent, selectMode, selectIds, focusedId, theme, onFocusNodeStable, toggleSelectId, dragIdRef, store]);
 
   return (
     <div style={outerStyle}>
@@ -866,14 +1006,17 @@ export function HierarchyPanelSidebar({
               <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>{props.filter.search ? t('hierarchy.noSearchResults') : t('hierarchy.empty')}</span>
             </div>
           ) : (
-            <Virtuoso
-              ref={virtuosoRef}
-              style={listStyle}
-              data={filteredTree}
-              itemContent={(index, item) => renderItem(item, index)}
-              increaseViewportBy={200}
-              overscan={5}
-            />
+            <RenameContext.Provider value={renameContextValue}>
+              <Virtuoso
+                ref={virtuosoRef}
+                style={listStyle}
+                data={filteredTree}
+                itemContent={itemContent}
+                computeItemKey={(_index, item) => item.node.id}
+                increaseViewportBy={200}
+                overscan={5}
+              />
+            </RenameContext.Provider>
           )}
         </div>
 
