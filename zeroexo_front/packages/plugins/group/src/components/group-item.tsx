@@ -38,7 +38,8 @@ export interface GroupItemProps {
   opacity: number | undefined;
   isSelected: boolean;
   isPreview: boolean;
-  invK: number; // 1/viewport.k,用于视觉属性缩放
+  /** 组数超阈值时关闭磨砂玻璃背景(合成层上限降级,由 GroupLayer 计算) */
+  blurDisabled?: boolean;
   isRenaming?: boolean;
   renameValue?: string;
   /** 是否显示版本文件夹折叠按钮 */
@@ -90,7 +91,7 @@ export const GroupItem = React.memo(
     opacity,
     isSelected,
     isPreview,
-    invK,
+    blurDisabled,
     isRenaming,
     renameValue,
     onGroupPointerDown,
@@ -118,16 +119,18 @@ export const GroupItem = React.memo(
       ? 'rgba(233, 69, 96, 0.9)'
       : 'rgba(233, 69, 96, 0.5)');
     // 厚度:undefined 用 1(与配置默认同值),按 1/k 缩放保持视觉恒定
-    const resolvedOutlineWidth = (outlineWidth ?? 1) * invK;
+    // T3: 改走连续 CSS 变量 --zx-invk(GroupLayer 容器每帧写入),缩放逐帧连续跟随
+    const invKVar = 'var(--zx-invk, 1)';
+    const resolvedOutlineWidth = `calc(${outlineWidth ?? 1}px * ${invKVar})`;
     // 类型:undefined 默认 dashed(与全局默认同源)
     const resolvedOutlineType = outlineType ?? 'dashed';
     // 偏移:undefined 用 3(与配置默认同值),按 1/k 缩放保持视觉恒定
-    const resolvedOutlineOffset = (outlineOffset ?? 3) * invK;
+    const resolvedOutlineOffset = `calc(${outlineOffset ?? 3}px * ${invKVar})`;
     const bg = backgroundColor ?? 'rgba(255, 255, 255, 0.04)';
     // 判断是否为渐变值(包含 gradient 关键字)
     const isGradient = typeof bg === 'string' && bg.includes('gradient');
     // 圆角:支持 node.borderRadius 自定义,默认 8,按 1/k 缩放保持视觉恒定
-    const radius = (borderRadius ?? 2) * invK;
+    const radius = `calc(${borderRadius ?? 2}px * ${invKVar})`;
     // 透明度:node.opacity(0-1),undefined 用 1
     const resolvedOpacity = opacity ?? 1;
 
@@ -167,15 +170,22 @@ export const GroupItem = React.memo(
             ...(isGradient
               ? { background: `${bg} padding-box` }
               : { backgroundColor: bg }),
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            // T5: 组数超阈值时关闭磨砂玻璃(合成层上限降级,视觉仅失去背景模糊)
+            // blur 半径反缩放(世界固定 16px):缩放容器内固定屏幕半径会在放大时采样不足,
+            // 背景呈像素块/马赛克;反缩放后任何缩放级别屏幕模糊半径恒定,采样比例恒定
+            ...(blurDisabled
+              ? {}
+              : {
+                  backdropFilter: `blur(calc(16px * ${invKVar}))`,
+                  WebkitBackdropFilter: `blur(calc(16px * ${invKVar}))`,
+                }),
             outline: `${resolvedOutlineWidth}px ${resolvedOutlineType} ${resolvedOutlineColor}`,
             outlineOffset: resolvedOutlineOffset,
             borderRadius: radius,
             opacity: resolvedOpacity,
             boxShadow: isSelected
-              ? `0 0 0 ${4 * invK}px rgba(233, 69, 96, 0.2)`
-              : `0 ${2 * invK}px ${6 * invK}px rgba(0, 0, 0, 0.15)`,
+              ? `0 0 0 calc(4px * ${invKVar}) rgba(233, 69, 96, 0.2)`
+              : `0 calc(2px * ${invKVar}) calc(6px * ${invKVar}) rgba(0, 0, 0, 0.15)`,
             pointerEvents: 'none',
           }}
         />
@@ -184,18 +194,18 @@ export const GroupItem = React.memo(
           <div
             style={{
               position: 'absolute',
-              top: 2 * invK,
-              right: 2 * invK,
-              padding: `1px ${5 * invK}px`,
-              borderRadius: 6 * invK,
+              top: `calc(2px * ${invKVar})`,
+              right: `calc(2px * ${invKVar})`,
+              padding: `1px calc(5px * ${invKVar})`,
+              borderRadius: `calc(6px * ${invKVar})`,
               backgroundColor: 'rgba(255, 255, 255, 0.12)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
+              backdropFilter: `blur(calc(8px * ${invKVar}))`,
+              WebkitBackdropFilter: `blur(calc(8px * ${invKVar}))`,
               color: '#fff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 8 * invK,
+              fontSize: `calc(8px * ${invKVar})`,
               fontWeight: 500,
               lineHeight: 1,
               pointerEvents: 'none',
@@ -210,14 +220,14 @@ export const GroupItem = React.memo(
         <div
           style={{
             position: 'absolute',
-            top: -(GROUP_TITLE_HEIGHT * invK) - 2 * invK,
+            top: `calc(-${GROUP_TITLE_HEIGHT + 2}px * ${invKVar})`,
             left: 0,
             right: 0,
-            height: GROUP_TITLE_HEIGHT * invK,
-            padding: `0 ${8 * invK}px`,
+            height: `calc(${GROUP_TITLE_HEIGHT}px * ${invKVar})`,
+            padding: `0 calc(8px * ${invKVar})`,
             display: 'flex',
             alignItems: 'center',
-            fontSize: 11 * invK,
+            fontSize: `calc(11px * ${invKVar})`,
             color: groupDefaults?.titleColor ?? (isSelected ? 'rgba(233, 69, 96, 0.95)' : (isLight ? '#1c1917' : 'rgba(245, 245, 244, 0.9)')),
             fontWeight: 600,
             userSelect: 'none',
@@ -250,18 +260,18 @@ export const GroupItem = React.memo(
               style={{
                 width: '100%',
                 height: '100%',
-                fontSize: 12 * invK,
+                fontSize: `calc(12px * ${invKVar})`,
                 background: 'rgba(30, 40, 60, 0.95)',
-                border: `${1 * invK}px solid rgba(100, 180, 255, 0.8)`,
-                borderRadius: 3 * invK,
+                border: `calc(1px * ${invKVar}) solid rgba(100, 180, 255, 0.8)`,
+                borderRadius: `calc(3px * ${invKVar})`,
                 color: '#e0e8f0',
-                padding: `0 ${4 * invK}px`,
+                padding: `0 calc(4px * ${invKVar})`,
                 outline: 'none',
                 pointerEvents: 'auto',
               }}
             />
           ) : title.trim() ? (
-            <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 4 * invK }}>
+            <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: `calc(4px * ${invKVar})` }}>
               <span
                 style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'auto', cursor: 'text' }}
                 onDoubleClick={(e) => {
@@ -277,9 +287,9 @@ export const GroupItem = React.memo(
                   title="折叠为叠卡预览"
                   style={{
                     flexShrink: 0,
-                    width: 16 * invK,
-                    height: 16 * invK,
-                    borderRadius: 3 * invK,
+                    width: `calc(16px * ${invKVar})`,
+                    height: `calc(16px * ${invKVar})`,
+                    borderRadius: `calc(3px * ${invKVar})`,
                     border: 'none',
                     background: 'rgba(255,255,255,0.1)',
                     color: '#94a3b8',
@@ -288,7 +298,7 @@ export const GroupItem = React.memo(
                     justifyContent: 'center',
                     cursor: 'pointer',
                     padding: 0,
-                    fontSize: 10 * invK,
+                    fontSize: `calc(10px * ${invKVar})`,
                     lineHeight: 1,
                     pointerEvents: 'auto',
                   }}
@@ -308,7 +318,6 @@ export const GroupItem = React.memo(
                 key={type}
                 type={type}
                 cursor={cursor}
-                invK={invK}
                 onPointerDown={(e) => onResizeHandlePointerDown(e, groupId, type)}
               />
             ))
@@ -351,7 +360,7 @@ export const GroupItem = React.memo(
     prev.opacity === next.opacity &&
     prev.isSelected === next.isSelected &&
     prev.isPreview === next.isPreview &&
-    prev.invK === next.invK &&
+    prev.blurDisabled === next.blurDisabled &&
     prev.isRenaming === next.isRenaming &&
     prev.renameValue === next.renameValue &&
     prev.showVersionFolderFold === next.showVersionFolderFold &&

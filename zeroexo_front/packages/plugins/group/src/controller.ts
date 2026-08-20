@@ -26,8 +26,10 @@ import {
   findParentGroup,
   isGroup,
   getDescendantIds,
+  getGroupBounds,
   getGroupBoundsWithEmptyFallback,
   getVersionFolderData,
+  getDepth,
   promoteSelectionToOutermost,
   computePromotedBounds,
   type NodeSizeAccessor,
@@ -67,6 +69,15 @@ export class GroupController {
   private readonly listeners = new Set<() => void>();
   /** 节点尺寸访问器(从 extensions.defaultSize 获取,用于 bounds 计算) */
   private nodeSizeAccessor: NodeSizeAccessor | null = null;
+  /** T2: 拖拽悬停判定 rAF 合帧(pointermove 频率可能远超 60Hz,合帧后每帧最多一次判定) */
+  private pendingDragMoveNodeIds: string[] | null = null;
+  private dragMoveRafId = 0;
+  /** T2: 拖拽期间组命中缓存(scene 引用不变则复用;组列表 + 各组 bounds 预计算,避免每帧 O(V) 遍历) */
+  private dragHitCache: {
+    scene: SceneNode[];
+    groupList: SceneNode[];
+    boundsByGroupId: Map<string, Rect>;
+  } | null = null;
 
   constructor(
     private store: ReactGraphStore,
@@ -680,8 +691,22 @@ export class GroupController {
    * 实时计算"无父组的被拖节点中心落点的最深组"作为吸附目标:
    * - 有父组的节点不跨组转移(与 handleDragEnd 自动吸附规则一致),不参与判定
    * - 悬停目标组本身在拖拽集中时不算(不能加入自己)
+   * T2: pointermove 每帧调用,内部 rAF 合帧 —— 悬停判定降频到每帧最多一次,
+   * 配合组命中缓存(scene 引用不变即复用预计算组列表+bounds),消除每帧全量遍历。
    */
   handleDragMove(nodeIds: string[]): void {
+    this.pendingDragMoveNodeIds = nodeIds;
+    if (this.dragMoveRafId !== 0) return;
+    this.dragMoveRafId = requestAnimationFrame(() => {
+      this.dragMoveRafId = 0;
+      const ids = this.pendingDragMoveNodeIds;
+      this.pendingDragMoveNodeIds = null;
+      if (ids) this.runDragMoveHoverCheck(ids);
+    });
+  }
+
+  /** rAF 内执行真实悬停判定(逻辑与原 handleDragMove 等价,组命中走缓存) */
+  private runDragMoveHoverCheck(nodeIds: string[]): void {
     const scene = this.getScene();
     // P0-2 瞬态拖拽通道:拖拽期间 graph 不更新,节点位置需叠加瞬态偏移表,
     // 否则悬停判定基于拖拽起始位置,拖入组提示永不触发
@@ -696,7 +721,7 @@ export class GroupController {
       const off = offsets.get(id) ?? { dx: 0, dy: 0 };
       const cx = node.position.x + off.dx + size.width / 2;
       const cy = node.position.y + off.dy + size.height / 2;
-      const target = findDeepestGroupAtPoint(scene, cx, cy);
+      const target = this.findGroupAtPointCached(scene, cx, cy);
       if (target && !draggedSet.has(target.id)) {
         next = target.id;
         break;
@@ -706,6 +731,42 @@ export class GroupController {
       this.hoverJoinGroupId = next;
       this.notify();
     }
+  }
+
+  /**
+   * 组命中:拖拽期间组列表 + bounds 缓存(仅 scene 引用变化时重建)。
+   * 与 findDeepestGroupAtPoint 判定规则一致(最深层命中),但不每帧全量遍历。
+   */
+  private findGroupAtPointCached(scene: SceneNode[], worldX: number, worldY: number): SceneNode | null {
+    let cache = this.dragHitCache;
+    if (!cache || cache.scene !== scene) {
+      const groupList: SceneNode[] = [];
+      const boundsByGroupId = new Map<string, Rect>();
+      for (const n of scene) {
+        if (n.type !== 'group') continue;
+        const b = getGroupBounds(scene, n.id);
+        if (!b) continue;
+        groupList.push(n);
+        boundsByGroupId.set(n.id, b);
+      }
+      cache = { scene, groupList, boundsByGroupId };
+      this.dragHitCache = cache;
+    }
+    const { groupList, boundsByGroupId } = cache;
+    let deepest: SceneNode | null = null;
+    let deepestDepth = -1;
+    for (const n of groupList) {
+      const b = boundsByGroupId.get(n.id);
+      if (!b) continue;
+      if (worldX >= b.x && worldX <= b.x + b.width && worldY >= b.y && worldY <= b.y + b.height) {
+        const d = getDepth(scene, n.id);
+        if (d > deepestDepth) {
+          deepestDepth = d;
+          deepest = n;
+        }
+      }
+    }
+    return deepest;
   }
 
   /**
@@ -740,6 +801,12 @@ export class GroupController {
    *   - 已有父组的节点不跨组转移(只能先脱离再加入)
    */
   handleDragEnd(nodeIds: string[], shiftKey: boolean, hasMoved: boolean): void {
+    // T2: 取消挂起的悬停判定 rAF(拖拽结束,残留帧不应再触发 notify)
+    if (this.dragMoveRafId !== 0) {
+      cancelAnimationFrame(this.dragMoveRafId);
+      this.dragMoveRafId = 0;
+      this.pendingDragMoveNodeIds = null;
+    }
     // 拖拽结束:基于最新 graph 校正预览框 bounds(拖动期间为平移态)
     this.finalizePreviewDrag();
     // 拖拽结束:无论是否移动,都清除临时脱离标记(避免纯点击 Shift 残留)

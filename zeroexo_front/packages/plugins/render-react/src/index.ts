@@ -33,6 +33,7 @@ export { NodeLayer } from './components/node-layer.js';
 export type { NodeLayerProps } from './components/node-layer.js';
 export { EdgeLayer } from './components/edge-layer.js';
 export type { EdgeLayerProps } from './components/edge-layer.js';
+export { quantizeZoom } from './components/edge-layer.js';
 export { NodeShell } from './components/node-shell.js';
 export type { NodeShellProps } from './components/node-shell.js';
 export { PinView } from './components/pin-view.js';

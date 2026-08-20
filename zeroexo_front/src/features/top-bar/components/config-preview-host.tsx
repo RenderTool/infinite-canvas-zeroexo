@@ -121,7 +121,6 @@ export function ConfigPreviewHost({
                 opacity={groupDefaults.opacity}
                 isSelected={false}
                 isPreview={false}
-                invK={1}
                 forceShowPins
               />
               {/* 配置专用节点:真实 NodeShell 渲染,叠于组上居中 */}

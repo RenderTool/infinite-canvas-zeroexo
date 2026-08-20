@@ -31,6 +31,9 @@ export const GROUP_OUTPUT_PIN_ID = '__group_out__';
 /** group z-index(固定 -10,渲染于普通节点之下) */
 export const GROUP_Z_INDEX = -10;
 
+/** 组数超过该阈值时关闭 backdropFilter(磨砂玻璃合成层上限,对齐边层 GLOW_LIMIT 降级模式) */
+export const GROUP_BLUR_LIMIT = 80;
+
 // ===== Version Folder 常量 =====
 
 /** 版本文件夹标记:group.data 上检测此字段 */

@@ -15,9 +15,16 @@
  * 渲染变换模式(与 NodeLayer 一致):
  * - 容器 transform: translate(viewport.x, viewport.y) scale(viewport.k)
  * - 子元素用世界坐标(left/top = bounds 值)
+ * - T3: 容器每帧写连续 --zx-invk CSS 变量,GroupItem 视觉经 calc(var) 连续跟随
+ *
+ * 性能设施(对齐节点层):
+ * - T1: 订阅 dragOffsets 瞬态直写组 DOM(拖拽期间组实时跟随,不重建 graph)
+ * - T3: invK 量化门控(5% 桶)+ CSS 连续化,缩放帧内 GroupItem 零重渲染
+ * - T4: 视口遮挡裁剪(视口外组不渲染 DOM)
+ * - T5: 组数超阈值时关闭磨砂玻璃背景(合成层上限降级)
  *
  * 订阅:
- * - store(graph + viewport + selection)
+ * - store(graph + viewport + selection + dragOffsets)
  * - GroupController(预览组状态变化)
  */
 
@@ -26,7 +33,7 @@ import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Rect, SceneNode } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { useGraph, useViewport, useSelection } from '@zeroexo/plugin-render-react';
+import { useGraph, useViewport, useSelection, quantizeZoom } from '@zeroexo/plugin-render-react';
 import {
   isGroup,
   isVersionFolder,
@@ -36,12 +43,13 @@ import {
   isVersionFolderStacked,
   getActiveVersionId,
   getVersionFolderData,
+  getDescendantIds,
   type NodeSizeAccessor,
 } from './scene-graph.js';
 import { StackedPreview } from './stacked-preview.js';
 import type { GroupController } from './controller.js';
 import { useGroupDefaults } from './group-defaults.js';
-import { GROUP_TITLE_HEIGHT, PREVIEW_GROUP_ID } from './constants.js';
+import { GROUP_TITLE_HEIGHT, PREVIEW_GROUP_ID, GROUP_BLUR_LIMIT } from './constants.js';
 import { GroupItem } from './components/group-item.js';
 import { HintCapsule } from './components/hint-capsule.js';
 import { useGroupDrag, useGroupResize } from './hooks/use-group-interactions.js';
@@ -83,6 +91,43 @@ export interface GroupLayerProps {
   onGroupDoubleClick?: (groupId: string) => void;
   /** 是否显示画布锚定教育提示胶囊(由 app 的全局开关注入,默认 true) */
   showHints?: boolean;
+}
+
+/** 遮挡裁剪 overscan 比例(与 node-layer 一致) */
+const OVERSCAN_RATIO = 0.2;
+
+/**
+ * T1: 计算本次拖拽需要瞬态跟随的组 → 偏移表。
+ * 组 bounds 平移不变性仅在「组内全部非组成员都在拖拽集」时成立:
+ * - 整体平移(组内全部成员被拖,interaction 写入同一偏移)→ 组框平移该偏移 ✓
+ * - 组内移动单个节点(部分成员被拖)→ 包围盒不是简单平移,组框保持原位,
+ *   松手后 graph 更新重算 bounds —— 恢复「组内移动节点组框不动」的原有交互特性
+ */
+function computeFollowGroupOffsets(
+  scene: SceneNode[],
+  offsets: ReadonlyMap<string, { dx: number; dy: number }>,
+): Map<string, { dx: number; dy: number }> {
+  const result = new Map<string, { dx: number; dy: number }>();
+  const byId = new Map(scene.map((n) => [n.id, n]));
+  const dragged = new Set(offsets.keys());
+  // 拖拽集全部节点同源同一偏移(interaction 写入同一 worldDx/worldDy),取任意一个即可
+  const anyOff = offsets.values().next().value!;
+  for (const nodeId of dragged) {
+    let cur = byId.get(nodeId);
+    while (cur?.parentId) {
+      const parent = byId.get(cur.parentId);
+      if (!parent) break;
+      if (parent.type === 'group' && !result.has(parent.id)) {
+        const members = getDescendantIds(scene, parent.id)
+          .filter((id) => (byId.get(id)?.type ?? 'group') !== 'group');
+        if (members.length > 0 && members.every((mid) => dragged.has(mid))) {
+          result.set(parent.id, anyOff);
+        }
+      }
+      cur = parent;
+    }
+  }
+  return result;
 }
 
 /**
@@ -127,18 +172,123 @@ export const GroupLayer = React.memo(function GroupLayer({
   const defaults = useGroupDefaults();
   const { t } = useTranslation();
 
-  const invK = viewport.k > 0 ? 1 / viewport.k : 1;
+  // T3: invK 量化门控(5% 桶,与 edge-layer/node-layer 同源同节奏)——
+  // 缩放动画帧内 GroupItem memo 命中不重渲染,视觉连续由容器 --zx-invk 变量承担
+  const invK = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
   const scene = graph.nodes;
 
-  // 1. 收集所有正式组(type==='group' 且未隐藏),按深度升序排序(父组先,子组后)
-  // hidden=true 的组不渲染(从层级面板点击隐藏后,组及其子树在画布中消失)
-  const groups = scene.filter((n) => isGroup(n) && !n.hidden);
-  groups.sort((a, b) => {
-    const da = getDepth(scene, a.id);
-    const db = getDepth(scene, b.id);
-    if (da !== db) return da - db; // 深度小的先渲染(在下层)
-    return (a.siblingOrder ?? 0) - (b.siblingOrder ?? 0);
+  // 容器 ref(直写 + 尺寸测量共用)
+  const layerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // T1: 瞬态拖拽期间组实时跟随 —— 订阅 dragOffsets 直写组 DOM(与 drag-offset-writer 同模式)。
+  // 节点拖拽走瞬态通道(graph 不更新),组 bounds 基于静态 scene 计算;本直写把偏移叠加到
+  // 组容器 transform(不动 left/top),组 bounds 平移不变性保证松手提交命令后无跳变。
+  // 仅「组内全部成员被拖」的组跟随(computeFollowGroupOffsets),组内移动单节点不跟随。
+  const sceneRef = React.useRef(scene);
+  sceneRef.current = scene;
+  /** 本次拖拽的跟随组偏移表(null = 未在拖拽中;拖拽开始计算一次,期间复用) */
+  const followGroupOffsetsRef = React.useRef<Map<string, { dx: number; dy: number }> | null>(null);
+  /**
+   * 组 DOM 索引(渲染期构建,直写回调零 DOM 查询——修复拖拽卡顿)。
+   * 拖拽期间 GroupLayer 重渲染时 GroupItem 为 memo 命中(DOM 元素引用不变),
+   * 索引保持有效;每次渲染后无依赖 useLayoutEffect 重建,保证与当前 DOM 一致。
+   * 注意:预览框(虚线"成组"框)不在此索引内 —— 其跟随由 P0-2 既有通道
+   * movePreviewSilent(React 渲染 previewBounds)承担,直写再叠加会双重偏移。
+   */
+  const groupElsRef = React.useRef<Map<string, HTMLElement>>(new Map());
+  React.useLayoutEffect(() => {
+    const layer = layerRef.current;
+    const map = new Map<string, HTMLElement>();
+    if (layer) {
+      for (let i = 0; i < layer.children.length; i++) {
+        const el = layer.children[i] as HTMLElement;
+        const id = el.getAttribute('data-canvas-group-id');
+        if (id) map.set(id, el);
+      }
+    }
+    groupElsRef.current = map;
   });
+  React.useEffect(() => {
+    return store.subscribeDragOffsets(() => {
+      const offsets = store.getDragOffsets();
+      // 拖拽结束(offsets 清空):一次性清空全部组 transform + 复位跟随表
+      if (offsets.size === 0) {
+        followGroupOffsetsRef.current = null;
+        for (const el of groupElsRef.current.values()) el.style.transform = '';
+        return;
+      }
+      // 拖拽开始帧计算跟随组集合(期间 scene/offsets 不变,仅计算一次)
+      if (followGroupOffsetsRef.current === null) {
+        followGroupOffsetsRef.current = computeFollowGroupOffsets(sceneRef.current, offsets);
+      }
+      // 直写:仅遍历跟随组(通常 1-2 个),零 DOM 查询
+      for (const [gid, off] of followGroupOffsetsRef.current) {
+        const el = groupElsRef.current.get(gid);
+        if (el) el.style.transform = `translate(${off.dx}px, ${off.dy}px)`;
+      }
+    });
+  }, [store]);
+
+  // 1. 收集所有正式组(type==='group' 且未隐藏) + 预计算 bounds,按深度升序排序(父组先,子组后)
+  // hidden=true 的组不渲染(从层级面板点击隐藏后,组及其子树在画布中消失)
+  // T4: bounds 预计算依赖 scene/detachedIds 变化,避免 map 内重复子树遍历
+  const detachedIds = controller.getDragDetachedIds();
+  const groupsWithBounds = React.useMemo(() => {
+    const gs = scene.filter((n) => isGroup(n) && !n.hidden);
+    gs.sort((a, b) => {
+      const da = getDepth(scene, a.id);
+      const db = getDepth(scene, b.id);
+      if (da !== db) return da - db; // 深度小的先渲染(在下层)
+      return (a.siblingOrder ?? 0) - (b.siblingOrder ?? 0);
+    });
+    return gs.map((g) => ({
+      group: g,
+      // 尊重 dirty 标记和用户自定义 bounds 缓存;
+      // Shift+拖拽临时脱离:detachedIds 仅影响 getGroupBounds 重算(实时排除脱离节点);
+      // 空组:统一回退为基准图片节点一半尺寸(与胶囊锚点/聚焦一致)
+      bounds: getGroupBoundsWithEmptyFallback(scene, g.id, getNodeSize, detachedIds ?? undefined)
+        ?? { x: g.position.x, y: g.position.y, width: 160, height: 60 },
+    }));
+  }, [scene, getNodeSize, detachedIds]);
+
+  // T4: 视口遮挡裁剪(视口外组不渲染 DOM,与 node-layer 同款可见矩形计算)
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+  React.useLayoutEffect(() => {
+    const el = layerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      setContainerSize({
+        width: rect.width || window.innerWidth,
+        height: rect.height || window.innerHeight,
+      });
+    };
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const canCull = viewport.k > 0 && containerSize.width > 0 && containerSize.height > 0;
+  const visibleRect = canCull
+    ? {
+        left: -viewport.x / viewport.k - (containerSize.width / viewport.k) * OVERSCAN_RATIO,
+        top: -viewport.y / viewport.k - (containerSize.height / viewport.k) * OVERSCAN_RATIO,
+        right: -viewport.x / viewport.k + (containerSize.width / viewport.k) * (1 + OVERSCAN_RATIO),
+        bottom: -viewport.y / viewport.k + (containerSize.height / viewport.k) * (1 + OVERSCAN_RATIO),
+      }
+    : null;
+  // 含被拖/选中节点的组必然与视口相交(被拖节点在视口内,组 bounds ⊇ 节点),culling 安全
+  const visibleGroups = visibleRect
+    ? groupsWithBounds.filter(({ bounds }) =>
+        bounds.x < visibleRect.right &&
+        bounds.x + bounds.width > visibleRect.left &&
+        bounds.y < visibleRect.bottom &&
+        bounds.y + bounds.height > visibleRect.top,
+      )
+    : groupsWithBounds;
+
+  // T5: 组数超阈值时关闭磨砂玻璃背景(合成层上限降级,对齐边层 GLOW_LIMIT 模式)
+  const blurDisabled = groupsWithBounds.length > GROUP_BLUR_LIMIT;
 
   // 2. 预览组 bounds
   const previewBounds = controller.getPreviewBounds();
@@ -219,6 +369,7 @@ export const GroupLayer = React.memo(function GroupLayer({
   // 8. 渲染
   return (
     <div
+      ref={layerRef}
       data-canvas-group-layer
       style={{
         position: 'absolute',
@@ -229,13 +380,15 @@ export const GroupLayer = React.memo(function GroupLayer({
         transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
         transformOrigin: 'top left',
         pointerEvents: 'none', // 容器不接收事件,子组通过 pointerEvents:auto 接收
+        // T3: 连续反缩放变量(GroupItem 视觉经 calc(var(--zx-invk, 1)) 逐帧连续跟随)
+        ['--zx-invk' as string]: String(viewport.k > 0 ? 1 / viewport.k : 1),
         // 不设容器 zIndex: 容器 transform 建立 stacking context,子 GroupItem 用
         // GROUP_Z_INDEX(-10) 在 NodeItem(0/5/10)之下,确保组可见且组内节点可命中。
         // (之前用 zIndex:-1 会让整层跑到 CanvasView 背景之后导致组不可见)
       }}
     >
       {/* Version Folder stacked preview groups - rendered separately from regular groups */}
-      {groups.filter((g) => isVersionFolderStacked(g)).map((g) => {
+      {visibleGroups.filter(({ group: g }) => isVersionFolderStacked(g)).map(({ group: g }) => {
         const childNodes = (g.childrenIds?.map((cid) => scene.find((n) => n.id === cid)).filter(Boolean) ?? []) as SceneNode[];
         const activeId = getActiveVersionId(g) ?? (childNodes[0]?.id ?? '');
         const isSelected = selection.selectedNodeIds.has(g.id);
@@ -254,13 +407,10 @@ export const GroupLayer = React.memo(function GroupLayer({
           />
         );
       })}
-      {groups.filter((g) => !isVersionFolderStacked(g)).map((g) => {
+      {visibleGroups.filter(({ group: g }) => !isVersionFolderStacked(g)).map(({ group: g, bounds }) => {
         // 读取 bounds:尊重 dirty 标记和用户自定义 bounds 缓存;
         // Shift+拖拽临时脱离:detachedIds 仅影响 getGroupBounds 重算(实时排除脱离节点);
         // 空组:统一回退为基准图片节点一半尺寸(与胶囊锚点/聚焦一致)
-        const detachedIds = controller.getDragDetachedIds();
-        const bounds = getGroupBoundsWithEmptyFallback(scene, g.id, getNodeSize, detachedIds ?? undefined)
-          ?? { x: g.position.x, y: g.position.y, width: 160, height: 60 };
         const isSelected = selection.selectedNodeIds.has(g.id);
         const isRenaming = renamingGroupId === g.id;
         const isVfGrid = isVersionFolder(g) && getVersionFolderData(g)?.previewMode === 'grid';
@@ -280,7 +430,7 @@ export const GroupLayer = React.memo(function GroupLayer({
             opacity={g.opacity ?? defaults.opacity}
             isSelected={isSelected}
             isPreview={false}
-            invK={invK}
+            blurDisabled={blurDisabled}
             isRenaming={isRenaming}
             renameValue={renameValue}
             showVersionFolderFold={isVfGrid}
@@ -315,7 +465,7 @@ export const GroupLayer = React.memo(function GroupLayer({
           opacity={undefined}
           isSelected={false}
           isPreview={true}
-          invK={invK}
+          blurDisabled={blurDisabled}
           onGroupPointerDown={handleGroupPointerDown}
         />
       ) : null}
