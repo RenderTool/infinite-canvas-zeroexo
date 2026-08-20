@@ -69,9 +69,15 @@ export function PinView({
   const isInput = position === 'left';
   const isMagnetMode = magnetOffsetX !== undefined || magnetOffsetY !== undefined;
   const baseTranslateX = isInput ? pinSize / 2 : -pinSize / 2;
-  // magnetOffset 是屏幕坐标,需除以缩放因子转为本地坐标
-  const translateX = isMagnetMode ? baseTranslateX + (magnetOffsetX ?? 0) / nodeScale.sx : 0;
-  const translateY = isMagnetMode ? (magnetOffsetY ?? 0) / nodeScale.sy : 0;
+  // magnetOffset 是屏幕坐标:先除节点缩放转本地坐标,再乘连续 --zx-invk(视口反缩放)。
+  // 视觉 = offset/sx × (1/k) × sx × k = offset 屏幕恒定;乘法走 CSS 变量而非 JS 量化 invK,
+  // 消除缩放动画跨桶(5%)瞬间磁吸偏移突变(T10)
+  const translateX = isMagnetMode
+    ? `calc(${baseTranslateX}px + ${(magnetOffsetX ?? 0) / nodeScale.sx}px * var(--zx-invk, 1))`
+    : '0px';
+  const translateY = isMagnetMode
+    ? `calc(${(magnetOffsetY ?? 0) / nodeScale.sy}px * var(--zx-invk, 1))`
+    : '0px';
 
   return (
     <div
@@ -112,7 +118,7 @@ export function PinView({
           alignItems: 'center',
           justifyContent: 'center',
           transform: isMagnetMode
-            ? `translate(${translateX}px, ${translateY}px) scale(${invSx}, ${invSy})`
+            ? `translate(${translateX}, ${translateY}) scale(${invSx}, ${invSy})`
             : `scale(${invSx}, ${invSy})`,
           zIndex: isMagnetMode ? 35 : 'auto',
         }}

@@ -41,6 +41,9 @@ export class ReactGraphStore {
   private nodesById: Map<string, NodeRecord>;
   /** viewport rAF 合帧（P0-6）：一帧内多次 setViewport 只通知一次 */
   private viewportNotifyScheduled = false;
+  /** viewport 动画令牌（T10）：外部 setViewport 递增打断进行中的 animateViewport，
+   *  避免动画 rAF 与用户手势/小地图写入并发竞争（双击聚焦后立即滚轮 → 抖动/回跳） */
+  private viewportAnimToken = 0;
 
   private readonly graphListeners = new Set<() => void>();
   private readonly viewportListeners = new Set<() => void>();
@@ -170,7 +173,9 @@ export class ReactGraphStore {
    * ViewportEvents.CHANGED 延迟到下一帧统一发布：高频 wheel/pan 事件
    * 一帧内多次调用只触发一次 React 渲染。
    */
-  setViewport = (viewport: Viewport): void => {
+  setViewport = (viewport: Viewport, opts?: { fromAnimation?: boolean }): void => {
+    // T10: 非动画来源（用户手势/小地图/外部写入）递增令牌，动画循环自检自停
+    if (!opts?.fromAnimation) this.viewportAnimToken++;
     this.viewport = viewport;
     if (this.viewportNotifyScheduled) return;
     this.viewportNotifyScheduled = true;
@@ -214,16 +219,22 @@ export class ReactGraphStore {
   /** 平滑动画过渡到目标视口(300ms easeInOutCubic) */
   animateViewport = (targetX: number, targetY: number, targetK: number, durationMs = 300): void => {
     const start = { ...this.viewport };
+    // T10: 本次动画持有唯一令牌，外部 setViewport（手势/小地图）递增后本循环立即自停
+    const token = ++this.viewportAnimToken;
     const startTime = performance.now();
     const animate = (now: number): void => {
+      if (token !== this.viewportAnimToken) return; // 已被外部写入打断
       const t = Math.min(1, (now - startTime) / durationMs);
       // easeInOutCubic
       const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      this.setViewport({
-        x: start.x + (targetX - start.x) * ease,
-        y: start.y + (targetY - start.y) * ease,
-        k: start.k + (targetK - start.k) * ease,
-      });
+      this.setViewport(
+        {
+          x: start.x + (targetX - start.x) * ease,
+          y: start.y + (targetY - start.y) * ease,
+          k: start.k + (targetK - start.k) * ease,
+        },
+        { fromAnimation: true },
+      );
       if (t < 1) requestAnimationFrame(animate);
     };
     requestAnimationFrame(animate);

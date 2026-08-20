@@ -477,8 +477,10 @@ export function NodeShell({
                 pin={pin}
                 position="left"
                 visible={pinVisible || isHoveredPin}
-                magnetOffsetX={isHoveredPin ? (pinHover.offsetX * invK) : undefined}
-                magnetOffsetY={isHoveredPin ? (pinHover.offsetY * invK) : undefined}
+                // T10: 磁吸偏移不再乘 JS 量化 invK——乘法移入 PinView 的 calc(var(--zx-invk))
+                // (连续视口反缩放),避免缩放动画跨桶瞬间磁吸偏移突变
+                magnetOffsetX={isHoveredPin ? pinHover.offsetX : undefined}
+                magnetOffsetY={isHoveredPin ? pinHover.offsetY : undefined}
                 onPointerDown={onPinPointerDown}
                 onPointerEnter={onPinPointerEnter}
                 onPointerLeave={onPinPointerLeave}
@@ -540,8 +542,10 @@ export function NodeShell({
                 pin={pin}
                 position="right"
                 visible={pinVisible || isHoveredPin}
-                magnetOffsetX={isHoveredPin ? (pinHover.offsetX * invK) : undefined}
-                magnetOffsetY={isHoveredPin ? (pinHover.offsetY * invK) : undefined}
+                // T10: 磁吸偏移不再乘 JS 量化 invK——乘法移入 PinView 的 calc(var(--zx-invk))
+                // (连续视口反缩放),避免缩放动画跨桶瞬间磁吸偏移突变
+                magnetOffsetX={isHoveredPin ? pinHover.offsetX : undefined}
+                magnetOffsetY={isHoveredPin ? pinHover.offsetY : undefined}
                 onPointerDown={onPinPointerDown}
                 onPointerEnter={onPinPointerEnter}
                 onPointerLeave={onPinPointerLeave}

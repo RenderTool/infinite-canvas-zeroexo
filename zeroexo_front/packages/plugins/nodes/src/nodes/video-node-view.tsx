@@ -378,8 +378,9 @@ export function VideoNodeView({
   const titleSizeText = data.naturalWidth && data.naturalHeight
     ? `${data.naturalWidth} × ${data.naturalHeight}`
     : `${node.size?.width ?? VIDEO_DEFAULT_SIZE.width} × ${node.size?.height ?? VIDEO_DEFAULT_SIZE.height}`;
-  const titleIconSize = Math.max(9, Math.min(13 * (invK ?? 1), 16));
-  const titleIconEl = <svg xmlns="http://www.w3.org/2000/svg" width={titleIconSize} height={titleIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>;
+  // T10: 图标尺寸 CSS 连续化(与标题 fontSize 同源 --zx-invk),消除量化跨桶跳变
+  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const titleIconEl = <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }}><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>;
 
   // 失焦(未选中且未悬停)时暂停视频,聚焦时自动恢复播放
   // 注意:不清除 src,避免重新请求下载

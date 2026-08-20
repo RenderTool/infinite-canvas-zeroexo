@@ -137,8 +137,9 @@ export function ImageNodeView({
   const titleSizeText = data.naturalWidth && data.naturalHeight
     ? `${data.naturalWidth} × ${data.naturalHeight}`
     : `${node.size?.width ?? 340} × ${node.size?.height ?? 240}`;
-  const titleIconSize = Math.max(9, Math.min(13 * (invK ?? 1), 16));
-  const titleIconEl = <ImageIcon size={titleIconSize} />;
+  // T10: 图标尺寸 CSS 连续化(与标题 fontSize 同源 --zx-invk),消除量化跨桶跳变
+  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const titleIconEl = <ImageIcon size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
 
   // contentOnly 模式:跳过 BaseNodeView 外壳,仅渲染媒体内容
   if (contentOnly) {

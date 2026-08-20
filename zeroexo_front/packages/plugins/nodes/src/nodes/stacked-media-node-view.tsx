@@ -364,8 +364,9 @@ export function StackedMediaNodeView({
     setUploading(false);
   }, [commandQueue, uploading, fileToCard, data.cards, node.id]);
 
-  // 标题栏图标(尺寸乘 invK 反缩放,与 text/image/video 等节点标题图标同款 13/16)
-  const titleIcon = <Combine size={Math.max(9, Math.min(13 * (invK ?? 1), 16))} />;
+  // T10: 图标尺寸 CSS 连续化(clamp 等价原 max/min 钳制但随 --zx-invk 连续,消除跨桶跳变)
+  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const titleIcon = <Combine size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
 
   /** 替换活跃卡片内容(主图区替换按钮) */
   const handleReplacePick = useCallback(async (files: FileList | null) => {
