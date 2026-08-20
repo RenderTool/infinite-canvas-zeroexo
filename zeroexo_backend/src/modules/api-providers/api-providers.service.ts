@@ -4,7 +4,7 @@ import { ErrorCode } from '../../common/errors/error-codes';
 import { badRequest, notFound } from '../../common/errors/app-exception.js';
 import { ApiProvider, Prisma } from '@prisma/client';
 import { BaseApiAdapter, HealthResult } from './adapters/base.adapter';
-import { AiAdapter } from './adapters/ai.adapter';
+import { AiAdapter, BALANCE_UNSUPPORTED, type BalanceResult } from './adapters/ai.adapter';
 import { EmailAdapter } from './adapters/email.adapter';
 import { OAuthAdapter } from './adapters/oauth.adapter';
 import { StorageAdapter } from './adapters/storage.adapter';
@@ -451,6 +451,58 @@ export class ApiProvidersService {
     }
 
     return result;
+  }
+
+  /**
+   * 刷新渠道余额(Plan#17)
+   *
+   * 流程: 解密凭证 → 解析 baseUrl → AiAdapter.fetchBalance 逐渠道路由
+   * → 落库 balance/balanceCurrency/balanceCheckedAt/balanceError → 返回结果。
+   * 不支持的渠道 balanceError 记 UNSUPPORTED 哨兵(前端据此展示「不支持」态)。
+   * 不触碰 LLM 调用主链路。
+   */
+  async refreshBalance(id: string): Promise<BalanceResult & { balanceCheckedAt: string }> {
+    const provider = await this.prisma.apiProvider.findUnique({ where: { id } });
+    if (!provider) {
+      throw notFound(ErrorCode.CHANNEL_NOT_FOUND, `API provider not found: ${id}`);
+    }
+    if (provider.type !== 'ai') {
+      throw badRequest(ErrorCode.BAD_REQUEST, 'Only AI type providers support balance query');
+    }
+
+    const decryptedCreds = this.decryptCredentials(provider.credentials as Record<string, any>);
+    const apiKey = (decryptedCreds.apiKey as string) ?? '';
+    const cfg = (provider.config as Record<string, any>) ?? {};
+
+    // baseUrl: DB 保存 > 默认地址(custom 等无默认地址时降级为不支持)
+    let baseUrl = (cfg.baseUrl as string) || '';
+    if (!baseUrl) {
+      try {
+        baseUrl = this.aiAdapter.getDefaultBaseUrl(provider.provider);
+      } catch {
+        baseUrl = '';
+      }
+    }
+
+    const result = await this.aiAdapter.fetchBalance(provider.provider, baseUrl, apiKey);
+    const balanceCheckedAt = new Date();
+
+    await this.prisma.apiProvider.update({
+      where: { id },
+      data: {
+        balance: result.ok ? (result.balance ?? null) : null,
+        balanceCurrency: result.ok ? (result.currency ?? null) : null,
+        balanceCheckedAt,
+        balanceError: result.ok ? null : (result.message ?? BALANCE_UNSUPPORTED),
+      },
+    });
+
+    this.logsService.log('system', `刷新渠道余额: ${provider.name} - ${result.ok ? `¥${result.balance}` : (result.message ?? '失败')}`, {
+      level: result.ok ? 'info' : 'warn',
+      meta: { providerId: id, provider: provider.provider, supported: result.supported },
+    });
+
+    return { ...result, balanceCheckedAt: balanceCheckedAt.toISOString() };
   }
 
   /**

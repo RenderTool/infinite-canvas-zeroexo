@@ -64,6 +64,97 @@ const SUPPORTED = [
 type ProviderType = (typeof SUPPORTED)[number];
 
 /**
+ * 渠道余额查询结果
+ * - supported=false: 该渠道无官方余额 API(DB 中 balanceError 记 UNSUPPORTED 哨兵)
+ * - ok=false + message: 支持查询但本次失败(脱敏后的错误描述)
+ */
+export interface BalanceResult {
+  supported: boolean;
+  ok?: boolean;
+  balance?: number;
+  currency?: string;
+  message?: string;
+}
+
+/**
+ * 各渠道商官方余额 API 配置表(仅登记有官方接口的渠道)
+ * - deepseek:    GET {base}/user/balance        → balance_infos[].total_balance(实测为复数数组)
+ * - siliconflow: GET {base}/v1/user/info        → data.balance
+ * - stability:   GET {base}/v1/user/balance     → credits
+ * - moonshot:    GET {base}/v1/users/me/balance → data[].balance(按 cash_type 汇总)
+ * - openrouter:  GET {base}/api/v1/auth/key     → data.limit - data.usage
+ * 未登记的渠道(openai/gemini/anthropic/volcengine/bailian/custom 等)
+ * 普通 key 无官方余额接口,返回 supported:false。
+ */
+const BALANCE_ENDPOINTS: Record<
+  string,
+  {
+    path: string;
+    extract: (json: Record<string, any>) => { balance: number | null; currency?: string };
+  }
+> = {
+  deepseek: {
+    path: '/user/balance',
+    extract: (json) => {
+      // 实测响应: { is_available, balance_infos: [{ currency, total_balance, ... }] }
+      const list = Array.isArray(json?.balance_infos)
+        ? json.balance_infos
+        : json?.balance_info
+          ? [json.balance_info]
+          : [];
+      let total = 0;
+      let currency = 'CNY';
+      let matched = false;
+      for (const item of list) {
+        const v = Number(item?.total_balance);
+        if (Number.isFinite(v)) {
+          total += v;
+          currency = item?.currency || currency;
+          matched = true;
+        }
+      }
+      return matched ? { balance: total, currency } : { balance: null };
+    },
+  },
+  siliconflow: {
+    path: '/v1/user/info',
+    extract: (json) => {
+      const v = Number(json?.data?.balance);
+      return Number.isFinite(v) ? { balance: v, currency: 'CNY' } : { balance: null };
+    },
+  },
+  stability: {
+    path: '/v1/user/balance',
+    extract: (json) => {
+      const v = Number(json?.credits);
+      return Number.isFinite(v) ? { balance: v, currency: 'credits' } : { balance: null };
+    },
+  },
+  moonshot: {
+    path: '/v1/users/me/balance',
+    extract: (json) => {
+      const list = Array.isArray(json?.data) ? json.data : [];
+      const total = list.reduce((sum: number, item: any) => sum + (Number(item?.balance) || 0), 0);
+      return list.length > 0 ? { balance: total, currency: 'CNY' } : { balance: null };
+    },
+  },
+  openrouter: {
+    path: '/api/v1/auth/key',
+    extract: (json) => {
+      const d = json?.data ?? {};
+      const usage = Number(d.usage) || 0;
+      const limit =
+        d.limit === null || d.limit === undefined ? Number(d.total_credits) : Number(d.limit);
+      // 无额度上限(limit=null)时以负消耗表示已用量
+      return Number.isFinite(limit) ? { balance: limit - usage, currency: 'USD' } : { balance: -usage, currency: 'USD' };
+    },
+  },
+};
+
+/** 余额错误信息哨兵: 渠道无官方余额接口 */
+export const BALANCE_UNSUPPORTED = 'UNSUPPORTED';
+
+/**
  * AI 适配器 - 统一 AI 渠道的连接校验与操作
  *
  * 实现:
@@ -304,6 +395,61 @@ export class AiAdapter extends BaseApiAdapter {
         ok: false,
         message: `网络请求失败: ${msg}`,
         models: { llm: [], image: [], video: [], audio: [], unclassified: [] },
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 渠道余额查询 - 按渠道类型路由到官方余额 API
+   *
+   * 错误脱敏: 错误信息截断 200 字符且不包含凭证;
+   * 单渠道失败不抛异常,以 ok=false + message 返回。
+   */
+  async fetchBalance(provider: string, baseUrl: string, apiKey: string): Promise<BalanceResult> {
+    const spec = BALANCE_ENDPOINTS[provider];
+    if (!spec) {
+      return { supported: false, message: BALANCE_UNSUPPORTED };
+    }
+    if (!apiKey) {
+      return { supported: true, ok: false, message: 'API Key 未配置' };
+    }
+    if (!baseUrl) {
+      return { supported: true, ok: false, message: 'baseUrl 未配置' };
+    }
+
+    const normalizedBase = baseUrl.replace(/\/+$/, '');
+    const url = `${normalizedBase}${spec.path}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.aiConfig.requestTimeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return {
+          supported: true,
+          ok: false,
+          message: `HTTP ${res.status}: ${text.slice(0, 200)}`,
+        };
+      }
+      const json = (await res.json()) as Record<string, any>;
+      const parsed = spec.extract(json);
+      if (parsed.balance === null) {
+        return { supported: true, ok: false, message: '余额响应解析失败: 未找到有效余额字段' };
+      }
+      return { supported: true, ok: true, balance: parsed.balance, currency: parsed.currency };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        supported: true,
+        ok: false,
+        message: `余额查询请求失败: ${msg.slice(0, 200)}`,
       };
     } finally {
       clearTimeout(timer);

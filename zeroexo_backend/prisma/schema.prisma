@@ -481,6 +481,14 @@ model ApiProvider {
   healthCheckedAt DateTime?
   /// 健康检查错误信息
   healthError     String?
+  /// 账户余额(渠道商余额 API 返回; null = 未查询或不支持)
+  balance         Float?
+  /// 余额币种(CNY / USD / credits 等)
+  balanceCurrency String?
+  /// 上次余额查询时间
+  balanceCheckedAt DateTime?
+  /// 余额查询错误信息(UNSUPPORTED = 该渠道无官方余额接口)
+  balanceError    String?
   /// 最后使用时间(用于清理未用服务)
   lastUsedAt      DateTime?
   /// 是否启用

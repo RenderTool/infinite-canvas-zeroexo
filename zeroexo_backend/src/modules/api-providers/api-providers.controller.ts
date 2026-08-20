@@ -247,6 +247,16 @@ export class ApiProvidersController {
     return this.apiProvidersService.checkHealth(id);
   }
 
+  /**
+   * 刷新渠道余额(Plan#17: 调渠道商官方余额 API → 落库 → 返回)
+   * POST /admin/api-providers/:id/balance
+   */
+  @Post(':id/balance')
+  @Roles('admin', 'super_admin')
+  async refreshBalance(@Param('id') id: string) {
+    return this.apiProvidersService.refreshBalance(id);
+  }
+
   @Post(':id/invoke')
   @Roles('admin', 'super_admin')
   async invoke(

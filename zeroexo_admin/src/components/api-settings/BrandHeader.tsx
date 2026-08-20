@@ -11,9 +11,11 @@
  * 该组件为纯展示 + 回调型组件，所有数据由父组件 AiBrandDetail 通过 props 传入。
  */
 import type { FC } from 'react';
-import { Badge, Button, Space, Spin } from 'antd';
-import { CheckCircle, XCircle, FileText, Trash2 } from 'lucide-react';
+import { Badge, Button, Space, Spin, Tooltip } from 'antd';
+import { CheckCircle, XCircle, FileText, Trash2, RefreshCw, Wallet } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { BRAND_ICONS, DefaultBrandIcon, type BrandIconProps } from './brand-icons';
+import type { BalanceDisplay } from './tabs/api-providers-types';
 
 export interface BrandHeaderProps {
   /** 品牌预设信息 */
@@ -51,7 +53,25 @@ export interface BrandHeaderProps {
   testResult: { ok: boolean; message: string } | null;
   /** API 原始返回的模型 ID 列表（用于折叠展示） */
   rawModelIds: string[] | null;
+  /** 余额展示态（Plan#17；未配置渠道时为 undefined） */
+  balanceDisplay?: BalanceDisplay;
+  /** 上次余额查询时间（悬浮提示用） */
+  balanceCheckedAt?: string | null;
+  /** 刷新余额回调 */
+  onRefreshBalance?: () => void;
+  /** 余额刷新中 */
+  balanceRefreshing?: boolean;
 }
+
+/** 余额级别 → 展示色 */
+const BALANCE_COLORS: Record<string, string> = {
+  ok: '#52c41a',
+  warning: '#fa8c16',
+  danger: '#f5222d',
+  error: '#f5222d',
+  unsupported: '#8c8c8c',
+  unknown: '#8c8c8c',
+};
 
 export default function BrandHeader({
   brandPreset,
@@ -68,7 +88,30 @@ export default function BrandHeader({
   onOpenTemplate,
   testResult,
   rawModelIds,
+  balanceDisplay,
+  balanceCheckedAt,
+  onRefreshBalance,
+  balanceRefreshing,
 }: BrandHeaderProps) {
+  const { t } = useTranslation();
+
+  // 余额标签文案（三态 + 警示分级）
+  const balanceLabel = balanceDisplay
+    ? balanceDisplay.level === 'unknown'
+      ? t('ai.balance.notQueried')
+      : balanceDisplay.level === 'unsupported'
+        ? t('ai.balance.unsupported')
+        : balanceDisplay.level === 'error'
+          ? t('ai.balance.queryFailed')
+          : balanceDisplay.text
+    : null;
+  const balanceTip = balanceDisplay
+    ? balanceDisplay.detail ||
+      (balanceCheckedAt
+        ? t('ai.balance.checkedAt', { time: new Date(balanceCheckedAt).toLocaleString() })
+        : undefined)
+    : undefined;
+
   return (
     <>
       {/* ─── 品牌头部 ─── */}
@@ -120,6 +163,29 @@ export default function BrandHeader({
                 fontWeight: 400,
               }}
             />
+            {/* 余额徽标（Plan#17：支持/不支持/未查询三态 + 欠费/低余额警示色） */}
+            {balanceDisplay && balanceLabel && (
+              <Tooltip title={balanceTip}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 12,
+                    padding: '1px 8px',
+                    borderRadius: 10,
+                    color: BALANCE_COLORS[balanceDisplay.level] || '#8c8c8c',
+                    background: `${BALANCE_COLORS[balanceDisplay.level] || '#8c8c8c'}14`,
+                    cursor: 'default',
+                  }}
+                >
+                  <Wallet size={12} />
+                  {t('ai.balance.label')} {balanceLabel}
+                  {balanceDisplay.level === 'danger' && `（${t('ai.balance.depleted')}）`}
+                  {balanceDisplay.level === 'warning' && `（${t('ai.balance.low')}）`}
+                </span>
+              </Tooltip>
+            )}
           </div>
           {brandPreset.description && (
             <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
@@ -161,6 +227,18 @@ export default function BrandHeader({
             {saveStatus === 'saving' ? '保存中...' : saveStatus === 'dirty' ? '未保存' : '已保存'}
           </div>
         <Space>
+          {existingRecord?.id && onRefreshBalance && (
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              icon={<RefreshCw size={14} />}
+              loading={balanceRefreshing}
+              onClick={onRefreshBalance}
+            >
+              {balanceRefreshing ? t('ai.balance.refreshing') : t('ai.balance.refresh')}
+            </Button>
+          )}
           <Button size="small" icon={<FileText size={14} />} onClick={onOpenTemplate}>
             模板
           </Button>

@@ -5,8 +5,10 @@
  * 点击卡片进入配置/编辑页面
  */
 import { ReactNode } from 'react';
-import { Card, Row, Col, Tag, Spin, Empty, Switch, Checkbox, Pagination, Button } from 'antd';
-import { Check } from 'lucide-react';
+import { Card, Row, Col, Tag, Spin, Empty, Switch, Checkbox, Pagination, Button, Tooltip } from 'antd';
+import { Check, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { BalanceDisplay } from './tabs/api-providers-types';
 
 export interface ProviderCardItem {
   id?: string;
@@ -34,6 +36,10 @@ interface ProviderCardGridProps {
   onSetDefault?: (item: ProviderCardItem) => void;
   /** 正在切换的渠道 id 集合（用于 Switch loading 态） */
   togglingIds?: Set<string>;
+  /** 刷新渠道余额回调（Plan#17，仅 AI 渠道 Tab 传入） */
+  onRefreshBalance?: (item: ProviderCardItem) => void;
+  /** 正在刷新余额的渠道 id 集合（刷新按钮 loading 态） */
+  refreshingBalanceIds?: Set<string>;
   emptyText?: string;
   /** 批量删除模式 */
   batchMode?: boolean;
@@ -57,12 +63,16 @@ export default function ProviderCardGrid({
   onToggleEnabled,
   onSetDefault,
   togglingIds,
+  onRefreshBalance,
+  refreshingBalanceIds,
   emptyText = '暂无可用服务',
   batchMode,
   selectedIds,
   onToggleSelect,
   pagination,
 }: ProviderCardGridProps) {
+  const { t } = useTranslation();
+
   if (loading) {
     return (
       <Card>
@@ -99,6 +109,9 @@ export default function ProviderCardGrid({
         const isEnabled = item.configured ? item.enabled !== false : false;
         const showSwitch = !!onToggleEnabled;
         const isToggling = !!(item.id && togglingIds?.has(item.id));
+        const isRefreshingBalance = !!(item.id && refreshingBalanceIds?.has(item.id));
+        // 余额展示态（Plan#17，仅已配置 AI 渠道有值）
+        const balance = item.meta?.balance as BalanceDisplay | undefined;
 
         return (
           <Col xs={24} md={12} key={item.id || `${item.provider}-${idx}`}>
@@ -256,6 +269,53 @@ export default function ProviderCardGrid({
                       <Tag color="blue" style={{ fontSize: 11 }}>
                         {item.meta.models as string}
                       </Tag>
+                    </div>
+                  )}
+                  {item.configured && balance && (
+                    <div
+                      style={{ marginTop: item.meta?.models ? 4 : 8, display: 'flex', alignItems: 'center', gap: 4 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Tooltip
+                        title={
+                          balance.detail ||
+                          (item.meta?.balanceCheckedAtTip as string) ||
+                          undefined
+                        }
+                      >
+                        <Tag
+                          color={
+                            balance.level === 'danger'
+                              ? 'red'
+                              : balance.level === 'warning'
+                                ? 'orange'
+                                : balance.level === 'ok'
+                                  ? 'green'
+                                  : 'default'
+                          }
+                          style={{ fontSize: 11, marginLeft: 0, cursor: 'default' }}
+                        >
+                          {balance.level === 'unknown'
+                            ? `${t('ai.balance.label')}: ${t('ai.balance.notQueried')}`
+                            : balance.level === 'unsupported'
+                              ? `${t('ai.balance.label')}: ${t('ai.balance.unsupported')}`
+                              : balance.level === 'error'
+                                ? `${t('ai.balance.label')}: ${t('ai.balance.queryFailed')}`
+                                : `${t('ai.balance.label')}: ${balance.text}`}
+                        </Tag>
+                      </Tooltip>
+                      {onRefreshBalance && !batchMode && (
+                        <Tooltip title={t('ai.balance.refresh')}>
+                          <Button
+                            type="text"
+                            size="small"
+                            style={{ padding: '0 4px', height: 20, fontSize: 11 }}
+                            loading={isRefreshingBalance}
+                            icon={!isRefreshingBalance ? <RefreshCw size={12} /> : undefined}
+                            onClick={() => onRefreshBalance(item)}
+                          />
+                        </Tooltip>
+                      )}
                     </div>
                   )}
                 </div>

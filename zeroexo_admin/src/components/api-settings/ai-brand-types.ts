@@ -39,6 +39,11 @@ export interface AiBrandDetailProps {
     enabled: boolean;
     isDefault: boolean;
     capabilities?: string[];
+    /** 账户余额（Plan#17） */
+    balance?: number | null;
+    balanceCurrency?: string | null;
+    balanceCheckedAt?: string | null;
+    balanceError?: string | null;
   };
   logoUrl?: string;
   onBack: () => void;

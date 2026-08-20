@@ -17,6 +17,8 @@
  */
 import { useState } from 'react';
 import { Card, message } from 'antd';
+import { useTranslation } from 'react-i18next';
+import { apiPost, showApiError } from '@/services/api-client';
 import type { AiBrandDetailProps } from './ai-brand-types';
 import DetailBreadcrumb from './DetailBreadcrumb';
 import AiBrandSchemaModal from './AiBrandSchemaModal';
@@ -28,15 +30,67 @@ import IconSelectModal from './IconSelectModal';
 import BrandHeader from './BrandHeader';
 import CredentialsForm from './CredentialsForm';
 import { useAiBrandState } from './use-ai-brand-state';
+import {
+  resolveBalanceDisplay,
+  type BalanceRefreshResponse,
+} from './tabs/api-providers-types';
 
 export default function AiBrandDetail(props: AiBrandDetailProps) {
+  const { t } = useTranslation();
   const { brandPreset, existingRecord } = props;
   const [watchedApiKey, setWatchedApiKey] = useState<string | undefined>(undefined);
   const [watchedFormValues, setWatchedFormValues] = useState<any>(undefined);
+  // 余额刷新（Plan#17）：本地覆盖层避免等待父级 records 刷新
+  const [balanceRefreshing, setBalanceRefreshing] = useState(false);
+  const [balanceOverride, setBalanceOverride] = useState<{
+    balance?: number | null;
+    balanceCurrency?: string | null;
+    balanceCheckedAt?: string | null;
+    balanceError?: string | null;
+  }>({});
   const handleFormChange = (_: Record<string, any>, allValues: Record<string, any>) => {
     setWatchedApiKey(allValues.apiKey);
     setWatchedFormValues(allValues);
   };
+
+  /** 刷新余额：调后端端点 → 更新本地覆盖层 + 通知父级刷新卡片列表 */
+  const handleRefreshBalance = async () => {
+    if (!existingRecord?.id) {
+      message.warning(t('ai.saveChannelFirst'));
+      return;
+    }
+    setBalanceRefreshing(true);
+    try {
+      const res = await apiPost<BalanceRefreshResponse>(
+        `/admin/api-providers/${existingRecord.id}/balance`,
+      );
+      setBalanceOverride({
+        balance: res.ok ? (res.balance ?? null) : null,
+        balanceCurrency: res.ok ? (res.currency ?? null) : null,
+        balanceCheckedAt: res.balanceCheckedAt,
+        balanceError: res.ok ? null : (res.message ?? null),
+      });
+      if (res.ok) {
+        message.success(t('ai.balance.refreshSuccess'));
+      } else if (!res.supported) {
+        message.info(t('ai.balance.unsupportedDesc'));
+      } else {
+        message.warning(res.message || t('ai.balance.queryFailed'));
+      }
+      props.onSave();
+    } catch (err) {
+      showApiError(err, '刷新余额失败');
+    } finally {
+      setBalanceRefreshing(false);
+    }
+  };
+
+  const effectiveRecord = existingRecord
+    ? { ...existingRecord, ...balanceOverride }
+    : undefined;
+  const balanceDisplay = effectiveRecord
+    ? resolveBalanceDisplay(effectiveRecord)
+    : undefined;
   const {
     // 表单 & 派生
     form,
@@ -147,6 +201,10 @@ export default function AiBrandDetail(props: AiBrandDetailProps) {
           onOpenTemplate={() => setTemplateOpen(true)}
           testResult={testResult}
           rawModelIds={rawModelIds}
+          balanceDisplay={balanceDisplay}
+          balanceCheckedAt={effectiveRecord?.balanceCheckedAt}
+          onRefreshBalance={handleRefreshBalance}
+          balanceRefreshing={balanceRefreshing}
         />
 
         {/* ─── 凭证表单 + 模型列表 ─── */}

@@ -19,6 +19,8 @@ import TemplateImportModal from './TemplateImportModal';
 import {
   STORAGE_KEY,
   MODEL_TYPE_LABELS,
+  resolveBalanceDisplay,
+  type BalanceRefreshResponse,
   type BrandPreset,
   type ProviderRecord,
 } from './api-providers-types';
@@ -39,6 +41,8 @@ export default function AiProvidersTab() {
   const [templateOpen, setTemplateOpen] = useState(false);
   // 正在切换启用状态的渠道 id 集合（Switch loading 态）
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  // 正在刷新余额的渠道 id 集合（Plan#17）
+  const [refreshingBalanceIds, setRefreshingBalanceIds] = useState<Set<string>>(new Set());
   // 入口分类筛选: '' = 全部, llm/image/video/audio
   const [typeFilter, setTypeFilter] = useState<string>('');
   // 搜索关键词
@@ -181,6 +185,46 @@ export default function AiProvidersTab() {
       message.success(t('api.defaultSet'));
     } catch (err) {
       showApiError(err, '设为默认失败');
+    }
+  };
+
+  /** 刷新渠道余额（Plan#17：调后端余额端点 → 局部更新 records） */
+  const handleRefreshBalance = async (item: ProviderCardItem) => {
+    if (!item.id) {
+      message.warning(t('ai.configureFirst'));
+      return;
+    }
+    setRefreshingBalanceIds((prev) => new Set(prev).add(item.id!));
+    try {
+      const res = await apiPost<BalanceRefreshResponse>(`/admin/api-providers/${item.id}/balance`);
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === item.id
+            ? {
+                ...r,
+                balance: res.ok ? (res.balance ?? null) : null,
+                balanceCurrency: res.ok ? (res.currency ?? null) : null,
+                balanceCheckedAt: res.balanceCheckedAt,
+                balanceError: res.ok ? null : (res.message ?? null),
+              }
+            : r,
+        ),
+      );
+      if (res.ok) {
+        message.success(t('ai.balance.refreshSuccess'));
+      } else if (!res.supported) {
+        message.info(t('ai.balance.unsupportedDesc'));
+      } else {
+        message.warning(res.message || t('ai.balance.queryFailed'));
+      }
+    } catch (err) {
+      showApiError(err, '刷新余额失败');
+    } finally {
+      setRefreshingBalanceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id!);
+        return next;
+      });
     }
   };
 
@@ -421,6 +465,7 @@ export default function AiProvidersTab() {
         meta: {
           models: modelTypeLabels.join(' / '),
           official: preset.official,
+          balance: match ? resolveBalanceDisplay(match) : undefined,
         },
       };
     });
@@ -456,6 +501,7 @@ export default function AiProvidersTab() {
             .map((c) => t(MODEL_TYPE_LABELS[c]) || c)
             .join(' / '),
           official: false,
+          balance: resolveBalanceDisplay(r),
         },
       };
     });
@@ -570,6 +616,8 @@ export default function AiProvidersTab() {
             onToggleEnabled={handleToggleEnabled}
             onSetDefault={handleSetDefault}
             togglingIds={togglingIds}
+            onRefreshBalance={handleRefreshBalance}
+            refreshingBalanceIds={refreshingBalanceIds}
             emptyText={t('ai.noPresetBrands')}
             batchMode={batchMode}
             selectedIds={selectedIds}
@@ -599,6 +647,8 @@ export default function AiProvidersTab() {
             onToggleEnabled={handleToggleEnabled}
             onSetDefault={handleSetDefault}
             togglingIds={togglingIds}
+            onRefreshBalance={handleRefreshBalance}
+            refreshingBalanceIds={refreshingBalanceIds}
             emptyText={t('ai.noCustomBrands')}
             batchMode={batchMode}
             selectedIds={selectedIds}
