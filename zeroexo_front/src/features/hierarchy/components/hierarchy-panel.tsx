@@ -9,7 +9,7 @@
  * - flex 布局固定占位,画布区域 flex-1 自适应
  *
  * 数据/回调来自 useHierarchyPanelProps(group 插件 hook);
- * 渲染样式: stone 暖色 + Lucide 图标 + 32px 行高 + 选中 alpha 态。
+ * 渲染样式: stone 暖色 + Lucide 图标 + 44px 行高 + 选中 alpha 态。
  */
 
 import { useRef, useState, useLayoutEffect, useCallback, useMemo, useEffect } from 'react';
@@ -148,7 +148,7 @@ function HierarchyThumbnail({
   return (
     <div
       style={{
-        width: 32, height: 32, flexShrink: 0, borderRadius: 4, overflow: 'hidden',
+        width: 36, height: 36, flexShrink: 0, borderRadius: 4, overflow: 'hidden',
         background: theme.toolbar.border + '33',
       }}
     >
@@ -565,7 +565,7 @@ export function HierarchyPanelSidebar({
     const rowStyle: CSSProperties = {
       display: 'flex', alignItems: 'stretch', gap: 0,
       margin: '2px 8px', padding: 0,
-      minHeight: 36, cursor: 'pointer', borderRadius: 6,
+      minHeight: 44, cursor: 'pointer', borderRadius: 6,
       backgroundColor: isSelected ? selectedBg : (node.id === focusedId ? theme.toolbar.accent + '12' : 'transparent'),
       color: isSelected ? selectedText : hidden ? theme.toolbar.textMuted : theme.toolbar.text,
       fontWeight: isSelected || isGroup ? 500 : 400,
@@ -654,7 +654,7 @@ export function HierarchyPanelSidebar({
               theme={theme}
             />
           ) : (
-            <span style={{ width: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ width: 36, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {getTypeIcon(node)}
             </span>
           )}
