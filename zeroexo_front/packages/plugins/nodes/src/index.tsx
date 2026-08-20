@@ -69,6 +69,10 @@ import { StackedMediaNodeView } from './nodes/stacked-media-node-view.js';
 import { getStackedMediaPins } from './nodes/stacked-media-pins.js';
 import { createStackedMediaDefaultData, parseStackedMediaData } from './nodes/stacked-media-types.js';
 import { ejectCard } from './nodes/stacked-media-model.js';
+// 配置专用节点(Plan#13):hidden 契约类型,仅供配置面板静态挂载,零实例约束
+import { createConfigPreviewExtension } from './config-preview/config-preview-node.js';
+export { ConfigPreviewNodeView, CONFIG_PREVIEW_TYPE } from './config-preview/config-preview-node.js';
+export type { ConfigPreviewNodeViewProps } from './config-preview/config-preview-node.js';
 
 // 派生节点视图(重导出本地 import,避免 Vite 中同时 import + export from 的绑定问题)
 export {
@@ -468,6 +472,8 @@ export class PluginNodesPlugin implements Plugin {
       createAudioExtension(controller, store),
       createAiPlaceholderExtension(controller, store),
       createStackedMediaExtension(controller, store),
+      // 配置专用节点(hidden):仅注册表契约完整,零实例约束,不出现在任何用户入口
+      createConfigPreviewExtension(),
     ];
 
     for (const ext of extensions) {

@@ -54,7 +54,7 @@ export function usePinDefaults(): PinDefaults {
 export interface NodeDefaults {
   /** 默认圆角(世界坐标像素;undefined 时 NodeShell 回退到 8) */
   borderRadius?: number;
-  /** 默认外轮廓厚度(世界坐标像素;undefined 时 NodeShell 回退到 1) */
+  /** 默认外轮廓厚度(世界坐标像素;undefined 时 NodeShell 回退到 0 = 无常驻描边) */
   outlineWidth?: number;
   /** 默认外轮廓颜色(非选中;undefined 时 NodeShell 回退到内置默认) */
   outlineColor?: string;

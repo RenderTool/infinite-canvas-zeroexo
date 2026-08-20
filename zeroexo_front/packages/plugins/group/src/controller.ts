@@ -61,6 +61,8 @@ export class GroupController {
   private dragDetachedIds: Set<string> | null = null;
   /** 拖拽悬停目标组 id(无父组节点拖入组区域时实时计算,用于"松开加入组"提示) */
   private hoverJoinGroupId: string | null = null;
+  /** 状态版本(每次 notify 递增;渲染层用作订阅快照,previewBounds/hoverJoinGroupId 变化均驱动重渲染) */
+  private version = 0;
   /** 订阅者 */
   private readonly listeners = new Set<() => void>();
   /** 节点尺寸访问器(从 extensions.defaultSize 获取,用于 bounds 计算) */
@@ -668,6 +670,11 @@ export class GroupController {
     return this.hoverJoinGroupId;
   }
 
+  /** 状态版本号(渲染层订阅快照:任一状态 notify 后递增,确保变化可被感知) */
+  getVersion(): number {
+    return this.version;
+  }
+
   /**
    * 拖拽移动钩子(由 interaction 的 dragMoveHook 调用)。
    * 实时计算"无父组的被拖节点中心落点的最深组"作为吸附目标:
@@ -676,6 +683,9 @@ export class GroupController {
    */
   handleDragMove(nodeIds: string[]): void {
     const scene = this.getScene();
+    // P0-2 瞬态拖拽通道:拖拽期间 graph 不更新,节点位置需叠加瞬态偏移表,
+    // 否则悬停判定基于拖拽起始位置,拖入组提示永不触发
+    const offsets = this.store.getDragOffsets();
     const draggedSet = new Set(nodeIds);
     let next: string | null = null;
     for (const id of nodeIds) {
@@ -683,8 +693,9 @@ export class GroupController {
       if (!node || node.type === 'group') continue;
       if (findParentGroup(scene, id) !== null) continue; // 有父组 → 不吸附
       const size = node.size ?? { width: 0, height: 0 };
-      const cx = node.position.x + size.width / 2;
-      const cy = node.position.y + size.height / 2;
+      const off = offsets.get(id) ?? { dx: 0, dy: 0 };
+      const cx = node.position.x + off.dx + size.width / 2;
+      const cy = node.position.y + off.dy + size.height / 2;
       const target = findDeepestGroupAtPoint(scene, cx, cy);
       if (target && !draggedSet.has(target.id)) {
         next = target.id;
@@ -828,6 +839,7 @@ export class GroupController {
   };
 
   private notify(): void {
+    this.version += 1;
     this.listeners.forEach((l) => l());
   }
 }

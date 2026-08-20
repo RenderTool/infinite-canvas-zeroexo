@@ -187,6 +187,11 @@ export function useEditorDialogs({
     saveCanvasConfig(next);
   }, []);
 
+  // 配置实时预览回调(Plan#13):只更新内存态不持久化,取消时由弹窗回滚到快照
+  const onCanvasConfigPreview = useCallback((next: CanvasConfig) => {
+    setCanvasConfig(next);
+  }, []);
+
   // 删除项目（弹窗确认）
   const handleMenuDeleteProject = useCallback(() => {
     setConfirmDeleteProject(true);
@@ -446,6 +451,7 @@ export function useEditorDialogs({
     onOpenSettings,
     onRenameGroup,
     onCanvasConfigConfirm,
+    onCanvasConfigPreview,
     handleMenuDeleteProject,
     handleClearCanvasClick,
     doDeleteProject,

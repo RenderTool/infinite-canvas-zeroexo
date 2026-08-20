@@ -86,8 +86,10 @@ export interface GroupLayerProps {
 }
 
 /**
- * 订阅 GroupController 预览状态变化。
- * 用 useSyncExternalStore 订阅 controller,当 previewBounds 引用变化时触发重渲染。
+ * 订阅 GroupController 状态变化。
+ * 用 useSyncExternalStore 订阅 controller;快照用版本号而非 previewBounds 引用——
+ * P0-2 瞬态拖拽通道下拖拽期间 graph 不更新,若快照只看 previewBounds,
+ * 拖拽中 hoverJoinGroupId 的变化(绿色"加入组"提示)将无法驱动重渲染。
  */
 function useGroupControllerPreview(controller: GroupController): void {
   const subscribe = React.useCallback(
@@ -95,7 +97,7 @@ function useGroupControllerPreview(controller: GroupController): void {
     [controller],
   );
   const getSnapshot = React.useCallback(
-    () => controller.getPreviewBounds(),
+    () => controller.getVersion(),
     [controller],
   );
   useSyncExternalStore(subscribe, getSnapshot);
@@ -190,8 +192,11 @@ export const GroupLayer = React.memo(function GroupLayer({
     onRenameFinish?.();
   }, [onRenameFinish]);
 
-  // 7. 锚定教育提示数据(拖拽期间 graph 随 MoveNodeCommand 更新驱动重渲染)
+  // 7. 锚定教育提示数据(拖拽期间由 controller 版本快照驱动重渲染)
   // 场景: 拖无父组节点悬停于组上方 → 目标组"加入组" + 绿色虚线高亮
+  // P0-2 瞬态拖拽通道:拖拽期间 graph 不更新(只写 dragOffsets 偏移表),
+  // 悬停目标判定由 controller.handleDragMove 叠加偏移实时计算并 notify,
+  // 本层经 getVersion() 快照感知变化后读取最新目标组并计算高亮 bounds。
   // (Shift+拖拽移出组提示已转为右侧面板常驻条目,选中组内节点即显示)
   const hoverJoinId = controller.getHoverJoinGroupId();
   let hoverJoinBounds: Rect | null = null;
@@ -259,6 +264,7 @@ export const GroupLayer = React.memo(function GroupLayer({
             borderRadius={g.borderRadius ?? defaults.borderRadius}
             outlineColor={g.outlineColor ?? defaults.outlineColor}
             outlineWidth={g.outlineWidth ?? defaults.outlineWidth}
+            outlineType={defaults.outlineType}
             outlineOffset={g.outlineOffset ?? defaults.outlineOffset}
             opacity={g.opacity ?? defaults.opacity}
             isSelected={isSelected}
@@ -292,6 +298,7 @@ export const GroupLayer = React.memo(function GroupLayer({
           borderRadius={undefined}
           outlineColor={undefined}
           outlineWidth={undefined}
+          outlineType={undefined}
           outlineOffset={undefined}
           opacity={undefined}
           isSelected={false}

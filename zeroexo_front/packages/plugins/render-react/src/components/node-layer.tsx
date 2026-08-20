@@ -674,7 +674,7 @@ function DefaultNodeContent({
   const isLight = typeof window !== 'undefined' && window.matchMedia
     ? !window.matchMedia('(prefers-color-scheme: dark)').matches
     : true;
-  const outlineWidth = node.outlineWidth ?? nodeDefaults.outlineWidth ?? 1;
+  const outlineWidth = node.outlineWidth ?? nodeDefaults.outlineWidth ?? 0;
   const outlineColor = node.outlineColor ?? nodeDefaults.outlineColor ?? '#0f3460';
   const outlineOffset = node.outlineOffset ?? 0;
   const radius = node.borderRadius ?? nodeDefaults.borderRadius ?? 8;

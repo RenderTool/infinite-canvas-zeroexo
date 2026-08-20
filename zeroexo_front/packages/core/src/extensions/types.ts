@@ -162,8 +162,20 @@ export interface NodeTypeExtension {
   minSize?: { width: number; height: number };
   /** 最大尺寸约束 */
   maxSize?: { width: number; height: number };
-  /** 是否锁定宽高比(图片/视频节点通常为 true) */
+  /**
+   * 是否锁定宽高比(图片/视频节点通常为 true) */
   lockAspectRatio?: boolean;
+
+  /**
+   * 内部专用类型标记(契约隔离)。
+   *
+   * hidden=true 的类型仅供宿主应用内部挂载(如配置面板的"配置专用节点"预览),
+   * 不得出现在任何用户入口:节点创建菜单 / 层级面板 / AI 生成 / 连线目标 /
+   * 缩略图 / 序列化 / 快捷键。由于创建入口均基于显式类型白名单(硬编码联合类型)
+   * 或 graph 实例遍历,hidden 类型不注册即无实例、不可达;
+   * 注册后仍需保持零实例约束(不得通过任何命令创建其实例)。
+   */
+  hidden?: boolean;
 
   /**
    * 特化外观节点(如气泡音频节点/资源浏览器节点)。

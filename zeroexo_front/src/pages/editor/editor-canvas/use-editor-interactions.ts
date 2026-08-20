@@ -22,7 +22,7 @@ import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, co
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
-import { configToPinDefaults } from '@/features/top-bar/index.js';
+import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import { buildResourceReferences } from '@/features/prompt-panel/resource-references.js';
 import type { GenerationMode } from '@/features/prompt-panel/components/prompt-panel';
@@ -333,28 +333,17 @@ export function useEditorInteractions({
   }), [canvasConfig, theme.node.pinDefaultColor]);
 
   // GroupDefaultsProvider 的 value:从 canvasConfig 构建(Group 样式默认,由 GroupLayer 消费作为回退)
-  const groupDefaultsValue = useMemo(() => ({
-    backgroundColor: canvasConfig.groupBackground,
-    borderRadius: canvasConfig.groupBorderRadius,
-    outlineColor: canvasConfig.groupOutlineColor,
-    outlineWidth: canvasConfig.groupOutlineWidth,
-    outlineOffset: canvasConfig.groupOutlineOffset,
-    opacity: canvasConfig.groupOpacity,
-    titleColor: theme.group.titleColor,
-  }), [canvasConfig, theme]);
+  // 映射函数与配置面板预览同源(config-dialog.tsx),保证预览与画布真实节点一致
+  const groupDefaultsValue = useMemo(
+    () => configToGroupDefaults(canvasConfig, theme),
+    [canvasConfig, theme],
+  );
 
   // NodeDefaultsProvider 的 value:圆角/轮廓宽度来自 canvasConfig,颜色来自 theme.node
-  const nodeDefaultsValue = useMemo(() => ({
-    borderRadius: canvasConfig.nodeBorderRadius,
-    outlineWidth: canvasConfig.nodeOutlineWidth,
-    outlineColor: theme.node.outlineColor,
-    outlineSelectedColor: theme.node.outlineSelectedColor,
-    fillColor: theme.node.fill,
-    titleColor: theme.node.titleColor,
-    titleSelectedColor: theme.node.outlineSelectedColor,
-    titleBackground: theme.node.titleBackground,
-    contentTextColor: theme.node.titleColor,
-  }), [canvasConfig, theme]);
+  const nodeDefaultsValue = useMemo(
+    () => configToNodeDefaults(canvasConfig, theme),
+    [canvasConfig, theme],
+  );
 
   // selectedNodeData 由 useEditorState 在 onChanged 中直接计算并缓存
   const selectedNodeData = state.selectedNodeData;

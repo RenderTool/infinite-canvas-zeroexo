@@ -24,6 +24,8 @@ export interface GroupDefaults {
   outlineColor?: string;
   /** 默认外轮廓厚度(世界坐标像素;undefined 时 GroupItem 回退到 2) */
   outlineWidth?: number;
+  /** 默认外轮廓类型(undefined 时 GroupItem 回退到 dashed) */
+  outlineType?: 'solid' | 'dashed';
   /** 默认外轮廓偏移(世界坐标像素;undefined 时 GroupItem 回退到 0) */
   outlineOffset?: number;
   /** 默认不透明度(0-1;undefined 时 GroupItem 回退到 1) */

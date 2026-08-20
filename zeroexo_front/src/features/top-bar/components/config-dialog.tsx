@@ -11,15 +11,17 @@
  * draft 状态隔离,实时同步到全局。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { App, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
-import type { PinDefaults } from '@zeroexo/plugin-render-react';
+import type { PinDefaults, NodeDefaults } from '@zeroexo/plugin-render-react';
+import type { GroupDefaults } from '@zeroexo/plugin-group';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { useHintsEnabled, setHintsEnabled } from '@/shared/hints/hints-settings.js';
+import { ConfigPreviewHost } from './config-preview-host.js';
 
 // ===== 配置数据模型 =====
 
@@ -62,6 +64,37 @@ export function configToPinDefaults(cfg: CanvasConfig): PinDefaults {
   return { color: cfg.pinColor, shape: cfg.pinShape, size: cfg.pinSize, opacity: cfg.pinOpacity };
 }
 
+// ===== 样式映射纯函数(预览与画布真实节点同源,use-editor-interactions 复用) =====
+
+/** 从 CanvasConfig + theme 派生节点全局默认样式(与画布注入同源) */
+export function configToNodeDefaults(cfg: CanvasConfig, theme: ThemeConfig): NodeDefaults {
+  return {
+    borderRadius: cfg.nodeBorderRadius,
+    outlineWidth: cfg.nodeOutlineWidth,
+    outlineColor: theme.node.outlineColor,
+    outlineSelectedColor: theme.node.outlineSelectedColor,
+    fillColor: theme.node.fill,
+    titleColor: theme.node.titleColor,
+    titleSelectedColor: theme.node.outlineSelectedColor,
+    titleBackground: theme.node.titleBackground,
+    contentTextColor: theme.node.titleColor,
+  };
+}
+
+/** 从 CanvasConfig + theme 派生组全局默认样式(与画布注入同源) */
+export function configToGroupDefaults(cfg: CanvasConfig, theme: ThemeConfig): GroupDefaults {
+  return {
+    backgroundColor: cfg.groupBackground,
+    borderRadius: cfg.groupBorderRadius,
+    outlineColor: cfg.groupOutlineColor,
+    outlineWidth: cfg.groupOutlineWidth,
+    outlineType: cfg.groupOutlineType,
+    outlineOffset: cfg.groupOutlineOffset,
+    opacity: cfg.groupOpacity,
+    titleColor: theme.group.titleColor,
+  };
+}
+
 // ===== 配置持久化(localStorage) =====
 // 参考 image-tool-definitions.tsx 的 loadImageToolbarConfig/saveImageToolbarConfig 模式
 
@@ -91,105 +124,8 @@ export function saveCanvasConfig(config: CanvasConfig): void {
 
 // ===== 预览组件 =====
 
-/** 预览分组宽度(包裹节点) */
-const PREVIEW_GROUP_WIDTH = 460;
-
-/**
- * 画布样式预览:一个分组卡片,中间放置一个节点卡片
- *
- * 同时展示分组样式(背景/轮廓/圆角)+ 节点样式(底色/轮廓/圆角)+ 引脚(左右两侧)。
- * 节点居中显示在分组内,便于观察分组轮廓与节点的关系。
- * 移动端使用更紧凑的尺寸避免溢出。
- */
-function CanvasPreview({
-  draft, theme, isMobile,
-}: { draft: CanvasConfig; theme: ThemeConfig; isMobile: boolean }): React.ReactElement {
-  const { t } = useTranslation();
-  const groupWidth = isMobile ? 300 : PREVIEW_GROUP_WIDTH;
-  const nodeWidth = isMobile ? 180 : 280;
-  const wrapStyle: CSSProperties = {
-    flex: 1, minWidth: 0, minHeight: 0,
-    background: theme.canvas.background,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: isMobile ? '16px 16px' : '24px 40px',
-    overflow: 'hidden', pointerEvents: 'none',
-  };
-  const pinContainerStyle: CSSProperties = {
-    position: 'absolute', top: '50%',
-    width: draft.pinSize, height: draft.pinSize,
-    borderRadius: draft.pinShape === 'circle' ? '50%' : 2,
-    border: `2px solid ${draft.pinColor}`,
-    background: 'transparent',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    opacity: draft.pinOpacity,
-    marginTop: -draft.pinSize / 2,
-  };
-  const pinIconSize = draft.pinSize * 0.5;
-  // 节点卡片使用 theme.node.fill(所有类型共用)
-  const nodeStyle: CSSProperties = {
-    width: nodeWidth,
-    background: theme.node.fill,
-    borderRadius: draft.nodeBorderRadius,
-    outline: `${draft.nodeOutlineWidth}px solid ${theme.node.outlineColor}`,
-    padding: isMobile ? '14px 16px' : '20px 24px',
-    display: 'flex', alignItems: 'center', gap: 10,
-    color: theme.node.titleColor,
-    position: 'relative',
-  };
-  // 分组卡片包裹节点,16:10 比例(更接近实际画布分组的视觉比例)
-  const groupHeight = (groupWidth * 10) / 16;
-  const groupStyle: CSSProperties = {
-    width: groupWidth,
-    height: groupHeight,
-    borderRadius: draft.groupBorderRadius,
-    outline: `${draft.groupOutlineWidth}px ${draft.groupOutlineType} ${draft.groupOutlineColor}`,
-    outlineOffset: draft.groupOutlineOffset,
-    padding: isMobile ? '10px 12px' : '14px 16px',
-    display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'center',
-    position: 'relative',
-  };
-  const titleStyle: CSSProperties = {
-    fontSize: isMobile ? 11 : 13, color: theme.group.titleColor, opacity: 0.8, fontWeight: 600,
-    position: 'absolute', top: isMobile ? 8 : 10, left: isMobile ? 10 : 14,
-  };
-  return (
-    <div style={wrapStyle}>
-      <div style={groupStyle}>
-        {/* 背景层(独立 opacity,不影响内部节点/引脚) */}
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: draft.groupBackground,
-          borderRadius: draft.groupBorderRadius,
-          opacity: draft.groupOpacity,
-          pointerEvents: 'none',
-        }} />
-        <span style={titleStyle}>{t('group.previewTitle')}</span>
-        {/* 节点居中 */}
-        <div style={nodeStyle}>
-          {/* input pin(左) - 空心圆环/方块 + "+" 号 */}
-          <span style={{ ...pinContainerStyle, left: -draft.pinSize / 2 }}>
-            <svg width={pinIconSize} height={pinIconSize} viewBox="0 0 24 24" fill="none">
-              <line x1="12" y1="4" x2="12" y2="20" stroke={draft.pinColor} strokeWidth="2.5" strokeLinecap="round" />
-              <line x1="4" y1="12" x2="20" y2="12" stroke={draft.pinColor} strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
-          </span>
-          {/* output pin(右) - 空心圆环/方块 + "+" 号 */}
-          <span style={{ ...pinContainerStyle, right: -draft.pinSize / 2 }}>
-            <svg width={pinIconSize} height={pinIconSize} viewBox="0 0 24 24" fill="none">
-              <line x1="12" y1="4" x2="12" y2="20" stroke={draft.pinColor} strokeWidth="2.5" strokeLinecap="round" />
-              <line x1="4" y1="12" x2="20" y2="12" stroke={draft.pinColor} strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span style={{ fontSize: isMobile ? 12 : 13, fontWeight: 500 }}>{t('settings.nodePreviewLabel')}</span>
-          <span style={{ marginLeft: 'auto', fontSize: isMobile ? 10 : 11, opacity: 0.55 }}>
-            {theme.mode === 'dark' ? t('settings.darkTheme') : t('settings.lightTheme')}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
+// 预览区由 ConfigPreviewHost 承载(Plan#13):真实节点渲染链(ConfigPreviewNodeView +
+// GroupItem)替代原手动构造 DIV,样式经 Provider 注入与画布真实节点同源,所见即所得。
 
 // ===== 配置弹窗 =====
 
@@ -200,10 +136,15 @@ export interface ConfigDialogProps {
   config: CanvasConfig;
   /** 确认时提交全量配置,立即全局生效 */
   onConfirm: (config: CanvasConfig) => void;
+  /**
+   * 实时预览回调(Plan#13):调参时实时应用到画布(不持久化),
+   * 取消时回滚到打开时快照,确认时持久化。
+   */
+  onPreview?: (config: CanvasConfig) => void;
 }
 
 export function ConfigDialog({
-  open, onClose, theme, config, onConfirm,
+  open, onClose, theme, config, onConfirm, onPreview,
 }: ConfigDialogProps): React.ReactElement {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -213,21 +154,42 @@ export function ConfigDialog({
   const hintsEnabled = useHintsEnabled();
   // 节点样式预览使用当前实际主题(而非 dialog props 中的 theme,后者可能是传入的旧主题)
   const previewTheme = currentTheme;
-  const [draft, setDraft] = useState<CanvasConfig>(config);
-  useEffect(() => { if (open) setDraft(config); }, [open, config]);
 
-  // 仅更新本地 draft，不立即应用（避免滑块拖动时频繁触发全局 re-render）
+  // ===== Plan#13 实时化:draft 镜像 + 打开时快照 =====
+  const [draft, setDraftState] = useState<CanvasConfig>(config);
+  const draftRef = useRef<CanvasConfig>(config);
+  /** 打开时快照(取消回滚基准;打开瞬间固定,不被实时预览覆盖) */
+  const snapshotRef = useRef<CanvasConfig>(config);
+  const openRef = useRef(open);
+  const setDraft = (next: CanvasConfig): void => {
+    draftRef.current = next;
+    setDraftState(next);
+  };
+  useEffect(() => {
+    // 仅 open false→true 边沿:固定快照 + 同步 draft(实时预览期间 config 变化不重置)
+    if (open && !openRef.current) {
+      snapshotRef.current = config;
+      setDraft(config);
+    }
+    openRef.current = open;
+  }, [open, config]);
+
+  /** 仅更新本地 draft 并实时预览(不立即持久化;拖动滑块时画布真实节点实时变化) */
   const update = (patch: Partial<CanvasConfig>): void => {
-    setDraft((prev) => ({ ...prev, ...patch }));
+    const next = { ...draftRef.current, ...patch };
+    setDraft(next);
+    onPreview?.(next);
   };
 
   const handleConfirm = (): void => {
-    onConfirm(draft);
+    onConfirm(draftRef.current);
     onClose();
   };
 
   const handleCancel = (): void => {
-    setDraft(config);
+    // 取消:回滚到打开时快照(实时预览期间画布已被改动)
+    onPreview?.(snapshotRef.current);
+    setDraft(snapshotRef.current);
     onClose();
   };
 
@@ -314,7 +276,10 @@ export function ConfigDialog({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingRight: 8 }}>
           <span>{t('settings.title')}</span>
           <button type="button" style={resetBtnStyle}
-            onClick={() => setDraft(DEFAULT_CANVAS_CONFIG)}>
+            onClick={() => {
+              setDraft(DEFAULT_CANVAS_CONFIG);
+              onPreview?.(DEFAULT_CANVAS_CONFIG);
+            }}>
             {t('common.reset')}
           </button>
         </div>
@@ -377,7 +342,14 @@ export function ConfigDialog({
       {/* 主体:画布样式左预览(3) + 右配置(1) */}
       <div style={configBodyStyle}>
         <div style={previewAreaWrapperStyle}>
-          <CanvasPreview draft={draft} theme={previewTheme} isMobile={isMobile} />
+          {/* Plan#13: 真实节点渲染链预览(配置专用节点 + 真实组单元),与画布同源 */}
+          <ConfigPreviewHost
+            nodeDefaults={configToNodeDefaults(draft, previewTheme)}
+            groupDefaults={configToGroupDefaults(draft, previewTheme)}
+            pinDefaults={{ ...configToPinDefaults(draft), color: previewTheme.node.pinDefaultColor }}
+            theme={previewTheme}
+            isMobile={isMobile}
+          />
         </div>
         <div style={configAreaStyle}>
           <div style={subtitleStyle}>{t('settings.subtitle')}</div>

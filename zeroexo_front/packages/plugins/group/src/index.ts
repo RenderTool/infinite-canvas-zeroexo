@@ -65,6 +65,10 @@ export type { GroupLayerProps } from './group-layer.js';
 export { GroupDefaultsProvider, useGroupDefaults } from './group-defaults.js';
 export type { GroupDefaults } from './group-defaults.js';
 
+// 导出单组渲染单元(供配置面板等静态挂载场景复用真实组渲染链)
+export { GroupItem } from './components/group-item.js';
+export type { GroupItemProps } from './components/group-item.js';
+
 // 导出层级面板(C 混合解耦:纯展示组件 + hook + 内置过滤算法)
 export { HierarchyPanel, useHierarchyPanelProps, DEFAULT_HIERARCHY_FILTER, matchHierarchyFilter, filterSceneNodes } from './hierarchy-panel.js';
 export type { HierarchyPanelProps, HierarchyTreeNode, HierarchyFilter } from './hierarchy-panel.js';

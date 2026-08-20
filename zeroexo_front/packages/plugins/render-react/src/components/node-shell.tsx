@@ -259,10 +259,11 @@ export function NodeShell({
   // 用 CSS outline(不占布局空间,支持 rgba 透明,跟随 border-radius 圆角)
   // 互斥状态优先级:连线悬停(蓝 1px) > 选中(红 2px),单一元素渲染,无叠加态
   // 用户澄清:hover 仅保留卡片阴影,不再出现蓝色轮廓线 —— 非选中/非连线悬停时
-  // 轮廓宽仅当节点显式声明 node.outlineWidth 时生效,全局默认不再贡献常驻描边
+  // 宽度三层优先级:node.outlineWidth 节点级 > isSelected 选中态 2px(红描边常驻) >
+  // nodeDefaults.outlineWidth 全局默认(配置面板滑块控制,默认 0 = 无常驻描边,调大可全局生效)
   const shellOutlineWidth = connectionHover && !connectionCustom
     ? 1
-    : (!selectionCustom && (node.outlineWidth ?? (isSelected ? 2 : 0)));
+    : (!selectionCustom && (node.outlineWidth ?? (isSelected ? 2 : (nodeDefaults.outlineWidth ?? 0))));
   const shellOutlineColor = connectionHover && !connectionCustom
     ? '#4a9eff'
     : (!selectionCustom

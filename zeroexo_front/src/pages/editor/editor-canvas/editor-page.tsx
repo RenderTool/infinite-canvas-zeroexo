@@ -706,6 +706,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         theme={theme}
         config={dialogs.canvasConfig}
         onConfirm={dialogs.onCanvasConfigConfirm}
+        onPreview={dialogs.onCanvasConfigPreview}
       />
 
       {/* 图片编辑独立对话框 */}

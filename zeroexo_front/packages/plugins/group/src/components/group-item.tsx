@@ -30,6 +30,8 @@ export interface GroupItemProps {
   outlineColor: string | undefined;
   /** 外轮廓厚度(世界坐标像素;undefined 用 2) */
   outlineWidth: number | undefined;
+  /** 外轮廓类型(undefined 用 dashed) */
+  outlineType: 'solid' | 'dashed' | undefined;
   /** 外轮廓偏移(世界坐标像素;正值向外扩,负值向内缩;undefined 用 0) */
   outlineOffset: number | undefined;
   /** 不透明度(0-1;undefined 用 1) */
@@ -81,6 +83,7 @@ export const GroupItem = React.memo(
     borderRadius,
     outlineColor,
     outlineWidth,
+    outlineType,
     outlineOffset,
     opacity,
     isSelected,
@@ -111,6 +114,8 @@ export const GroupItem = React.memo(
       : 'rgba(120, 160, 220, 0.6)');
     // 厚度:node.outlineWidth 自定义,默认 2,按 1/k 缩放保持视觉恒定
     const resolvedOutlineWidth = (outlineWidth ?? 2) * invK;
+    // 类型:node.outlineType 自定义,默认 dashed(与全局默认同源)
+    const resolvedOutlineType = outlineType ?? 'dashed';
     const resolvedOutlineOffset = (outlineOffset ?? 0) * invK;
     const bg = backgroundColor ?? 'rgba(255, 255, 255, 0.04)';
     // 判断是否为渐变值(包含 gradient 关键字)
@@ -158,7 +163,7 @@ export const GroupItem = React.memo(
               : { backgroundColor: bg }),
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
-            outline: `${resolvedOutlineWidth}px dashed ${resolvedOutlineColor}`,
+            outline: `${resolvedOutlineWidth}px ${resolvedOutlineType} ${resolvedOutlineColor}`,
             outlineOffset: resolvedOutlineOffset,
             borderRadius: radius,
             opacity: resolvedOpacity,
@@ -327,6 +332,7 @@ export const GroupItem = React.memo(
     prev.borderRadius === next.borderRadius &&
     prev.outlineColor === next.outlineColor &&
     prev.outlineWidth === next.outlineWidth &&
+    prev.outlineType === next.outlineType &&
     prev.outlineOffset === next.outlineOffset &&
     prev.opacity === next.opacity &&
     prev.isSelected === next.isSelected &&
@@ -344,5 +350,6 @@ export const GroupItem = React.memo(
     prev.onResizeHandlePointerDown === next.onResizeHandlePointerDown &&
     prev.onGroupPinPointerDown === next.onGroupPinPointerDown &&
     prev.onGroupPinPointerEnter === next.onGroupPinPointerEnter &&
-    prev.onGroupPinPointerLeave === next.onGroupPinPointerLeave,
+    prev.onGroupPinPointerLeave === next.onGroupPinPointerLeave &&
+    prev.forceShowPins === next.forceShowPins,
 );
