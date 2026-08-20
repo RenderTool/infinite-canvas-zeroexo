@@ -54,7 +54,8 @@ export function PinView({
   onPointerLeave,
 }: PinViewProps): React.ReactElement {
   const pinDefaults = usePinDefaults();
-  const color = pin.color ?? pinDefaults.color ?? PIN_COLORS[pin.dataType ?? 'any'] ?? '#95a5a6';
+  // 颜色三层优先级:pin.color > 全局默认 > dataType 内置语义色 > 最终兜底(与配置默认 pinColor 同值)
+  const color = pin.color ?? pinDefaults.color ?? PIN_COLORS[pin.dataType ?? 'any'] ?? '#78716c';
   const shape = pin.shape ?? pinDefaults.shape ?? 'circle';
   const pinSize = pin.size ?? pinDefaults.size ?? DEFAULT_PIN_SIZE;
   const pinOpacity = pinDefaults.opacity ?? 1;

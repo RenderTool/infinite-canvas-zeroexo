@@ -18,7 +18,7 @@ export interface PinDefaults {
   color?: string;
   /** 默认 Pin 形状('circle'|'square';undefined 用 'circle') */
   shape?: 'circle' | 'square';
-  /** 默认 Pin 尺寸(像素;undefined 用 12) */
+  /** 默认 Pin 尺寸(像素;undefined 用 14,与配置默认 pinSize 同值) */
   size?: number;
   /** 默认 Pin 透明度(0-1;undefined 用 1) */
   opacity?: number;
@@ -52,7 +52,7 @@ export function usePinDefaults(): PinDefaults {
 
 /** 全局 Node 默认样式 */
 export interface NodeDefaults {
-  /** 默认圆角(世界坐标像素;undefined 时 NodeShell 回退到 8) */
+  /** 默认圆角(世界坐标像素;undefined 时 NodeShell 回退到 2,与配置默认 nodeBorderRadius 同值) */
   borderRadius?: number;
   /** 默认外轮廓厚度(世界坐标像素;undefined 时 NodeShell 回退到 0 = 无常驻描边) */
   outlineWidth?: number;

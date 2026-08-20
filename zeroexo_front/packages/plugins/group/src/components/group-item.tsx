@@ -109,14 +109,17 @@ export const GroupItem = React.memo(
       if (typeof window === 'undefined') return true;
       return !window.matchMedia('(prefers-color-scheme: dark)').matches;
     }, []);
+    // 颜色:undefined 时回退全局默认,未注入 Provider 时兜底与配置默认 groupOutlineColor 同值(红)
+    // 选中态强化红 0.9 仅在未注入 Provider 路径生效(注入路径用配置色)
     const resolvedOutlineColor = outlineColor ?? groupDefaults?.outlineColor ?? (isSelected
       ? 'rgba(233, 69, 96, 0.9)'
-      : 'rgba(120, 160, 220, 0.6)');
-    // 厚度:node.outlineWidth 自定义,默认 2,按 1/k 缩放保持视觉恒定
-    const resolvedOutlineWidth = (outlineWidth ?? 2) * invK;
-    // 类型:node.outlineType 自定义,默认 dashed(与全局默认同源)
+      : 'rgba(233, 69, 96, 0.5)');
+    // 厚度:undefined 用 1(与配置默认同值),按 1/k 缩放保持视觉恒定
+    const resolvedOutlineWidth = (outlineWidth ?? 1) * invK;
+    // 类型:undefined 默认 dashed(与全局默认同源)
     const resolvedOutlineType = outlineType ?? 'dashed';
-    const resolvedOutlineOffset = (outlineOffset ?? 0) * invK;
+    // 偏移:undefined 用 3(与配置默认同值),按 1/k 缩放保持视觉恒定
+    const resolvedOutlineOffset = (outlineOffset ?? 3) * invK;
     const bg = backgroundColor ?? 'rgba(255, 255, 255, 0.04)';
     // 判断是否为渐变值(包含 gradient 关键字)
     const isGradient = typeof bg === 'string' && bg.includes('gradient');

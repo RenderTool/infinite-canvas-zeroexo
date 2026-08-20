@@ -38,6 +38,7 @@ export interface CanvasConfig {
   groupOutlineOffset: number;
   groupOpacity: number;
   // Pin 默认(独立透明度,不受分组透明度影响)
+  // pinColor 契约保留:画布当前未启用配置值(注入层用主题色),启用时删除注入层覆盖即可
   pinColor: string;
   pinShape: 'circle' | 'square';
   pinSize: number;

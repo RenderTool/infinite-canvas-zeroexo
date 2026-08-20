@@ -18,15 +18,15 @@ import React from 'react';
 export interface GroupDefaults {
   /** 默认背景色(支持 rgba 含 A 通道;undefined 时 GroupItem 回退到内置默认) */
   backgroundColor?: string;
-  /** 默认圆角(世界坐标像素;undefined 时 GroupItem 回退到 8) */
+  /** 默认圆角(世界坐标像素;undefined 时 GroupItem 回退到 2,与配置默认 groupBorderRadius 同值) */
   borderRadius?: number;
-  /** 默认外轮廓颜色(支持 rgba 透明;undefined 时 GroupItem 回退到选中红/未选中蓝) */
+  /** 默认外轮廓颜色(支持 rgba 透明;undefined 时 GroupItem 回退到选中红 0.9/未选中红 0.5(与配置默认同值)) */
   outlineColor?: string;
-  /** 默认外轮廓厚度(世界坐标像素;undefined 时 GroupItem 回退到 2) */
+  /** 默认外轮廓厚度(世界坐标像素;undefined 时 GroupItem 回退到 1,与配置默认 groupOutlineWidth 同值) */
   outlineWidth?: number;
   /** 默认外轮廓类型(undefined 时 GroupItem 回退到 dashed) */
   outlineType?: 'solid' | 'dashed';
-  /** 默认外轮廓偏移(世界坐标像素;undefined 时 GroupItem 回退到 0) */
+  /** 默认外轮廓偏移(世界坐标像素;undefined 时 GroupItem 回退到 3,与配置默认 groupOutlineOffset 同值) */
   outlineOffset?: number;
   /** 默认不透明度(0-1;undefined 时 GroupItem 回退到 1) */
   opacity?: number;

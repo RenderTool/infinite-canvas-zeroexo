@@ -271,10 +271,11 @@ export function NodeShell({
         ?? (isSelected ? (nodeDefaults.outlineSelectedColor ?? '#e94560') : (nodeDefaults.outlineColor ?? '#0f3460')))
       : nodeDefaults.outlineColor ?? '#0f3460');
   const shellOutlineOffset = node.outlineOffset ?? 0;
-  // 圆角:特化覆写优先,其次 node.borderRadius 自定义,回退 NodeDefaults,再回退默认 8
-  const shellBorderRadius = borderRadiusOverride ?? node.borderRadius ?? nodeDefaults.borderRadius ?? 8;
+  // 圆角:特化覆写优先,其次 node.borderRadius 自定义,回退 NodeDefaults,再回退默认 2(与配置默认对齐)
+  const shellBorderRadius = borderRadiusOverride ?? node.borderRadius ?? nodeDefaults.borderRadius ?? 2;
   // 无缝拼接模式(borderRadius 显式为 0,如图片拆解切片):空闲不投影,避免拼合缝隙观感
-  const tileMode = (node.borderRadius ?? 8) === 0;
+  // 与 shellBorderRadius 同源:全局默认(borderRadius 调 0)也应触发 tileMode
+  const tileMode = (node.borderRadius ?? nodeDefaults.borderRadius ?? 2) === 0;
   // opacity 不在此层应用(由外层 NodeItem 统一应用一次,避免双层叠加)
 
   // 引脚可见性: hover 节点时显示，选中节点时也显示，或连线拖拽期间强制显示所有节点 Pin

@@ -234,8 +234,9 @@ const NodeItem = React.memo(
     const size = resolveNodeSize(node, ext);
     const resizable = ext?.resizable === true && !node.locked;
     const locked = node.locked === true;
-    // 无缝拼接模式:borderRadius 显式为 0 的节点(如图片拆解切片)空闲时不渲染阴影,避免拼合时缝隙观感
-    const tileMode = (node.borderRadius ?? 8) === 0;
+      // 无缝拼接模式:borderRadius 显式为 0 的节点(如图片拆解切片)空闲时不渲染阴影,避免拼合时缝隙观感
+      // 与 NodeShell 同源:全局默认 borderRadius 调 0 也应触发 tileMode
+      const tileMode = (node.borderRadius ?? nodeDefaults.borderRadius ?? 2) === 0;
 
     // GPU 加速缩放:当节点尺寸与默认尺寸不同时,使用 transform scale 代替 width/height 过渡
     // 避免 CSS width/height 过渡触发 layout 重算导致文字模糊
@@ -324,7 +325,7 @@ const NodeItem = React.memo(
           // 保持 visible 以确保引脚(Pin 容器定位在 left:-40/right:-40)可见
           overflow: 'visible',
           boxSizing: 'border-box',
-          borderRadius: node.borderRadius ?? nodeDefaults.borderRadius ?? 8,
+          borderRadius: node.borderRadius ?? nodeDefaults.borderRadius ?? 2,
           // 有 renderer 时外层背景透明(让 NodeShell 背景显示);无 renderer 时用 ext.color / 全局默认
           backgroundColor: renderer
             ? 'transparent'
@@ -677,7 +678,7 @@ function DefaultNodeContent({
   const outlineWidth = node.outlineWidth ?? nodeDefaults.outlineWidth ?? 0;
   const outlineColor = node.outlineColor ?? nodeDefaults.outlineColor ?? '#0f3460';
   const outlineOffset = node.outlineOffset ?? 0;
-  const radius = node.borderRadius ?? nodeDefaults.borderRadius ?? 8;
+  const radius = node.borderRadius ?? nodeDefaults.borderRadius ?? 2;
   return (
     <div
       style={{
