@@ -13,11 +13,12 @@
  */
 
 import {
-  Settings2, Package,
+  Settings2,
   Brush, Scissors,
   Grid2x2, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
   Heading1,
 } from 'lucide-react';
+import { NODE_ICONS } from './icons.js';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
 import { setImageBlob } from '@zeroexo/plugin-persistence';
@@ -319,8 +320,8 @@ export function getImageTools(): ToolDefinition[] {
     {
       id: 'createStackNode',
       label: '堆叠',
-      title: '堆叠',
-      icon: <Package size={14} />,
+      title: '',
+      icon: <NODE_ICONS.stack size={14} />,
       group: 'edit',
       run: (node: NodeRecord, ctx: ToolContext) => {
         convertToStack(node, ctx);
@@ -338,8 +339,8 @@ export function getVideoTools(): ToolDefinition[] {
     {
       id: 'createStackNode',
       label: '堆叠',
-      title: '堆叠',
-      icon: <Package size={14} />,
+      title: '',
+      icon: <NODE_ICONS.stack size={14} />,
       group: 'edit',
       run: (node: NodeRecord, ctx: ToolContext) => {
         convertToStack(node, ctx);

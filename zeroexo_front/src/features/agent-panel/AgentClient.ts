@@ -52,12 +52,17 @@ export interface AgentSendOptions {
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 3;
 
+/** 单路订阅状态(2026-08-20: 单例单路改为多路 Map, 支持批量选集生成时多任务并行订阅,
+ *  旧实现 subscribe() 会 unsubscribe 顶掉前一任务 → 批量生成只有最后一个节点能收到产物) */
+interface SubscriptionState {
+  abortController: AbortController | null;
+  reconnectAttempts: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  callbacks: AgentClientCallbacks;
+}
+
 export class AgentClient {
-  private abortController: AbortController | null = null;
-  private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private currentTaskId: string | null = null;
-  private currentCallbacks: AgentClientCallbacks = {};
+  private subscriptions = new Map<string, SubscriptionState>();
 
   /**
    * 提交 Agent 任务
@@ -87,7 +92,9 @@ export class AgentClient {
       throw new Error(`提交任务失败 [${res.status}]: ${errText.slice(0, 200)}`);
     }
 
-    return (await res.json()) as AgentExecuteResponse;
+    // 全局响应拦截器统一 { data: T } 包装,此处解包(2026-08-20 P0: 未解包导致 taskId=undefined → stream/undefined 幽灵流永久等待)
+    const json = (await res.json()) as { data?: AgentExecuteResponse };
+    return (json?.data ?? (json as unknown as AgentExecuteResponse)) as AgentExecuteResponse;
   }
 
   /**
@@ -113,44 +120,65 @@ export class AgentClient {
   }
 
   /**
-   * 订阅指定 taskId 的 SSE 事件流
+   * 订阅指定 taskId 的 SSE 事件流(多路: 不同 taskId 互不影响, 同 taskId 重复订阅先断开旧的)
    * 自动处理重连（最多 MAX_RECONNECT_ATTEMPTS 次）
    */
   subscribe(taskId: string, callbacks: AgentClientCallbacks): void {
-    this.unsubscribe();
-    this.currentTaskId = taskId;
-    this.currentCallbacks = callbacks;
-    this.reconnectAttempts = 0;
-    void this.connectSSE(taskId, callbacks);
-  }
-
-  /**
-   * 取消订阅，断开 SSE 连接
-   */
-  unsubscribe(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    // 防御: taskId 无效(空/undefined)时直接失败,避免连上 /stream/undefined 幽灵流永久等待
+    if (!taskId) {
+      callbacks.onError?.('任务 ID 无效，无法连接事件流');
+      callbacks.onClose?.();
+      return;
     }
-    this.abortController?.abort();
-    this.abortController = null;
-    this.currentTaskId = null;
-    this.currentCallbacks = {};
-    this.reconnectAttempts = 0;
+    this.disconnect(taskId);
+    const state: SubscriptionState = {
+      abortController: null,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      callbacks,
+    };
+    this.subscriptions.set(taskId, state);
+    void this.connectSSE(taskId, state);
   }
 
   /**
-   * 获取当前订阅的 taskId
+   * 取消订阅。不传 taskId 断开全部(兼容旧用法); 传 taskId 仅断开该任务
+   */
+  unsubscribe(taskId?: string): void {
+    if (taskId) {
+      this.disconnect(taskId);
+      return;
+    }
+    for (const id of [...this.subscriptions.keys()]) {
+      this.disconnect(id);
+    }
+  }
+
+  /** 断开单路订阅并清理状态 */
+  private disconnect(taskId: string): void {
+    const state = this.subscriptions.get(taskId);
+    if (!state) return;
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+    state.abortController?.abort();
+    state.abortController = null;
+    this.subscriptions.delete(taskId);
+  }
+
+  /**
+   * 获取当前订阅的 taskId 列表
    */
   get currentTask(): string | null {
-    return this.currentTaskId;
+    return [...this.subscriptions.keys()][0] ?? null;
   }
 
   /**
    * 是否已连接
    */
   get connected(): boolean {
-    return this.abortController !== null;
+    return this.subscriptions.size > 0;
   }
 
   /** 按事件类型分发(兼容 event: 命名事件与 JSON 内 type 字段两种格式) */
@@ -194,8 +222,10 @@ export class AgentClient {
       case 'agent:done': {
         const d = event.data as { output?: unknown } | null;
         callbacks.onDone?.(d?.output);
-        this.abortController?.abort();
-        this.abortController = null;
+        // 断开当前任务的连接并清理订阅(不误伤其他并行任务)
+        const taskId = [...this.subscriptions.entries()]
+          .find(([, s]) => s.callbacks === callbacks)?.[0];
+        if (taskId) this.disconnect(taskId);
         callbacks.onClose?.();
         break;
       }
@@ -204,10 +234,11 @@ export class AgentClient {
     }
   }
 
-  private async connectSSE(taskId: string, callbacks: AgentClientCallbacks): Promise<void> {
-    this.abortController?.abort();
+  private async connectSSE(taskId: string, state: SubscriptionState): Promise<void> {
+    state.abortController?.abort();
     const abortController = new AbortController();
-    this.abortController = abortController;
+    state.abortController = abortController;
+    const callbacks = state.callbacks;
 
     try {
       // token 经 Authorization header 传递(URL 不拼接 token)
@@ -251,29 +282,30 @@ export class AgentClient {
         }
       }
 
-      // 流正常结束(未收到 done 事件)时视为完成
-      if (this.abortController === abortController) {
-        this.abortController = null;
+      // 流正常结束(未收到 done 事件)时清理当前任务订阅
+      if (this.subscriptions.get(taskId)?.abortController === abortController) {
+        this.disconnect(taskId);
       }
     } catch (err) {
-      if (this.abortController !== abortController) return;
-      this.abortController = null;
+      if (this.subscriptions.get(taskId)?.abortController !== abortController) return;
+      state.abortController = null;
       if (err instanceof DOMException && err.name === 'AbortError') {
         // 用户主动取消,不报错
         return;
       }
 
-      // 自动重连
-      if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS && this.currentTaskId) {
-        this.reconnectAttempts++;
-        this.reconnectTimer = setTimeout(() => {
-          if (this.currentTaskId) {
-            void this.connectSSE(this.currentTaskId, this.currentCallbacks);
+      // 自动重连(仅对仍活跃的订阅)
+      if (state.reconnectAttempts < MAX_RECONNECT_ATTEMPTS && this.subscriptions.has(taskId)) {
+        state.reconnectAttempts++;
+        state.reconnectTimer = setTimeout(() => {
+          if (this.subscriptions.has(taskId)) {
+            void this.connectSSE(taskId, state);
           }
-        }, RECONNECT_DELAY_MS * this.reconnectAttempts);
+        }, RECONNECT_DELAY_MS * state.reconnectAttempts);
       } else {
         callbacks.onError?.('SSE 连接已断开');
         callbacks.onClose?.();
+        this.disconnect(taskId);
       }
     }
   }

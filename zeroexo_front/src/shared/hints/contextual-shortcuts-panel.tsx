@@ -16,19 +16,20 @@
 
 import React, { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { LogOut } from 'lucide-react';
+import { HINT_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { toKeyCaps, type ShortcutEntry } from '@zeroexo/plugin-keyboard';
 import { HINT_ENTRIES, type HintEntry } from './hint-entries.js';
 import { useHintsEnabled } from './hints-settings.js';
 
 /** 瞬态状态访问器(结构化类型,避免对插件包的硬依赖) */
 export interface TransientAccessor {
   subscribeTransient: (listener: () => void) => () => void;
-  getTransient: () => { spacePressed: boolean; marqueeAdditive: boolean };
+  getTransient: () => { spacePressed: boolean; marqueeAdditive: boolean; marqueeSelecting: boolean };
 }
 
 export interface ContextualShortcutsPanelProps {
-  /** 是否处于预览组态(展示 Enter 确认 / Esc 取消 / Ctrl+G 切换) */
+  /** 是否处于预览组态(展示 Enter 确认 / Esc 取消) */
   isGroupPreviewing: boolean;
   /** 单选了某个节点或组(展示双击聚焦提示;每次选中都显示) */
   singleSelected?: boolean;
@@ -36,10 +37,6 @@ export interface ContextualShortcutsPanelProps {
   singleSelectedInGroup?: boolean;
   /** 空白右键创建菜单是否打开(展示快捷创建提示) */
   createMenuOpen?: boolean;
-  /** 选中集中是否含组(展示 Shift+Delete 解组提示) */
-  selectionHasGroup?: boolean;
-  /** 是否选中 ≥2 个图片节点(展示 Ctrl+Shift+G 收纳版本组提示) */
-  canVersionFolder?: boolean;
   /** 是否选中堆叠媒体节点(展示移除卡片/收纳节点提示) */
   isStackedMedia?: boolean;
   /** 选中堆叠媒体节点且有卡片时(展示缩略图预览提示) */
@@ -48,8 +45,14 @@ export interface ContextualShortcutsPanelProps {
   hasIncomingPreviews?: boolean;
   /** 是否选中可堆叠媒体节点(image/video,有内容时,展示转入堆叠/生成堆叠节点提示) */
   isStackableMedia?: boolean;
+  /** 当前选中节点类型(区分 text/video/group 等双击语义;无选中/多选时为空) */
+  selectedNodeType?: string | null;
+  /** 画布是否已有节点(连线创建/导航提示的常驻条件) */
+  canvasHasNodes?: boolean;
   /** interaction 控制器瞬态订阅(Space 平移 / Shift+框选;未注入时跳过对应条目) */
   transient?: TransientAccessor | null;
+  /** 键盘插件注册表(shortcutId 引用条目时由此派生键帽,单一事实源) */
+  keyboardShortcuts?: readonly ShortcutEntry[];
 }
 
 /** panel 条目可见上下文 */
@@ -58,14 +61,15 @@ interface HintContext {
   singleSelected: boolean;
   singleSelectedInGroup: boolean;
   createMenuOpen: boolean;
-  selectionHasGroup: boolean;
-  canVersionFolder: boolean;
   isStackedMedia: boolean;
   stackHasCards: boolean;
   hasIncomingPreviews: boolean;
   isStackableMedia: boolean;
+  selectedNodeType: string | null;
+  canvasHasNodes: boolean;
   spacePressed: boolean;
   marqueeAdditive: boolean;
+  marqueeSelecting: boolean;
 }
 
 /** panel 条目显示条件派生(集中管理,新增条目在此加条件) */
@@ -73,22 +77,40 @@ function isVisible(entry: HintEntry, ctx: HintContext): boolean {
   switch (entry.id) {
     case 'preview-confirm':
     case 'preview-cancel':
-    case 'preview-toggle':
       return ctx.isGroupPreviewing;
+    // 双击聚焦:非 text 节点(text 双击语义由专属条目替代)
     case 'dblclick-focus':
-      return ctx.singleSelected && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
+      return (
+        ctx.singleSelected &&
+        ctx.selectedNodeType !== 'text' &&
+        !ctx.isGroupPreviewing &&
+        !ctx.createMenuOpen
+      );
+    // 双击编辑文字(接入既有 nodes.doubleClickToEdit)
+    case 'text-dblclick-edit':
+      return ctx.singleSelected && ctx.selectedNodeType === 'text' && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
+    // 双击组标题重命名(单选组时与聚焦提示并存)
+    case 'group-rename-dblclick':
+      return ctx.singleSelected && ctx.selectedNodeType === 'group' && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
     case 'drag-out-group':
       return ctx.singleSelectedInGroup && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
     case 'canvas-create':
       return ctx.createMenuOpen;
+    // 空画布:提示创建首个节点(新手最迷茫时刻)
+    case 'empty-canvas-create':
+      return !ctx.canvasHasNodes && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
+    // 滚轮平移画布:无选中时低优先级常驻(导航教育通道;性能考量默认滚轮平移而非缩放)
+    case 'scroll-pan':
+      return ctx.canvasHasNodes && !ctx.singleSelected && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
+    // Space 平移:仅按住时实时提示(取消常驻展示,避免与滚轮提示叠加信息过载)
     case 'space-pan':
       return ctx.spacePressed;
+    // 连线创建:画布有节点且无选中时常驻(核心隐藏操作)
+    case 'connect-create':
+      return ctx.canvasHasNodes && !ctx.singleSelected && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
+    // Shift+框选加选:普通框选进行中或 Shift 加选时展示(教育提示即时可懂)
     case 'shift-marquee':
-      return ctx.marqueeAdditive;
-    case 'shift-delete-ungroup':
-      return ctx.selectionHasGroup && !ctx.isGroupPreviewing;
-    case 'version-folder-shortcut':
-      return ctx.canVersionFolder && !ctx.isGroupPreviewing;
+      return (ctx.marqueeSelecting || ctx.marqueeAdditive) && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
     case 'stack-remove-card':
       return ctx.isStackedMedia && !ctx.isGroupPreviewing;
     case 'stack-preview-thumbnail':
@@ -130,18 +152,30 @@ function MouseDragIcon({ stroke, accent }: { stroke: string; accent: string }): 
   );
 }
 
+/** 鼠标滚轮图标:鼠标 + 中部滚轮高亮 */
+function MouseWheelIcon({ stroke, accent }: { stroke: string; accent: string }): React.ReactElement {
+  return (
+    <svg width="21" height="19" viewBox="0 0 21 19" fill="none" style={{ flexShrink: 0 }} aria-hidden>
+      <rect x="1.5" y="1.5" width="12" height="16" rx="6" stroke={stroke} strokeWidth="1.4" />
+      <line x1="7.5" y1="2" x2="7.5" y2="10.5" stroke={accent} strokeWidth="1.6" />
+      <line x1="1.5" y1="7" x2="13.5" y2="7" stroke={stroke} strokeWidth="1" />
+    </svg>
+  );
+}
+
 export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsPanel({
   isGroupPreviewing,
   singleSelected,
   singleSelectedInGroup,
   createMenuOpen,
-  selectionHasGroup,
-  canVersionFolder,
   isStackedMedia,
   stackHasCards,
   hasIncomingPreviews,
   isStackableMedia,
+  selectedNodeType,
+  canvasHasNodes,
   transient,
+  keyboardShortcuts,
 }: ContextualShortcutsPanelProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -155,7 +189,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
   const getSnapshot = React.useCallback(
     () => {
       const tr = transient?.getTransient();
-      return `${tr?.spacePressed ? 1 : 0}|${tr?.marqueeAdditive ? 1 : 0}`;
+      return `${tr?.spacePressed ? 1 : 0}|${tr?.marqueeAdditive ? 1 : 0}|${tr?.marqueeSelecting ? 1 : 0}`;
     },
     [transient],
   );
@@ -163,20 +197,56 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
   const parts = snapshot.split('|');
   const spacePressed = parts[0] === '1';
   const marqueeAdditive = parts[1] === '1';
+  const marqueeSelecting = parts[2] === '1';
+
+  // 键帽解析:shortcutId 引用注册表派生(单一事实源);未引用时回退手写 keys(手势类)
+  // DEV 断言:引用必须在注册表中存在,防止注册表改名/删除导致键帽静默丢失
+  const resolveKeys = React.useMemo(() => {
+    const capMap = new Map<string, string[]>();
+    for (const s of keyboardShortcuts ?? []) capMap.set(s.id, toKeyCaps(s));
+    if (import.meta.env.DEV) {
+      for (const entry of HINT_ENTRIES) {
+        if (!entry.shortcutId) continue;
+        const ids = Array.isArray(entry.shortcutId) ? entry.shortcutId : [entry.shortcutId];
+        for (const id of ids) {
+          if (!capMap.has(id)) {
+            console.warn(`[hints] hint '${entry.id}' 引用的快捷键 '${id}' 不在键盘注册表中,键帽将为空`);
+          }
+        }
+      }
+      for (const entry of HINT_ENTRIES) {
+        if (entry.iconKey && !(entry.iconKey in HINT_ICONS)) {
+          console.warn(`[hints] hint '${entry.id}' 的图标语义键 '${entry.iconKey}' 不在模块图标 Map(HINT_ICONS)中,图标将缺失`);
+        }
+      }
+    }
+    return (entry: HintEntry): string[] => {
+      if (!entry.shortcutId) return entry.keys ?? [];
+      const ids = Array.isArray(entry.shortcutId) ? entry.shortcutId : [entry.shortcutId];
+      const caps: string[] = [];
+      for (const id of ids) {
+        for (const cap of capMap.get(id) ?? []) {
+          if (!caps.includes(cap)) caps.push(cap);
+        }
+      }
+      return caps;
+    };
+  }, [keyboardShortcuts]);
 
   const ctx: HintContext = {
     isGroupPreviewing,
     singleSelected: !!singleSelected,
     singleSelectedInGroup: !!singleSelectedInGroup,
     createMenuOpen: !!createMenuOpen,
-    selectionHasGroup: !!selectionHasGroup,
-    canVersionFolder: !!canVersionFolder,
     isStackedMedia: !!isStackedMedia,
     stackHasCards: !!stackHasCards,
     hasIncomingPreviews: !!hasIncomingPreviews,
     isStackableMedia: !!isStackableMedia,
+    selectedNodeType: selectedNodeType ?? null,
+    canvasHasNodes: !!canvasHasNodes,
     spacePressed,
     marqueeAdditive,
+    marqueeSelecting,
   };
 
   const visible = HINT_ENTRIES
@@ -239,7 +309,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           key={entry.id}
           style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
         >
-          {(entry.keys ?? []).map((k, i) => (
+          {resolveKeys(entry).map((k, i) => (
             <React.Fragment key={`${entry.id}-${k}-${i}`}>
               {i > 0 ? <span style={{ color: dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)', fontSize: 10 }}>+</span> : null}
               <span style={keyCapStyle}>{k}</span>
@@ -251,8 +321,11 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           {entry.gesture === 'drag' ? (
             <MouseDragIcon stroke={iconStroke} accent={accent} />
           ) : null}
-          {entry.id === 'stack-remove-card' ? (
-            <LogOut size={16} strokeWidth={1.8} color={accent} aria-hidden />
+          {entry.gesture === 'wheel' ? (
+            <MouseWheelIcon stroke={iconStroke} accent={accent} />
+          ) : null}
+          {entry.iconKey ? (
+            <HintIcon iconKey={entry.iconKey} accent={accent} />
           ) : null}
           <span style={{ color: textColor, fontSize: 12, fontWeight: 500 }}>
             {t(entry.labelKey)}
@@ -262,3 +335,10 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
     </div>
   );
 });
+
+/** iconKey 渲染兜底:语义键缺失时静默跳过(DEV 断言已报警) */
+function HintIcon({ iconKey, accent }: { iconKey: string; accent: string }): React.ReactElement | null {
+  const IconComp = HINT_ICONS[iconKey];
+  if (!IconComp) return null;
+  return <IconComp size={16} strokeWidth={1.8} color={accent} aria-hidden />;
+}

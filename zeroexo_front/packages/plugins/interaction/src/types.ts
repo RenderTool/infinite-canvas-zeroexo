@@ -69,6 +69,8 @@ export interface InteractionTransient {
   draggingNode: boolean;
   /** 是否正在 Shift+框选(追加选择) */
   marqueeAdditive: boolean;
+  /** 是否正在框选(普通框选或 Shift 加选,供教育提示在框选中展示加选提示) */
+  marqueeSelecting: boolean;
   /** 是否正在 resize 缩放节点 */
   resizing: boolean;
 }

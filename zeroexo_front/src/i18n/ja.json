@@ -30,7 +30,8 @@
     "layer": "レイヤー",
     "createNode": "作成",
     "stackedMedia": "スタック",
-    "stackSelectedCount": "選択ノードをスタック ({{count}})"
+    "stackSelectedCount": "選択ノードをスタック ({{count}})",
+    "resetView": "ビューをリセット"
   },
   "nodeCategory": {
     "base": "基本",
@@ -688,7 +689,7 @@
     "confirmLabel": "グループ化",
     "confirmTitle": "グループ化(Enterで確定)",
     "versionFolderTitle": "バージョンフォルダ(Enterで確定)",
-    "cancelTitle": "グループ解除(Escでキャンセル)",
+    "cancelTitle": "キャンセル(Esc)",
     "renameTitle": "グループ名変更(タイトル入力にフォーカス)",
     "ungroupTitle": "グループ解除(子ノード保持、Delete)",
     "bgColorTitle": "グループ背景色を設定",
@@ -960,6 +961,9 @@
     "edit": "編集",
     "detail": "詳細表示",
     "convertToStack": "スタックに変換",
+    "eject": "独立ノードとして取り出す",
+    "stack": "スタック",
+    "moveOutGroup": "グループから取り出す",
     "createStackNode": "スタックノード作成"
   },
   "contextMenu": {
@@ -1253,19 +1257,21 @@
   "hints": {
     "dragOutGroup": "ドラッグで外す",
     "dragIntoGroup": "グループに追加",
-    "previewConfirm": "グループ化",
+    "previewConfirm": "グループにする",
     "previewCancel": "キャンセル",
-    "previewToggle": "プレビュー切替",
     "spacePan": "キャンバスをパン",
     "shiftMarquee": "追加選択",
-    "shiftDeleteUngroup": "グループ解除",
-    "versionFolderShortcut": "バージョングループ化",
-    "dblclickFocus": "ダブルクリックでフォーカス",
+    "dblclickFocus": "ダブルクリックで拡大表示",
+    "textDblclickEdit": "ダブルクリックで編集",
+    "groupRenameDblclick": "グループ名をダブルクリックで変更",
+    "scrollPan": "キャンバスを移動",
+    "connectCreate": "ノードの点をドラッグして接続",
     "canvasCreate": "タイプを選んで作成",
-    "stackRemoveCard": "スタックから取り出す",
+    "emptyCanvasCreate": "右クリックまたは左の＋ボタンで最初のノードを作成",
+    "stackRemoveCard": "独立ノードとして取り出す",
     "stackPreviewThumbnail": "ダブルクリックでサムネイルをプレビュー",
-    "stackCollectHint": "収納ボタンをクリックしてスタックに追加",
-    "stackableMediaHint": "カプセルツールバーの「堆叠」をクリックしてスタックノードを作成"
+    "stackCollectHint": "収納ボタンでスタックに追加",
+    "stackableMediaHint": "カプセルツールバーの収納ボタンでスタックを作成"
   },
   "errors": {
     "INTERNAL_SERVER_ERROR": "サーバー内部エラーです。後でもう一度お試しください",
@@ -1751,15 +1757,24 @@
     "categorySelect": "選択",
     "categoryView": "表示",
     "categoryCanvas": "キャンバス",
+    "categoryGroup": "グループ",
     "undo": "元に戻す",
     "redo": "やり直す",
-    "copyNode": "ノードを複製",
+    "copy": "コピー",
+    "paste": "ペースト",
+    "duplicate": "その場で複製",
     "deleteNode": "ノードを削除",
+    "dragDetach": "長押しでグループから外す",
     "selectAll": "すべて選択",
+    "deselect": "選択解除",
     "zoomIn": "拡大",
     "zoomOut": "縮小",
+    "resetView": "ビューをリセット",
     "panMode": "パンモード",
-    "selectMode": "選択モード"
+    "selectMode": "選択モード",
+    "groupConfirm": "グループにする",
+    "groupUngroup": "グループ解除（選択グループ）",
+    "previewCancel": "グループプレビューをキャンセル"
   },
   "projectCard": {
     "copyProject": "プロジェクトをコピー",

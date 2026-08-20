@@ -208,9 +208,9 @@ export class GroupPlugin implements Plugin {
    * - 预览态 Escape 取消预览(而非清空选中)
    *
    * 条目:
-   * - Ctrl/Cmd+G:切换预览/确认
+   * - Enter:预览态确认(推荐键,注册序即展示推荐序:同操作多条只展示首条)
+   * - Ctrl/Cmd+G:切换预览/确认(同效不展示,功能保留)
    * - Escape:预览态取消预览
-   * - Enter:预览态确认
    * - Delete/Backspace:删除选中节点(含组,非预览态)
    * - Shift+Delete/Backspace:解组保留子节点(非预览态)
    */
@@ -218,7 +218,19 @@ export class GroupPlugin implements Plugin {
     const ctrl = this.getController();
     return [
       {
+        id: 'group:enter-confirm',
+        meta: { category: 'group', descriptionKey: 'shortcuts.groupConfirm', education: true },
+        key: 'Enter',
+        handler: (e) => {
+          if (!ctrl.isPreviewing()) return false;
+          e.preventDefault();
+          ctrl.confirmPreview();
+          return true;
+        },
+      },
+      {
         id: 'group:toggle-preview',
+        meta: { category: 'group', descriptionKey: 'shortcuts.groupConfirm', education: true },
         key: 'g',
         ctrlKey: true,
         handler: (e) => {
@@ -238,6 +250,7 @@ export class GroupPlugin implements Plugin {
       },
       {
         id: 'group:escape-preview',
+        meta: { category: 'group', descriptionKey: 'shortcuts.previewCancel' },
         key: 'Escape',
         handler: () => {
           if (!ctrl.isPreviewing()) return false;
@@ -246,17 +259,8 @@ export class GroupPlugin implements Plugin {
         },
       },
       {
-        id: 'group:enter-confirm',
-        key: 'Enter',
-        handler: (e) => {
-          if (!ctrl.isPreviewing()) return false;
-          e.preventDefault();
-          ctrl.confirmPreview();
-          return true;
-        },
-      },
-      {
         id: 'group:delete-nodes',
+        meta: { category: 'group', descriptionKey: 'shortcuts.groupUngroup', education: true },
         key: ['Delete', 'Backspace'],
         handler: (e) => {
           if (ctrl.isPreviewing()) return false;
@@ -270,6 +274,7 @@ export class GroupPlugin implements Plugin {
       },
       {
         id: 'group:delete-ungroup',
+        meta: { display: false },
         key: ['Delete', 'Backspace'],
         shiftKey: true,
         handler: (e) => {
@@ -290,6 +295,7 @@ export class GroupPlugin implements Plugin {
       },
       {
         id: 'group:create-version-folder',
+        meta: { display: false },
         key: 'g',
         ctrlKey: true,
         shiftKey: true,

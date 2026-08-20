@@ -20,7 +20,7 @@
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, FileUp, BookOpen, ListOrdered, Eye, EyeOff, ArrowUpDown, GripVertical } from 'lucide-react';
-import { App, Button, Tooltip, Input, Modal } from 'antd';
+import { App, Button, ConfigProvider, Tooltip, Input, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme, AnimatedThemeToggler } from '@zeroexo/plugin-theme';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
@@ -386,6 +386,9 @@ export function ScriptFullscreenEditor({
   if (!open) return null;
 
   return createPortal(
+    // 局部提升 antd 弹层基准:自制 overlay(Z_INDEX.FULLSCREEN=30000)之上的 antd 弹层
+    // (Dropdown/Tooltip/Modal)由 token 自动分配 40000,替代手动 zIndex/overlayStyle
+    <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
     <div style={overlayStyle(theme)}>
       {/* ===== 顶部 header ===== */}
       <div style={headerStyle(cardBorder, theme)}>
@@ -558,7 +561,6 @@ export function ScriptFullscreenEditor({
             onDuplicate={handleDuplicate}
             onSplit={handleSplit}
             onMergePrev={handleMergePrev}
-            menuZIndex={Z_INDEX.FULLSCREEN_EDITOR_MENU}
           />
         </div>
       </div>
@@ -587,7 +589,6 @@ export function ScriptFullscreenEditor({
         centered
         width={320}
         destroyOnHidden
-        zIndex={Z_INDEX.FULLSCREEN_MODAL}
       >
         <div style={{ marginBottom: 8, fontSize: 13, color: mutedColor }}>
           {t('storyboard.enterEpisodeNumber', { count: normalizedEpisodes.length })}
@@ -602,7 +603,8 @@ export function ScriptFullscreenEditor({
           autoFocus
         />
       </Modal>
-    </div>,
+    </div>
+    </ConfigProvider>,
     document.body,
   );
 }

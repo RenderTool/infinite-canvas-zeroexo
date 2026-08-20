@@ -164,6 +164,7 @@ export class InteractionController {
     spacePressed: this.spacePressed,
     draggingNode: this.drag.type === 'node',
     marqueeAdditive: this.drag.type === 'marquee' && this.drag.additive,
+    marqueeSelecting: this.drag.type === 'marquee',
     resizing: this.drag.type === 'resize',
   });
 
@@ -270,8 +271,8 @@ export class InteractionController {
         startClientY: event.clientY,
         additive: event.shiftKey,
       };
-      // 框选开始即通知(Shift 追加框选教育提示需即时展示)
-      if (event.shiftKey) this.notifyTransient();
+      // 框选开始即通知(普通框选展示加选提示/Shift 追加框选提示均需即时展示)
+      this.notifyTransient();
       return;
     }
 

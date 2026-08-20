@@ -23,6 +23,9 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { App, Layout, Tooltip } from 'antd';
+import { ClipboardPaste } from 'lucide-react';
+import { EDITOR_ICONS } from './icons.js';
+import { hasClipboardContent, pasteClipboard } from '@zeroexo/preset-default';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { CanvasView, PinDefaultsProvider, NodeDefaultsProvider } from '@zeroexo/plugin-render-react';
 import { MinimapView } from '@zeroexo/plugin-minimap';
@@ -50,6 +53,7 @@ import { AgentDock } from '@/features/canvas-agent/ui/index.js';
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
+import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
 import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, MobileNavDrawer, MobileNavButton, MobileNavFloatingWrapper, LanguageDialog, AssetDetailViewer, LoadingOverlay } from '@/shared/components/index.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
@@ -78,6 +82,8 @@ export interface EditorPageProps {
 
 export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
   const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, conflict, onPullCloud, onPushLocal, onConflictClose } = useEditorState(canvasId);
+    // 快捷键注册表(键盘插件实例;供快捷键弹窗自动映射,未安装插件时为 undefined)
+    const keyboardShortcuts = state.editor?.core.plugins.get<KeyboardPlugin>('keyboard')?.listShortcuts();
   const { theme } = useTheme();
   const { message } = App.useApp();
   const { t, i18n } = useTranslation();
@@ -142,6 +148,42 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     onRenameGroup: dialogs.onRenameGroup,
   });
 
+  // 空白右键「重置视图」:全图适配(fit-content)。左栏缩放菜单 fitScreen 仅是 100% 复位,
+  // 此处才是真正「看到全部内容」;空图回退世界原点 (0,0) k=1(Plan#21 候选 B)
+  const handleResetView = useCallback(() => {
+    const store = state.editor?.store;
+    if (!store) return;
+    const graph = store.getGraph();
+    if (graph.nodes.length === 0) {
+      store.setViewport({ x: 0, y: 0, k: 1 });
+      return;
+    }
+    // 全图 union:组用 getGroupBoundsWithEmptyFallback(含空组回退),普通节点 position+size(与多选聚焦同源)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of graph.nodes) {
+      if (n.type === 'group') {
+        const b = getGroupBoundsWithEmptyFallback(graph.nodes, n.id, interactions.getNodeSize);
+        if (!b) continue;
+        minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.width); maxY = Math.max(maxY, b.y + b.height);
+      } else {
+        const size = interactions.getNodeSize(n);
+        minX = Math.min(minX, n.position.x); minY = Math.min(minY, n.position.y);
+        maxX = Math.max(maxX, n.position.x + size.width); maxY = Math.max(maxY, n.position.y + size.height);
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      store.setViewport({ x: 0, y: 0, k: 1 });
+      return;
+    }
+    store.focusOnBounds(
+      { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+      state.containerSize,
+      400,
+      51,
+    );
+  }, [state.editor, state.containerSize, interactions]);
+
   // 从 persistence 加载画布标题
   useEffect(() => {
     void (async () => {
@@ -193,20 +235,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     if (!store?.focusOnNode) return;
     store.focusOnNode(nodeId, state.containerSize, width, height, 400, 51);
   }, [state.editor?.store, state.containerSize]);
-
-  // Ctrl+Shift+G 可否收纳为版本文件夹:选中 ≥2 个图片节点(与 createVersionFolder 真实条件一致)
-  const canVersionFolder = (() => {
-    const store = state.editor?.store;
-    if (!store || state.selectedCount < 2) return false;
-    const selected = store.getSelection().selectedNodeIds;
-    const graph = store.getGraph();
-    let imageCount = 0;
-    for (const id of selected) {
-      const n = graph.nodes.find((nd: NodeRecord) => nd.id === id);
-      if (n?.type === 'image') imageCount++;
-    }
-    return imageCount >= 2;
-  })();
 
   // 是否选中可堆叠媒体节点(image/video,有内容时)
   const isStackableMedia = (() => {
@@ -403,6 +431,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           onOpenCollaboration={dialogs.onOpenCollaboration}
           onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
+          keyboardShortcuts={keyboardShortcuts}
           syncBadge={
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <CreationSyncBadge
@@ -552,13 +581,14 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             singleSelected={state.selectedCount === 1}
             singleSelectedInGroup={state.selectedInGroup}
             createMenuOpen={!!nodeCreateMenuPos}
-            selectionHasGroup={state.selectedHasGroup}
-            canVersionFolder={canVersionFolder}
             isStackedMedia={(state.selectedNodeType as string) === 'stacked-media'}
             stackHasCards={stackHasCards}
             hasIncomingPreviews={hasIncomingPreviews}
             isStackableMedia={isStackableMedia}
+            selectedNodeType={state.selectedNodeType as string | null}
+            canvasHasNodes={!!state.editor && state.editor.store.getGraph().nodes.length > 0}
             transient={refs.interactionController}
+            keyboardShortcuts={keyboardShortcuts}
           />
           )}
           {nodeCreateMenuPos ? (
@@ -567,6 +597,14 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
               onSelect={interactions.handleNodeCreateMenuSelect}
               onClose={() => setNodeCreateMenuPos(null)}
               theme={theme}
+              extraItems={[
+                { key: 'reset-view', label: t('toolbar.resetView'), icon: <EDITOR_ICONS.resetView size={14} />, onClick: handleResetView },
+                ...(hasClipboardContent() && state.editor
+                  ? [{ key: 'paste', label: t('editor.paste'), icon: <ClipboardPaste size={14} />, onClick: () => {
+                    pasteClipboard(state.editor!.store, state.editor!.core.commandQueue);
+                  }}]
+                  : []),
+              ]}
             />
           ) : null}
         </>
@@ -598,7 +636,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             toolContext={interactions.toolContext}
             getGroupTools={interactions.getGroupTools}
             selectedCount={state.selectedCount}
-            selectedHasGroup={state.selectedHasGroup}
             showMoveOut={state.selectedInGroup}
             onMoveOutGroup={interactions.handleMoveOutGroup}
             isPreview={state.isGroupPreviewing}
@@ -606,7 +643,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             getAnchorBounds={interactions.getAnchorBounds}
             node={state.isGroupPreviewing ? interactions.previewGroupNode : undefined}
             onGroup={actions.groupSelected}
-            onUngroup={actions.ungroupSelected}
             onArrangeGrid={() => interactions.handleArrange('grid')}
             onArrangeHorizontal={() => interactions.handleArrange('horizontal')}
             onArrangeVertical={() => interactions.handleArrange('vertical')}
@@ -726,7 +762,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         theme={theme}
         config={dialogs.canvasConfig}
         onConfirm={dialogs.onCanvasConfigConfirm}
-        onPreview={dialogs.onCanvasConfigPreview}
       />
 
       {/* 图片编辑独立对话框 */}
@@ -957,6 +992,8 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         <ShortcutsDialog
           theme={theme}
           onClose={() => dialogs.setMobileShortcutsOpen(false)}
+          isMobile={isMobile}
+          shortcuts={keyboardShortcuts}
         />
       ) : null}
     </Layout>

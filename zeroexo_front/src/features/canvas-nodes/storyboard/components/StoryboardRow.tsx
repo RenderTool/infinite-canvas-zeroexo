@@ -8,7 +8,8 @@ import { Input, Tooltip, Button } from 'antd';
 import { Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import type { Shot, StoryboardEntity } from '../storyboard-types';
+import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign } from '../storyboard-types';
+import { formatLighting, formatEnvironment } from '../storyboard-utils';
 import { MentionDropdown } from './EntityManager';
 import { ShotStatePicker } from './ShotStatePicker';
 import { CAMERA_MOVEMENT_OPTIONS, NODE_GRID_TEMPLATE, EDIT_GRID_TEMPLATE, gridCellStyle } from './StoryboardTable';
@@ -67,11 +68,12 @@ export const StoryboardRow = memo(function StoryboardRow({
   const accentCyan = '#5DDCFF';
 
   const sfx = Array.isArray(shot.sfx) ? shot.sfx : [];
-  const mood = shot.lighting?.mood ?? '';
-  const loc = shot.environment?.location ?? '';
+  // Plan#20 T2: 光影/环境双兼容字符串化展示(后端产出字符串 / 旧数据对象)
+  const lightingText = formatLighting(shot.lighting);
+  const envText = formatEnvironment(shot.environment);
   const moodLocParts: string[] = [];
-  if (mood) moodLocParts.push(mood);
-  if (loc) moodLocParts.push(loc);
+  if (lightingText) moodLocParts.push(lightingText);
+  if (envText) moodLocParts.push(envText);
   const moodLocText = moodLocParts.join(' · ') || null;
   const gridTemplate = readOnly ? NODE_GRID_TEMPLATE : EDIT_GRID_TEMPLATE;
   const cellBase: CSSProperties = { display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '0.375rem 0.25rem', fontSize: 12, width: '100%', height: '100%', minHeight: 60, color: textColor, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'hidden' };
@@ -194,10 +196,16 @@ export const StoryboardRow = memo(function StoryboardRow({
             autoSize={{ minRows: 1, maxRows: 30 }}
             value={moodLocText || ''}
             onChange={(e) => {
-              const parts = e.target.value.split(' · ');
+              const val = e.target.value;
+              // Plan#20 T2: 字符串形态整体回写 lighting(保持字符串契约); 对象形态沿用 mood·loc 拆分
+              if (typeof shot.lighting === 'string' || typeof shot.environment === 'string') {
+                onUpdateShot(shot.id, { lighting: val });
+                return;
+              }
+              const parts = val.split(' · ');
               onUpdateShot(shot.id, {
-                lighting: { ...shot.lighting, mood: parts[0] || '' },
-                environment: { ...shot.environment, location: parts[1] || '' },
+                lighting: { ...(shot.lighting as LightingDesign), mood: parts[0] || '' },
+                environment: { ...(shot.environment as EnvironmentDesign), location: parts[1] || '' },
               });
             }}
             placeholder={t('storyboardRow.placeholderLighting')}

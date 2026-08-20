@@ -43,8 +43,7 @@ interface EpisodeListProps {
   onMergePrev: (id: string) => void;
   /** 头部右上角自定义操作区(如导入/全屏按钮) */
   actions?: ReactNode;
-  /** 下拉菜单 z-index(全屏编辑器内需使用 FULLSCREEN_EDITOR_MENU 避免被遮挡) */
-  menuZIndex?: number;
+  // 弹层 z-index 由 antd token zIndexPopupBase 自动分配(全屏编辑器内局部 40000),不再手动传
 }
 
 const menuLabelStyle: CSSProperties = { fontSize: 12 };
@@ -94,7 +93,6 @@ export function EpisodeList({
   onSplit,
   onMergePrev,
   actions,
-  menuZIndex,
 }: EpisodeListProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -173,7 +171,6 @@ export function EpisodeList({
               key={ep.id}
               menu={{ items: buildMenu(ep, idx, { onRename: () => handleStartEdit(ep), onDuplicate, onSplit, onMergePrev, onDelete }), style: { minWidth: 160 } }}
               trigger={['contextMenu']}
-              overlayStyle={menuZIndex ? { zIndex: menuZIndex } : undefined}
             >
             <div
               draggable
@@ -258,7 +255,6 @@ export function EpisodeList({
                   trigger={['click']}
                   placement="bottomRight"
                   rootClassName="zx-episode-more-dropdown"
-                  overlayStyle={menuZIndex ? { zIndex: menuZIndex } : undefined}
                 >
                   <Tooltip title={t('episodeList.moreActions')}>
                     <button type="button" style={actionBtnStyle(isDark)} onClick={(e) => e.stopPropagation()}>

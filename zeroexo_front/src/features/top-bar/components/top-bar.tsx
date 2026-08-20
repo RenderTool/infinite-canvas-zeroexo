@@ -26,6 +26,7 @@ import { AppearanceDialog, ShortcutsDialog, LanguageSwitcher } from '@/shared/co
 import type { GridStyle } from '@/shared/components/index.js';
 import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
+import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
 
 /** 换肤图标(sun-moon),与主页 AppTopBar 保持同一图标,体现"同一组件变体" */
 function SunMoonIcon(): React.ReactElement {
@@ -73,6 +74,8 @@ export interface TopBarProps {
   onSaveVersion?: () => void;
   /** 打开版本历史面板 */
   onOpenVersionHistory?: () => void;
+  /** 快捷键注册表(键盘插件实例;透传给快捷键弹窗自动映射) */
+  keyboardShortcuts?: readonly ShortcutEntry[];
 }
 
 export function TopBar({
@@ -98,6 +101,7 @@ export function TopBar({
   onOpenCollaboration,
   onSaveVersion,
   onOpenVersionHistory,
+  keyboardShortcuts,
 }: TopBarProps): React.ReactElement {
   const { theme, mode } = useTheme();
   const { t } = useTranslation();
@@ -303,6 +307,7 @@ export function TopBar({
         <ShortcutsDialog
           theme={theme}
           onClose={() => setShortcutsOpen(false)}
+          shortcuts={keyboardShortcuts}
         />
       ) : null}
     </div>

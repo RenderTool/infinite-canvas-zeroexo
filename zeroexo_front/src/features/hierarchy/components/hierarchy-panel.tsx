@@ -22,8 +22,9 @@ import {
   ChevronDown, ChevronRight, FolderOpen, Image as ImageIcon,
   Settings2, Type as TypeIcon, File, FileText, Clapperboard, Film,
   Layers, X, Search, Download, CheckSquare, Square,
-  Lock, Combine, Video,
+  Lock, Video,
 } from 'lucide-react';
+import { HIERARCHY_ICONS } from './icons.js';
 import JSZip from 'jszip';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useHierarchyPanelProps } from '@zeroexo/plugin-group';
@@ -62,16 +63,16 @@ function getTypeIcon(node: SceneNode): ReactNode {
     case 'audio': return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>;
     case 'generator': return <Settings2 {...cls} />;
     case 'stacked-media': {
-      // 堆叠节点:显示活跃卡片类型图标(空堆叠回退 Combine 图标)
+      // 堆叠节点:显示活跃卡片类型图标(空堆叠回退 stack 语义图标)
       const data = node.data as Record<string, unknown> | undefined;
       const cards = (data?.cards as Array<{ sourceType: string }>) ?? [];
       const activeIndex = (data?.activeIndex as number) ?? 0;
       const activeCard = cards[activeIndex];
-      if (!activeCard) return <Combine {...cls} />;
+      if (!activeCard) return <HIERARCHY_ICONS.stack {...cls} />;
       if (activeCard.sourceType === 'video') return <Video {...cls} />;
       if (activeCard.sourceType === 'image') return <ImageIcon {...cls} />;
       if (activeCard.sourceType === 'text') return <TypeIcon {...cls} />;
-      return <Combine {...cls} />;
+      return <HIERARCHY_ICONS.stack {...cls} />;
     }
     case 'script': return <FileText {...cls} />;
     case 'storyboard': return <Clapperboard {...cls} />;

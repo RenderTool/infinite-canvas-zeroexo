@@ -29,8 +29,9 @@ export function AntdThemeProvider({ children, light = false }: AntdThemeProvider
     cssVar: { key: 'zx' },
     algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
     token: {
-      // 全屏编辑 overlay 使用 zIndex 10000,antd 弹层(Modal/Select/Dropdown/Tooltip)
-      // 必须高于它,否则全屏内所有弹层都会被 overlay 遮住(删除确认、下拉面板等)。
+      // antd 弹层(Modal/Select/Dropdown/Tooltip)z-index 由本 token 统一分配(全局 20000);
+      // 自制 overlay 走 Z_INDEX 常量(全屏编辑器 Z_INDEX.FULLSCREEN=30000),全屏内的 antd 弹层
+      // 由 script-fullscreen-editor 局部 ConfigProvider 覆盖为 40000——禁止再手动传 zIndex。
       zIndexPopupBase: 20000,
       colorPrimary: theme.toolbar.accent,
       colorBgLayout: light ? '#ffffff' : theme.canvas.background,

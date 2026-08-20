@@ -23,6 +23,24 @@ import type { Plugin, PluginContext } from '@zeroexo/core';
 // ===== 类型 =====
 
 /**
+ * 快捷键展示元数据(Plan#23 A 模块:注册表自动映射)
+ * - 快捷键页面/教育浮层按此派生,UI 不再手写副本
+ * - 缺失 meta 或 descriptionKey 缺省 → UI 自动隐藏该条(内部机制键)
+ */
+export interface ShortcutMeta {
+  /** 分类 id(快捷键页面分组,对应 shortcuts.category* i18n key;缺省归 'other') */
+  category?: string;
+  /** 操作说明 i18n key(shortcuts.* 命名空间;缺省则 UI 不展示该条) */
+  descriptionKey?: string;
+  /** 图标语义键(消费模块内 Map 解析,可选) */
+  iconKey?: string;
+  /** 是否在 UI 展示(默认 true;false = 内部机制变体,如 Shift+Delete 解组) */
+  display?: boolean;
+  /** 是否为教育浮层候选(默认 false;education 面板自动收集) */
+  education?: boolean;
+}
+
+/**
  * 快捷键条目
  * - key: 键名(如 'Delete' / 'Escape' / 'g' / 'z'),支持多个(如 ['Delete', 'Backspace'])
  * - ctrlKey: 匹配 Ctrl 或 Cmd(macOS),默认 false
@@ -46,6 +64,69 @@ export interface ShortcutEntry {
   altKey?: boolean;
   /** 处理函数:返回 true 已处理(停止分发),false 未处理(继续匹配) */
   handler: (event: KeyboardEvent) => boolean;
+  /** 展示元数据(可选;用于快捷键页面/教育浮层自动映射) */
+  meta?: ShortcutMeta;
+}
+
+// ===== 目录派生(UI 消费:快捷键页面/教育浮层自动映射) =====
+
+/** 目录条目:由注册表派生,UI 只消费此结构,禁止手写键帽副本 */
+export interface ShortcutCatalogEntry {
+  /** 注册 id */
+  id: string;
+  /** 键帽链(KeyCap 解析结果,如 ['Ctrl','Shift','G']) */
+  caps: string[];
+  /** 操作说明 i18n key */
+  descriptionKey: string;
+  /** 分类 id(对应 shortcuts.category* i18n key) */
+  category: string;
+  /** 图标语义键(可选) */
+  iconKey?: string;
+  /** 教育浮层候选标记 */
+  education?: boolean;
+}
+
+/**
+ * 键帽解析:修饰符(固定顺序 Ctrl→Shift→Alt)+ 主键
+ * - 主键单字符字母大写显示(如 'g' → 'G'),其余原样(Delete/Escape/Enter/= 等)
+ * - 多键取首(如 ['Delete','Backspace'] → 'Delete')
+ */
+export function toKeyCaps(
+  entry: Pick<ShortcutEntry, 'key' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+): string[] {
+  const caps: string[] = [];
+  if (entry.ctrlKey) caps.push('Ctrl');
+  if (entry.shiftKey) caps.push('Shift');
+  if (entry.altKey) caps.push('Alt');
+  const key = (Array.isArray(entry.key) ? entry.key[0] : entry.key) ?? '';
+  caps.push(/^[a-zA-Z]$/.test(key) ? key.toUpperCase() : key);
+  return caps;
+}
+
+/**
+ * 聚合目录:由注册表派生 UI 展示条目(单一事实源 → 派生层)
+ * - 过滤:无 meta / display:false / 无 descriptionKey(内部机制键不展示)
+ * - 未安装插件 → 无对应条目(自动隐藏)
+ * - extras:注册表外补充(如 interaction 插件内部监听的 V 键),需完整 meta
+ */
+export function getShortcutCatalog(
+  shortcuts: readonly ShortcutEntry[],
+  extras: readonly ShortcutEntry[] = [],
+): ShortcutCatalogEntry[] {
+  const out: ShortcutCatalogEntry[] = [];
+  for (const entry of [...shortcuts, ...extras]) {
+    const meta = entry.meta;
+    if (!meta || meta.display === false || !meta.descriptionKey) continue;
+    out.push({
+      id: entry.id,
+      caps: toKeyCaps(entry),
+      descriptionKey: meta.descriptionKey,
+      category: meta.category ?? 'other',
+      iconKey: meta.iconKey,
+      education: meta.education,
+    });
+  }
+  return out;
 }
 
 // ===== 插件类 =====

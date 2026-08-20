@@ -31,6 +31,16 @@ import { GroupPlugin } from '@zeroexo/plugin-group';
 import { LayoutPlugin } from '@zeroexo/plugin-layout';
 import { registerStandardShortcuts } from './shortcuts.js';
 
+// 剪贴板复用 API(供右键菜单等 UI 入口调用,与快捷键同源;逻辑全部在 shortcuts.ts,此处纯转发)
+export {
+  hasClipboardContent,
+  pasteClipboard,
+  duplicateSubtree,
+  pasteFromClipboard,
+  collectSubtreeIds,
+  filterTopLevelIds,
+} from './shortcuts.js';
+
 // ===== 类型 =====
 
 export interface DefaultEditorOptions {

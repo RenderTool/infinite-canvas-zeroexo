@@ -20,6 +20,44 @@ import type { HistoryPlugin } from '@zeroexo/plugin-history';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import type { GroupController } from '@zeroexo/plugin-group';
 
+// 剪贴板:模块级状态,std:copy/std:duplicate 写入;右键菜单(空白粘贴)通过
+// pasteClipboard/hasClipboardContent 复用。每次 registerStandardShortcuts 重置,保证实例隔离语义。
+let clipboard: { nodes: NodeRecord[]; edges: EdgeRecord[] } = { nodes: [], edges: [] };
+
+// ===== 剪贴板复用 API(供右键菜单等 UI 入口调用,与快捷键同源) =====
+
+/** 是否有可粘贴内容(右键菜单显示「粘贴」项的判据) */
+export function hasClipboardContent(): boolean {
+  return clipboard.nodes.length > 0;
+}
+
+/** 粘贴当前剪贴板(与 Ctrl+V 同逻辑):重建 id 映射 + 选中新节点;无内容返回 false */
+export function pasteClipboard(store: ReactGraphStore, commandQueue: CommandQueue): boolean {
+  if (clipboard.nodes.length === 0) return false;
+  const newIds = pasteFromClipboard(clipboard, commandQueue);
+  const topIds = filterTopLevelIds(newIds, commandQueue);
+  if (topIds.length > 0) store.selectNodes(topIds, false);
+  return true;
+}
+
+/** 复制指定节点子树(与 Ctrl+D 同逻辑):收集子树+关联连线 → 粘贴 → 选中新节点 */
+export function duplicateSubtree(store: ReactGraphStore, commandQueue: CommandQueue, nodeIds: Set<string>): void {
+  if (nodeIds.size === 0) return;
+  const graph = commandQueue.getState();
+  const collected = collectSubtreeIds(graph.nodes, nodeIds);
+  const localClip = {
+    nodes: graph.nodes
+      .filter((n) => collected.has(n.id))
+      .map((n) => structuredClone(n)),
+    edges: graph.edges
+      .filter((edge) => collected.has(edge.source.nodeId) && collected.has(edge.target.nodeId))
+      .map((e) => structuredClone(e)),
+  };
+  const newIds = pasteFromClipboard(localClip, commandQueue);
+  const topIds = filterTopLevelIds(newIds, commandQueue);
+  if (topIds.length > 0) store.selectNodes(topIds, false);
+}
+
 export function registerStandardShortcuts(
   keyboard: KeyboardPlugin,
   deps: {
@@ -31,12 +69,14 @@ export function registerStandardShortcuts(
   },
 ): () => void {
   const { store, commandQueue, history, groupCtrl } = deps;
-  let clipboard: { nodes: NodeRecord[]; edges: EdgeRecord[] } = { nodes: [], edges: [] };
+  // 每次注册重置剪贴板,保证实例隔离语义(模块级 clipboard 由 std:copy/std:duplicate 写入)
+  clipboard = { nodes: [], edges: [] };
 
   return keyboard.registerShortcuts([
     // Ctrl/Cmd+Z:撤销(Shift 时重做)
     {
       id: 'std:undo',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.undo' },
       key: 'z',
       ctrlKey: true,
       handler: (e) => {
@@ -48,6 +88,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+Y:重做
     {
       id: 'std:redo-y',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.redo' },
       key: 'y',
       ctrlKey: true,
       handler: () => {
@@ -58,6 +99,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+A:全选
     {
       id: 'std:select-all',
+      meta: { category: 'select', descriptionKey: 'shortcuts.selectAll' },
       key: 'a',
       ctrlKey: true,
       handler: (e) => {
@@ -70,6 +112,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+C:复制(保留组层级,收集选中 + 子组所有子孙 + 关联连线)
     {
       id: 'std:copy',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.copy', education: true },
       key: 'c',
       ctrlKey: true,
       handler: (e) => {
@@ -89,41 +132,28 @@ export function registerStandardShortcuts(
         return true;
       },
     },
-    // Ctrl/Cmd+V:粘贴(重建 id 映射,保持 parentId/childrenIds 层级 + 连线)
+    // Ctrl/Cmd+V:粘贴(与右键菜单共用 pasteClipboard 单一事实源)
     {
       id: 'std:paste',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.paste', education: true },
       key: 'v',
       ctrlKey: true,
       handler: (e) => {
-        if (clipboard.nodes.length === 0) return false;
-        const newIds = pasteFromClipboard(clipboard, commandQueue);
-        const topIds = filterTopLevelIds(newIds, commandQueue);
-        if (topIds.length > 0) store.selectNodes(topIds, false);
+        if (!pasteClipboard(store, commandQueue)) return false;
         e.preventDefault();
         return true;
       },
     },
-    // Ctrl/Cmd+D:原位复制(偏移 20,20,保留组结构 + 连线)
+    // Ctrl/Cmd+D:原位复制(与右键菜单共用 duplicateSubtree 单一事实源,偏移 20,20,保留组结构 + 连线)
     {
       id: 'std:duplicate',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.duplicate', education: true },
       key: 'd',
       ctrlKey: true,
       handler: (e) => {
         const nodeIds = store.getSelection().selectedNodeIds;
         if (nodeIds.size === 0) return false;
-        const graph = commandQueue.getState();
-        const collected = collectSubtreeIds(graph.nodes, nodeIds);
-        const localClip = {
-          nodes: graph.nodes
-            .filter((n) => collected.has(n.id))
-            .map((n) => structuredClone(n)),
-          edges: graph.edges
-            .filter((edge) => collected.has(edge.source.nodeId) && collected.has(edge.target.nodeId))
-            .map((e) => structuredClone(e)),
-        };
-        const newIds = pasteFromClipboard(localClip, commandQueue);
-        const topIds = filterTopLevelIds(newIds, commandQueue);
-        if (topIds.length > 0) store.selectNodes(topIds, false);
+        duplicateSubtree(store, commandQueue, nodeIds);
         e.preventDefault();
         return true;
       },
@@ -132,6 +162,7 @@ export function registerStandardShortcuts(
     // 安全兜底:如果选中集中含组节点,走 groupCtrl.deleteNodes(解组保留子节点)
     {
       id: 'std:delete',
+      meta: { category: 'edit', descriptionKey: 'shortcuts.deleteNode' },
       key: ['Delete', 'Backspace'],
       handler: (e) => {
         const { selectedNodeIds, selectedEdgeIds } = store.getSelection();
@@ -168,6 +199,7 @@ export function registerStandardShortcuts(
     // Escape:清空选中(无选中时返回 false,让 group:escape-preview 处理预览取消)
     {
       id: 'std:escape',
+      meta: { category: 'select', descriptionKey: 'shortcuts.deselect' },
       key: 'Escape',
       handler: (e) => {
         const { selectedNodeIds, selectedEdgeIds } = store.getSelection();
@@ -180,6 +212,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+=:放大
     {
       id: 'std:zoom-in',
+      meta: { category: 'view', descriptionKey: 'shortcuts.zoomIn' },
       key: '=',
       ctrlKey: true,
       handler: (e) => {
@@ -193,6 +226,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+-:缩小
     {
       id: 'std:zoom-out',
+      meta: { category: 'view', descriptionKey: 'shortcuts.zoomOut' },
       key: '-',
       ctrlKey: true,
       handler: (e) => {
@@ -206,6 +240,7 @@ export function registerStandardShortcuts(
     // Ctrl/Cmd+0:重置缩放
     {
       id: 'std:zoom-reset',
+      meta: { category: 'view', descriptionKey: 'shortcuts.resetView' },
       key: '0',
       ctrlKey: true,
       handler: (e) => {
@@ -220,7 +255,7 @@ export function registerStandardShortcuts(
 
 // ===== 快捷键辅助函数 =====
 
-function pasteFromClipboard(clipboard: { nodes: NodeRecord[]; edges: EdgeRecord[] }, commandQueue: CommandQueue): string[] {
+export function pasteFromClipboard(clipboard: { nodes: NodeRecord[]; edges: EdgeRecord[] }, commandQueue: CommandQueue): string[] {
   const idMap = new Map<string, string>();
   for (const node of clipboard.nodes) {
     idMap.set(node.id, generateId('node'));
@@ -283,7 +318,7 @@ function pasteFromClipboard(clipboard: { nodes: NodeRecord[]; edges: EdgeRecord[
   return newIds;
 }
 
-function filterTopLevelIds(ids: string[], commandQueue: CommandQueue): string[] {
+export function filterTopLevelIds(ids: string[], commandQueue: CommandQueue): string[] {
   const graph = commandQueue.getState();
   return ids.filter((id) => {
     const node = graph.nodes.find((n) => n.id === id);
@@ -291,7 +326,7 @@ function filterTopLevelIds(ids: string[], commandQueue: CommandQueue): string[] 
   });
 }
 
-function collectSubtreeIds(nodes: NodeRecord[], selectedIds: Set<string>): Set<string> {
+export function collectSubtreeIds(nodes: NodeRecord[], selectedIds: Set<string>): Set<string> {
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const result = new Set<string>();
   for (const id of selectedIds) {

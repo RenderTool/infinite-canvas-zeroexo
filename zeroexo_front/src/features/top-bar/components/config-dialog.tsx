@@ -8,7 +8,7 @@
  *
  * 节点统一使用 theme.node.fill(dark/light 主题切换),移除按类型独立配色。
  *
- * draft 状态隔离,实时同步到全局。
+ * draft 状态隔离,确认按钮才应用到画布(预览面板语义)。
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -137,15 +137,10 @@ export interface ConfigDialogProps {
   config: CanvasConfig;
   /** 确认时提交全量配置,立即全局生效 */
   onConfirm: (config: CanvasConfig) => void;
-  /**
-   * 实时预览回调(Plan#13):调参时实时应用到画布(不持久化),
-   * 取消时回滚到打开时快照,确认时持久化。
-   */
-  onPreview?: (config: CanvasConfig) => void;
 }
 
 export function ConfigDialog({
-  open, onClose, theme, config, onConfirm, onPreview,
+  open, onClose, theme, config, onConfirm,
 }: ConfigDialogProps): React.ReactElement {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -156,30 +151,26 @@ export function ConfigDialog({
   // 节点样式预览使用当前实际主题(而非 dialog props 中的 theme,后者可能是传入的旧主题)
   const previewTheme = currentTheme;
 
-  // ===== Plan#13 实时化:draft 镜像 + 打开时快照 =====
+  // ===== 确认制:draft 镜像,确认才应用到画布(弹窗内 ConfigPreviewHost 实时预览) =====
   const [draft, setDraftState] = useState<CanvasConfig>(config);
   const draftRef = useRef<CanvasConfig>(config);
-  /** 打开时快照(取消回滚基准;打开瞬间固定,不被实时预览覆盖) */
-  const snapshotRef = useRef<CanvasConfig>(config);
   const openRef = useRef(open);
   const setDraft = (next: CanvasConfig): void => {
     draftRef.current = next;
     setDraftState(next);
   };
   useEffect(() => {
-    // 仅 open false→true 边沿:固定快照 + 同步 draft(实时预览期间 config 变化不重置)
+    // 仅 open false→true 边沿:同步 draft(确认后 config 已更新,重新打开用新值)
     if (open && !openRef.current) {
-      snapshotRef.current = config;
       setDraft(config);
     }
     openRef.current = open;
   }, [open, config]);
 
-  /** 仅更新本地 draft 并实时预览(不立即持久化;拖动滑块时画布真实节点实时变化) */
+  /** 仅更新本地 draft(弹窗内预览面板实时渲染,画布不受影响) */
   const update = (patch: Partial<CanvasConfig>): void => {
     const next = { ...draftRef.current, ...patch };
     setDraft(next);
-    onPreview?.(next);
   };
 
   const handleConfirm = (): void => {
@@ -188,9 +179,7 @@ export function ConfigDialog({
   };
 
   const handleCancel = (): void => {
-    // 取消:回滚到打开时快照(实时预览期间画布已被改动)
-    onPreview?.(snapshotRef.current);
-    setDraft(snapshotRef.current);
+    // 确认制:画布从未被改动,直接关闭(丢弃 draft)
     onClose();
   };
 
@@ -279,7 +268,6 @@ export function ConfigDialog({
           <button type="button" style={resetBtnStyle}
             onClick={() => {
               setDraft(DEFAULT_CANVAS_CONFIG);
-              onPreview?.(DEFAULT_CANVAS_CONFIG);
             }}>
             {t('common.reset')}
           </button>
@@ -327,8 +315,8 @@ export function ConfigDialog({
         wrapper: {
           padding: 0,
         },
-        /* 面板底色只作用于弹窗卡片本身(content),不再铺满整个 wrapper;mask 保持全透明,露出画布 */
-        content: {
+        /* 面板底色只作用于弹窗卡片本身(root,antd 6 已移除 content 键),不再铺满整个 wrapper;mask 保持全透明,露出画布 */
+        root: {
           background: theme.toolbar.panel,
           color: theme.toolbar.text,
           borderRadius: 12,

@@ -181,15 +181,10 @@ export function useEditorDialogs({
     setRenamingGroupId(groupId);
   }, []);
 
-  // 配置确认回调
+  // 配置确认回调(确认制:预览只发生在弹窗内,确认才应用到画布并持久化)
   const onCanvasConfigConfirm = useCallback((next: CanvasConfig) => {
     setCanvasConfig(next);
     saveCanvasConfig(next);
-  }, []);
-
-  // 配置实时预览回调(Plan#13):只更新内存态不持久化,取消时由弹窗回滚到快照
-  const onCanvasConfigPreview = useCallback((next: CanvasConfig) => {
-    setCanvasConfig(next);
   }, []);
 
   // 删除项目（弹窗确认）
@@ -451,7 +446,6 @@ export function useEditorDialogs({
     onOpenSettings,
     onRenameGroup,
     onCanvasConfigConfirm,
-    onCanvasConfigPreview,
     handleMenuDeleteProject,
     handleClearCanvasClick,
     doDeleteProject,

@@ -26,15 +26,14 @@ import type { NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from 
 import { resolveNodeSize } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import {
-  Group, LayoutPanelLeft, LayoutGrid, Rows, Columns, GitBranch,
+  LayoutGrid, Rows, Columns, GitBranch,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   Maximize2,
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
   Compass,
-  LogOut,
-  Combine,
   } from 'lucide-react';
+import { DOCK_ICONS } from './icons.js';
 import { NodeJoystickNav } from './node-joystick-nav.js';
 
 export interface NodeCapsuleToolbarProps {
@@ -44,7 +43,6 @@ export interface NodeCapsuleToolbarProps {
   toolContext: ToolContext;
   getGroupTools?: (node: NodeRecord, ctx: ToolContext) => ToolDefinition[];
   selectedCount: number;
-  selectedHasGroup: boolean;
   /** 单选且有父组 → 显示"移出组"直达按钮 */
   showMoveOut?: boolean;
   onMoveOutGroup?: () => void;
@@ -54,7 +52,6 @@ export interface NodeCapsuleToolbarProps {
   getAnchorBounds?: () => { x: number; y: number; width: number; height: number } | null;
   node?: NodeRecord;
   onGroup: () => void;
-  onUngroup: () => void;
   onArrangeGrid: () => void;
   onArrangeHorizontal: () => void;
   onArrangeVertical: () => void;
@@ -99,6 +96,7 @@ const TOOL_TITLE_I18N_KEY: Record<string, string> = {
   detail: 'toolTitles.detail',
   convertToStack: 'toolTitles.convertToStack',
   createStackNode: 'toolTitles.createStackNode',
+  eject: 'toolTitles.eject',
   confirm: 'groupTools.confirmTitle',
   cancel: 'groupTools.cancelTitle',
   rename: 'groupTools.renameTitle',
@@ -173,7 +171,6 @@ export function NodeCapsuleToolbar({
   toolContext,
   getGroupTools,
   selectedCount,
-  selectedHasGroup,
   showMoveOut,
   onMoveOutGroup,
   isPreview,
@@ -181,7 +178,6 @@ export function NodeCapsuleToolbar({
   getAnchorBounds,
   node: nodeProp,
   onGroup,
-  onUngroup,
   onArrangeGrid,
   onArrangeHorizontal,
   onArrangeVertical,
@@ -296,13 +292,6 @@ export function NodeCapsuleToolbar({
   const hasAgg = showGroupAgg || showArrangeAgg || showAlignAgg || showSizeAgg || showLayerAgg || !!showMoveOut;
   if (!hasAny && !hasAgg && !showNavButton) return null;
 
-  // 聚合菜单项
-  const groupItems: MenuItem[] = [
-    { key: 'group', label: t('toolbar.group'), icon: <Group size={16} />, onClick: onGroup },
-    ...(selectedHasGroup
-      ? [{ key: 'ungroup', label: t('toolbar.ungroup'), icon: <LayoutPanelLeft size={16} />, onClick: onUngroup }]
-      : []),
-  ];
   // 排列: 仅包含排列模式
   const arrangeItems: MenuItem[] = [
     { key: 'grid', label: t('toolsDock.grid'), icon: <LayoutGrid size={16} />, onClick: onArrangeGrid },
@@ -369,8 +358,7 @@ export function NodeCapsuleToolbar({
         {!effectivePureIcon && label ? <span>{label}</span> : null}
       </button>
       {openMenu === id ? renderMenu(
-        id === 'group' ? groupItems
-        : id === 'arrange' ? arrangeItems
+        id === 'arrange' ? arrangeItems
         : id === 'align' ? alignItems
         : id === 'size' ? sizeItems
         : layerItems,
@@ -493,7 +481,22 @@ export function NodeCapsuleToolbar({
       ) : null}
 
       {/* 聚合按钮组 */}
-      {showGroupAgg ? renderAggButton('group', <Group size={16} />, t('toolbar.group')) : null}
+      {/* 成组:多选(非预览态)一步到位直接成组,不做下拉菜单(用户拍板:二次菜单多余);解组入口=右键菜单/Delete */}
+      {showGroupAgg ? (
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            title={t('toolbar.group')}
+            onClick={(e) => { e.stopPropagation(); onGroup(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}
+            onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <DOCK_ICONS.group size={16} />
+          </button>
+        </div>
+      ) : null}
       {showArrangeAgg ? renderAggButton('arrange', <LayoutGrid size={16} />, t('toolbar.arrange')) : null}
       {showAlignAgg ? renderAggButton('align', <AlignCenterVertical size={16} />, t('toolbar.align')) : null}
       {showSizeAgg ? renderAggButton('size', <Scaling size={16} />, t('toolbar.unify')) : null}
@@ -510,7 +513,7 @@ export function NodeCapsuleToolbar({
             onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <Combine size={16} />
+            <DOCK_ICONS.stack size={16} />
           </button>
         </div>
       ) : null}
@@ -526,7 +529,7 @@ export function NodeCapsuleToolbar({
             onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <LogOut size={16} />
+            <DOCK_ICONS.moveOutGroup size={16} />
           </button>
         </div>
       ) : null}

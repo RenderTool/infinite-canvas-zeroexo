@@ -7,6 +7,9 @@
  *
  * 归属: 2026-08-20 自 app 层 src/shared/components 下沉(征集 #11 P0 反向依赖修复),
  *       插件包不再引用宿主类型; app 层 shared/index 改 re-export 本组件保持兼容
+ *
+ * 视觉与 Logo 下拉(antd Dropdown)对齐:亮/暗色背景、边框、圆角 8、boxShadowSecondary、
+ * antd slide-up 动画曲线; 分组分隔线为短虚线; 菜单内滚动用原生捕获隔离,不穿透画布。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -96,12 +99,29 @@ export function ContextMenu({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [position, onClose]);
 
+  // 菜单内滚动隔离:原生捕获阶段拦截 wheel,阻止穿透到画布(React 合成 onWheel
+  // 在 root 派发,晚于画布元素上的原生监听,无法拦截)。捕获阶段在事件到达
+  // 菜单容器时先于更深层目标执行,stopPropagation 使画布缩放/滚动监听收不到事件。
+  useEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const stopWheel = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener('wheel', stopWheel, { capture: true, passive: true });
+    return () => el.removeEventListener('wheel', stopWheel, { capture: true } as EventListenerOptions);
+  }, [mounted]);
+
   // 阻止浏览器默认右键菜单
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
   };
 
   // ===== 样式 =====
+
+  // 与 AntdThemeProvider 映射一致:亮色下拉=#fff/#e7e5e4,暗色=toolbar.panel/border
+  const panelBg = isDark ? theme.toolbar.panel : '#ffffff';
+  const panelBorder = isDark ? theme.toolbar.border : '#e7e5e4';
+  // antd Dropdown slide-up 动画曲线(平滑缓出,非弹性回弹)
+  const motion = 'opacity 0.2s cubic-bezier(0.08, 0.82, 0.17, 1), transform 0.2s cubic-bezier(0.08, 0.82, 0.17, 1)';
 
   const menuStyle: CSSProperties = {
     position: 'fixed',
@@ -110,19 +130,22 @@ export function ContextMenu({
     zIndex: 999,
     minWidth: 170,
     maxWidth: 'calc(100vw - 16px)',
+    maxHeight: 'min(60vh, 480px)',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
     padding: '4px 0',
     margin: 0,
     listStyle: 'none',
-    background: theme.toolbar.panel,
-    border: `1px solid ${theme.toolbar.border}`,
-    borderRadius: 6,
+    background: panelBg,
+    border: `1px solid ${panelBorder}`,
+    borderRadius: 8,
     boxShadow: '0 6px 16px 0 rgba(0,0,0,0.08), 0 3px 6px -4px rgba(0,0,0,0.12), 0 9px 28px 8px rgba(0,0,0,0.05)',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-    transform: visible ? 'scaleY(1)' : 'scaleY(0.85)',
+    transform: visible ? 'scaleY(1)' : 'scaleY(0.8)',
     opacity: visible ? 1 : 0,
     transformOrigin: 'top center',
     pointerEvents: visible ? 'auto' : 'none',
-    transition: 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
+    transition: motion,
   };
 
   const itemBaseStyle: CSSProperties = {

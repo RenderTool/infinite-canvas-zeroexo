@@ -23,8 +23,6 @@ import { listArtifacts, createArtifact, updateArtifact, deleteArtifact } from '@
 import type { Project } from '@/services/artifact-service.js';
 import { PublicPromptSection } from './components/PublicPromptSection.js';
 import { BackToTop } from './components/BackToTop.js';
-// 临时:Plan#19 测试画布(用户验收后删除)
-import { HomeTestCanvas } from './components/home-test-canvas.js';
 
 export interface HomePageProps {
   onOpenProject: (id: string) => void;
@@ -203,9 +201,6 @@ export function HomePage({ onOpenProject, onNavigate }: HomePageProps): React.Re
             onOpenProject={onOpenProject}
             onAiBusyChange={handleAiBusyChange}
           />
-
-          {/* 临时:Plan#19 测试画布(用户验收后删除) */}
-          <HomeTestCanvas />
 
           {/* 最近项目 */}
           <div style={{ marginTop: 48, marginBottom: 24 }}>

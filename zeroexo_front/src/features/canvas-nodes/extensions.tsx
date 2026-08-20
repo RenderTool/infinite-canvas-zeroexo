@@ -99,7 +99,9 @@ function getScriptTools(): ToolDefinition[] {
       icon: <Clapperboard size={14} />,
       group: 'edit',
       primary: true,
-      run: (node) => { nodeActionBus.emit('script:generateStoryboard', { nodeId: node.id, mode: 'template' }); },
+      // Plan#20 T0(征集#13): 不再硬编码 mode:'template'——改 emit 请求事件,
+      // 由 script-editor-sheet 按 isSample 分流(范文→模板分镜 / 真实剧本→选集 Modal 走 AI 链路)
+      run: (node) => { nodeActionBus.emit('script:requestGenerateStoryboard', { nodeId: node.id }); },
     },
   ];
 }

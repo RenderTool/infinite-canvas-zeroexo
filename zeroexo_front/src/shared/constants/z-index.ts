@@ -9,6 +9,10 @@
  * import { Z_INDEX } from '@/shared/constants/z-index.js';
  * style={{ zIndex: Z_INDEX.DROPDOWN }}
  * ```
+ *
+ * 注意：antd 弹层(Dropdown/Tooltip/Modal)的 z-index 由 ConfigProvider token
+ * zIndexPopupBase 控制(全局 20000；全屏编辑器内局部 40000)，不走本常量；
+ * 本常量用于自制 overlay/弹层(style zIndex)与全屏层级基准。
  */
 export const Z_INDEX = {
   /** 基础层 - 最低层元素 */

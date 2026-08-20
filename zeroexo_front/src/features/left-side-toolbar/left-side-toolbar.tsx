@@ -28,12 +28,12 @@ import { Tooltip, NodeCreateMenu } from '@/shared/components/index.js';
 import type { AddNodeType } from '@/shared/components/index.js';
 import {
   Map,
-  Layers,
+  FolderTree,
   ZoomIn,
   ZoomOut,
   Maximize2,
   Eraser,
-  BookOpen,
+  TentTree,
   Hand,
   MousePointer2,
   Plus,
@@ -227,10 +227,10 @@ function LeftSideToolBarView({
 
           {/* ===== 组1: 我的资产 + 画布层级 ===== */}
           <div style={sectionGroupStyle}>
-            {/* 我的资产(主页同款 ImageIcon) */}
+            {/* 我的资产(主页同款 TentTree 图标，征集#14) */}
             <Tooltip title={t('toolbar.myAssets')} theme={theme}>
               <Button type="text" onClick={onOpenMyAssets} aria-label={t('toolbar.myAssets')} className="zx-toolbar-btn" style={{ width: 32, height: 32, padding: 0 }}>
-                <BookOpen size={18} />
+                <TentTree size={18} />
               </Button>
             </Tooltip>
             {/* 画布结构开关 */}
@@ -242,7 +242,7 @@ function LeftSideToolBarView({
                 className="zx-toolbar-btn"
                 style={{ width: 32, height: 32, padding: 0, background: isHierarchyOpen ? 'rgba(255,255,255,0.1)' : undefined }}
               >
-                <Layers size={18} />
+                <FolderTree size={18} />
               </Button>
             </Tooltip>
           </div>

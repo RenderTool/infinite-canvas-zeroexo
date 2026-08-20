@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Combine } from 'lucide-react';
+import { NODE_ICONS } from '../icons.js';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
 import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -402,7 +402,7 @@ export function StackedMediaNodeView({
 
   // T10: 图标尺寸 CSS 连续化(clamp 等价原 max/min 钳制但随 --zx-invk 连续,消除跨桶跳变)
   const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
-  const titleIcon = <Combine size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
+  const titleIcon = <NODE_ICONS.stack size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
 
   /** 替换活跃卡片内容(主图区替换按钮) */
   const handleReplacePick = useCallback(async (files: FileList | null) => {
@@ -448,7 +448,7 @@ export function StackedMediaNodeView({
       borderRadius: 8,
       overflow: 'hidden',
     }}>
-      <Combine size={22} strokeWidth={1.5} />
+      <NODE_ICONS.stack size={22} strokeWidth={1.5} />
       {/* 空态文案:对齐图片节点 AIStateView 空态(图标+小字描述),
           上传入口统一为左上角纯 icon 按钮(MainReplaceButton 选中显示) */}
       <span style={{ fontSize: 11, opacity: 0.7 }}>{uploading ? '上传中…' : '上传图片或视频'}</span>

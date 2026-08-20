@@ -1,7 +1,8 @@
 /**
  * ConnectionDropMenu - 连线释放菜单
- * 从 Pin 拖拽到空白区域松手时弹出,创建节点后自动连接源 Pin。
- * 视觉风格与 NodeCreateMenu 完全一致,根据源节点类型过滤适用选项。
+ * 从 Pin 拖拽到空白区域松手时弹出(标题"引用该节点生成"),创建节点后自动连接源 Pin。
+ * 视觉与 NodeCreateMenu 完全一致:Logo 下拉(antd Dropdown)同款卡片风格 + slide-up 动画,
+ * 分组短虚线分隔;菜单内滚动用原生捕获隔离,不穿透画布。
  */
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -65,11 +66,33 @@ export const ConnectionDropMenu = memo(function ConnectionDropMenu({
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const nodeTypes = useMemo(() => createNodeTypeDefs(), []);
 
   const isDark = theme.mode === 'dark';
   const hoverBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
   const disabledColor = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)';
+  // 与 AntdThemeProvider 映射一致:亮色下拉=#fff/#e7e5e4,暗色=toolbar.panel/border
+  const panelBg = isDark ? theme.toolbar.panel : '#ffffff';
+  const panelBorder = isDark ? theme.toolbar.border : '#e7e5e4';
+  // antd Dropdown slide-up 动画曲线(平滑缓出,非弹性回弹)
+  const motion = 'opacity 0.2s cubic-bezier(0.08, 0.82, 0.17, 1), transform 0.2s cubic-bezier(0.08, 0.82, 0.17, 1)';
+  // 分组分隔线:短虚线(与右键菜单 ContextMenu 一致)
+  const dividerStyle: React.CSSProperties = {
+    height: 0,
+    border: 'none',
+    borderTop: `1px dashed ${theme.toolbar.border}`,
+    margin: '4px 8px',
+  };
+
+  // 菜单内滚动隔离:原生捕获阶段拦截 wheel,阻止穿透到画布(配合 overscroll-behavior:contain)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const stopWheel = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener('wheel', stopWheel, { capture: true, passive: true });
+    return () => el.removeEventListener('wheel', stopWheel, { capture: true } as EventListenerOptions);
+  }, []);
 
   // 弹出动画 - useLayoutEffect 确保在 paint 前触发,生产模式更流畅
   useLayoutEffect(() => {
@@ -150,18 +173,18 @@ export const ConnectionDropMenu = memo(function ConnectionDropMenu({
         zIndex: 1000,
         minWidth: 200,
         maxWidth: 260,
-        background: theme.toolbar.panel,
-        border: `1px solid ${theme.toolbar.border}`,
-        borderRadius: 6,
+        background: panelBg,
+        border: `1px solid ${panelBorder}`,
+        borderRadius: 8,
         boxShadow: '0 6px 16px 0 rgba(0,0,0,0.08), 0 3px 6px -4px rgba(0,0,0,0.12), 0 9px 28px 8px rgba(0,0,0,0.05)',
         padding: '4px 0',
         display: 'flex',
         flexDirection: 'column',
         color: theme.toolbar.text,
-        transform: visible ? 'scaleY(1)' : 'scaleY(0.85)',
+        transform: visible ? 'scaleY(1)' : 'scaleY(0.8)',
         opacity: visible ? 1 : 0,
         transformOrigin: 'top center',
-        transition: 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        transition: motion,
       }}
     >
       <div style={{
@@ -174,13 +197,13 @@ export const ConnectionDropMenu = memo(function ConnectionDropMenu({
       }}>
         引用该节点生成
       </div>
-      <div style={{ overflowY: 'auto', flex: 1, maxHeight: 320 }} onWheel={(e) => e.stopPropagation()}>
+      <div ref={scrollRef} style={{ overflowY: 'auto', flex: 1, maxHeight: 320, overscrollBehavior: 'contain' }}>
         {CATEGORY_ORDER.map((cat, catIdx) => {
           const groupDefs = nodeTypes.filter((d) => d.category === cat);
           if (groupDefs.length === 0) return null;
           return (
             <div key={cat}>
-              {catIdx > 0 && <div style={{ height: 1, margin: '4px 8px', background: theme.toolbar.border }} />}
+              {catIdx > 0 && <div style={dividerStyle} />}
               {groupDefs.map((def) => {
                 // 统一规则: 与手动拖拽连线验证共用 canConnect()
                 // direction='output': 源节点→新节点 (正向)

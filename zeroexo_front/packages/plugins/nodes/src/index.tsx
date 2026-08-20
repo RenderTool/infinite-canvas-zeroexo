@@ -26,7 +26,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { ConnectionPlugin } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
-import { LogOut } from 'lucide-react';
+import { NODE_ICONS } from './icons.js';
 import type {
   TextNodeData,
   ImageNodeData,
@@ -401,13 +401,13 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
         }
       }
 
-      // 移出按钮(仅 StackNode 显示;LogOut 表达"移出为独立节点"语义,与删除区分)
+      // 移出按钮(仅 StackNode 显示;图标走注册表 eject 语义=Combine,与移出组 LogOut 区分——用户拍板表 2026-08-20)
       tools.push({
         id: 'eject',
-        // 胶囊中统一使用图标按钮，title/tooltip 提供语义。
+        // 胶囊中统一使用图标按钮，title/tooltip 提供语义(title 空串走 TOOL_TITLE_I18N_KEY.eject 映射)。
         label: '',
-        title: '移出为独立节点',
-        icon: <LogOut size={14} />,
+        title: '',
+        icon: <NODE_ICONS.eject size={14} />,
         visible: () => data.cards.length > 0,
         run: () => {
           if (data.cards.length === 0) return;

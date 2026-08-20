@@ -7,7 +7,8 @@
 
 import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { App } from 'antd';
-import { Pencil, Group, Trash2, Copy as CopyIcon, Download, FolderOpen, X, Palette, Maximize2, Combine } from 'lucide-react';
+import { Pencil, Trash2, Copy as CopyIcon, Download, FolderOpen, Palette, Maximize2, Crosshair, RefreshCw } from 'lucide-react';
+import { EDITOR_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
@@ -19,6 +20,7 @@ import type {
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition } from '@zeroexo/plugin-nodes';
+import { duplicateSubtree } from '@zeroexo/preset-default';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -33,6 +35,7 @@ import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
+import { normalizeShotForUi } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
 import { CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
@@ -248,22 +251,33 @@ export function useEditorInteractions({
 
   // ===== useMemo 计算值 =====
 
+  // 依赖字段化拆分(确认制):改节点参数不触发 group/pin memo 重算,
+  // 确认生效时重渲染面按字段域收敛,千节点场景避免连锁全量
   const pinDefaults = useMemo(() => ({
     ...configToPinDefaults(canvasConfig),
     color: theme.node.pinDefaultColor,
-  }), [canvasConfig, theme.node.pinDefaultColor]);
+  }), [
+    canvasConfig.pinColor, canvasConfig.pinShape, canvasConfig.pinSize, canvasConfig.pinOpacity,
+    theme.node.pinDefaultColor,
+  ]);
 
   // GroupDefaultsProvider 的 value:从 canvasConfig 构建(Group 样式默认,由 GroupLayer 消费作为回退)
   // 映射函数与配置面板预览同源(config-dialog.tsx),保证预览与画布真实节点一致
   const groupDefaultsValue = useMemo(
     () => configToGroupDefaults(canvasConfig, theme),
-    [canvasConfig, theme],
+    [
+      canvasConfig.groupBackground, canvasConfig.groupBorderRadius,
+      canvasConfig.groupOutlineWidth, canvasConfig.groupOutlineColor,
+      canvasConfig.groupOutlineType, canvasConfig.groupOutlineOffset,
+      canvasConfig.groupOpacity,
+      theme,
+    ],
   );
 
   // NodeDefaultsProvider 的 value:圆角/轮廓宽度来自 canvasConfig,颜色来自 theme.node
   const nodeDefaultsValue = useMemo(
     () => configToNodeDefaults(canvasConfig, theme),
-    [canvasConfig, theme],
+    [canvasConfig.nodeBorderRadius, canvasConfig.nodeOutlineWidth, theme],
   );
 
   // selectedNodeData 由 useEditorState 在 onChanged 中直接计算并缓存
@@ -422,21 +436,79 @@ export function useEditorInteractions({
         const canSaveAsset = isAssetNode && (hasContent || (nodeType === 'script' && hasEpisodes));
 
         const items: ContextMenuItem[] = [
+          // ===== 聚焦置顶(测试画布验证最高频;组走 bounds 含空组回退) =====
+          { key: 'focus', label: t('editor.focusNode'), icon: createElement(Crosshair, { size: 14 }), onClick: () => {
+            const store = refs.store;
+            if (!store) return;
+            const g = store.getGraph();
+            const n = g.nodes.find((nn) => nn.id === nodeId);
+            if (!n) return;
+            if (n.type === 'group') {
+              const bounds = getGroupBoundsWithEmptyFallback(g.nodes, nodeId, getNodeSize);
+              if (bounds) { store.focusOnBounds(bounds, state.containerSize, 400, 51); return; }
+            }
+            const size = getNodeSize(n as NodeRecord);
+            store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
+          }},
           // ===== 基础操作组 =====
           { key: 'copy', label: t('editor.copy'), icon: createElement(CopyIcon, { size: 14 }), onClick: () => {
-            refs.commandQueue?.execute(new DuplicateNodeCommand(nodeId));
+            // 组节点/多选(右键目标在选择集内)走子树复制(与 Ctrl+D 同逻辑):
+            // 组复制不再产生坏组壳(childrenIds 悬空),多选复制与快捷键行为一致(Plan#21)
+            const store = refs.store;
+            if (!store || !refs.commandQueue) return;
+            const sel = store.getSelection().selectedNodeIds;
+            const multi = sel.has(nodeId) && sel.size >= 2;
+            if (multi || node?.type === 'group') {
+              duplicateSubtree(store, refs.commandQueue, multi ? sel : new Set([nodeId]));
+            } else {
+              refs.commandQueue.execute(new DuplicateNodeCommand(nodeId));
+            }
           }},
           { key: 'rename', label: t('editor.rename'), icon: createElement(Pencil, { size: 14 }), onClick: () => {
-            // 重命名前聚焦目标节点(可能在视口外,统一走 focusOnNode 平滑聚焦)
             const store = refs.store;
-            if (store) {
-              const n = store.getNode(nodeId);
-              const size = n ? getNodeSize(n as NodeRecord) : undefined;
-              store.focusOnNode(nodeId, state.containerSize, size?.width, size?.height, 400, 51);
+            if (!store) return;
+            // 组节点:聚焦组 bounds(含空组回退) + 走 onRenameGroup 状态机
+            // (GroupLayer 消费 renamingGroupId;setRenamingNodeId 对组无效 — Plan#21 顺带修复)
+            if (store.getNode(nodeId)?.type === 'group') {
+              const bounds = getGroupBoundsWithEmptyFallback(store.getGraph().nodes, nodeId, getNodeSize);
+              if (bounds) { store.focusOnBounds(bounds, state.containerSize, 400, 51); }
+              onRenameGroup(nodeId);
+              return;
             }
+            // 普通节点:聚焦 + 进重命名态
+            const n = store.getNode(nodeId);
+            const size = n ? getNodeSize(n as NodeRecord) : undefined;
+            store.focusOnNode(nodeId, state.containerSize, size?.width, size?.height, 400, 51);
             setRenamingNodeId(nodeId);
           }},
+          // 替换媒体(image/video/audio):与胶囊 replace 工具同源(文件选择)
+          ...(nodeType === 'image' || nodeType === 'video' || nodeType === 'audio'
+            ? [{ key: 'replace', label: t('contextMenu.replace'), icon: createElement(RefreshCw, { size: 14 }), onClick: () => {
+              setReplaceNodeId(nodeId);
+              if (nodeType === 'video') setReplaceAccept('video/*');
+              else if (nodeType === 'audio') setReplaceAccept('audio/*');
+              else setReplaceAccept('image/*');
+              replaceInputRef.current?.click();
+            }}]
+            : []),
+          // 编辑内容(text 节点):与双击/胶囊 editText 同源(进节点内编辑态)
+          ...(nodeType === 'text'
+            ? [{ key: 'edit-content', label: t('editor.editContent'), icon: createElement(Pencil, { size: 14 }), onClick: () => {
+              refs.store?.updateNodeData(nodeId, { __editing: true });
+            }}]
+            : []),
         ];
+
+        // ===== 组专属操作(样式/解组;与胶囊组工具同源) =====
+        // 预览组态下解组无意义(尚未成组),隐藏入口(用户拍板:多余菜单)
+        if (node?.type === 'group' && !state.isGroupPreviewing) {
+          items.push({ key: 'group-style', label: t('groupTools.styleLabel'), icon: createElement(Palette, { size: 14 }), onClick: () => {
+            setGroupStyleDialog({ groupId: nodeId, currentBgColor: node.backgroundColor || undefined, currentOpacity: node.opacity, currentRadius: node.borderRadius });
+          }});
+          items.push({ key: 'ungroup', label: t('toolbar.ungroup'), icon: createElement(EDITOR_ICONS.ungroup, { size: 14 }), onClick: () => {
+            refs.groupPlugin?.getController().ungroup([nodeId]);
+          }});
+        }
 
         // 基准尺寸恢复(非组节点):定向对右键目标节点生效,与胶囊菜单"基准尺寸"同源
         // 特化外观节点(气泡音频/资源浏览器)不参与尺寸计算,不提供该项
@@ -536,10 +608,23 @@ export function useEditorInteractions({
           });
         }
 
-        // ===== 多选堆叠(选中≥2 且右键目标属于选择集,对整组选择生效) =====
+        // ===== 多选操作(选中≥2 且右键目标属于选择集,对整组选择生效) =====
         const selection = refs.store?.getSelection();
         const selectedIds = selection?.selectedNodeIds;
         if (node && selectedIds && selectedIds.has(nodeId) && selectedIds.size >= 2) {
+          // 成组(与胶囊 onGroup 同源:创建预览 → 立即确认,二段式合并一步)
+          items.push({ key: 'divider-group-selected', divider: true, label: '', onClick: () => {} });
+          items.push({
+            key: 'group-selected',
+            label: t('toolbar.group'),
+            icon: createElement(EDITOR_ICONS.group, { size: 14 }),
+            onClick: () => {
+              const ctrl = refs.groupPlugin?.getController();
+              if (!ctrl || selectedIds.size < 2) return;
+              ctrl.createPreview(selectedIds);
+              ctrl.confirmPreview(t('groupTools.defaultGroupName'));
+            },
+          });
           const isNodeStackable = (n: NodeRecord): boolean => {
             if (n.type === 'group') return false;
             const ext = state.extensions.get(n.type);
@@ -553,7 +638,7 @@ export function useEditorInteractions({
             items.push({
               key: 'stackSelected',
               label: t('nodes.stackSelected', { count: stackableCount }),
-              icon: createElement(Combine, { size: 14 }),
+              icon: createElement(EDITOR_ICONS.stack, { size: 14 }),
               onClick: handleStackSelected,
             });
           }
@@ -566,13 +651,13 @@ export function useEditorInteractions({
           items.push({
             key: 'convertToStack',
             label: t('nodes.stackConvertTo'),
-            icon: createElement(Combine, { size: 14 }),
+            icon: createElement(EDITOR_ICONS.stack, { size: 14 }),
             onClick: () => { if (node) convertToStack(node, stackCtx); },
           });
           items.push({
             key: 'createStackNode',
             label: t('nodes.stackCreateNew'),
-            icon: createElement(Combine, { size: 14 }),
+            icon: createElement(EDITOR_ICONS.stack, { size: 14 }),
             onClick: () => { if (node) createStackNode(node, stackCtx); },
           });
         }
@@ -580,15 +665,25 @@ export function useEditorInteractions({
         // ===== 危险操作组(分割线分隔) =====
         items.push({ key: 'divider-delete', divider: true, label: '', onClick: () => {} });
         items.push({ key: 'delete', label: t('editor.delete'), icon: createElement(Trash2, { size: 14 }), danger: true, onClick: () => {
-          // 组节点走 deleteNodes(解组保留子节点),非组节点走 RemoveNodeCommand
-          if (refs.groupPlugin && refs.store) {
-            const n = refs.store.getGraph().nodes.find((nn: any) => nn.id === nodeId);
-            if (n?.type === 'group') {
-              refs.groupPlugin.getController().deleteNodes(new Set([nodeId]));
+          // 与 std:delete 同逻辑:多选(右键目标在选择集内)删整个选择集;
+          // 含组走 deleteNodes(解组保留子节点),否则 BatchCommand 一次撤销(Plan#21 一致性修复)
+          const store = refs.store;
+          if (!store || !refs.commandQueue) return;
+          const sel = store.getSelection().selectedNodeIds;
+          const targetIds = sel.has(nodeId) && sel.size >= 2 ? sel : new Set([nodeId]);
+          if (refs.groupPlugin) {
+            const graph = store.getGraph();
+            const hasGroup = [...targetIds].some((id) => graph.nodes.find((nn) => nn.id === id)?.type === 'group');
+            if (hasGroup) {
+              refs.groupPlugin.getController().deleteNodes(targetIds);
               return;
             }
           }
-          refs.commandQueue?.execute(new RemoveNodeCommand(nodeId));
+          const cmds: Command[] = [];
+          for (const id of targetIds) cmds.push(new RemoveNodeCommand(id));
+          for (const edgeId of store.getSelection().selectedEdgeIds) cmds.push(new RemoveEdgeCommand(edgeId));
+          refs.commandQueue.execute(new BatchCommand(cmds as unknown as Command[]));
+          store.clearSelection();
         }});
 
         setContextMenuItems(items);
@@ -600,7 +695,7 @@ export function useEditorInteractions({
     (e as unknown as { skipBuiltinMenu?: boolean }).skipBuiltinMenu = true;
     setNodeCreateMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuItems(null);
-  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize]);
+  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
   const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench') => {
@@ -953,7 +1048,8 @@ export function useEditorInteractions({
             },
             onDone: (output) => {
               const result = (output as any)?.output ?? output;
-              const shots = result?.shots;
+              // Plan#20 T2: onDone 适配层——后端字符串产出/旧对象数据双兼容归一
+              const shots = Array.isArray(result?.shots) ? result.shots.map(normalizeShotForUi) : result?.shots;
               const failed = result?.blocks?.failed;
               if (!Array.isArray(shots)) {
                 console.error('分镜任务返回异常:', output);
@@ -962,7 +1058,11 @@ export function useEditorInteractions({
                 return;
               }
               setEpData({ shotsByEpisode: shots, statusByEpisode: 'ready', progressByEpisode: 100 });
-              q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'ready' }));
+              // Plan#20 T4: 后端主体字典落节点数据(供 T5/T8 占位主体堆叠创建与主体标注匹配)
+              q.execute(new UpdateNodeDataCommand(storyboardId, {
+                status: 'ready',
+                aiSubjects: Array.isArray(result?.subjects) ? result.subjects : undefined,
+              }));
               if (Array.isArray(failed) && failed.length > 0) {
                 message.warning(i18n.t('editor.storyboardPartialFailed', { failed: failed.length, total: result?.blocks?.total ?? 0 }));
               }
@@ -1616,24 +1716,16 @@ export function useEditorInteractions({
       const isPreview = node.id === PREVIEW_GROUP_ID || ctrl.isPreviewing();
 
       if (isPreview) {
-        // 预览组:根据模式显示不同确认按钮 + 解组取消按钮
+        // 预览组:仅保留成组确认按钮(一步到位);取消预览走 Esc(用户拍板:移除 X 按钮,预览态无解组/取消概念)
         const mode = ctrl.getPreviewGroupMode();
         return [
           {
             id: 'confirm',
-            label: mode === 'version-folder' ? '聚合组' : '成组',
+            label: mode === 'version-folder' ? t('groupTools.versionFolderTitle') : t('toolbar.group'),
             title: mode === 'version-folder' ? t('groupTools.versionFolderTitle') : t('groupTools.confirmTitle'),
-            icon: createElement(Group, { size: 14 }),
+            icon: createElement(EDITOR_ICONS.group, { size: 14 }),
             group: '预览',
             run: () => ctrl.confirmPreview(t('groupTools.defaultGroupName')),
-          },
-          {
-            id: 'cancel',
-            label: t('toolbar.ungroup'),
-            title: t('groupTools.cancelTitle'),
-            icon: createElement(X, { size: 14 }),
-            group: '预览',
-            run: () => ctrl.cancelPreview(),
           },
         ];
       }
@@ -1664,7 +1756,7 @@ export function useEditorInteractions({
           id: 'ungroup',
           label: t('groupTools.ungroupLabel'),
           title: t('groupTools.ungroupTitle'),
-          icon: createElement(Group, { size: 14 }),
+          icon: createElement(EDITOR_ICONS.ungroup, { size: 14 }),
           group: '组操作',
           run: (n: any) => ctrl.ungroup([n.id]),
         },

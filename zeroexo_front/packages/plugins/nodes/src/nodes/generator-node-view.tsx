@@ -841,7 +841,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
           onPointerDown={handleInteractivePointerDown}
           onMouseDown={handleInteractiveMouseDown}
         >
-          {/* 上传按钮(移到最前) */}
+          {/* 上传按钮(移到最前;显隐与节点激活态对齐:仅选中时显示,空节点亦然,保持卡片清爽) */}
           <button
             type="button"
             onClick={handleAddReference}
@@ -858,6 +858,8 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
               justifyContent: 'center',
               flexShrink: 0,
               transition: 'background 0.12s',
+              opacity: isSelected ? 1 : 0,
+              pointerEvents: isSelected ? 'auto' : 'none',
             }}
             title="上传参考素材(支持图片/视频/文本)"
             onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
@@ -1021,7 +1023,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             })
           )}
 
-          {incomingNodes.length === 0 && (
+          {incomingNodes.length === 0 && isSelected && (
             <span style={{ fontSize: 11, color: mutedColor }}>拖入节点连入参考,或点击上传素材</span>
           )}
         </div>

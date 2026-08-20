@@ -187,8 +187,14 @@ export function ScriptEditorSheet({
         if (e.nodeId !== nodeId) return;
         setFullscreenOpen(true);
       }),
+      // Plan#20 T0(征集#13): 胶囊「分镜」按钮请求事件——按 isSample 分流,
+      // 范文→模板分镜 / 真实剧本→选集 Modal 走 AI 链路(修复胶囊入口永远范文 bug)
+      nodeActionBus.on('script:requestGenerateStoryboard', (e: { nodeId: string }) => {
+        if (e.nodeId !== nodeId) return;
+        handleGenerateStoryboard();
+      }),
       // 注意:不订阅 script:generateStoryboard 事件
-      // 该事件由 extensions.tsx 按钮触发,use-editor-interactions.ts 处理创建分镜节点,
+      // 该事件由 handleGenerateStoryboard 范文分支/其他入口 emit,use-editor-interactions.ts 处理创建分镜节点,
       // 此处订阅会导致 handleGenerateStoryboard(isSample=true 时重新 emit 同一事件)触发无限循环。
     ];
     return () => unsubs.forEach((unsub) => unsub?.());

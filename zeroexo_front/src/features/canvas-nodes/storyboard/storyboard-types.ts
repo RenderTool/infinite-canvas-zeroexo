@@ -78,12 +78,17 @@ export interface Shot {
   voiceoverText: string;
   monologue: string;
   sfx: string[];
-  entities: EntityRef[];
+  /** Plan#20 T2: 后端分块产出字符串数组, 旧数据为 EntityRef[] —— 双兼容, 展示用 entityDisplayName */
+  entities: Array<EntityRef | string>;
   emotion: string;
-  lighting: LightingDesign;
-  environment: EnvironmentDesign;
+  /** Plan#20 T2: 后端产出字符串(光影描述), 旧数据为对象 —— 双兼容, 展示统一走 formatLighting */
+  lighting: string | LightingDesign;
+  environment: string | EnvironmentDesign;
   continuity: { transition: ShotTransition };
   prompt: string;
+  /** Plan#20 T2: 后端分块契约提示词字段(prompt 列映射 promptText) */
+  promptText?: string;
+  promptEn?: string;
 }
 
 // ===== 实体关联 =====
@@ -141,4 +146,6 @@ export interface StoryboardNodeData {
   steps?: StepRecord[];
   /** 实体冲突列表 */
   conflicts?: EntityConflict[];
+  /** Plan#20 T4: 后端汇总阶段产出的主体字典(供占位主体堆叠创建/主体标注匹配) */
+  aiSubjects?: Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }>;
 }
