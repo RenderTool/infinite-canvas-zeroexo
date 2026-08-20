@@ -55,6 +55,9 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
   const [ctxMenuItems, setCtxMenuItems] = useState<ContextMenuItem[]>([]);
   const closeCtxMenu = useCallback(() => setCtxMenuPosition(null), []);
 
+  // 上传文件选择器 ref（Toolbar 上传按钮与右键菜单「上传素材」共用同一入口）
+  const materialFileInputRef = useRef<HTMLInputElement>(null);
+
   // ── 副本定位聚焦：临时高亮 id + 分页跳转 ──
   const [highlightId, setHighlightId] = useState<string | null>(props.focusId ?? null);
   const focusJumpedRef = useRef(false);
@@ -179,7 +182,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     e.preventDefault();
     setCtxMenuPosition({ x: e.clientX, y: e.clientY });
     setCtxMenuItems([
-      { key: 'upload-material', label: '上传素材', icon: null, onClick: () => {} },
+      { key: 'upload-material', label: '上传素材', icon: null, onClick: () => materialFileInputRef.current?.click() },
       { key: 'new-subject', label: '新建主体', icon: null, onClick: () => { ctx.setSubjectCreateId(undefined); ctx.setSubjectCreateOpen(true); } },
       { key: 'new-prompt', label: '新建提示词', icon: null, onClick: () => { ctx.setPromptCreateId(undefined); ctx.setPromptCreateOpen(true); } },
       { key: 'new-script', label: '新建剧本', icon: null, onClick: () => ctx.handleNewScript() },
@@ -205,6 +208,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       onViewModeChange={ctx.setViewMode}
       onMultiSelectToggle={handleMultiSelectToggle}
       onUploadMaterial={handleUploadMaterial}
+      materialFileInputRef={materialFileInputRef}
       onNewSubject={handleNewSubject}
       onNewPrompt={handleNewPrompt}
       onNewScript={ctx.handleNewScript}

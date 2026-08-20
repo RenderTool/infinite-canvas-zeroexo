@@ -16,6 +16,7 @@ import { createAssetNode } from '@zeroexo/plugin-nodes';
 import { arrangeNodes } from '@zeroexo/plugin-layout';
 import type { LayoutNode } from '@zeroexo/plugin-layout';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
+import type { TaskId } from '@zeroexo/plugin-upload-queue';
 import { uploadAsset } from '../asset-picker/services/upload-asset.js';
 import type { CreateAssetInput } from '../asset-picker/asset-store.js';
 import { useUploadQueueStore } from './upload-queue-store.js';
@@ -70,8 +71,10 @@ export function useUploadQueue(
         }
       });
 
+      let taskIds: TaskId[] = [];
       try {
-        uploadQueue.addTasks(files, async (file: File) => {
+        // addTasks 返回本次批次 ID：仅收集本批次结果，避免历史任务残留导致重复创建节点
+        taskIds = uploadQueue.addTasks(files, async (file: File) => {
           const storeId = fileToStoreId.get(file);
           if (storeId) store.getState().updateItem(storeId, { status: 'uploading' });
 
@@ -81,12 +84,12 @@ export function useUploadQueue(
           return { input, node };
         });
 
-        await uploadQueue.waitForCompletion();
+        await uploadQueue.waitForTasks(taskIds);
 
-        // 收集结果
-        const allTasks = uploadQueue.getTasks();
-        for (const task of allTasks) {
-          if (task.status === 'done' && task.result) {
+        // 按批次 ID 收集结果（不再全量 getTasks()）
+        for (const taskId of taskIds) {
+          const task = uploadQueue.getTask(taskId);
+          if (task?.status === 'done' && task.result) {
             const result = task.result as { node?: NodeRecord };
             if (result.node) {
               uploadedNodes.push(result.node);
@@ -96,6 +99,7 @@ export function useUploadQueue(
         }
       } finally {
         unsub();
+        uploadQueue.removeTasks(taskIds);
       }
 
       // 3. 使用 arrangeNodes 计算网格位置
@@ -181,8 +185,10 @@ export function useAssetUploadQueue(
         }
       });
 
+      let taskIds: TaskId[] = [];
       try {
-        uploadQueue.addTasks(files, async (file: File) => {
+        // addTasks 返回本次批次 ID：仅收集本批次结果，避免历史任务残留导致重复入库
+        taskIds = uploadQueue.addTasks(files, async (file: File) => {
           const storeId = fileToStoreId.get(file);
           if (storeId) store.getState().updateItem(storeId, { status: 'uploading' });
 
@@ -190,17 +196,18 @@ export function useAssetUploadQueue(
           return input;
         });
 
-        await uploadQueue.waitForCompletion();
+        await uploadQueue.waitForTasks(taskIds);
 
-        // 收集结果
-        const allTasks = uploadQueue.getTasks();
-        for (const task of allTasks) {
-          if (task.status === 'done' && task.result) {
+        // 按批次 ID 收集结果（不再全量 getTasks()）
+        for (const taskId of taskIds) {
+          const task = uploadQueue.getTask(taskId);
+          if (task?.status === 'done' && task.result) {
             results.push(task.result as CreateAssetInput);
           }
         }
       } finally {
         unsub();
+        uploadQueue.removeTasks(taskIds);
       }
 
       return results;

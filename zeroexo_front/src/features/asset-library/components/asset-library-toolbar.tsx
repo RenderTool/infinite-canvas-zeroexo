@@ -5,7 +5,7 @@
  * 以及子分类筛选器、扫描进度条。
  */
 
-import { memo, useRef } from 'react';
+import { memo } from 'react';
 import {
   Search,
   Upload,
@@ -41,6 +41,8 @@ export interface AssetLibraryToolbarProps {
   onViewModeChange: (mode: ViewMode) => void;
   onMultiSelectToggle: () => void;
   onUploadMaterial: (files: FileList) => void;
+  /** 上传文件选择器 ref（与页面右键菜单「上传素材」共用同一入口） */
+  materialFileInputRef: { current: HTMLInputElement | null };
   onNewSubject: () => void;
   onNewPrompt: () => void;
   onNewScript: () => void;
@@ -63,12 +65,12 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
   onViewModeChange,
   onMultiSelectToggle,
   onUploadMaterial,
+  materialFileInputRef,
   onNewSubject,
   onNewPrompt,
   onNewScript,
 }: AssetLibraryToolbarProps): React.ReactElement {
   const { t } = useTranslation();
-  const materialFileInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <>

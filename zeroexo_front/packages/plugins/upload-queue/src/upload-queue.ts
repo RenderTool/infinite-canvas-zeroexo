@@ -60,11 +60,15 @@ export class UploadQueue {
 
   // ===== 公开 API =====
 
-  /** 添加批量任务并开始处理 */
+  /**
+   * 添加批量任务并开始处理
+   * @returns 本次批次的任务 ID 列表（用于 waitForTasks / removeTasks 按批次隔离）
+   */
   addTasks<TInput, TOutput>(
     inputs: TInput[],
     processor: (input: TInput) => Promise<TOutput>,
-  ): void {
+  ): TaskId[] {
+    const taskIds: TaskId[] = [];
     for (const input of inputs) {
       const task: UploadTask = {
         id: this.generateId(),
@@ -77,8 +81,10 @@ export class UploadQueue {
       };
       this.tasks.set(task.id, task);
       this.pending.push(task.id);
+      taskIds.push(task.id);
     }
     this.start();
+    return taskIds;
   }
 
   /** 启动队列处理（如果尚未启动） */
@@ -96,6 +102,49 @@ export class UploadQueue {
   async waitForCompletion(): Promise<void> {
     if (!this.donePromise) return;
     await this.donePromise;
+  }
+
+  /**
+   * 等待指定批次任务全部进入终态(done / error / cancelled)
+   *
+   * 与 waitForCompletion 的区别：按任务 ID 隔离，支持同一队列上并发多个批次
+   * （历史批次残留 + 共享 donePromise 会导致二次上传重复收集旧结果）。
+   */
+  async waitForTasks(ids: TaskId[]): Promise<void> {
+    if (ids.length === 0) return;
+    const remaining = new Set(
+      ids.filter((id) => {
+        const task = this.tasks.get(id);
+        return !task || (task.status !== 'done' && task.status !== 'error' && task.status !== 'cancelled');
+      }),
+    );
+    if (remaining.size === 0) return;
+    await new Promise<void>((resolve) => {
+      const unsub = this.on((event) => {
+        if (event.type === 'task-completed' || event.type === 'task-failed' || event.type === 'task-cancelled') {
+          remaining.delete(event.taskId);
+          if (remaining.size === 0) {
+            unsub();
+            resolve();
+          }
+        }
+      });
+    });
+  }
+
+  /**
+   * 移除指定批次任务（仅在任务全部进入终态后调用）
+   *
+   * 防止历史任务残留导致 getTasks() 全量收集时重复返回旧批次结果。
+   * 运行中的任务不会被删除（防御性保护）。
+   */
+  removeTasks(ids: TaskId[]): void {
+    for (const id of ids) {
+      const task = this.tasks.get(id);
+      if (!task) continue;
+      if (task.status === 'pending' || task.status === 'running') continue;
+      this.tasks.delete(id);
+    }
   }
 
   /** 取消队列（正在运行的任务继续完成，待处理的任务标记为 cancelled） */

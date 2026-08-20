@@ -41,7 +41,7 @@ export interface UploadQueueState {
   /** 是否显示覆盖层 */
   visible: boolean;
 
-  /** 添加文件到队列(重置旧状态) */
+  /** 添加文件到队列(追加到现有队列,支持上传中再次触发上传) */
   addFiles: (files: File[]) => void;
   /** 更新某个文件项的状态 */
   updateItem: (id: string, patch: Partial<UploadFileItem>) => void;
@@ -108,13 +108,13 @@ export const useUploadQueueStore = create<UploadQueueState>((set, get) => ({
       }
     }
 
-    set({
-      items,
-      processing: false,
-      completed: 0,
-      total: items.length,
+    // 追加到现有队列: 上传中再次触发上传时两批合并显示,
+    // total/completed 累计, 覆盖层进度不互相顶掉
+    set((s) => ({
+      items: [...s.items, ...items],
+      total: s.total + items.length,
       visible: true,
-    });
+    }));
   },
 
   updateItem: (id: string, patch: Partial<UploadFileItem>) => {
