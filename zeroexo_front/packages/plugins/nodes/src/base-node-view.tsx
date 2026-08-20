@@ -195,18 +195,16 @@ export interface AIStateViewProps {
   accentColor: string;
   /** 空状态(idle 无内容)图标 */
   emptyIcon: React.ReactNode;
-  /** 空状态文案 */
-  emptyText: string;
   /** 是否有生成内容(决定显示 success 还是 empty) */
   hasContent: boolean;
+  /** 节点激活态(选中):替换按钮仅激活显示(空节点亦然,与胶囊工具栏一致) */
+  isSelected?: boolean;
   /** Bug3: 空状态点击触发替换内容(打开文件选择器) */
   onReplace: () => void;
   /** 替换按钮位置: top-right(右上角) / left(帧左侧并排),默认 top-right */
   replaceBtnPosition?: 'top-right' | 'left';
   /** Bug3: 统一背景色(与文本节点一致) */
   backgroundColor: string;
-  /** 空状态/加载状态文字颜色(传入则使用主题色,默认 #6b7280) */
-  emptyTextColor?: string;
   /** 生成中任务信息(渠道 · 模型 · 任务hash,由生成时写入 node.data) */
   taskLabel?: string;
   /** 失败/生成中:重试回调(节点视图内 emit 到 editor-page) */
@@ -268,19 +266,17 @@ export function AIStateView({
   errorType,
   accentColor,
   emptyIcon,
-  emptyText,
   hasContent,
+  isSelected = false,
   onReplace,
   replaceBtnPosition,
   backgroundColor,
-  emptyTextColor,
   taskLabel,
   onRetry,
   onCancel,
   children,
 }: AIStateViewProps): React.ReactElement {
   const { t } = useTranslation();
-  const textColor = emptyTextColor ?? '#6b7280';
   // loading: 环形进度 + 半透明遮罩 + 任务信息 + 取消按钮
   if (status === 'loading') {
     const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
@@ -425,7 +421,7 @@ export function AIStateView({
             </button>
           ) : null}
         </div>
-        <ReplaceButton onClick={onReplace} alwaysVisible={false} position={replaceBtnPosition} />
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
       </div>
     );
   }
@@ -505,17 +501,17 @@ export function AIStateView({
     );
   }
 
-  // success / idle(有内容): 渲染媒体内容 + Bug1: 左下角替换按钮(hover 显示)
+  // success / idle(有内容): 渲染媒体内容 + Bug1: 左下角替换按钮(激活节点显示)
   if (hasContent) {
     return (
       <div className="ze-node-content-wrap" style={{ position: 'relative', width: '100%', height: '100%' }}>
         {children}
-        <ReplaceButton onClick={onReplace} alwaysVisible={false} position={replaceBtnPosition} />
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
       </div>
     );
   }
 
-  // Bug1: idle(无内容): 空状态占位 + 左下角替换按钮(移除整区域点击避免误触)
+  // Bug1: idle(无内容): 空状态占位(仅图标,不渲染空态文字标签) + 左下角替换按钮(移除整区域点击避免误触)
   return (
     <div
       style={{
@@ -525,8 +521,7 @@ export function AIStateView({
       }}
     >
       {emptyIcon}
-      <span style={{ fontSize: 11, color: textColor, opacity: 0.7 }}>{emptyText}</span>
-      <ReplaceButton onClick={onReplace} alwaysVisible={true} position={replaceBtnPosition} />
+      <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
     </div>
   );
 }
@@ -549,21 +544,20 @@ function errorBtnStyle(outline: boolean): React.CSSProperties {
   };
 }
 
-// Bug1: 节点左下角替换按钮(避免空状态整区域点击误触)
-// 内容节点: hover 父容器时显示; 空节点: 始终显示
+// Bug1: 节点替换按钮(避免空状态整区域点击误触)
+// 显隐语义与胶囊工具栏"选中显示"对齐:无论是否空节点,仅节点激活(选中)时显示 —— 保持卡片视觉清爽
 // 使用 inline style + onMouseEnter/Leave 替代全局 CSS class,避免多实例互相覆盖
-function ReplaceButton({ onClick, alwaysVisible, position = 'top-right' }: {
+function ReplaceButton({ onClick, position = 'top-right', visible = false }: {
   onClick: () => void;
-  alwaysVisible: boolean;
   position?: 'top-right' | 'left';
+  /** 节点激活态:仅选中时显示 */
+  visible?: boolean;
 }): React.ReactElement {
-  const { t } = useTranslation();
   const [hover, setHover] = React.useState(false);
-  const show = alwaysVisible || hover;
+  const opacity = visible ? (hover ? 0.85 : 1) : 0;
   return (
     <button
       type="button"
-      title={t('nodes.replace')}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -589,7 +583,7 @@ function ReplaceButton({ onClick, alwaysVisible, position = 'top-right' }: {
         cursor: 'pointer',
         transition: 'opacity 0.15s',
         zIndex: 10,
-        opacity: show ? 0.85 : 0,
+        opacity,
       }}
     >
       <Upload size={13} />

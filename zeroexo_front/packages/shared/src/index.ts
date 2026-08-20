@@ -208,7 +208,7 @@ export const DARK_THEME: ThemeConfig = {
     gridLine: 'rgba(245,245,244,.10)',
   },
   node: {
-    fill: '#1c1917',
+    fill: '#161616',
     defaultColor: '#e94560',
     outlineColor: '#78716c',
     outlineSelectedColor: '#e94560',

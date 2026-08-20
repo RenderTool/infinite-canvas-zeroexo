@@ -151,10 +151,10 @@ export function ImageNodeView({
           errorType={data.errorType}
           accentColor={nodeColor}
           emptyIcon={imageEmptyIcon(theme.toolbar.textMuted)}
-          emptyText={t('nodes.imageEmpty')}
-          emptyTextColor={theme.toolbar.textMuted}
           hasContent={hasContent}
           onReplace={handleReplaceClick}
+          // contentOnly 内嵌卡:替换入口归容器(StackNode MainReplaceButton)管理
+          isSelected={false}
           replaceBtnPosition="left"
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
@@ -208,10 +208,9 @@ export function ImageNodeView({
         errorType={data.errorType}
         accentColor={nodeColor}
         emptyIcon={imageEmptyIcon(theme.toolbar.textMuted)}
-        emptyText={t('nodes.imageEmpty')}
-        emptyTextColor={theme.toolbar.textMuted}
         hasContent={hasContent}
         onReplace={handleReplaceClick}
+        isSelected={isSelected}
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}

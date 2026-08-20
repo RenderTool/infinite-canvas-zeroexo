@@ -450,9 +450,9 @@ export function StackedMediaNodeView({
     }}>
       <Combine size={22} strokeWidth={1.5} />
       {/* 空态文案:对齐图片节点 AIStateView 空态(图标+小字描述),
-          上传入口统一为左上角纯 icon 按钮(MainReplaceButton 常显) */}
+          上传入口统一为左上角纯 icon 按钮(MainReplaceButton 选中显示) */}
       <span style={{ fontSize: 11, opacity: 0.7 }}>{uploading ? '上传中…' : '上传图片或视频'}</span>
-      <MainReplaceButton onClick={() => emptyFileInputRef.current?.click()} alwaysVisible />
+      <MainReplaceButton onClick={() => emptyFileInputRef.current?.click()} visible={isSelected} />
     </div>
   ) : (
     <div
@@ -510,8 +510,8 @@ export function StackedMediaNodeView({
           </div>
         )}
       </div>
-      {/* 活跃卡替换按钮(hover 主图区显示,复用 ReplaceButton 视觉) */}
-      <MainReplaceButton onClick={() => replaceFileInputRef.current?.click()} />
+      {/* 活跃卡替换按钮(节点激活时显示/未激活隐藏,对齐胶囊工具栏选中显示语义;hover 仅微调透明度) */}
+      <MainReplaceButton onClick={() => replaceFileInputRef.current?.click()} visible={isSelected} />
     </div>
   );
 

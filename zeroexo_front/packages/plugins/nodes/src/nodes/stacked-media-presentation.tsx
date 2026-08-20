@@ -147,7 +147,7 @@ function StackTextEditor({ html, isDark, onCommit }: { html: string; isDark: boo
       <div
         style={{ width: '100%', height: '100%', overflowY: 'auto', padding: '12px 16px', boxSizing: 'border-box', fontSize: 14, lineHeight: 1.6, cursor: 'text' }}
         onDoubleClick={() => setIsEditing(true)}
-        dangerouslySetInnerHTML={{ __html: html || '<span style="opacity:0.5">双击编辑文本</span>' }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
@@ -196,11 +196,11 @@ function StackImageContent({ src, storageKey, isDark = false }: { src: string; s
   return <img src={hydrated} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />;
 }
 
-export function MainReplaceButton({ onClick, alwaysVisible = false }: { onClick: () => void; alwaysVisible?: boolean }): React.ReactElement {
+export function MainReplaceButton({ onClick, visible = false }: { onClick: () => void; visible?: boolean }): React.ReactElement {
   const [hover, setHover] = useState(false);
   // 视觉与 ReplaceButton(left) 对齐:左上角 6,6 · 24×24 · 圆角 6,纯 Upload icon
-  // alwaysVisible:空态时常显(对齐图片节点空态 ReplaceButton alwaysVisible=true)
-  const opacity = alwaysVisible ? (hover ? 0.85 : 1) : (hover ? 0.85 : 0);
+  // 显隐语义与胶囊工具栏"选中显示"对齐:无论是否空节点,仅节点激活(选中)时显示 —— 保持卡片视觉清爽
+  const opacity = visible ? (hover ? 0.85 : 1) : 0;
   return <button type="button" title="替换当前卡片" aria-label="替换当前卡片" onClick={(event) => { event.stopPropagation(); onClick(); }} onPointerDown={(event) => event.stopPropagation()} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ position: 'absolute', left: 6, top: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer', transition: 'opacity 0.15s', zIndex: 10, opacity }}><Upload size={13} /></button>;
 }
 

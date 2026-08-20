@@ -325,10 +325,10 @@ export function AudioNodeView({
           errorType={data.errorType}
           accentColor={nodeColor}
           emptyIcon={audioEmptyIcon(theme.toolbar.textMuted)}
-          emptyText={t('nodes.audioEmpty')}
-          emptyTextColor={theme.toolbar.textMuted}
           hasContent={hasContent}
           onReplace={handleReplaceClick}
+          // contentOnly 内嵌卡:替换入口归容器(StackNode MainReplaceButton)管理
+          isSelected={false}
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
           replaceBtnPosition="left"
@@ -365,10 +365,9 @@ export function AudioNodeView({
         errorType={data.errorType}
         accentColor={nodeColor}
         emptyIcon={audioEmptyIcon(theme.toolbar.textMuted)}
-        emptyText={t('nodes.audioEmpty')}
-        emptyTextColor={theme.toolbar.textMuted}
         hasContent={hasContent}
         onReplace={handleReplaceClick}
+        isSelected={isSelected}
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"

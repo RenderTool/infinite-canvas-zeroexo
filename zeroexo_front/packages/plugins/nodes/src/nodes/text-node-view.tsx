@@ -221,7 +221,7 @@ export function TextNodeView({
               }}
               onDoubleClick={handleDoubleClick}
               dangerouslySetInnerHTML={{
-                __html: content || t('nodes.doubleClickToEdit'),
+                __html: content,
               }}
             />
           </div>
