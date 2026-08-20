@@ -23,6 +23,7 @@
   "dependencies": {
     "@zeroexo/core": "workspace:*",
     "@zeroexo/plugin-interaction": "workspace:*",
+    "@zeroexo/plugin-theme": "workspace:*",
     "@zeroexo/shared": "workspace:*"
   },
   "peerDependencies": {

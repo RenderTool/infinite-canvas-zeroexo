@@ -14,6 +14,8 @@ import {
   GridSpatialIndex,
 } from '@zeroexo/core';
 import type { CommandQueue, EventBus, NodeSizeResolver } from '@zeroexo/core';
+import { computeFocusTarget } from './focus-geometry.js';
+import type { FocusBounds } from './focus-geometry.js';
 
 export interface SelectionState {
   selectedNodeIds: Set<string>;
@@ -240,6 +242,22 @@ export class ReactGraphStore {
     requestAnimationFrame(animate);
   };
 
+  /** 平滑聚焦到指定 bounds(多选联合边界/组节点等):与 focusOnNode 共用同一几何公式
+   *  算法与参数语义见 focus-geometry.ts computeFocusTarget,禁止在调用方复制 targetK 计算
+   *  @param capsuleHeight 胶囊菜单高度(px),有胶囊菜单时传入以确保缩放包含菜单区域
+   *  @param paddingRatio 聚焦缩放系数(0~1),越小节点周边留白越大(默认 0.82)
+   */
+  focusOnBounds = (
+    bounds: FocusBounds,
+    containerSize: { width: number; height: number },
+    durationMs = 400,
+    capsuleHeight = 0,
+    paddingRatio = 0.82,
+  ): void => {
+    const target = computeFocusTarget(bounds, containerSize, capsuleHeight, paddingRatio);
+    this.animateViewport(target.x, target.y, target.k, durationMs);
+  };
+
   /** 平滑聚焦到指定节点:自动计算最佳缩放,使节点完整显示在视口内
    *  算法: 1) 节点中心对齐屏幕中心; 2) 缩放至节点+胶囊菜单完整可见的最大尺寸(保留 5% 边距)
    *  优先使用节点当前实际尺寸(node.size),传入的 nodeWidth/nodeHeight 仅作为降级回退。
@@ -262,25 +280,12 @@ export class ReactGraphStore {
     // 优先使用节点当前实际尺寸,传入参数仅作为降级回退
     const nodeW = node.size?.width ?? nodeWidth ?? 200;
     const nodeH = node.size?.height ?? nodeHeight ?? 100;
-    // 节点中心:使用节点实际中心(不偏移)
-    const nodeCenterX = (node.position?.x ?? 0) + nodeW / 2;
-    const nodeCenterY = (node.position?.y ?? 0) + nodeH / 2;
-    // 缩放范围:包含胶囊菜单高度(菜单在节点上方,所以 totalH = nodeH + capsuleHeight)
-    const totalH = nodeH + capsuleHeight;
-    // 计算缩放:使节点+胶囊完整显示在视口内,保留 (1-paddingRatio) 边距
-    const padding = paddingRatio;
-    const targetK = Math.min(
-      (containerSize.width / nodeW) * padding,
-      (containerSize.height / totalH) * padding,
-      2.0, // 最大缩放上限，防止音频节点等小高度节点过度放大
-    );
-    const cx = containerSize.width / 2;
-    const cy = containerSize.height / 2;
-    this.animateViewport(
-      cx - nodeCenterX * targetK,
-      cy - nodeCenterY * targetK,
-      targetK,
+    this.focusOnBounds(
+      { x: node.position?.x ?? 0, y: node.position?.y ?? 0, width: nodeW, height: nodeH },
+      containerSize,
       durationMs,
+      capsuleHeight,
+      paddingRatio,
     );
   };
 

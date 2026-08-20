@@ -351,17 +351,12 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
               if (Number.isFinite(minX)) {
                 const unionW = maxX - minX;
                 const unionH = maxY - minY;
-                const padding = 0.82;
-                const targetK = Math.min(
-                  (state.containerSize.width / unionW) * padding,
-                  (state.containerSize.height / (unionH + 51)) * padding,
-                  2.0,
+                store.focusOnBounds(
+                  { x: minX, y: minY, width: unionW, height: unionH },
+                  state.containerSize,
+                  400,
+                  51,
                 );
-                const cx = state.containerSize.width / 2;
-                const cy = state.containerSize.height / 2;
-                const centerX = minX + unionW / 2;
-                const centerY = minY + unionH / 2;
-                store.animateViewport(cx - centerX * targetK, cy - centerY * targetK, targetK, 400);
                 return;
               }
             }
@@ -372,17 +367,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             if (targetNode.type === 'group') {
               const bounds = getGroupBoundsWithEmptyFallback(graph.nodes, nodeId, interactions.getNodeSize);
               if (bounds) {
-                const padding = 0.82;
-                const targetK = Math.min(
-                  (state.containerSize.width / bounds.width) * padding,
-                  (state.containerSize.height / (bounds.height + 51)) * padding,
-                  2.0,
-                );
-                const cx = state.containerSize.width / 2;
-                const cy = state.containerSize.height / 2;
-                const centerX = bounds.x + bounds.width / 2;
-                const centerY = bounds.y + bounds.height / 2;
-                store.animateViewport(cx - centerX * targetK, cy - centerY * targetK, targetK, 400);
+                store.focusOnBounds(bounds, state.containerSize, 400, 51);
                 return;
               }
             }
@@ -535,17 +520,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
                     if (!targetNode) return;
                     const bounds = getGroupBoundsWithEmptyFallback(graph.nodes, groupId, interactions.getNodeSize);
                     if (bounds) {
-                      const padding = 0.82;
-                      const targetK = Math.min(
-                        (state.containerSize.width / bounds.width) * padding,
-                        (state.containerSize.height / (bounds.height + 51)) * padding,
-                        2.0,
-                      );
-                      const cx = state.containerSize.width / 2;
-                      const cy = state.containerSize.height / 2;
-                      const centerX = bounds.x + bounds.width / 2;
-                      const centerY = bounds.y + bounds.height / 2;
-                      store.animateViewport(cx - centerX * targetK, cy - centerY * targetK, targetK, 400);
+                      store.focusOnBounds(bounds, state.containerSize, 400, 51);
                     }
                   }}
                 />

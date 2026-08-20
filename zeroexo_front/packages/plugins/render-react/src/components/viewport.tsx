@@ -6,8 +6,8 @@
 
 import React, { useState } from 'react';
 import type { Viewport } from '@zeroexo/core';
-import { ContextMenu } from '@/shared/components/index.js';
-import type { ContextMenuItem } from '@/shared/components/index.js';
+import { ContextMenu } from './context-menu.js';
+import type { ContextMenuItem } from './context-menu.js';
 
 export interface ViewportProps {
   /** 视口变换状态 */

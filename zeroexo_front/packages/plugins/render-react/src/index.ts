@@ -23,6 +23,9 @@ export { ReactGraphStoreContext, useReactGraphStore } from './store.js';
 
 // ===== 组件 =====
 export { CanvasView } from './components/canvas-view.js';
+
+export { ContextMenu } from './components/context-menu.js';
+export type { ContextMenuProps, ContextMenuItem } from './components/context-menu.js';
 export type { CanvasViewProps } from './components/canvas-view.js';
 export { Viewport_ as Viewport } from './components/viewport.js';
 export type { ViewportProps } from './components/viewport.js';

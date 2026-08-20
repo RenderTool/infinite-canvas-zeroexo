@@ -10,6 +10,7 @@ import { Viewport_ } from './viewport.js';
 import { NodeLayer } from './node-layer.js';
 import { EdgeLayer } from './edge-layer.js';
 import { DragOffsetWriter } from './drag-offset-writer.js';
+import type { ContextMenuItem } from './context-menu.js';
 import {
   ReactGraphStore,
   ReactGraphStoreContext,
@@ -48,7 +49,7 @@ export interface CanvasViewProps {
   /** 右键菜单事件(透传给 Viewport_,用于检测点击节点/边/空白区域) */
   onCanvasContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** 右键菜单项(覆盖默认的 复制/粘贴/删除,透传给 Viewport_ 的 ContextMenu; null=不显示内置菜单) */
-  contextMenuItems?: import('@/shared/components/index.js').ContextMenuItem[] | null;
+  contextMenuItems?: ContextMenuItem[] | null;
   /** 画布拖拽事件(Phase D2:AssetPicker 素材/外部文件拖入画布生成节点) */
   onCanvasDrop?: (e: React.DragEvent<HTMLDivElement>) => void;
   onCanvasDragOver?: (e: React.DragEvent<HTMLDivElement>) => void;

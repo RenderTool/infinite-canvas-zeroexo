@@ -13,8 +13,8 @@ export type { ModalProps } from './modal.js';
 export { ConfirmDialog } from './confirm-dialog.js';
 export type { ConfirmDialogProps } from './confirm-dialog.js';
 
-export { ContextMenu } from './context-menu.js';
-export type { ContextMenuProps, ContextMenuItem } from './context-menu.js';
+export { ContextMenu } from '@zeroexo/plugin-render-react';
+export type { ContextMenuProps, ContextMenuItem } from '@zeroexo/plugin-render-react';
 
 export { Dropdown } from './dropdown.js';
 export type { DropdownProps, DropdownItem } from './dropdown.js';

@@ -4,6 +4,9 @@
  * 特性: 右键触发器 + 绝对定位菜单 + 外部点击关闭 + Escape 关闭 + Scale+Fade 动画
  * 使用 @zeroexo/plugin-theme 的 useTheme 获取主题色,支持亮/暗主题自适应
  * 视觉风格 1:1 复刻上下文ContextMenu.tailwind.jsx
+ *
+ * 归属: 2026-08-20 自 app 层 src/shared/components 下沉(征集 #11 P0 反向依赖修复),
+ *       插件包不再引用宿主类型; app 层 shared/index 改 re-export 本组件保持兼容
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
