@@ -14,7 +14,6 @@ import { AiEventsModule } from '../ai-events/ai-events.module';
 import { ApiProvidersModule } from '../api-providers/api-providers.module';
 import { AssetsModule } from '../assets/assets.module';
 import { AiGenerateModule } from '../ai-generate/ai-generate.module';
-import { AgentController } from './agent.controller';
 import { AgentTaskController } from './agent-task.controller';
 import { AgentConversationController } from './agent-conversation.controller';
 import { AgentFactory, LLM_SERVICE_TOKEN } from './agent-factory';
@@ -35,7 +34,6 @@ import { MemoryCompactorService } from './memory-compactor.service';
     AiGenerateModule,
   ],
   controllers: [
-    AgentController,
     AgentTaskController,
     AgentConversationController,
   ],

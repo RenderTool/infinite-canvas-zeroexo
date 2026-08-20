@@ -21,4 +21,4 @@
 - 用户输入含 `mode: "chunk"` 时,以上「工具写入」铁律**全部豁免**
 - 分块模式: 禁止调用任何工具,直接输出镜头 JSON 数组,不要任何解释/前言/Markdown 代码块
 - **输出 schema 固定**(每次生成一致, 与 save_shots 契约字段相同):
-  - 必填: id / number / sceneId / duration(4-15秒) / shotType / cameraMovement / description(主体位置+具体行为, 禁"正要/准备/即将"过渡态, 中景及以上必须含画面位置/朝向) / lighting(主光源方向+色温, 禁"柔和光线"抽象词) / promptText(含[主体描述][场景与氛围][动作与情节][镜头语言]段落) / promptEn(与promptText结构一致) / entities / dayNight(日/夜/黄昏/黎明) / environment(地点+时间+纵深层次)
+  - 必填: id / number / sceneId / duration(4-15秒) / shotType / cameraMovement / description(主体位置+具体行为, 禁"正要/准备/即将"过渡态, 中景及以上必须含画面位置/朝向) / lighting(主光源方向+色温, 禁"柔和光线"抽象词) / dialogue(本镜头台词原文, 无台词则空字符串""; 台词写入description/promptText时保持同一文本) / voiceoverText(旁白文本, 无则空字符串"") / monologue(内心独白, 无则空字符串"") / sfx(音效数组, 如["江水声","风声"], 无则空数组[]) / promptText(含[主体描述][场景与氛围][动作与情节][镜头语言][音画同步/音频]段落) / promptEn(与promptText结构一致) / entities / dayNight(日/夜/黄昏/黎明) / environment(地点+时间+纵深层次)

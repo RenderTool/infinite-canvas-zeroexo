@@ -7,7 +7,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { Observable, Subject } from 'rxjs';
+import { Observable, ReplaySubject } from 'rxjs';
 
 export type AgentSSEEventType =
   | 'agent:thinking'
@@ -28,16 +28,20 @@ export interface AgentSSEEvent {
 @Injectable()
 export class AgentSSEService {
   private readonly logger = new Logger(AgentSSEService.name);
-  /** taskId -> Subject 映射 */
-  private connections = new Map<string, Subject<AgentSSEEvent>>();
+  /**
+   * taskId -> ReplaySubject 映射(Plan#20 P0 修复: Subject→ReplaySubject)
+   * 旧实现用热 Subject: 前端订阅前 emit 的事件(含快速失败/完成)永久丢失 → 前端永远等待。
+   * ReplaySubject(500) 缓冲早于订阅的事件,订阅时回放;防内存膨胀上限 500 条。
+   */
+  private connections = new Map<string, ReplaySubject<AgentSSEEvent>>();
 
   /**
    * 为指定 taskId 创建 SSE 订阅
-   * 返回 Observable，前端可通过 EventSource 消费
+   * 返回 Observable，前端可通过 EventSource 消费;订阅前已 emit 的事件会被回放
    */
   subscribe(taskId: string): Observable<AgentSSEEvent> {
     if (!this.connections.has(taskId)) {
-      this.connections.set(taskId, new Subject<AgentSSEEvent>());
+      this.connections.set(taskId, new ReplaySubject<AgentSSEEvent>(500));
     }
 
     const subject = this.connections.get(taskId)!;
@@ -46,13 +50,14 @@ export class AgentSSEService {
   }
 
   /**
-   * 向指定 taskId 推送事件
+   * 向指定 taskId 推送事件(连接未建立时先缓冲,订阅后回放——不再丢失)
    */
   emit(taskId: string, event: Omit<AgentSSEEvent, 'taskId' | 'timestamp'>): void {
-    const subject = this.connections.get(taskId);
+    let subject = this.connections.get(taskId);
     if (!subject) {
-      this.logger.warn(`SSE 连接不存在: taskId=${taskId}`);
-      return;
+      subject = new ReplaySubject<AgentSSEEvent>(500);
+      this.connections.set(taskId, subject);
+      this.logger.debug(`SSE 连接未建立,事件已缓冲待回放: taskId=${taskId}, type=${event.type}`);
     }
 
     const fullEvent: AgentSSEEvent = {

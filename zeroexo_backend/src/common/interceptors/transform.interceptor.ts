@@ -22,8 +22,10 @@ export class TransformInterceptor<T>
     next: CallHandler<T>,
   ): Observable<{ data: T }> {
     // 排除 SSE 端点,避免破坏 Observable 流
+    // 2026-08-20 P0: 补 /api/agents/stream —— 未排除时 Agent 任务 SSE 事件被包成 {data:...},
+    // 前端 event.type 丢失 → onDone(undefined) → 生成分镜永远拿不到产物
     const request = context.switchToHttp().getRequest<Request>();
-    if (request.path.startsWith('/api/sync-events') || request.path.startsWith('/api/ai-events') || request.path.includes('/think/stream')) {
+    if (request.path.startsWith('/api/sync-events') || request.path.startsWith('/api/ai-events') || request.path.includes('/think/stream') || request.path.startsWith('/api/agents/stream')) {
       return next.handle() as Observable<{ data: T }>;
     }
     return next.handle().pipe(map((data: T) => ({ data })));

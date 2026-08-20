@@ -77,7 +77,11 @@ export class AgentLlmService implements LlmService {
       temperature: cfg.agentTemperature ?? 0.7,
       // 分镜等结构化长输出需更大上限,默认 8192 防止 JSON 被截断
       max_tokens: cfg.agentMaxTokens ?? 8192,
-      // 渠道可选附加参数(如 DeepSeek: { thinking: { type: 'disabled' } })
+      // Plan#20 P0: DeepSeek 推理模型默认关闭 thinking——reasoning_tokens 挤占 max_tokens
+      // 预算导致结构化 JSON 输出被截断(渠道配置可显式覆盖);Plan#9 联调修复④同因,
+      // 但渠道级配置会被重置丢失,故沉淀为代码级默认
+      ...(provider.provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
+      // 渠道可选附加参数(优先级最高,可覆盖上方默认)
       ...(cfg.agentExtraBody || {}),
     };
 

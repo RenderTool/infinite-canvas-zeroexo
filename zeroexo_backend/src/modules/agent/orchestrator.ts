@@ -12,6 +12,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { AgentEvent } from './dto/agent.dto';
 import { AgentFactory } from './agent-factory';
 import { AgentTaskService } from './agent-task.service';
@@ -44,10 +46,36 @@ interface StoryboardChunk {
   text: string;
 }
 
-/** 分块上限: 约 8k tokens(中文 1 token ≈ 1.5 字符, 保守取 12000 字符) */
-const CHUNK_MAX_CHARS = 12000;
+/** 分块上限: 约 6k tokens(中文 1 token ≈ 1.5 字符, 取 9000 字符——Plan#20 P0: 12000 时单块镜头输出超 max_tokens 预算被截断) */
+const CHUNK_MAX_CHARS = 9000;
 /** 并发池上限 */
 const CHUNK_CONCURRENCY = 3;
+
+/**
+ * 分块 schema 强指令兜底快照(Plan#20 T4 单源化):
+ * 事实源为 skills/storyboard_assistant/SYSTEM_PROMPT.md 「分块模式豁免」段,
+ * 仅当文件缺失/提取失败时使用本快照;修改字段契约只改文件,不改这里。
+ */
+const CHUNK_SCHEMA_DIRECTIVE_FALLBACK = [
+  '4. 每个镜头对象必须包含以下字段(缺一不可):',
+  '   id: 字符串唯一标识',
+  '   number: 顺序号(从 1 递增)',
+  '   sceneId: 场次编号(本块内从 1 开始, 如 1-1)',
+  '   duration: 4-15 秒整数',
+  '   shotType: 从[特写,近景,中景,中近景,中远景,远景,大全景,全景]选',
+  '   cameraMovement: 从[固定,推,拉,摇,移,跟,升,降,推拉,环绕,航拍]选',
+  '   description: 画面描述(主体位置+具体行为神态; 禁止"正要/准备/即将"等过渡态; 中景及以上必须含画面位置/朝向)',
+  '   lighting: 光影(主光源方向+色温; 禁止"柔和光线"等抽象词)',
+  '   dialogue: 台词原文(无则空字符串"")',
+  '   voiceoverText: 旁白文本(无则空字符串"")',
+  '   monologue: 内心独白(无则空字符串"")',
+  '   sfx: 音效数组(如["江水声","风声"]; 无则空数组[])',
+  '   promptText: 中文提示词(含[主体描述][场景与氛围][动作与情节][镜头语言]段落)',
+  '   promptEn: 英文提示词(与 promptText 结构一致)',
+  '   entities: 实体名数组(如["沈渔"])',
+  '   dayNight: 日/夜/黄昏/黎明',
+  '   environment: 环境描述(地点+时间+纵深层次)',
+].join('\n');
 
 @Injectable()
 export class AgentOrchestrator {
@@ -281,8 +309,11 @@ export class AgentOrchestrator {
       }
     }
 
+    // Plan#20 T4: 汇总阶段生成主体字典(零额外 LLM 成本): 剧本文本提取角色/场景 + shots.entities 去重归类
+    const subjects = this.buildSubjectsDictionary(scriptText, mergedShots);
+
     this.logger.log(
-      `分镜汇总: ${taskId} 共 ${mergedShots.length} 个镜头, 失败块 ${failedBlocks.length}/${plans.length}`,
+      `分镜汇总: ${taskId} 共 ${mergedShots.length} 个镜头, 失败块 ${failedBlocks.length}/${plans.length}, 主体 ${subjects.length} 个`,
     );
 
     yield {
@@ -291,6 +322,7 @@ export class AgentOrchestrator {
         agentType: 'storyboard_generate',
         output: {
           shots: mergedShots,
+          subjects,
           blocks: {
             total: plans.length,
             done: plans.length - failedBlocks.length,
@@ -404,29 +436,88 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * Plan#20 T4 单源化: 从 SYSTEM_PROMPT.md 「分块模式豁免」段提取 schema 强指令(事实源=文件),
+   * 提取失败回退内置快照。字段契约变更只改文件即可生效,消除代码/文件双源漂移。
+   */
+  private loadChunkSchemaDirective(): string {
+    try {
+      const file = path.join(__dirname, 'skills', 'storyboard_assistant', 'SYSTEM_PROMPT.md');
+      const md = fs.readFileSync(file, 'utf-8');
+      const anchor = md.indexOf('## 分块模式豁免');
+      if (anchor >= 0) {
+        const section = md.slice(anchor).trim();
+        if (section.includes('必填')) {
+          return `4. 输出 schema 铁律(以下段来自 SYSTEM_PROMPT.md, 逐字遵守):\n${section}`;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`读取 SYSTEM_PROMPT.md 分块段失败,回退内置快照: ${(err as Error).message}`);
+    }
+    return CHUNK_SCHEMA_DIRECTIVE_FALLBACK;
+  }
+
+  /**
+   * Plan#20 T4: 主体字典生成(汇总阶段零额外 LLM 成本)
+   * - 角色: 剧本对白说话人(「名字: 对白」行首)提取
+   * - 场景: 【场景 N: 地点 - 时间】标题提取
+   * - shots.entities 全局去重 → kind 归类(命中角色集→character, 场景集→scene, 其余→prop)
+   * - description: 首个含该名的 shot.description 截取
+   */
+  private buildSubjectsDictionary(
+    scriptText: string,
+    shots: any[],
+  ): Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }> {
+    // 角色: 对白行首「名字: 内容」(排除场景标题/括号开头)
+    const characterSet = new Set<string>();
+    const dialogueRe = /^([^\s:：【】（）()\d]{1,12})[:：]\s*\S/gm;
+    let m: RegExpExecArray | null;
+    while ((m = dialogueRe.exec(scriptText)) !== null) {
+      const name = m[1].trim();
+      if (name && !/^(场景|转场|第)/.test(name)) characterSet.add(name);
+    }
+    // 场景: 【场景 N: 地点 - 时间】提取地点
+    const sceneSet = new Set<string>();
+    const sceneRe = /【场景\s*\d*\s*[:：]?\s*([^\-—】]{1,20}?)\s*[-—]/g;
+    while ((m = sceneRe.exec(scriptText)) !== null) {
+      const loc = m[1].trim();
+      if (loc) sceneSet.add(loc);
+    }
+    // shots.entities 去重(兼容字符串/数组形态)
+    const entityNames = new Set<string>();
+    for (const shot of shots) {
+      const list = Array.isArray(shot.entities) ? shot.entities : typeof shot.entities === 'string' ? [shot.entities] : [];
+      for (const e of list) {
+        const name = typeof e === 'string' ? e.trim() : (e?.mention ?? e?.name ?? '').trim();
+        if (name) entityNames.add(name);
+      }
+    }
+    // 归类 + 描述(首个含名镜头描述截取 80 字)
+    const subjects: Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }> = [];
+    for (const name of entityNames) {
+      const kind = characterSet.has(name) ? 'character' : sceneSet.has(name) ? 'scene' : 'prop';
+      const hit = shots.find((s) => typeof s.description === 'string' && s.description.includes(name));
+      const description = hit ? String(hit.description).slice(0, 80) : '';
+      subjects.push({ name, kind, aliases: [], description });
+    }
+    // 剧本中出现但未进任何镜头实体的角色也收录(占位主体完备性)
+    for (const name of characterSet) {
+      if (!entityNames.has(name)) subjects.push({ name, kind: 'character', aliases: [], description: '' });
+    }
+    return subjects;
+  }
+
   /** 执行单个子任务 Agent(不走 worker,避免循环依赖),返回最终输出文本 */
   private async executeChildAgent(child: any, projectId: string, userId: string): Promise<string> {
     const agent = await this.agentFactory.create('storyboard_assistant', projectId, userId);
-    // 分块模式强指令置于 user 消息首位(比 system prompt 更近输出层,遵从度更高)
+    // 分块模式强指令置于 user 消息首位(比 system prompt 更近输出层,遵从度更高);
+    // schema 段单源化自 SYSTEM_PROMPT.md(Plan#20 T4, 征集#16 前置项)
     const inputStr = [
       '【分块生成模式·必须遵守】',
       '1. 你是分块处理模式: 禁止调用任何工具,直接输出镜头 JSON 数组;',
       '2. 禁止任何解释、前言、总结或 Markdown 代码块;',
       '3. 输出第一行必须是 JSON 数组本身,sceneId 从 1 开始编号;',
-      '4. 每个镜头对象必须包含以下字段(缺一不可):',
-      '   id: 字符串唯一标识',
-      '   number: 顺序号(从 1 递增)',
-      '   sceneId: 场次编号(本块内从 1 开始, 如 1-1)',
-      '   duration: 4-15 秒整数',
-      '   shotType: 从[特写,近景,中景,中近景,中远景,远景,大全景,全景]选',
-      '   cameraMovement: 从[固定,推,拉,摇,移,跟,升,降,推拉,环绕,航拍]选',
-      '   description: 画面描述(主体位置+具体行为神态, 如"沈渔立于画面左侧, 转身望向江面"; 禁止"正要/准备/即将"等过渡态; 中景及以上必须含画面位置/朝向)',
-      '   lighting: 光影(主光源方向+色温, 如"左侧45°逆光, 5500K"; 禁止"柔和光线"等抽象词)',
-      '   promptText: 中文提示词(含[主体描述][场景与氛围][动作与情节][镜头语言]段落)',
-      '   promptEn: 英文提示词(与 promptText 结构一致)',
-      '   entities: 实体名数组(如["沈渔"])',
-      '   dayNight: 日/夜/黄昏/黎明',
-      '   environment: 环境描述(地点+时间+纵深层次)',
+      this.loadChunkSchemaDirective(),
       '任务数据:',
       JSON.stringify(child.input ?? {}),
     ].join('\n');
@@ -478,10 +569,33 @@ export class AgentOrchestrator {
         if (parsed && Array.isArray(parsed.shots)) return parsed.shots;
       } catch { /* 继续尝试 */ }
     }
-    // 5. 截断检测: 有 [ 无闭合 ]
+    // 5. 截断抢救(Plan#20 P0): 从尾部逐个 `}` 断点尝试补 `]` 闭合,救回完整镜头对象
+    const salvaged = this.salvageTruncatedArray(output);
+    if (salvaged.length > 0) {
+      this.logger.warn(`分块输出被截断,抢救回 ${salvaged.length} 个完整镜头(尾部不完整对象丢弃)`);
+      return salvaged;
+    }
+    // 6. 截断检测: 有 [ 无闭合 ]
     if (output.includes('[') && !output.includes(']')) {
       throw new Error('分块输出不完整(疑似被 max_tokens 截断),请重试或调大 max_tokens');
     }
     throw new Error(`分块输出不是有效 JSON: ${output.slice(0, 120)}`);
+  }
+
+  /** 截断抢救: 从尾部向前逐个 `}` 断点尝试补 `]` 闭合,返回能解析出的完整镜头数组(失败返回 []) */
+  private salvageTruncatedArray(output: string): any[] {
+    const arrStart = output.indexOf('[');
+    if (arrStart < 0) return [];
+    let searchFrom = output.length;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const braceIdx = output.lastIndexOf('}', searchFrom - 1);
+      if (braceIdx <= arrStart) break;
+      searchFrom = braceIdx;
+      try {
+        const parsed = JSON.parse(output.slice(arrStart, braceIdx + 1) + ']');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch { /* 继续向前找断点 */ }
+    }
+    return [];
   }
 }

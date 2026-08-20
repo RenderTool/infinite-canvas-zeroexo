@@ -364,6 +364,12 @@ model Subject {
   tags        String[] @default([])
   /// 关联的形象图集 Asset.storageKey 列表
   imageKeys   String[] @default([])
+  /// 状态集合(Plan#20 T1): [{id,name,imageKeys[],generatePrompt,note}] 状态剧照+切换后提示词
+  states      Json     @default("[]")
+  /// 封面立绘 Asset.storageKey(Plan#20 T1,画布封面简历式卡片用)
+  coverKey    String?
+  /// 音效素材补充(Plan#20 T1,非角色独有): [{key,name,kind:voice|ambient|sfx,note}] 配音/环境音/音效
+  audio       Json     @default("[]")
   /// 所属文件夹
   folderId    String?
   folder      AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
