@@ -155,13 +155,15 @@ const NodeItem = React.memo(
     // 节点未找到(极小概率,如快速删除):返回空占位
     if (!node) return <div data-node-id={nodeId} style={{ display: 'none' }} />;
 
-    // P1-3: 低缩放 LOD (k < 0.35) — 渲染轻量占位(色块+标题),不渲染节点内容
-    // 避免大量复杂节点内容(视频/图片/音频)在低缩放时全量渲染
+    // P1-3: 低缩放 LOD (k < 0.35) — 渲染轻量占位(纯色块,不渲染节点内容/标题文本)
+    // 避免大量复杂节点内容(视频/图片/音频)在低缩放时全量渲染。
+    // 去标题文本: 全视图(k<0.35)时节点屏幕尺寸小,标题本就不可读(k=0.35 时
+    // 16px 标题 ≈ 5.6px);而 3000 节点全视图时文本布局/绘制成本随节点数翻倍
+    // (每节点 div+span 两个 DOM),是大量节点掉帧的主因之一 —— 占位改为纯色块。
     const isLowZoom = invK > 1 / 0.35; // invK = 1/k, 所以 k < 0.35 时 invK > 2.857
     if (isLowZoom) {
       // 使用节点底色(与 NodeShell shellColor 优先级一致: fillColor 优先于 ext.color)
       const nodeColor = node.backgroundColor ?? node.nodeColor ?? nodeDefaults.fillColor ?? ext?.color ?? '#16213e';
-      const title = node.title ?? node.type;
       const size = resolveNodeSize(node, ext);
       const nodeTransform = `translate(${node.position.x}px, ${node.position.y}px)`;
 
@@ -210,20 +212,6 @@ const NodeItem = React.memo(
             cursor: node.locked ? 'default' : (props.mode === 'pan' ? 'grab' : 'default'),
           }}
         >
-          <span style={{
-            fontSize: Math.max(10, 16 * invK),
-            color: nodeDefaults?.contentTextColor ?? '#fff',
-            textAlign: 'center',
-            padding: '0 4px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: '100%',
-            lineHeight: 1.2,
-            opacity: 0.9,
-          }}>
-            {title}
-          </span>
         </div>
       );
     }
