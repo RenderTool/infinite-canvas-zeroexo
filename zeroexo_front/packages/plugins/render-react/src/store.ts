@@ -15,6 +15,7 @@ import {
 } from '@zeroexo/core';
 import type { CommandQueue, EventBus, NodeSizeResolver } from '@zeroexo/core';
 import { computeFocusTarget } from './focus-geometry.js';
+import { resolveFocusAnimation } from './focus-model.js';
 import type { FocusBounds } from './focus-geometry.js';
 
 export interface SelectionState {
@@ -218,15 +219,30 @@ export class ReactGraphStore {
     return () => this.dragOffsetListeners.delete(listener);
   };
 
-  /** 平滑动画过渡到目标视口(300ms easeInOutCubic) */
-  animateViewport = (targetX: number, targetY: number, targetK: number, durationMs = 300): void => {
+  /** 平滑动画过渡到目标视口(默认 300ms easeInOutCubic)
+   *  @param frameIntervalMs 帧间隔节流(ms):>0 时跳过间隔内的中间帧(30fps=33, 15fps=66),
+   *          用于大量节点时降低每帧全画布重渲染成本;0 = 不节流(60fps)
+   */
+  animateViewport = (targetX: number, targetY: number, targetK: number, durationMs = 300, frameIntervalMs = 0): void => {
+    // durationMs<=0 = 直接跳转(大量节点降级策略,见 focus-model.ts)
+    if (durationMs <= 0) {
+      this.setViewport({ x: targetX, y: targetY, k: targetK });
+      return;
+    }
     const start = { ...this.viewport };
     // T10: 本次动画持有唯一令牌，外部 setViewport（手势/小地图）递增后本循环立即自停
     const token = ++this.viewportAnimToken;
     const startTime = performance.now();
+    let lastFrame = 0;
     const animate = (now: number): void => {
       if (token !== this.viewportAnimToken) return; // 已被外部写入打断
       const t = Math.min(1, (now - startTime) / durationMs);
+      // 帧节流:间隔内跳过写入(动画总时长不变,帧数按比例减少)
+      if (frameIntervalMs > 0 && now - lastFrame < frameIntervalMs && t < 1) {
+        requestAnimationFrame(animate);
+        return;
+      }
+      lastFrame = now;
       // easeInOutCubic
       const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
       this.setViewport(
@@ -255,7 +271,9 @@ export class ReactGraphStore {
     paddingRatio = 0.82,
   ): void => {
     const target = computeFocusTarget(bounds, containerSize, capsuleHeight, paddingRatio);
-    this.animateViewport(target.x, target.y, target.k, durationMs);
+    // FocusModel:按节点规模决策动画档位(>120 降帧,>800 直接跳转),见 focus-model.ts
+    const strategy = resolveFocusAnimation(this.graph.nodes.length, durationMs);
+    this.animateViewport(target.x, target.y, target.k, strategy.durationMs, strategy.frameIntervalMs);
   };
 
   /** 平滑聚焦到指定节点:自动计算最佳缩放,使节点完整显示在视口内

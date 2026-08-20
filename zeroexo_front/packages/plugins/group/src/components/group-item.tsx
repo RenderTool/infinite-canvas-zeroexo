@@ -47,6 +47,8 @@ export interface GroupItemProps {
   onVersionFolderFold?: (groupId: string) => void;
   onGroupPointerDown?: (e: React.PointerEvent, groupId: string) => void;
   onGroupDoubleClick?: (e: React.MouseEvent, groupId: string) => void;
+  /** 标题文字双击(与普通节点标题行为一致:进入重命名;不冒泡到组聚焦) */
+  onTitleDoubleClick?: (groupId: string) => void;
   onRenameChange?: (value: string) => void;
   onRenameCommit?: () => void;
   onRenameCancel?: () => void;
@@ -93,6 +95,7 @@ export const GroupItem = React.memo(
     renameValue,
     onGroupPointerDown,
     onGroupDoubleClick,
+    onTitleDoubleClick,
     onRenameChange,
     onRenameCommit,
     onRenameCancel,
@@ -259,7 +262,15 @@ export const GroupItem = React.memo(
             />
           ) : title.trim() ? (
             <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 4 * invK }}>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+              <span
+                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', pointerEvents: 'auto', cursor: 'text' }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onTitleDoubleClick?.(groupId);
+                }}
+              >
+                {title}
+              </span>
               {showVersionFolderFold && onVersionFolderFold ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); onVersionFolderFold(groupId); }}
@@ -347,6 +358,7 @@ export const GroupItem = React.memo(
     prev.onVersionFolderFold === next.onVersionFolderFold &&
     prev.onGroupPointerDown === next.onGroupPointerDown &&
     prev.onGroupDoubleClick === next.onGroupDoubleClick &&
+    prev.onTitleDoubleClick === next.onTitleDoubleClick &&
     prev.onRenameChange === next.onRenameChange &&
     prev.onRenameCommit === next.onRenameCommit &&
     prev.onRenameCancel === next.onRenameCancel &&

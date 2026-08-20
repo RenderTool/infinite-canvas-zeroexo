@@ -344,16 +344,8 @@ export function useEditorInteractions({
       const graph = editor.store.getGraph();
       const node = graph.nodes.find((n: any) => n.id === nodeId);
       if (node) {
-        const vp = editor.store.getViewport();
-        const nodeCenterX = (node.position?.x ?? 0) + (node.size?.width ?? 0) / 2;
-        const nodeCenterY = (node.position?.y ?? 0) + (node.size?.height ?? 0) / 2;
-        const cx = state.containerSize.width / 2;
-        const cy = state.containerSize.height / 2;
-        editor.store.setViewport({
-          ...vp,
-          x: cx - nodeCenterX * vp.k,
-          y: cy - nodeCenterY * vp.k,
-        });
+        // 重命名前聚焦节点(平滑动画,统一走 focusOnNode 几何公式,节点可能在视口外)
+        editor.store.focusOnNode(nodeId, state.containerSize, node.size?.width, node.size?.height, 400, 51);
       }
     };
     const handleNodeDelete = () => {
@@ -435,6 +427,13 @@ export function useEditorInteractions({
             refs.commandQueue?.execute(new DuplicateNodeCommand(nodeId));
           }},
           { key: 'rename', label: t('editor.rename'), icon: createElement(Pencil, { size: 14 }), onClick: () => {
+            // 重命名前聚焦目标节点(可能在视口外,统一走 focusOnNode 平滑聚焦)
+            const store = refs.store;
+            if (store) {
+              const n = store.getNode(nodeId);
+              const size = n ? getNodeSize(n as NodeRecord) : undefined;
+              store.focusOnNode(nodeId, state.containerSize, size?.width, size?.height, 400, 51);
+            }
             setRenamingNodeId(nodeId);
           }},
         ];
@@ -601,7 +600,7 @@ export function useEditorInteractions({
     (e as unknown as { skipBuiltinMenu?: boolean }).skipBuiltinMenu = true;
     setNodeCreateMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuItems(null);
-  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions]);
+  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
   const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench') => {
@@ -1651,7 +1650,15 @@ export function useEditorInteractions({
           title: t('groupTools.renameTitle'),
           icon: createElement(Pencil, { size: 14 }),
           group: '组操作',
-          run: (n: any) => onRenameGroup(n.id),
+          run: (n: any) => {
+            // 重命名前聚焦组 bounds(含空组回退,用户能看到正在重命名的组对象)
+            const store = refs.store;
+            if (store) {
+              const bounds = getGroupBoundsWithEmptyFallback(store.getGraph().nodes, n.id, getNodeSize);
+              if (bounds) store.focusOnBounds(bounds, state.containerSize, 400, 51);
+            }
+            onRenameGroup(n.id);
+          },
         },
         {
           id: 'ungroup',
@@ -1673,7 +1680,7 @@ export function useEditorInteractions({
         },
       ];
     },
-    [refs.groupPlugin, onRenameGroup, t],
+    [refs.groupPlugin, onRenameGroup, t, refs.store, state.containerSize, getNodeSize],
   );
 
   // 胶囊工具栏锚点: 计算全部选中节点/组的包围盒

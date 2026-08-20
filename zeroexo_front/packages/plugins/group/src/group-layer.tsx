@@ -166,7 +166,18 @@ export const GroupLayer = React.memo(function GroupLayer({
     [onGroupDoubleClick],
   );
 
-  // 5b. 外部触发重命名(toolbar "重命名"按钮 → externalRenamingGroupId 变化)
+  // 5b. 标题文字双击重命名(与普通节点双击标题行为一致)
+  const handleTitleDoubleClick = React.useCallback(
+    (groupId: string) => {
+      const group = scene.find((n) => n.id === groupId);
+      if (!group) return;
+      setRenamingGroupId(groupId);
+      setRenameValue(group.title ?? '');
+    },
+    [scene],
+  );
+
+  // 5c. 外部触发重命名(toolbar "重命名"按钮 → externalRenamingGroupId 变化)
   // 等效双击:设置 renamingGroupId + renameValue,后续由 GroupItem 的 useEffect 自动 focus+select
   React.useEffect(() => {
     if (!externalRenamingGroupId) return;
@@ -276,6 +287,7 @@ export const GroupLayer = React.memo(function GroupLayer({
             onVersionFolderFold={handleVfFold}
             onGroupPointerDown={handleGroupPointerDown}
             onGroupDoubleClick={handleGroupDoubleClick}
+            onTitleDoubleClick={handleTitleDoubleClick}
             onRenameChange={setRenameValue}
             onRenameCommit={commitRename}
             onRenameCancel={cancelRename}
