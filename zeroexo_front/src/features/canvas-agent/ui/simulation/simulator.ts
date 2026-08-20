@@ -1,6 +1,9 @@
 /**
  * simulation/simulator.ts — Agent 流程模拟引擎
  *
+ * @deprecated 已由 session/agent-session.ts 真连后端替代（ComposerInput 不再调用 getSimulator）。
+ * 保留仅作历史参考。
+ *
  * 模拟后端 AgentRuntime 的 SSE 事件流，驱动 AgentDock UI 渲染。
  * 新 UI 使用消息流而非 ThinkStream，每个 step 直接添加消息。
  *

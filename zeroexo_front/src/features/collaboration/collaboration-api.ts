@@ -165,7 +165,11 @@ export function listAgentMessages(canvasId: string, limit: number = 50): Promise
   return apiGet(`${COLLAB}/rooms/${canvasId}/agent/messages?${params.toString()}`);
 }
 
-/** 执行 Agent（协作模式，结果写入协作消息并广播给所有成员） */
+/**
+ * @deprecated 协作聊天 @AI 派发路径已废弃（Plan#8 T6），Agent 交互迁移至 AgentDock。
+ * 保留仅作历史引用。
+ */
+// 执行 Agent（协作模式，结果写入协作消息并广播给所有成员）
 export function executeAgent(canvasId: string, dto: AgentExecuteRequest): Promise<AgentExecuteResponse> {
   return apiPost(`${COLLAB}/rooms/${canvasId}/agent/execute`, dto);
 }

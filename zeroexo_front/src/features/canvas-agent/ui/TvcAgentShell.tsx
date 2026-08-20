@@ -1,5 +1,3 @@
-
-
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import DOMPurify from 'dompurify';
@@ -10,6 +8,12 @@ import {
   TrendingUp, Video, Wallet, Zap,
 } from 'lucide-react';
 import './AgentDock.css';
+
+/**
+ * @deprecated 已被 DockContent（真连后端 SSE）替代，保留仅作历史参考。
+ * 本组件为纯前端 mock（sleep + streamText + 硬编码 6 步 TVC 演示流程），
+ * 不再被 AgentDock 引用。
+ */
 
 // ====== 工具函数 ======
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

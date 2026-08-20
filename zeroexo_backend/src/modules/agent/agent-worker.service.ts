@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AgentFactory } from './agent-factory';
 import { AgentTaskService } from './agent-task.service';
 import { AgentSSEService } from './agent-sse.service';
+import { AgentConversationService } from './agent-conversation.service';
 
 @Injectable()
 export class AgentWorkerService {
@@ -21,6 +22,7 @@ export class AgentWorkerService {
     private readonly taskService: AgentTaskService,
     private readonly sseService: AgentSSEService,
     private readonly prisma: PrismaService,
+    private readonly conversationService: AgentConversationService,
   ) {}
 
   /**
@@ -86,6 +88,15 @@ export class AgentWorkerService {
               (event.data as any)?.toolName ?? '',
               (event.data as any)?.arguments ?? {},
             );
+            // 会话内：写入工具调用消息
+            if (task.conversationId) {
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `调用工具 ${(event.data as any)?.toolName ?? ''}`,
+                toolName: (event.data as any)?.toolName ?? '',
+                toolArguments: JSON.stringify((event.data as any)?.arguments ?? {}),
+              });
+            }
             break;
           case 'agent:tool_result':
             this.sseService.emitResult(taskId, event.data);
@@ -100,10 +111,21 @@ export class AgentWorkerService {
             const completeData = event.data as any;
             finalOutput = completeData?.output ?? '';
             this.sseService.emitResult(taskId, completeData);
+            // 会话内：写入最终回复
+            if (task.conversationId) {
+              void this.writeMessage(task, { role: 'assistant', content: finalOutput });
+            }
             break;
           }
           case 'agent:error':
             this.sseService.emitError(taskId, (event.data as any)?.error ?? '未知错误');
+            // 会话内：写入错误消息
+            if (task.conversationId) {
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `执行出错：${(event.data as any)?.error ?? '未知错误'}`,
+              });
+            }
             break;
         }
 
@@ -132,6 +154,9 @@ export class AgentWorkerService {
           this.logger.warn(`Project Memory 持久化失败: ${task.projectId}`, err);
         });
       }
+
+      // 8. 会话内任务收尾：触发记忆压缩（超预算时折叠历史）
+      await this.conversationService.maybeCompact(task.conversationId);
     } catch (err) {
       const errorMessage = (err as Error).message;
 
@@ -146,6 +171,9 @@ export class AgentWorkerService {
 
       // 推送 error 事件
       this.sseService.emitError(taskId, errorMessage);
+
+      // 会话内任务失败也触发记忆压缩
+      await this.conversationService.maybeCompact(task.conversationId);
     } finally {
       this.runningTasks.delete(taskId);
       this.sseService.close(taskId);
@@ -164,6 +192,27 @@ export class AgentWorkerService {
    */
   get runningCount(): number {
     return this.runningTasks.size;
+  }
+
+  /**
+   * 会话内写入消息（失败仅告警，不阻塞主流程）
+   */
+  private async writeMessage(
+    task: any,
+    input: { role: string; content: string; toolName?: string; toolArguments?: string },
+  ): Promise<void> {
+    try {
+      await this.conversationService.addMessage({
+        conversationId: task.conversationId,
+        role: input.role,
+        content: input.content,
+        taskId: task.id,
+        toolName: input.toolName,
+        toolArguments: input.toolArguments,
+      });
+    } catch (err) {
+      this.logger.warn(`会话消息写入失败: ${task.conversationId}`, (err as Error).message);
+    }
   }
 
   /**

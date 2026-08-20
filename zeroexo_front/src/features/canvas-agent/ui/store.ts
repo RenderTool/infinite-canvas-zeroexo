@@ -77,6 +77,10 @@ export interface CanvasAgentState {
   selectedNodeId: string | null;
   setSelectedNodeId: (id: string | null) => void;
 
+  // ---- 会话（真连层使用） ----
+  activeConversationId: string | null;
+  setActiveConversationId: (id: string | null) => void;
+
   // ---- 重置 ----
   reset: () => void;
 }
@@ -145,6 +149,10 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   // 选中节点
   selectedNodeId: null,
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+
+  // 会话
+  activeConversationId: null,
+  setActiveConversationId: (id) => set({ activeConversationId: id }),
 
   // 重置
   reset: () =>

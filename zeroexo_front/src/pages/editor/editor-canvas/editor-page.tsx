@@ -695,7 +695,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
       </div>
       {/* Agent Dock（右侧可收起面板，推开整个 nav+content） */}
       {!state.loading && !isMobile && (
-        <AgentDock />
+        <AgentDock projectId={canvasId} />
       )}
       </div>
 

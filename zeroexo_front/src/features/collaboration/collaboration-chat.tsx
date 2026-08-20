@@ -1,8 +1,12 @@
 /**
  * CollaborationChat + MentionInput - 协作聊天组件
  *
+ * @note 协作聊天中的 @AI 派发路径已废弃（Plan#8 T6）：
+ * Agent 交互迁移至 AgentDock（真连 /api/agents/execute + SSE）。
+ * 本组件仅保留成员提及（@昵称）。
+ *
  * MentionInput:
- * - 自动增高文本域,输入 @ 时弹出成员/AI 提及建议
+ * - 自动增高文本域,输入 @ 时弹出成员提及建议
  * - Enter 发送, Shift+Enter 换行
  *
  * CollaborationChat:
@@ -24,26 +28,18 @@ import {
   listMessages,
   sendMessage,
   deleteMessage,
-  executeAgent,
 } from './collaboration-api.js';
 import { useCollaborationStore } from './use-collaboration-store.js';
 
-/** 提及 AI 时使用的固定标签(与内容匹配一致) */
-const AGENT_MENTION = 'AI';
-
-/** 提取内容中的提及(成员昵称 + AI) */
-function extractMentions(content: string, members: CollaborationMember[]): {
-  mentions: string[];
-  agentMentioned: boolean;
-} {
+/** 提取内容中的提及(成员昵称) */
+function extractMentions(content: string, members: CollaborationMember[]): string[] {
   const mentions: string[] = [];
   for (const m of members) {
     if (m.nickname && content.includes(`@${m.nickname}`)) {
       mentions.push(m.nickname);
     }
   }
-  const agentMentioned = new RegExp(`@${AGENT_MENTION}`, 'i').test(content);
-  return { mentions, agentMentioned };
+  return mentions;
 }
 
 /** 渲染带提及高亮的消息内容 */
@@ -67,7 +63,6 @@ export interface MentionInputProps {
   onChange: (value: string) => void;
   onSend: () => void;
   members: CollaborationMember[];
-  allowAgent: boolean;
   placeholder?: string;
   disabled?: boolean;
   theme: ThemeConfig;
@@ -78,12 +73,10 @@ export function MentionInput({
   onChange,
   onSend,
   members,
-  allowAgent,
   placeholder,
   disabled,
   theme,
 }: MentionInputProps): React.ReactElement {
-  const { t } = useTranslation();
   const textareaRef = useRef<TextAreaRef>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
 
@@ -126,15 +119,11 @@ export function MentionInput({
     setMention({ start: at, query });
   }, [value]);
 
-  // 提及建议列表: 成员(模糊匹配昵称) + AI 助手
+  // 提及建议列表: 成员(模糊匹配昵称)
   const suggestions = useMemo(() => {
     if (!mention) return [];
     const q = mention.query.toLowerCase();
-    const list: { key: string; label: string; type: 'member' | 'agent' }[] = [];
-
-    if (allowAgent && 'ai'.startsWith(q)) {
-      list.push({ key: '__agent__', label: AGENT_MENTION, type: 'agent' });
-    }
+    const list: { key: string; label: string; type: 'member' }[] = [];
 
     for (const m of members) {
       if (!m.nickname) continue;
@@ -143,7 +132,7 @@ export function MentionInput({
       }
     }
     return list.slice(0, 8);
-  }, [mention, members, allowAgent]);
+  }, [mention, members]);
 
   // 选择提及建议,替换 "@查询词" 为 "@昵称 "
   const selectSuggestion = (label: string) => {
@@ -218,26 +207,22 @@ export function MentionInput({
                 selectSuggestion(s.label);
               }}
             >
-              {s.type === 'agent' ? (
-                <Bot size={13} style={{ color: theme.toolbar.accent, flexShrink: 0 }} />
-              ) : (
-                <span
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 10,
-                    flexShrink: 0,
-                    background: theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
-                  }}
-                >
-                  {s.label.charAt(0)}
-                </span>
-              )}
-              <span>{s.type === 'agent' ? t('collab.chatAgent') : s.label}</span>
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 10,
+                  flexShrink: 0,
+                  background: theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+                }}
+              >
+                {s.label.charAt(0)}
+              </span>
+              <span>{s.label}</span>
             </div>
           ))}
         </div>
@@ -318,22 +303,13 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
     }
     setSending(true);
     try {
-      const { mentions, agentMentioned } = extractMentions(content, members);
+      const mentions = extractMentions(content, members);
       const replyToId = replyingTo?.id;
-      // 1. 先发送用户消息（普通文本，所有成员可见）
-      const msg = await sendMessage(room.canvasId, { content, mentions, agentMentioned, replyToId });
+      // 发送用户消息（普通文本，所有成员可见）
+      const msg = await sendMessage(room.canvasId, { content, mentions, replyToId });
       store.addMessage(msg);
       setText('');
       setReplyingTo(null);
-      // 2. 若 @AI 触发 → 执行协作 Agent（思考态由 SSE 事件驱动，结果经 agent_result/message 广播）
-      if (agentMentioned && room.allowAgentChat) {
-        try {
-          await executeAgent(room.canvasId, { content, mentions, replyToId });
-        } catch (agentErr) {
-          console.error('[CollaborationChat] execute agent failed:', agentErr);
-          message.error(t('collab.agentExecuteFailed'));
-        }
-      }
     } catch (err) {
       console.error('[CollaborationChat] send failed:', err);
       message.error(t('collab.chatFailed'));
@@ -594,7 +570,6 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
             onChange={setText}
             onSend={() => void handleSend()}
             members={members}
-            allowAgent={room?.allowAgentChat ?? true}
             placeholder={t('collab.chatPlaceholder')}
             disabled={!canChat || sending}
             theme={theme}

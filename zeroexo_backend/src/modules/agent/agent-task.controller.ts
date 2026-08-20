@@ -26,16 +26,34 @@ import {
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthGuard } from '@nestjs/passport';
+import { Allow, IsInt, IsObject, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { AgentTaskService } from './agent-task.service';
 import { AgentWorkerService } from './agent-worker.service';
 import { AgentSSEService, AgentSSEEvent } from './agent-sse.service';
+import { AgentConversationService } from './agent-conversation.service';
 
 export class ExecuteAgentDto {
+  /** 任务类型(script_writer | storyboard_assistant | canvas_agent | ...) */
+  @IsString()
+  @MinLength(1)
   taskType!: string;
-  input!: any;
+
+  /** 任意结构化输入(JSON),全局 whitelist 下需 @Allow 保留 */
+  @Allow()
+  input?: any;
+
+  @IsOptional()
+  @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
   conversationId?: string;
+
+  @IsOptional()
+  @IsObject()
   config?: {
     model?: string;
     channel?: string;
@@ -43,10 +61,28 @@ export class ExecuteAgentDto {
 }
 
 export class TaskListQueryDto {
+  @IsOptional()
+  @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsString()
   taskType?: string;
+
+  @IsOptional()
+  @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
   offset?: number;
 }
 
@@ -66,6 +102,7 @@ export class AgentTaskController {
     private readonly taskService: AgentTaskService,
     private readonly workerService: AgentWorkerService,
     private readonly sseService: AgentSSEService,
+    private readonly conversationService: AgentConversationService,
   ) {}
 
   /**
@@ -89,6 +126,18 @@ export class AgentTaskController {
       projectId: dto.projectId,
       conversationId: dto.conversationId,
     });
+
+    // 1.5 会话内发起：把用户消息写入会话历史（刷新后前端可恢复上下文）
+    if (dto.conversationId) {
+      await this.conversationService.addMessage({
+        conversationId: dto.conversationId,
+        role: 'user',
+        content: typeof dto.input === 'string' ? dto.input : JSON.stringify(dto.input ?? {}),
+        taskId: task.id,
+      }).catch((err) => {
+        this.logger.warn(`会话消息写入失败: ${dto.conversationId}`, (err as Error).message);
+      });
+    }
 
     // 2. 异步执行任务（不 await）
     this.workerService.executeTask(task.id).catch((err) => {

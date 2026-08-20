@@ -76,8 +76,11 @@ export interface UseCollaborationResult {
   /** 解除禁言 */
   unmute: (userId: string) => Promise<void>;
   /** 发送聊天消息 */
-  sendChatMessage: (content: string, mentions?: string[], agentMentioned?: boolean) => Promise<CollaborationMessage | null>;
-  /** 执行协作 Agent（@AI 触发，结果广播给所有成员） */
+  sendChatMessage: (content: string, mentions?: string[]) => Promise<CollaborationMessage | null>;
+  /**
+   * @deprecated 协作聊天 @AI 派发路径已废弃（Plan#8 T6），Agent 交互迁移至 AgentDock。
+   * 保留仅作历史引用。
+   */
   executeAgent: (content: string, mentions?: string[], replyToId?: string) => Promise<AgentExecuteResponse | null>;
   /** Agent 执行状态（思考中 / 工具调用中） */
   agentStatus: ReturnType<typeof useCollaborationStore.getState>['agentStatus'];
@@ -363,14 +366,18 @@ export function useCollaboration(
   }, [store]);
 
   // 发送消息
-  const sendChatMessage = useCallback(async (content: string, mentions: string[] = [], agentMentioned = false) => {
+  const sendChatMessage = useCallback(async (content: string, mentions: string[] = []) => {
     const currentCanvasId = store.getState().canvasId;
     if (!currentCanvasId) return null;
-    const message = await sendMessageApi(currentCanvasId, { content, mentions, agentMentioned });
+    const message = await sendMessageApi(currentCanvasId, { content, mentions });
     store.getState().addMessage(message);
     return message;
   }, [store]);
 
+  /**
+   * @deprecated 协作聊天 @AI 派发路径已废弃（Plan#8 T6），Agent 交互迁移至 AgentDock。
+   * 保留仅作历史引用。
+   */
   // 执行协作 Agent（@AI 触发）
   const executeAgent = useCallback(async (content: string, mentions: string[] = [], replyToId?: string) => {
     const currentCanvasId = store.getState().canvasId;

@@ -1,20 +1,32 @@
 /**
  * AgentDock - 右侧可收起 Agent 对话面板
  *
- * 薄包装器，内容完全由 TvcAgentShell 负责。
- * 仅提供 slide-in/slide-out 动画。
- * 顶部右上角收纳 AI 渠道/模型选择器(AiModelPicker)。
+ * 外层容器（slide-in/slide-out 动画 + AiModelPicker），
+ * 内容由 DockContent（真连后端 SSE）负责。
+ * projectId 由 editor-page 注入，用于会话归属与项目上下文。
  */
 
+import { useEffect } from 'react';
 import { useCanvasAgentStore } from './store.js';
-import { TvcAgentShell } from './TvcAgentShell.js';
+import { DockContent } from './DockContent.js';
+import { setSessionProjectId } from './session/agent-session.js';
 import { AiModelPicker } from '../../top-bar/components/ai-model-picker.js';
 import './AgentDock.css';
 
 const DOCK_WIDTH = 420;
 
-export function AgentDock(): React.ReactElement {
+export interface AgentDockProps {
+  /** 当前画布/项目 ID（透传给后端会话与任务） */
+  projectId?: string;
+}
+
+export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
   const dockOpen = useCanvasAgentStore((s) => s.dockOpen);
+
+  // 注入当前项目 ID 到真连层
+  useEffect(() => {
+    setSessionProjectId(projectId ?? null);
+  }, [projectId]);
 
   return (
     <div
@@ -35,7 +47,7 @@ export function AgentDock(): React.ReactElement {
           <AiModelPicker />
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <TvcAgentShell />
+          <DockContent projectId={projectId} />
         </div>
       </div>
     </div>

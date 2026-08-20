@@ -16,7 +16,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { useCanvasAgentStore } from '../store.js';
-import { getSimulator } from '../simulation/simulator.js';
+import { sendMessage } from '../session/agent-session.js';
 import { ReferenceChip } from './ReferenceChip.js';
 import { MentionPopover } from './MentionPopover.js';
 
@@ -47,12 +47,8 @@ export function ComposerInput(): React.ReactElement {
       timestamp: Date.now(),
     });
 
-    // 尝试匹配模拟器流程
-    const sim = getSimulator();
-    if (sim.run(text)) {
-      // 模拟器已处理
-      return;
-    }
+    // 真连后端：提交 Agent 任务 + 订阅 SSE 事件流
+    void sendMessage(text);
   }, [inputText, isGenerating, setInputText, addMessage]);
 
   const handleKeyDown = useCallback(

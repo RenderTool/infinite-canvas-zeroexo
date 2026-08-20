@@ -1,6 +1,9 @@
 /**
  * simulation/flows.ts — 模拟后端 Agent 的 skill 编排流程
  *
+ * @deprecated 与 simulator.ts 一同废弃：已由 session/agent-session.ts 真连后端替代。
+ * 保留仅作历史参考。
+ *
  * 基于真实后端 skills 目录结构：
  *   canvas_agent / script_writer / storyboard_breaker /
  *   entity_extractor / cinematographer / genre_analyzer / analyze

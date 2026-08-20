@@ -11,7 +11,7 @@
 import { useState, useMemo } from 'react';
 import { AlertTriangle, DollarSign, FileText } from 'lucide-react';
 import { getSimulationResume } from '../store.js';
-import { getSimulator } from '../simulation/simulator.js';
+import { stopGenerating } from '../session/agent-session.js';
 import type { CanvasAgentMessage, PlanStep } from '../types.js';
 
 export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
@@ -43,7 +43,7 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
   };
 
   const handleCancel = () => {
-    getSimulator()?.stop();
+    stopGenerating();
   };
 
   const selectedCost = useMemo(

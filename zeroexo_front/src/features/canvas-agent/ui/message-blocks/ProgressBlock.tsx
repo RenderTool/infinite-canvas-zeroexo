@@ -9,7 +9,7 @@
  */
 
 import { CheckCircle, XCircle, Loader, Clock } from 'lucide-react';
-import { getSimulator } from '../simulation/simulator.js';
+import { stopGenerating } from '../session/agent-session.js';
 import type { CanvasAgentMessage, ProgressStep } from '../types.js';
 
 const STATUS_ICONS: Record<string, React.ReactElement> = {
@@ -101,7 +101,7 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
         >
           <button
             type="button"
-            onClick={() => getSimulator()?.stop()}
+            onClick={() => stopGenerating()}
             style={{
               padding: '4px 12px',
               borderRadius: 7,

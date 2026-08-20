@@ -1,6 +1,10 @@
 /**
  * collaboration-agent.service - 协作模式 Agent 服务（共享记忆群聊）
  *
+ * @deprecated 协作聊天 @AI 派发路径已废弃（Plan#8 T6）：
+ * Agent 交互统一迁移至 AgentDock（/api/agents/execute + SSE + AgentConversation）。
+ * 保留仅作历史参考，不再被前端调用。
+ *
  * 提供协作房间维度的 Agent 会话管理：
  * - 获取/创建 AgentSession（共享记忆）
  * - Agent 会话消息历史
