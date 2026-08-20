@@ -397,6 +397,10 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename }: InnerPro
               onMouseEnter: () => setHovering(true),
               onMouseLeave: () => setHovering(false),
             }}
+            onImgError={(e) => {
+              // 加载失败降透明度兑底(与提示词预览台同款)
+              e.currentTarget.style.opacity = '0.3';
+            }}
           >
             {/* 缩放工具栏 — 悬浮半透明 */}
             <ZoomToolbar
