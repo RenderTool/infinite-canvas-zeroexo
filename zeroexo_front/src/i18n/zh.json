@@ -938,6 +938,7 @@
     "stackReplaceTypeChanged": "已替换为{{type}}资源",
     "stackCollected": "已收纳 · {{title}}",
     "stackMerged": "已合并 · {{title}}",
+    "stackCollectedBatch": "已收纳 {{count}} 项",
     "stackUndo": "移出"
   },
   "toolTitles": {
@@ -1299,7 +1300,7 @@
     "dragIntoGroup": "加入组",
     "previewConfirm": "合成一组",
     "previewCancel": "取消",
-    "spacePan": "平移画布",
+    "spacePan": "切换平移模式",
     "shiftMarquee": "加选",
     "dblclickFocus": "双击放大查看",
     "textDblclickEdit": "双击编辑文字",
@@ -2004,8 +2005,10 @@
   },
   "storyboardTable": {
     "shotNumber": "镜号",
+    "dayNight": "日/夜",
     "duration": "时长",
     "description": "画面描述",
+    "entities": "主体",
     "shotType": "景别",
     "lighting": "光影氛围",
     "dialogue": "对白·旁白",

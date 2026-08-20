@@ -936,6 +936,7 @@
     "stackReplaceTypeChanged": "{{type}}リソースに置換しました",
     "stackCollected": "収納済み · {{title}}",
     "stackMerged": "統合済み · {{title}}",
+    "stackCollectedBatch": "{{count}} 件を収納しました",
     "stackUndo": "取り出す"
   },
   "toolTitles": {
@@ -1259,7 +1260,7 @@
     "dragIntoGroup": "グループに追加",
     "previewConfirm": "グループにする",
     "previewCancel": "キャンセル",
-    "spacePan": "キャンバスをパン",
+    "spacePan": "パンモードに切替",
     "shiftMarquee": "追加選択",
     "dblclickFocus": "ダブルクリックで拡大表示",
     "textDblclickEdit": "ダブルクリックで編集",
@@ -2002,8 +2003,10 @@
   },
   "storyboardTable": {
     "shotNumber": "カット番号",
+    "dayNight": "昼夜",
     "duration": "再生時間",
     "description": "画面説明",
+    "entities": "主体",
     "shotType": "ショットサイズ",
     "lighting": "光と雰囲気",
     "dialogue": "セリフ・ナレーション",

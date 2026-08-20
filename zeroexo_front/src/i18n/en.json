@@ -939,6 +939,7 @@
     "stackReplaceTypeChanged": "Replaced with {{type}} resource",
     "stackCollected": "Collected · {{title}}",
     "stackMerged": "Merged · {{title}}",
+    "stackCollectedBatch": "{{count}} items collected",
     "stackUndo": "Eject"
   },
   "toolTitles": {
@@ -1300,7 +1301,7 @@
     "dragIntoGroup": "Drop to add",
     "previewConfirm": "Make group",
     "previewCancel": "Cancel",
-    "spacePan": "Pan canvas",
+    "spacePan": "Toggle pan mode",
     "shiftMarquee": "Add to selection",
     "dblclickFocus": "Double-click to zoom in",
     "textDblclickEdit": "Double-click to edit",
@@ -2005,8 +2006,10 @@
   },
   "storyboardTable": {
     "shotNumber": "Shot No.",
+    "dayNight": "Day/Night",
     "duration": "Duration",
     "description": "Description",
+    "entities": "Subjects",
     "shotType": "Shot Size",
     "lighting": "Lighting & Mood",
     "dialogue": "Dialogue & Narration",

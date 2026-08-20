@@ -72,6 +72,13 @@ import { useEditorInteractions } from './use-editor-interactions.js';
 import { MobileHierarchyDrawer } from './editor-mobile-drawer.js';
 import { DevPerformancePanel } from '@/features/dev-performance/dev-performance-panel.js';
 
+// 堆叠收纳提示合并窗口(征集#25 拍板 A+B):批量场景(压力注入器/JSON 加载)一次触发大量 stackCollected,
+// 原实现每条独立 message 造成提示刷屏;现按 1.5s 窗口合并 + 计数,窗口内事件数 ≥ 阈值判定批量 → 完全静默。
+const STACK_TOAST_KEY = 'stackCollected-batch';
+const STACK_TOAST_WINDOW_MS = 1500;
+const STACK_TOAST_DELAY_MS = 300;
+const STACK_TOAST_BATCH_THRESHOLD = 10;
+
 export interface EditorPageProps {
   canvasId: string;
   /** 协作邀请码(来自 /c/<code> 邀请链接解析,用于自动申请加入房间) */
@@ -300,37 +307,110 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     return unsubscribe;
   }, [t, message]);
 
-  // 堆叠收纳/合并提示(征集#9 验收):与批量堆叠同通道(editor-page message),「移出」按钮回发 undo 事件由 node-view 执行撤销
+  // 堆叠收纳/合并提示(征集#9 验收 + 征集#25 拍板 A+B):
+  // 批量场景(压力注入器/JSON 加载)一次触发大量 stackCollected,原实现每条独立 message 造成提示刷屏。
+  // 现改为 1.5s 窗口合并 + 计数(单条仍保留 title 与「移出」撤销);
+  // 窗口内事件数 ≥ STACK_TOAST_BATCH_THRESHOLD 判定为批量加载 → 完全静默(收纳动作照做、不提示)。
   useEffect(() => {
+    const w = {
+      count: 0, // 普通收纳数(可撤销)
+      mergedCount: 0, // 跨类型合并数(无单卡撤销)
+      lastNodeId: '',
+      lastTitle: '',
+      timer: 0,
+      showTimer: 0,
+      batch: false, // 本窗口是否批量(≥ 阈值)
+    };
+    const show = () => {
+      const key = STACK_TOAST_KEY;
+      const total = w.count + w.mergedCount;
+      if (total === 1) {
+        // 单条:保持原行为(含 title 与撤销按钮)
+        const merged = w.mergedCount === 1;
+        const label = merged
+          ? t('nodes.stackMerged', { title: w.lastTitle })
+          : t('nodes.stackCollected', { title: w.lastTitle });
+        message.info({
+          key,
+          content: merged ? (
+            label
+          ) : (
+            <span>
+              {label}
+              <a
+                style={{ marginLeft: 8, fontWeight: 600 }}
+                onClick={() => {
+                  nodeActionBus.emit('stackUndoCollect', { nodeId: w.lastNodeId });
+                  message.destroy(key);
+                }}
+              >
+                {t('nodes.stackUndo')}
+              </a>
+            </span>
+          ),
+          duration: merged ? 3 : 5,
+        });
+        return;
+      }
+      // 多条:合并计数 + 最近一次可撤销
+      message.info({
+        key,
+        content: (
+          <span>
+            {t('nodes.stackCollectedBatch', { count: total })}
+            {w.count > 0 ? (
+              <a
+                style={{ marginLeft: 8, fontWeight: 600 }}
+                onClick={() => {
+                  nodeActionBus.emit('stackUndoCollect', { nodeId: w.lastNodeId });
+                  message.destroy(key);
+                }}
+              >
+                {t('nodes.stackUndo')}
+              </a>
+            ) : null}
+          </span>
+        ),
+        duration: 5,
+      });
+    };
+    const flush = () => {
+      if (w.timer) window.clearTimeout(w.timer);
+      if (w.showTimer) window.clearTimeout(w.showTimer);
+      w.timer = 0;
+      w.showTimer = 0;
+      if (!w.batch) {
+        show();
+      } else {
+        message.destroy(STACK_TOAST_KEY); // 批量:静默(若已显示首条则收回)
+      }
+      w.count = 0;
+      w.mergedCount = 0;
+      w.lastNodeId = '';
+      w.lastTitle = '';
+      w.batch = false;
+    };
     const unsubscribe = nodeActionBus.on('stackCollected', (event) => {
       const { nodeId, title, merged } = event;
       if (!nodeId || typeof title !== 'string') return;
-      const key = `stackCollected-${nodeId}-${Date.now()}`;
-      const label = merged
-        ? t('nodes.stackMerged', { title })
-        : t('nodes.stackCollected', { title });
-      message.info({
-        key,
-        content: merged ? (
-          label
-        ) : (
-          <span>
-            {label}
-            <a
-              style={{ marginLeft: 8, fontWeight: 600 }}
-              onClick={() => {
-                nodeActionBus.emit('stackUndoCollect', { nodeId });
-                message.destroy(key);
-              }}
-            >
-              {t('nodes.stackUndo')}
-            </a>
-          </span>
-        ),
-        duration: merged ? 3 : 5,
-      });
+      if (merged) w.mergedCount += 1;
+      else w.count += 1;
+      w.lastNodeId = nodeId;
+      w.lastTitle = title;
+      if (w.count + w.mergedCount >= STACK_TOAST_BATCH_THRESHOLD) w.batch = true;
+      if (w.timer === 0) {
+        w.timer = window.setTimeout(flush, STACK_TOAST_WINDOW_MS);
+        // 首条延迟显示:给批量判定留出窗口(批量场景完全静默,不闪现单条后消失)
+        w.showTimer = window.setTimeout(() => {
+          if (!w.batch) show();
+        }, STACK_TOAST_DELAY_MS);
+      }
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (w.timer) window.clearTimeout(w.timer);
+      if (w.showTimer) window.clearTimeout(w.showTimer);
+    };
   }, [t, message]);
 
   return (
