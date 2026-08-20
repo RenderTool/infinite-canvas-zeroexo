@@ -17,7 +17,7 @@ import { AiEventsService } from '../ai-events/ai-events.service';
 /** LLM 服务的最小接口定义 */
 export interface LlmService {
   chat(params: {
-    messages: Array<{ role: string; content: string }>;
+    messages: ChatMessage[];
     tools?: Array<{
       type: string;
       function: {
@@ -37,6 +37,18 @@ export interface LlmService {
       }>;
     };
   }>;
+}
+
+/** 对话消息(OpenAI 兼容: tool 消息必须携带 tool_call_id, assistant 消息需回传 tool_calls) */
+export interface ChatMessage {
+  role: string;
+  content: string;
+  tool_calls?: Array<{
+    id: string;
+    type: string;
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
 }
 
 export class AgentExecutor {
@@ -66,7 +78,7 @@ export class AgentExecutor {
       };
 
       // 构造消息列表: 系统指令 + 用户输入
-      const messages: Array<{ role: string; content: string }> = [
+      const messages: ChatMessage[] = [
         { role: 'system', content: this.instructions },
         { role: 'user', content: input },
       ];
@@ -97,6 +109,13 @@ export class AgentExecutor {
 
         // 3. 处理 tool_call
         if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
+          // 将 assistant 的 tool_calls 消息回传(OpenAI 兼容规范必需,否则严格校验渠道拒绝)
+          messages.push({
+            role: 'assistant',
+            content: responseMessage.content ?? '',
+            tool_calls: responseMessage.tool_calls,
+          });
+
           for (const toolCall of responseMessage.tool_calls) {
             // 推送工具调用事件
             yield {
@@ -127,9 +146,10 @@ export class AgentExecutor {
                   timestamp: Date.now(),
                 };
 
-                // 将工具结果追加到消息列表
+                // 将工具结果追加到消息列表(tool 消息必须携带 tool_call_id)
                 messages.push({
                   role: 'tool',
+                  tool_call_id: toolCall.id,
                   content: JSON.stringify(result),
                 });
               } catch (err) {
@@ -145,6 +165,7 @@ export class AgentExecutor {
 
                 messages.push({
                   role: 'tool',
+                  tool_call_id: toolCall.id,
                   content: `Error: ${(err as Error).message}`,
                 });
               }

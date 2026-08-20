@@ -11,11 +11,17 @@ import { AgentFactory } from './agent-factory';
 import { AgentTaskService } from './agent-task.service';
 import { AgentSSEService } from './agent-sse.service';
 import { AgentConversationService } from './agent-conversation.service';
+import { AgentOrchestrator } from './orchestrator';
 
 @Injectable()
 export class AgentWorkerService {
   private readonly logger = new Logger(AgentWorkerService.name);
   private runningTasks = new Map<string, boolean>();
+
+  /** 任务级并发上限: 与 standalone worker(MAX_CONCURRENT_TASKS=3)对齐, 防多任务×分块并发打爆渠道 QPS(Plan#9 T7 评估落地) */
+  private static readonly MAX_CONCURRENT_TASKS = 3;
+  private static activeTaskCount = 0;
+  private static taskWaiters: Array<() => void> = [];
 
   constructor(
     private readonly agentFactory: AgentFactory,
@@ -23,6 +29,7 @@ export class AgentWorkerService {
     private readonly sseService: AgentSSEService,
     private readonly prisma: PrismaService,
     private readonly conversationService: AgentConversationService,
+    private readonly orchestrator: AgentOrchestrator,
   ) {}
 
   /**
@@ -44,9 +51,20 @@ export class AgentWorkerService {
       return;
     }
 
+    // 任务级并发信号量: 超过上限排队等待(不拒绝)。排队前先置 running,
+    // 避免 pending 状态暴露给 standalone worker 轮询造成双进程重复领取
+    await this.taskService.updateTask(taskId, { status: 'running', progress: 0 }).catch(() => undefined);
+    await AgentWorkerService.acquireSlot();
+
     this.runningTasks.set(taskId, true);
 
     try {
+      // 0. 分镜生成分块编排任务: 走 orchestrator 分块编排(Plan#9)
+      if (task.taskType === 'storyboard_generate') {
+        await this.executeStoryboardGenerate(task);
+        return;
+      }
+
       // 1. 更新为 running
       await this.taskService.updateTask(taskId, { status: 'running', progress: 0 });
 
@@ -176,6 +194,121 @@ export class AgentWorkerService {
       await this.conversationService.maybeCompact(task.conversationId);
     } finally {
       this.runningTasks.delete(taskId);
+      this.sseService.close(taskId);
+      AgentWorkerService.releaseSlot();
+    }
+  }
+
+  /** 获取并发槽位: 未满直接占用, 已满入队等待 */
+  private static acquireSlot(): Promise<void> {
+    if (AgentWorkerService.activeTaskCount < AgentWorkerService.MAX_CONCURRENT_TASKS) {
+      AgentWorkerService.activeTaskCount++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      AgentWorkerService.taskWaiters.push(() => {
+        AgentWorkerService.activeTaskCount++;
+        resolve();
+      });
+    });
+  }
+
+  /** 释放并发槽位: 唤醒下一个排队任务 */
+  private static releaseSlot(): void {
+    AgentWorkerService.activeTaskCount--;
+    const next = AgentWorkerService.taskWaiters.shift();
+    if (next) next();
+  }
+
+  /**
+   * 分镜生成分块编排任务执行(Plan#9)
+   *
+   * 由 AgentOrchestrator 分块编排: 切块 → 每块独立子任务(并发) → 汇总合并。
+   * 事件映射与 executeTask 一致, output 为 { shots, blocks } 对象。
+   */
+  private async executeStoryboardGenerate(task: any): Promise<void> {
+    const taskId = task.id;
+    const startTime = Date.now();
+
+    try {
+      await this.taskService.updateTask(taskId, { status: 'running', progress: 0 });
+      this.sseService.emitThinking(taskId, '开始分镜分块生成...');
+
+      const input = typeof task.input === 'string' ? JSON.parse(task.input) : (task.input ?? {});
+      const generator = this.orchestrator.orchestrateStoryboardGenerate(
+        taskId,
+        task.projectId || '__no_project__',
+        task.userId,
+        input,
+      );
+
+      let finalOutput: any = null;
+      let iterationCount = 0;
+
+      for await (const event of generator) {
+        iterationCount++;
+
+        switch (event.type) {
+          case 'agent:step':
+            this.sseService.emitThinking(taskId, (event.data as any)?.message ?? '');
+            break;
+          case 'agent:progress':
+            this.sseService.emitProgress(
+              taskId,
+              (event.data as any)?.progress ?? 0,
+              (event.data as any)?.message,
+            );
+            break;
+          case 'agent:complete': {
+            const completeData = event.data as any;
+            finalOutput = completeData?.output ?? null;
+            this.sseService.emitResult(taskId, completeData);
+            break;
+          }
+          case 'agent:error':
+            this.sseService.emitError(taskId, (event.data as any)?.error ?? '未知错误');
+            break;
+        }
+
+        // 检查是否被取消
+        const currentTask = await this.taskService.getTask(taskId);
+        if (currentTask.status === 'cancelled') {
+          this.sseService.emitError(taskId, '任务已被取消');
+          return;
+        }
+      }
+
+      // 未产出 finalOutput 视为失败(如全部块失败时编排器只推 error)
+      if (!finalOutput) {
+        await this.taskService.updateTask(taskId, {
+          status: 'failed',
+          error: '分镜分块生成失败',
+          completedAt: new Date(),
+        });
+        return;
+      }
+
+      await this.taskService.updateTask(taskId, {
+        status: 'completed',
+        output: { output: finalOutput, iterations: iterationCount },
+        progress: 100,
+        completedAt: new Date(),
+      });
+      this.sseService.emitDone(taskId, { output: finalOutput, iterations: iterationCount });
+
+      this.logger.log(
+        `分镜分块任务完成: ${taskId}, ${finalOutput?.shots?.length ?? 0} 镜头, ${(finalOutput?.blocks?.failed ?? []).length} 失败块, 耗时 ${Date.now() - startTime}ms`,
+      );
+    } catch (err) {
+      const errorMessage = (err as Error).message;
+      this.logger.error(`分镜分块任务执行失败: ${taskId}`, (err as Error).stack);
+      await this.taskService.updateTask(taskId, {
+        status: 'failed',
+        error: errorMessage,
+        completedAt: new Date(),
+      });
+      this.sseService.emitError(taskId, errorMessage);
+    } finally {
       this.sseService.close(taskId);
     }
   }

@@ -91,6 +91,28 @@ export class AgentClient {
   }
 
   /**
+   * 取消任务
+   * POST /api/agents/tasks/:id/cancel
+   */
+  async cancelTask(taskId: string): Promise<void> {
+    const token = getToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`/api/agents/tasks/${taskId}/cancel`, {
+      method: 'POST',
+      headers,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`取消任务失败 [${res.status}]: ${errText.slice(0, 200)}`);
+    }
+  }
+
+  /**
    * 订阅指定 taskId 的 SSE 事件流
    * 自动处理重连（最多 MAX_RECONNECT_ATTEMPTS 次）
    */

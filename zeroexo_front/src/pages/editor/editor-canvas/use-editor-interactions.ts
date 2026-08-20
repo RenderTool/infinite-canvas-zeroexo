@@ -34,6 +34,7 @@ import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import { CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
+import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
 
 // ===== 反推提示词预设 =====
@@ -90,86 +91,6 @@ function computeNodesBounds(nodes: NodeRecord[]): { minX: number; minY: number; 
   }
   if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   return { minX, minY, maxX, maxY };
-}
-
-/** 分镜生成提示词：指导 AI 将剧本拆解为结构化镜头 JSON */
-const STORYBOARD_GENERATE_PRESET = `你是一名专业导演和分镜师。请根据以下剧本内容，将其拆解为连续的镜头（分镜），并只输出一个 JSON 数组。
-
-剧本内容：
-{script}
-
-要求：
-1. 每个镜头对应一个对象，字段严格如下：
-{
-  "sceneId": "场景编号，如 1-1",
-  "dayNight": "日" 或 "夜",
-  "duration": 镜头时长秒数（数字，通常 3 至 8 之间）,
-  "description": "画面描述，具体描述画面内容、人物动作、构图、镜头内发生的事",
-  "shotType": "景别，从[特写, 近景, 中景, 中近景, 中远景, 远景, 大全景, 全景]中选一个",
-  "cameraMovement": "运镜，从[固定, 推, 拉, 摇, 移, 跟, 升, 降, 推拉, 环绕, 航拍]中选一个",
-  "dialogue": "本镜头出现的对白（无则为空字符串）",
-  "voiceoverText": "本镜头的旁白（无则为空字符串）",
-  "monologue": "本镜头的内心独白（无则为空字符串）",
-  "sfx": ["音效数组，如: 雨声, 脚步声；无则为[]"],
-  "lighting": { "mood": "光影氛围描述" },
-  "environment": { "location": "场景地点" },
-  "emotion": "本镜头的情绪基调"
-}
-2. 严格按剧本叙事顺序生成镜头，覆盖剧本全部关键情节，不要遗漏。
-3. 只输出 JSON 数组本身，不要输出任何解释、注释或 Markdown 代码块标记。`;
-
-/** 调用 AI 生成分镜镜头列表(支持流式进度回调) */
-async function generateStoryboardShots(
-  provider: any,
-  scriptText: string,
-  signal?: AbortSignal,
-  onProgress?: (pct: number) => void,
-): Promise<Shot[]> {
-  const prompt = STORYBOARD_GENERATE_PRESET.replace('{script}', scriptText);
-  let accLen = 0;
-  const text = await provider.generateText({ prompt, model: 'gpt-4o', signal }, (delta: string) => {
-    // 累计字符数估算进度(0-100),onProgress 内部再做节流
-    accLen += delta.length;
-    if (onProgress) onProgress(accLen);
-  });
-  // 提取 JSON 数组（兼容 AI 可能包裹 Markdown 代码块的情况）
-  const jsonMatch = /\[\s*\{[\s\S]*\}\s*\]/.exec(text);
-  const raw = jsonMatch ? jsonMatch[0] : text;
-  if (!raw || !raw.trim()) {
-    throw new Error(i18n.t('editor.noStoryboardReturned'));
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(i18n.t('editor.invalidStoryboardRetry'));
-  }
-  if (!Array.isArray(parsed)) throw new Error(i18n.t('editor.invalidStoryboardData'));
-  return parsed.map((s, i) => {
-    const lighting = (s.lighting ?? {}) as Record<string, unknown>;
-    const environment = (s.environment ?? {}) as Record<string, unknown>;
-    const sfxRaw = s.sfx;
-    return {
-      id: `shot-${Date.now()}-${i + 1}`,
-      number: i + 1,
-      sceneId: String(s.sceneId ?? `1-${i + 1}`),
-      dayNight: String(s.dayNight ?? '日'),
-      duration: Number(s.duration) || 5,
-      description: String(s.description ?? ''),
-      shotType: String(s.shotType ?? '中景'),
-      cameraMovement: String(s.cameraMovement ?? '固定'),
-      dialogue: String(s.dialogue ?? ''),
-      voiceoverText: String(s.voiceoverText ?? ''),
-      monologue: String(s.monologue ?? ''),
-      sfx: Array.isArray(sfxRaw) ? sfxRaw.map(String) : (sfxRaw ? [String(sfxRaw)] : []),
-      entities: [],
-      emotion: String(s.emotion ?? ''),
-      lighting: { keyLight: '自然光', colorTemp: '5500K', mood: String(lighting.mood ?? '') },
-      environment: { location: String(environment.location ?? ''), time: '午后', weather: '晴' },
-      continuity: { transition: 'cut' },
-      prompt: String(s.prompt ?? ''),
-    } as Shot;
-  });
 }
 
 /** 范文模板分镜(与剧本范文内容一致,标注 isSample 供分镜节点渲染"范文示例") */
@@ -963,11 +884,20 @@ export function useEditorInteractions({
       void handlePromptGenerate(node.id, mode, prompt);
     });
     const unsubCancel = nodeActionBus.on('cancel', (event: { nodeId: string }) => {
+      // 分镜节点: 嵌套 Map(epKey → { taskId }), 断开 SSE + 取消后端任务
+      const ctlMap = nodeAbortControllersRef.current.get(event.nodeId);
+      if (ctlMap instanceof Map) {
+        for (const ctl of ctlMap.values()) {
+          if (ctl?.taskId) void agentClient.cancelTask(ctl.taskId);
+        }
+        agentClient.unsubscribe();
+        return;
+      }
       handlePromptStop(event.nodeId);
     });
     // ==== AI 生成分镜(真实剧本)的复用逻辑:支持进度条与按集生成,供初次生成/重试/切换集共用 ====
+    // Plan#9: 直连 provider 改为后端 storyboard_generate 任务(后端 storyboard_assistant 分块编排 + SSE)
     const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string) => {
-      const provider = refs.aiProvider;
       const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string }>; activeEpisodeId?: string };
       const episodes = scriptData.episodes ?? [];
       const targetEp = episodes.find((e) => e.id === episodeId) ?? episodes.find((e) => e.id === scriptData.activeEpisodeId) ?? episodes[0];
@@ -998,37 +928,60 @@ export function useEditorInteractions({
         setEpData({ statusByEpisode: 'ready' });
         return;
       }
-      if (!provider) {
-        setEpData({ statusByEpisode: 'error' });
-        return;
-      }
       setEpData({ statusByEpisode: 'generating', progressByEpisode: 0 });
-      const ctl = new AbortController();
-      // 停止控制按 nodeId → episodeId 双层 Map,只 abort 当前集任务
+      // 同时更新整体节点状态(用于无内容新节点显示 StaggerGridRipple 骨架态)
+      q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'generating' }));
+
+      // 停止控制按 nodeId → episodeId 双层 Map, 存任务 id 供取消
       let nodeCtlMap = nodeAbortControllersRef.current.get(storyboardId);
       if (!nodeCtlMap) {
         nodeCtlMap = new Map();
         nodeAbortControllersRef.current.set(storyboardId, nodeCtlMap);
       }
-      nodeCtlMap.set(epKey, ctl);
-      let lastProgress = 0;
-      void generateStoryboardShots(provider, scriptText, ctl.signal, (accLen) => {
-        // 以累计字符数估算进度(约 4000 字符视为接近完成),节流到每 ≥5% 才写一次
-        const pct = Math.max(0, Math.min(95, Math.round((accLen / 4000) * 100)));
-        if (pct - lastProgress >= 5 || pct === 95) {
-          lastProgress = pct;
-          setEpData({ progressByEpisode: pct });
-        }
+      const ctlInfo = { taskId: '' };
+      nodeCtlMap.set(epKey, ctlInfo);
+
+      // 提交后端分块生成任务(超长剧本由后端切块并发, 进度按块折算 0-95)
+      void agentClient.send('storyboard_generate', {
+        scriptText,
+        episodeId: targetEp.id,
       })
-        .then((shots: Shot[]) => {
-          setEpData({ shotsByEpisode: shots, statusByEpisode: 'ready', progressByEpisode: 100 });
+        .then(({ taskId }) => {
+          ctlInfo.taskId = taskId;
+          agentClient.subscribe(taskId, {
+            onProgress: (progress) => {
+              setEpData({ progressByEpisode: Math.max(0, Math.min(100, progress)) });
+            },
+            onDone: (output) => {
+              const result = (output as any)?.output ?? output;
+              const shots = result?.shots;
+              const failed = result?.blocks?.failed;
+              if (!Array.isArray(shots)) {
+                console.error('分镜任务返回异常:', output);
+                setEpData({ statusByEpisode: 'error' });
+                q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'error' }));
+                return;
+              }
+              setEpData({ shotsByEpisode: shots, statusByEpisode: 'ready', progressByEpisode: 100 });
+              q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'ready' }));
+              if (Array.isArray(failed) && failed.length > 0) {
+                message.warning(i18n.t('editor.storyboardPartialFailed', { failed: failed.length, total: result?.blocks?.total ?? 0 }));
+              }
+            },
+            onError: (error) => {
+              console.error('生成分镜失败:', error);
+              setEpData({ statusByEpisode: 'error' });
+              q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'error' }));
+            },
+            onClose: () => {
+              nodeCtlMap.delete(epKey);
+            },
+          });
         })
-        .catch((err) => {
-          if (err?.name === 'AbortError') return;
-          console.error('生成分镜失败:', err);
+        .catch((err: any) => {
+          console.error('提交分镜任务失败:', err);
           setEpData({ statusByEpisode: 'error' });
-        })
-        .finally(() => {
+          q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'error' }));
           nodeCtlMap.delete(epKey);
         });
     };

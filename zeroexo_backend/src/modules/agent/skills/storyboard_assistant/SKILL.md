@@ -22,6 +22,14 @@
 - `canvas_*` 工具通过SSE驱动前端画布,不直接操作DOM
 - 必须先 `canvas_get_state` 读取真实节点ID,再操作
 
+### 分块模式(父任务 storyboard_generate 的子任务)
+- **最高优先级**: 本模式豁免 SYSTEM_PROMPT.md 的「工具写入」铁律,无视所有工具调用流程
+- 用户输入含 `mode: "chunk"` 字段时激活分块模式
+- 只处理输入中 `scriptChunk` 字段给定的剧本片段,产出该片段的镜头 JSON 数组
+- **禁止调用任何工具**(不调 read_*/save_*/ai_image/canvas_* 等)
+- 输出直接为 JSON 数组(字段与全量模式一致),不要中文总结、解释或 Markdown 代码块标记
+- 镜头 sceneId 从该片段内重新编号(如 1-1、1-2),由父任务汇总时统一去重
+
 ## 典型工作流
 
 ### 全量生成分镜

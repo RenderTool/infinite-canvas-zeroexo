@@ -5,7 +5,7 @@
  * 单行编辑逻辑已抽离至 StoryboardRow，运镜选择器已抽离至 ShotStatePicker。
  */
 import { memo, type CSSProperties, type ReactElement } from 'react';
-import { Button } from 'antd';
+import { Button, Progress } from 'antd';
 import { RotateCcw, Maximize, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -83,6 +83,8 @@ export interface StoryboardTableProps {
   onMentionOpen: (shotId: string) => void;
   onShotTypeClick: (shotId: string) => void;
   status: EpisodeStatus;
+  /** 当前集生成进度 0-100(生成中有效) */
+  progress?: number;
   nodeId: string;
   linkedScript: { id: string; title?: string } | undefined;
   activeEpisode: { id: string; title?: string } | undefined;
@@ -112,6 +114,7 @@ export const StoryboardTable = memo(function StoryboardTable({
   onMentionOpen,
   onShotTypeClick,
   status,
+  progress,
   nodeId,
   linkedScript,
   activeEpisode,
@@ -167,6 +170,17 @@ export const StoryboardTable = memo(function StoryboardTable({
             <Sparkles size={14} style={{ color: accent }} />
             {t('storyboardTable.aiGenerating')}
           </div>
+          {progress != null && progress > 0 && (
+            <div style={{ width: 168 }}>
+              <Progress
+                percent={Math.min(100, Math.round(progress))}
+                size="small"
+                strokeColor={accent}
+                railColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
+                format={(pct) => `${pct}%`}
+              />
+            </div>
+          )}
           <div style={{ fontSize: 12, color: mutedColor }}>{t('storyboardTable.pleaseWait')}</div>
         </div>
       ) : shots.length === 0 && status === 'error' ? (

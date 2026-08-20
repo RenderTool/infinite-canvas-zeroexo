@@ -61,7 +61,9 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   }, [linkedScript]) as Array<{ id: string; title?: string; content?: string }>;
   const episodeLabel = useCallback((ep: { title?: string }, idx: number) => {
     const defaultTitle = t('storyboard.episodeLabel', { number: idx + 1 });
-    return ep.title && ep.title !== defaultTitle ? `${defaultTitle} · ${ep.title}` : defaultTitle;
+    // 与程序生成的默认标题(第N集,无空格)比较:i18n 插值带空格("第 1 集")会误判为自定义标题导致重复显示
+    const hasCustomTitle = !!ep.title && ep.title !== `第${idx + 1}集`;
+    return hasCustomTitle ? `${defaultTitle} · ${ep.title}` : defaultTitle;
   }, [t]);
 
   // 当前集
@@ -73,6 +75,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const hasByEpisode = useMemo(() => Object.keys(data.shotsByEpisode ?? {}).length > 0, [data.shotsByEpisode]);
   const shots = data.shotsByEpisode?.[activeEpisodeId] ?? (hasByEpisode ? [] : (data.shots ?? []));
   const status = data.statusByEpisode?.[activeEpisodeId] ?? (hasByEpisode ? 'idle' : (data.status ?? 'idle'));
+  const progress = data.progressByEpisode?.[activeEpisodeId] ?? data.progress ?? 0;
   const entities = data.entities ?? [];
   const activeEpisode = scriptEpisodes.find((e) => e.id === activeEpisodeId) ?? scriptEpisodes[0];
   const activeEpisodeIndex = Math.max(0, scriptEpisodes.findIndex((e) => e.id === activeEpisodeId));
@@ -194,7 +197,6 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   useEffect(() => {
     const unsubs = [
       nodeActionBus.on('storyboard:addShot', (e) => { if (e.nodeId === nodeId) handleAddShotRef.current(); }),
-      nodeActionBus.on('storyboard:generate', (e) => { if (e.nodeId === nodeId) message.info(t('storyboard.aiGenerateComingSoon')); }),
       nodeActionBus.on('storyboard:fullscreen', (e) => { if (e.nodeId === nodeId) setFullscreenOpen(true); }),
     ];
     return () => unsubs.forEach((u) => u?.());
@@ -256,7 +258,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
             </div>
           </>
         ) : (
-          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
         )}
       </div>
 
@@ -295,7 +297,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
                   </div>
                 </>
               ) : (
-                <StoryboardTable readOnly={false} shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+                <StoryboardTable readOnly={false} shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
               )}
             </div>
           </div>

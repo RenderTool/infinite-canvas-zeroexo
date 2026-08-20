@@ -12,22 +12,49 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Module } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PrismaModule } from '../../common/prisma/prisma.module';
+import { RedisModule } from '../../common/redis/redis.module';
+import { AppThrottlerModule } from '../../common/throttler/throttler.module';
+import { EmailModule } from '../email/email.module';
+import { StorageModule } from '../storage/storage.module';
+import databaseConfig from '../../config/database.config';
+import jwtConfig from '../../config/jwt.config';
+import aiConfig from '../../config/ai.config';
+import { throttlerConfig } from '../../common/throttler/throttler.config';
 import { AiEventsModule } from '../ai-events/ai-events.module';
 import { ApiProvidersModule } from '../api-providers/api-providers.module';
 import { AssetsModule } from '../assets/assets.module';
 import { AiGenerateModule } from '../ai-generate/ai-generate.module';
 import { AgentFactory, LLM_SERVICE_TOKEN } from './agent-factory';
+import { AgentOrchestrator } from './orchestrator';
 import { AgentLlmService } from './agent-llm.service';
 import { AgentTaskService } from './agent-task.service';
 import { AgentSSEService } from './agent-sse.service';
 import { AgentWorkerService } from './agent-worker.service';
+import { CanvasOpExecutorService } from './canvas-op-executor.service';
+import { AgentConversationService } from './agent-conversation.service';
+import { MemoryCompactorService } from './memory-compactor.service';
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_CONCURRENT_TASKS = 3;
 
 @Module({
   imports: [
+    // 与主模块保持一致的全局配置(StorageService 等依赖 ConfigService)
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [databaseConfig, jwtConfig, aiConfig, throttlerConfig],
+      envFilePath: '.env',
+    }),
+    ScheduleModule.forRoot(),
+    PrismaModule,
+    RedisModule,
+    AppThrottlerModule,
+    EmailModule,
+    StorageModule,
     AiEventsModule,
     ApiProvidersModule,
     AssetsModule,
@@ -36,10 +63,14 @@ const MAX_CONCURRENT_TASKS = 3;
   providers: [
     PrismaService,
     AgentFactory,
+    AgentOrchestrator,
     AgentLlmService,
     AgentTaskService,
     AgentSSEService,
     AgentWorkerService,
+    CanvasOpExecutorService,
+    AgentConversationService,
+    MemoryCompactorService,
     { provide: LLM_SERVICE_TOKEN, useClass: AgentLlmService },
   ],
 })

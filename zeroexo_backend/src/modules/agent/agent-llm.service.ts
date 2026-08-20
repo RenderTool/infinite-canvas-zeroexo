@@ -7,7 +7,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ApiProvidersService } from '../api-providers/api-providers.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { LlmService } from './agent-executor';
+import { ChatMessage, LlmService } from './agent-executor';
 
 @Injectable()
 export class AgentLlmService implements LlmService {
@@ -19,7 +19,7 @@ export class AgentLlmService implements LlmService {
   ) {}
 
   async chat(params: {
-    messages: Array<{ role: string; content: string }>;
+    messages: ChatMessage[];
     tools?: Array<{
       type: string;
       function: { name: string; description: string; parameters: Record<string, unknown> };
@@ -67,12 +67,18 @@ export class AgentLlmService implements LlmService {
 
     const body: Record<string, any> = {
       model,
-      messages: params.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      // 透传 tool_calls / tool_call_id(OpenAI 兼容规范: tool 消息必须携带 tool_call_id)
+      messages: params.messages.map((m) => {
+        const msg: Record<string, any> = { role: m.role, content: m.content };
+        if (m.tool_calls && m.tool_calls.length > 0) msg.tool_calls = m.tool_calls;
+        if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+        return msg;
+      }),
       temperature: cfg.agentTemperature ?? 0.7,
-      max_tokens: cfg.agentMaxTokens ?? 4096,
+      // 分镜等结构化长输出需更大上限,默认 8192 防止 JSON 被截断
+      max_tokens: cfg.agentMaxTokens ?? 8192,
+      // 渠道可选附加参数(如 DeepSeek: { thinking: { type: 'disabled' } })
+      ...(cfg.agentExtraBody || {}),
     };
 
     if (params.tools && params.tools.length > 0) {
@@ -89,7 +95,8 @@ export class AgentLlmService implements LlmService {
     this.logger.debug(`LLM 请求: ${url}, messages=${params.messages.length}, tools=${params.tools?.length ?? 0}`);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+    // 长 prompt + 推理模型 + 结构化长输出,超时放宽到 120s
+    const timeout = setTimeout(() => controller.abort(), cfg.agentTimeoutMs ?? 120000);
 
     try {
       const response = await fetch(url, {
