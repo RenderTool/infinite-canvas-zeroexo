@@ -261,6 +261,50 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     return unsubscribe;
   }, [state.editor, state.containerSize, interactions]);
 
+  // 堆叠卡片跨类型替换提示(征集#9 增强拍板):node-view 无法访问 message,经 nodeActionBus 通知(message 为顶层 useApp 实例)
+  useEffect(() => {
+    const unsubscribe = nodeActionBus.on('stackReplaceTypeChanged', (event) => {
+      const { type } = event;
+      if (type === 'image' || type === 'video' || type === 'audio') {
+        message.info(t('nodes.stackReplaceTypeChanged', { type: t(`toolbar.${type}`) }));
+      }
+    });
+    return unsubscribe;
+  }, [t, message]);
+
+  // 堆叠收纳/合并提示(征集#9 验收):与批量堆叠同通道(editor-page message),「移出」按钮回发 undo 事件由 node-view 执行撤销
+  useEffect(() => {
+    const unsubscribe = nodeActionBus.on('stackCollected', (event) => {
+      const { nodeId, title, merged } = event;
+      if (!nodeId || typeof title !== 'string') return;
+      const key = `stackCollected-${nodeId}-${Date.now()}`;
+      const label = merged
+        ? t('nodes.stackMerged', { title })
+        : t('nodes.stackCollected', { title });
+      message.info({
+        key,
+        content: merged ? (
+          label
+        ) : (
+          <span>
+            {label}
+            <a
+              style={{ marginLeft: 8, fontWeight: 600 }}
+              onClick={() => {
+                nodeActionBus.emit('stackUndoCollect', { nodeId });
+                message.destroy(key);
+              }}
+            >
+              {t('nodes.stackUndo')}
+            </a>
+          </span>
+        ),
+        duration: merged ? 3 : 5,
+      });
+    });
+    return unsubscribe;
+  }, [t, message]);
+
   return (
     <Layout style={layoutStyle(theme)}>
       <div style={mainRowStyle}>
@@ -595,6 +639,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             onAlign={(type: string) => interactions.handleAlign(type as any)}
             onUnifySizes={(type: string) => interactions.handleUnifySizes(type as any)}
             onSort={(type: string) => refs.layoutController?.sortSelection(type as any)}
+            onStackSelected={interactions.handleStackSelected}
             /**
              * usePureIcon - 纯图标模式开关
              * false（默认）: icon + 文本标签

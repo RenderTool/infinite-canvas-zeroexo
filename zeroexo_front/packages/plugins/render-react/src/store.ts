@@ -244,6 +244,8 @@ export class ReactGraphStore {
    *  算法: 1) 节点中心对齐屏幕中心; 2) 缩放至节点+胶囊菜单完整可见的最大尺寸(保留 5% 边距)
    *  优先使用节点当前实际尺寸(node.size),传入的 nodeWidth/nodeHeight 仅作为降级回退。
    *  @param capsuleHeight 胶囊菜单高度(px),有胶囊菜单时传入以确保缩放包含菜单区域
+   *  @param paddingRatio 聚焦缩放系数(0~1),越小节点周边留白越大(默认 0.82);
+   *         例:堆叠模式传 0.8 得到比基准更小的缩放、节点外边空间更大
    *  注: 胶囊菜单在节点上方,中心点使用节点实际中心(不偏移),缩放范围包含胶囊菜单区域
    */
   focusOnNode = (
@@ -253,6 +255,7 @@ export class ReactGraphStore {
     nodeHeight?: number,
     durationMs = 400,
     capsuleHeight = 0,
+    paddingRatio = 0.82,
   ): void => {
     const node = this.getNode(nodeId);
     if (!node) return;
@@ -264,8 +267,8 @@ export class ReactGraphStore {
     const nodeCenterY = (node.position?.y ?? 0) + nodeH / 2;
     // 缩放范围:包含胶囊菜单高度(菜单在节点上方,所以 totalH = nodeH + capsuleHeight)
     const totalH = nodeH + capsuleHeight;
-    // 计算缩放:使节点+胶囊完整显示在视口内,保留 18% 边距
-    const padding = 0.82;
+    // 计算缩放:使节点+胶囊完整显示在视口内,保留 (1-paddingRatio) 边距
+    const padding = paddingRatio;
     const targetK = Math.min(
       (containerSize.width / nodeW) * padding,
       (containerSize.height / totalH) * padding,

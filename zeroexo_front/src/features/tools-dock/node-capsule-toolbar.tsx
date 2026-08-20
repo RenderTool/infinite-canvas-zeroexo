@@ -7,7 +7,7 @@
  *
  * 展示内容：
  * - 单选节点/组：该节点全部工具(ext.getTools / getGroupTools) + 层级聚合按钮
- * - 多选：成组/排列/尺寸聚合按钮(层级聚合暂隐藏)
+ * - 多选：成组/排列/尺寸聚合按钮 + 批量堆叠(征集#9 E2,含不可堆叠跳过计数)(层级聚合暂隐藏)
  * - 预览组：确认/取消工具
  *
  * 位置计算：通过 useGraph/useViewport 订阅状态，锚点由宿主注入的 getAnchorBounds
@@ -16,7 +16,7 @@
  * 所有可见文本通过 i18n 获取，禁止硬编码。
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -33,6 +33,7 @@ import {
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
   Compass,
   LogOut,
+  Combine,
   } from 'lucide-react';
 import { NodeJoystickNav } from './node-joystick-nav.js';
 
@@ -61,6 +62,8 @@ export interface NodeCapsuleToolbarProps {
   onAlign: (type: string) => void;
   onUnifySizes: (type: string) => void;
   onSort: (type: string) => void;
+  /** 批量堆叠(征集#9 E2):多选时对可堆叠子集执行收纳,由宿主注入执行逻辑 */
+  onStackSelected?: () => void;
   isMobile?: boolean;
   /**
    * 纯图标模式开关
@@ -109,6 +112,15 @@ function resolveText(
   ctx: ToolContext,
 ): string {
   return typeof value === 'function' ? value(node, ctx) : value;
+}
+
+/** 与右键菜单同源判定:group 恒不可堆叠,其余看扩展 capabilities.stackable(征集#9 E2) */
+function isNodeStackable(
+  n: NodeRecord,
+  getExt: (nodeId: string) => NodeTypeExtension | undefined,
+): boolean {
+  if (n.type === 'group') return false;
+  return Boolean(getExt(n.id)?.capabilities?.stackable);
 }
 
 function resolveIcon(
@@ -177,6 +189,7 @@ export function NodeCapsuleToolbar({
   onAlign,
   onUnifySizes,
   onSort,
+  onStackSelected,
   usePureIcon = true,
 }: NodeCapsuleToolbarProps): React.ReactElement | null {
   const { t } = useTranslation();
@@ -207,10 +220,21 @@ export function NodeCapsuleToolbar({
   }, [openMenu]);
 
   // 必须在 early return 之前声明所有 hooks
-
   const node = nodeProp ?? (nodeId ? graph.nodes.find((n) => n.id === nodeId) : null);
   const hasNodeTools = !!node;
   const isMultiSelect = selectedCount >= 2;
+  // 批量堆叠可堆叠计数(征集#9 E2):多选且存在可堆叠节点且宿主注入执行逻辑时才有意义
+  const stackableCount = useMemo(() => {
+    if (!isMultiSelect || !onStackSelected) return 0;
+    const ids = store.getSelection().selectedNodeIds;
+    const g = store.getGraph();
+    let count = 0;
+    for (const id of ids) {
+      const n = g.nodes.find((nn) => nn.id === id);
+      if (n && isNodeStackable(n, getExtension)) count++;
+    }
+    return count;
+  }, [isMultiSelect, onStackSelected, store, getExtension]);
 
   if (!hasNodeTools && !isMultiSelect) return null;
 
@@ -240,6 +264,7 @@ export function NodeCapsuleToolbar({
   const showAlignAgg = isMultiSelect || isSingleGroup;
   const showSizeAgg = isMultiSelect || isSingleGroup;
   const showLayerAgg = false;
+  const showStackAgg = isMultiSelect && stackableCount > 0 && !!onStackSelected;
   // 摇杆导航按钮: 仅单选非组非预览节点时显示
   const showNavButton = hasNodeTools && !isGroupNode && !isMultiSelect && !isPreview;
 
@@ -473,6 +498,22 @@ export function NodeCapsuleToolbar({
       {showAlignAgg ? renderAggButton('align', <AlignCenterVertical size={16} />, t('toolbar.align')) : null}
       {showSizeAgg ? renderAggButton('size', <Scaling size={16} />, t('toolbar.unify')) : null}
       {showLayerAgg ? renderAggButton('layer', <Layers size={16} />, t('toolbar.layer')) : null}
+      {/* 批量堆叠:单动作直达(无下拉),点击即执行收纳(征集#9 E2) */}
+      {showStackAgg ? (
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            title={t('toolbar.stackSelectedCount', { count: stackableCount })}
+            onClick={(e) => { e.stopPropagation(); onStackSelected?.(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={aggButtonStyle(false, nodeAccent, textColor, hoverBg)}
+            onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Combine size={16} />
+          </button>
+        </div>
+      ) : null}
       {/* 移出组:统一为纯图标动作按钮，避免与节点工具出现两套交互 */}
       {showMoveOut ? (
         <div style={{ position: 'relative' }}>

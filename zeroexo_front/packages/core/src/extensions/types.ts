@@ -3,6 +3,7 @@
  */
 
 import type { NodeRecord } from '../model/types.js';
+import type { Viewport } from '../model/types.js';
 import type { CommandQueue } from '../command/command-queue.js';
 import type { EventBus } from '../bus/event-bus.js';
 import type { NodeViewContract } from '../node-view-contract.js';
@@ -73,6 +74,10 @@ export interface ToolContext {
   eventBus: EventBus;
   /** 获取当前选中节点 id 集合 */
   getSelectedNodeIds(): Set<string>;
+  /** 惰性读取当前视口(可选:需要按用户视觉中心定位的工具使用;未注入时工具回退原逻辑) */
+  getViewport?(): Viewport;
+  /** 惰性读取画布容器屏幕尺寸(与 getViewport 配合计算视觉中心) */
+  getContainerSize?(): { width: number; height: number };
   /** 打开节点编辑器/属性面板(可选,由渲染层注入) */
   openEditor?(node: NodeRecord): void;
   /** 打开图片编辑对话框(按 type 指定具体编辑器:crop/split/upscale/maskEdit/angle/superResolve/view/info/saveAsset/reversePrompt/replace) */

@@ -29,7 +29,8 @@
     "config": "配置",
     "layer": "层级",
     "createNode": "创建",
-    "stackedMedia": "堆叠"
+    "stackedMedia": "堆叠",
+    "stackSelectedCount": "堆叠所选节点 ({{count}})"
   },
   "nodeCategory": {
     "base": "基础",
@@ -729,6 +730,7 @@
     "scriptAlreadyLinked": "该剧本已关联到该分镜节点",
     "scriptLinked": "剧本关联成功",
     "storyboardRetryUnavailable": "分镜重试不可用：未找到关联剧本",
+    "storyboardPartialFailed": "分镜生成完成，但有 {{failed}}/{{total}} 块失败，可点击重试（已完成块将跳过）",
     "saveToAssets": "存入我的资产",
     "assetsSaved": "已存入我的资产",
     "linkNewScript": "关联新剧本",
@@ -928,7 +930,11 @@
     "stackCreateNew": "生成堆叠节点",
     "stackSelected": "堆叠所选节点",
     "stackSelectedDone": "已收纳 {{count}} 个节点",
-    "stackSelectedResult": "已收纳 {{collected}} 个节点，跳过 {{skipped}} 个不支持的节点"
+    "stackSelectedResult": "已收纳 {{collected}} 个节点，跳过 {{skipped}} 个不支持的节点",
+    "stackReplaceTypeChanged": "已替换为{{type}}资源",
+    "stackCollected": "已收纳 · {{title}}",
+    "stackMerged": "已合并 · {{title}}",
+    "stackUndo": "移出"
   },
   "toolTitles": {
     "duplicate": "复制节点",
@@ -1995,6 +2001,7 @@
     "retry": "重试生成",
     "abandon": "放弃",
     "noShotsLinked": "此分镜尚未关联剧本，可在下方工具栏「关联剧本」，或点击「编辑」手动创建",
+    "currentEpisode": "当前集",
     "generateCurrentEpisode": "生成当前集分镜"
   },
   "storyboardRow": {

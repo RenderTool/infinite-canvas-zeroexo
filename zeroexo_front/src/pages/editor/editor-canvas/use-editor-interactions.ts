@@ -18,7 +18,7 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition } from '@zeroexo/plugin-nodes';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -634,26 +634,7 @@ export function useEditorInteractions({
               key: 'stackSelected',
               label: t('nodes.stackSelected', { count: stackableCount }),
               icon: createElement(Combine, { size: 14 }),
-              onClick: () => {
-                const g = refs.store?.getGraph();
-                if (!g) return;
-                const sn = g.nodes.filter((n) => selectedIds.has(n.id));
-                const bounds = computeNodesBounds(sn);
-                const result = stackSelectedNodes(
-                  { x: bounds.maxX + 120, y: bounds.minY },
-                  sn,
-                  { edges: g.edges },
-                  isNodeStackable,
-                );
-                if (result) {
-                  refs.commandQueue?.execute(result.command);
-                  if (result.skippedCount > 0) {
-                    message.info(t('nodes.stackSelectedResult', { collected: result.collectedCount, skipped: result.skippedCount }));
-                  } else {
-                    message.success(t('nodes.stackSelectedDone', { count: result.collectedCount }));
-                  }
-                }
-              },
+              onClick: handleStackSelected,
             });
           }
         }
@@ -1559,6 +1540,14 @@ export function useEditorInteractions({
       commandQueue: refs.commandQueue,
       eventBus: state.editor.core.eventBus,
       getSelectedNodeIds: () => state.editor?.store.getSelection().selectedNodeIds ?? new Set(),
+      // 征集#9 E1:惰性读取视口/容器尺寸,供新建堆叠按用户视觉中心定位(不加入依赖,避免高频重建)
+      getViewport: () => refs.store?.getViewport() ?? { x: 0, y: 0, k: 1 },
+      getContainerSize: () => {
+        const el = containerRef.current;
+        return el
+          ? { width: el.clientWidth, height: el.clientHeight }
+          : { width: window.innerWidth, height: window.innerHeight };
+      },
       openEditor: (node: NodeRecord) => {
         // 文本/配置节点编辑器(图片节点由 openImageDialog 处理)
         if (node.type !== 'image') {
@@ -1595,6 +1584,63 @@ export function useEditorInteractions({
       },
     };
   }, [refs.commandQueue, state.editor, handleSaveNodeAsset, handleReversePrompt]);
+
+  // 多选堆叠(征集#9 E2 拍板):右键菜单与胶囊工具栏共用入口;
+  // 落点优先用户视觉中心(视口中心,选择集即将删除故整体忽略),回退选择集右上外侧 120px;
+  // 不可堆叠节点跳过式处理(执行可堆叠子集 + 未收纳列表提示)
+  const handleStackSelected = useCallback(() => {
+    const g = refs.store?.getGraph();
+    const selectedIds = refs.store?.getSelection().selectedNodeIds;
+    if (!g || !selectedIds || selectedIds.size < 2) return;
+    const isNodeStackable = (n: NodeRecord): boolean => {
+      if (n.type === 'group') return false;
+      const ext = state.extensions.get(n.type);
+      return Boolean(ext?.capabilities?.stackable);
+    };
+    const sn = g.nodes.filter((n) => selectedIds.has(n.id));
+    const spawn =
+      toolContext?.getViewport && toolContext.getContainerSize
+        ? resolveStackSpawnPosition(toolContext, { ignoreNodeIds: selectedIds })
+        : null;
+    const result = stackSelectedNodes(
+      spawn ?? { x: computeNodesBounds(sn).maxX + 120, y: computeNodesBounds(sn).minY },
+      sn,
+      { edges: g.edges },
+      isNodeStackable,
+    );
+    if (!result) return;
+    refs.commandQueue?.execute(result.command);
+    // 合并堆叠后缩放聚焦(征集#9 验收):聚焦系数 0.8(比基准 0.82 更小 → 节点周边留白更大);
+    // 顺带验证 focusOnNode 新开放的 paddingRatio 接口(此前硬编码 0.82 无扩展点)
+    const container = toolContext?.getContainerSize ? toolContext.getContainerSize() : null;
+    const mergedNode = refs.store?.getNode(result.stackNodeId);
+    if (refs.store?.focusOnNode && container) {
+      refs.store.focusOnNode(
+        result.stackNodeId,
+        container,
+        mergedNode?.size?.width,
+        mergedNode?.size?.height,
+        400,
+        51,
+        0.8,
+      );
+    }
+    if (result.skippedCount > 0) {
+      // 跳过透明度增强:列出未收纳节点标题(至多 3 个)
+      const skippedTitles = result.skippedIds
+        .map((id) => g.nodes.find((n) => n.id === id)?.title)
+        .filter((t): t is string => !!t);
+      const skipDetail =
+        skippedTitles.length > 0
+          ? `（未收纳：${skippedTitles.slice(0, 3).join('、')}${skippedTitles.length > 3 ? ' 等' : ''}）`
+          : '';
+      message.info(
+        t('nodes.stackSelectedResult', { collected: result.collectedCount, skipped: result.skippedCount }) + skipDetail,
+      );
+    } else {
+      message.success(t('nodes.stackSelectedDone', { count: result.collectedCount }));
+    }
+  }, [refs, state.extensions, toolContext, t, message]);
 
   // 节点扩展访问器
   const getExtension = useCallback(
@@ -1767,6 +1813,7 @@ export function useEditorInteractions({
     handleDistribute,
     handleUnifySizes,
     handleMoveOutGroup,
+    handleStackSelected,
     handleReplaceFileChange,
     getExtension,
     getGroupTools,

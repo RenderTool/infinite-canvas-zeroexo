@@ -29,7 +29,8 @@
     "config": "Config",
     "layer": "Layer",
     "createNode": "Create",
-    "stackedMedia": "Stack"
+    "stackedMedia": "Stack",
+    "stackSelectedCount": "Stack Selected ({{count}})"
   },
   "nodeCategory": {
     "base": "Basic",
@@ -730,6 +731,7 @@
     "scriptAlreadyLinked": "This script is already linked to this storyboard node",
     "scriptLinked": "Script linked successfully",
     "storyboardRetryUnavailable": "Storyboard retry unavailable: no linked script found",
+    "storyboardPartialFailed": "Storyboard generated with {{failed}}/{{total}} blocks failed. Click retry (completed blocks will be skipped)",
     "saveToAssets": "Save to My Assets",
     "assetsSaved": "Saved to My Assets",
     "linkNewScript": "Link New Script",
@@ -929,7 +931,11 @@
     "stackCreateNew": "Create Stack Node",
     "stackSelected": "Stack Selected Nodes",
     "stackSelectedDone": "{{count}} nodes stacked",
-    "stackSelectedResult": "{{collected}} nodes stacked, {{skipped}} unsupported nodes skipped"
+    "stackSelectedResult": "{{collected}} nodes stacked, {{skipped}} unsupported nodes skipped",
+    "stackReplaceTypeChanged": "Replaced with {{type}} resource",
+    "stackCollected": "Collected · {{title}}",
+    "stackMerged": "Merged · {{title}}",
+    "stackUndo": "Eject"
   },
   "toolTitles": {
     "duplicate": "Duplicate Node",
@@ -1996,6 +2002,7 @@
     "retry": "Retry",
     "abandon": "Abandon",
     "noShotsLinked": "This storyboard is not yet linked to a script. You can link a script from the toolbar below or click \"Edit\" to create manually.",
+    "currentEpisode": "Current episode",
     "generateCurrentEpisode": "Generate storyboard for current episode"
   },
   "storyboardRow": {

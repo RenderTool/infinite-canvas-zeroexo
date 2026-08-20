@@ -55,7 +55,7 @@ export { createAssetNode } from './asset-node-factory.js';
 export { replaceNodeImage } from './utils/replace-node-image.js';
 // 媒体替换模型 — video/audio 替换命令化(视图只消费命令,支持撤销/重做)
 export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
-export { convertToStack, createStackNode } from './node-tools.js';
+export { convertToStack, createStackNode, resolveStackSpawnPosition } from './node-tools.js';
 export { stackSelectedNodes } from './nodes/stacked-media-model.js';
 // 视图组件 import(供 extension factory 使用)
 import { TextNodeView, getTextNodePins } from './nodes/text-node-view.js';

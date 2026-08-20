@@ -19,7 +19,7 @@ import {
   Heading1,
 } from 'lucide-react';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
-import { AddNodeCommand, AddEdgeCommand, BatchCommand } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
 import { setImageBlob } from '@zeroexo/plugin-persistence';
 import { collectCard } from './nodes/stacked-media-model.js';
 import { parseStackedMediaData } from './nodes/stacked-media-types.js';
@@ -374,6 +374,42 @@ function genId(prefix: string): string {
 }
 
 /**
+ * 新建堆叠节点落点(征集#9 E1 拍板):优先用户视觉中心(视口中心)。
+ *
+ * 与已有节点包围盒重叠时向右偏移 140px 试探(至多 2 次),仍冲突则直落中心保证必见;
+ * ctx 未注入视口信息(无 getViewport/getContainerSize)时返回 null,调用方回退原右侧 120px 逻辑。
+ */
+export function resolveStackSpawnPosition(
+  ctx: ToolContext,
+  opts?: { ignoreNodeIds?: Set<string> },
+): { x: number; y: number } | null {
+  const vp = ctx.getViewport?.();
+  const size = ctx.getContainerSize?.();
+  if (!vp || !size) return null;
+  const cx = (size.width / 2 - vp.x) / vp.k;
+  const cy = (size.height / 2 - vp.y) / vp.k;
+  const graph = ctx.commandQueue.getState();
+  const occupied = (p: { x: number; y: number }): boolean =>
+    (graph?.nodes ?? []).some((n) => {
+      if (opts?.ignoreNodeIds?.has(n.id)) return false;
+      const { width: w, height: h } = resolveNodeSize(n);
+      // ±16 间隙容忍:中心点贴近节点边缘不视为冲突
+      return (
+        p.x >= (n.position?.x ?? 0) - 16 &&
+        p.x <= (n.position?.x ?? 0) + w + 16 &&
+        p.y >= (n.position?.y ?? 0) - 16 &&
+        p.y <= (n.position?.y ?? 0) + h + 16
+      );
+    });
+  const candidates = [
+    { x: cx, y: cy },
+    { x: cx + 140, y: cy },
+    { x: cx + 280, y: cy },
+  ];
+  return candidates.find((p) => !occupied(p)) ?? { x: cx, y: cy };
+}
+
+/**
  * 将当前节点转入 StackNode
  *
  * 逻辑:
@@ -408,13 +444,15 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
     ctx.commandQueue.execute(collected.command);
   } else {
     // 无 StackNode → 一个原子命令完成创建与收纳，避免 setTimeout 和 View effect 竞争。
+    // 落点优先用户视觉中心(征集#9 E1),无视口信息回退节点右侧 120px
     const nodePos = node.position ?? { x: 0, y: 0 };
     const nodeWidth = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
+    const spawn = resolveStackSpawnPosition(ctx, { ignoreNodeIds: new Set([node.id]) });
     const stackNodeId = genId('stack-node');
     const stackNode: NodeRecord = {
       id: stackNodeId,
       type: 'stacked-media',
-      position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
+      position: spawn ?? { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
       size: { ...STACKED_MEDIA_DEFAULT_SIZE },
       title: '堆叠媒体',
       data: { cards: [], activeIndex: 0 },
@@ -445,11 +483,13 @@ export function convertToStack(node: NodeRecord, ctx: ToolContext): void {
 export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
   const nodePos = node.position ?? { x: 0, y: 0 };
   const nodeWidth = node.size?.width ?? IMAGE_DEFAULT_SIZE.width;
+  // 落点优先用户视觉中心(征集#9 E1),无视觉信息回退节点右侧 120px
+  const spawn = resolveStackSpawnPosition(ctx, { ignoreNodeIds: new Set([node.id]) });
   const stackNodeId = genId('stack-node');
   const stackNode: NodeRecord = {
     id: stackNodeId,
     type: 'stacked-media',
-    position: { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
+    position: spawn ?? { x: nodePos.x + nodeWidth + 120, y: nodePos.y },
     size: { ...STACKED_MEDIA_DEFAULT_SIZE },
     title: '堆叠媒体',
     data: { cards: [], activeIndex: 0 },

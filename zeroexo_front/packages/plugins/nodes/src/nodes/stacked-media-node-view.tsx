@@ -19,9 +19,8 @@ import type { EdgeRecord, NodeRecord, NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView } from '../base-node-view.js';
+import { BaseNodeView, nodeActionBus } from '../base-node-view.js';
 import { IMAGE_DEFAULT_SIZE, STACKED_MEDIA_DEFAULT_SIZE } from '../utils/node-contracts.js';
-import { StackCollectToast } from './stacked-media-toast.js';
 import { activateStackCard, appendCards, collectCard, dismissCollected, mergeStacks, replaceCardContent, updateCardData } from './stacked-media-model.js';
 import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
 import {
@@ -35,9 +34,8 @@ export interface StackedMediaNodeViewProps extends NodeRendererProps {
   store?: ReactGraphStore | null;
 }
 
-/** 非打扰式收纳提示快照(胶囊「移除」据此反向恢复) */
+/** 收纳撤销快照(仅保留最近一次可撤销;视觉提示由 editor-page message 承载,不在此渲染) */
 interface CollectSnapshot {
-  label: string;
   sourceNode: NodeRecord;
   edge: EdgeRecord;
   cardId: string;
@@ -215,7 +213,7 @@ export function StackedMediaNodeView({
     setActiveIndex(index);
   }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
 
-  // ===== 收纳:连线预览 → 卡片(删边 + 删源节点 + 追加卡片,自动执行 + 胶囊可撤销) =====
+  // ===== 收纳:连线预览 → 卡片(删边 + 删源节点 + 追加卡片,自动执行 + message「移出」可撤销) =====
   const handleCollect = useCallback((edge: EdgeRecord, sourceNode: NodeRecord) => {
     if (!commandQueue) return;
     if (sourceNode.type === 'stacked-media' && store) {
@@ -223,19 +221,30 @@ export function StackedMediaNodeView({
       commandQueue.execute(result.command);
       setActiveIndex(result.activeIndex);
       setCollectToast(null);
+      // 提示通道统一(征集#9 验收):与批量堆叠同走 editor-page message;合并场景无单卡撤销
+      nodeActionBus.emit('stackCollected', {
+        nodeId: node.id,
+        title: sourceNode.title || sourceNode.type,
+        merged: true,
+      });
       return;
     }
     const result = collectCard(node.id, data, sourceNode, edge);
     commandQueue.execute(result.command);
     setActiveIndex(result.cards.length - 1);
-    // 画布锚定胶囊快照(仅保留最近一次可撤销)
+    // 撤销快照(仅保留最近一次可撤销)
     setCollectToast({
-      label: `已收纳 · ${sourceNode.title || sourceNode.type}`,
       sourceNode,
       edge,
       cardId: result.cardId,
       prevActiveIndex: data.activeIndex,
       prevCards: data.cards,
+    });
+    // 提示通道统一(征集#9 验收):以胶囊菜单的 message 形式为主,「移出」按钮回发 undo 事件由本视图撤销
+    nodeActionBus.emit('stackCollected', {
+      nodeId: node.id,
+      title: sourceNode.title || sourceNode.type,
+      merged: false,
     });
   }, [commandQueue, data.cards, data.activeIndex, node.id]);
 
@@ -243,7 +252,7 @@ export function StackedMediaNodeView({
   const handleCollectRef = useRef(handleCollect);
   handleCollectRef.current = handleCollect;
 
-  // ===== 收纳提示胶囊「移出」:与胶囊 eject 同语义(解绑为独立节点,不恢复连线) =====
+  // ===== 收纳提示「移出」回执:editor-page message 按钮 → 本视图执行撤销(与胶囊 eject 同语义) =====
   const handleUndoCollect = useCallback(() => {
     if (!collectToast || !commandQueue) return;
     const { sourceNode, cardId } = collectToast;
@@ -251,6 +260,16 @@ export function StackedMediaNodeView({
     commandQueue.execute(result.command);
     setActiveIndex(result.activeIndex);
   }, [collectToast, commandQueue, node.id, data.cards, data.activeIndex]);
+
+  const handleUndoCollectRef = useRef(handleUndoCollect);
+  handleUndoCollectRef.current = handleUndoCollect;
+  useEffect(() => {
+    const unsubscribe = nodeActionBus.on('stackUndoCollect', (event) => {
+      if (event.nodeId !== node.id) return;
+      handleUndoCollectRef.current();
+    });
+    return unsubscribe;
+  }, [node.id]);
 
   // ===== 文本卡片编辑落盘(失焦时单次写入,不逐键污染命令历史) =====
   const handleTextCommit = useCallback((cardId: string, html: string) => {
@@ -339,6 +358,23 @@ export function StackedMediaNodeView({
         size: node.size ?? { ...IMAGE_DEFAULT_SIZE },
       };
     }
+    if (file.type.startsWith('audio/')) {
+      // 音频卡(征集#9 增强拍板):资源浏览器语义,图片/视频卡均可替换为音频
+      const media = await uploadMediaFile(file, 'audio');
+      return {
+        id: genId('card'),
+        sourceType: 'audio',
+        data: {
+          content: media.url,
+          storageKey: media.storageKey,
+          status: 'success',
+          durationMs: media.durationMs,
+          mimeType: media.mimeType,
+        },
+        title: fileName,
+        size: node.size ?? { ...IMAGE_DEFAULT_SIZE },
+      };
+    }
     return null;
   }, [node.size]);
 
@@ -378,6 +414,10 @@ export function StackedMediaNodeView({
       if (card) {
         const result = replaceCardContent(node.id, data.cards, activeIndex, card);
         commandQueue.execute(result.command);
+        // 跨类型替换提示(征集#9 增强拍板):类型变更对用户透明,经 nodeActionBus 通知 editor-page 显示 message
+        if (activeCard.sourceType !== card.sourceType) {
+          nodeActionBus.emit('stackReplaceTypeChanged', { nodeId: node.id, type: card.sourceType });
+        }
       }
     } catch (err) {
       console.warn('[StackNode] 替换失败:', file.name, err);
@@ -389,8 +429,9 @@ export function StackedMediaNodeView({
   const isDark = theme.mode === 'dark';
   // 内容区表面:NodeTokens 无 contentBackground token,按明暗主题分支取中性表面色(修复暗色主题空态白底)
   const contentSurface = isDark ? '#161616' : '#ffffff';
-  // 替换/上传文件过滤:活跃卡为视频时优先视频类型,空态/图片卡优先图片(B2)
-  const replaceAccept = activeCard?.sourceType === 'video' ? 'video/*,image/*' : 'image/*,video/*';
+  // 替换/上传文件过滤:活跃卡为视频时优先视频类型,空态/图片卡优先图片;
+  // 均允许跨类型替换(资源浏览器语义,征集#9 增强拍板:放开音频)
+  const replaceAccept = activeCard?.sourceType === 'video' ? 'video/*,image/*,audio/*' : 'image/*,video/*,audio/*';
   const mainContent = !hasCards ? (
     <div style={{
       position: 'absolute',
@@ -524,17 +565,6 @@ export function StackedMediaNodeView({
           onNext={handleNext}
         />
       </div>
-
-      {/* 收纳提示胶囊(画布锚定,portal 到 body,不受节点容器裁剪) */}
-      {collectToast && store && (
-        <StackCollectToast
-          store={store}
-          node={node}
-          label={collectToast.label}
-          onRemove={handleUndoCollect}
-          onDismissed={() => setCollectToast(null)}
-        />
-      )}
 
       {/* 隐藏文件选择(空态上传/活跃卡替换) */}
       <input

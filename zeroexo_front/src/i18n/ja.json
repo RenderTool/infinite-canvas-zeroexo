@@ -29,7 +29,8 @@
     "config": "設定ノード",
     "layer": "レイヤー",
     "createNode": "作成",
-    "stackedMedia": "スタック"
+    "stackedMedia": "スタック",
+    "stackSelectedCount": "選択ノードをスタック ({{count}})"
   },
   "nodeCategory": {
     "base": "基本",
@@ -726,6 +727,7 @@
     "scriptAlreadyLinked": "このスクリプトは既にこのストーリーボードノードにリンクされています",
     "scriptLinked": "スクリプトのリンクに成功しました",
     "storyboardRetryUnavailable": "ストーリーボードの再試行は利用できません：リンクされたスクリプトが見つかりません",
+    "storyboardPartialFailed": "ストーリーボード生成完了、{{failed}}/{{total}} ブロック失敗。再試行可能（完了済みブロックはスキップ）",
     "saveToAssets": "マイアセットに保存",
     "assetsSaved": "マイアセットに保存しました",
     "linkNewScript": "新規スクリプトをリンク",
@@ -929,7 +931,11 @@
     "stackCreateNew": "スタックノードを作成",
     "stackSelected": "選択ノードをスタック",
     "stackSelectedDone": "{{count}} 個のノードをスタックしました",
-    "stackSelectedResult": "{{collected}} 個のノードをスタック、{{skipped}} 個のサポート外ノードをスキップ"
+    "stackSelectedResult": "{{collected}} 個のノードをスタック、{{skipped}} 個のサポート外ノードをスキップ",
+    "stackReplaceTypeChanged": "{{type}}リソースに置換しました",
+    "stackCollected": "収納済み · {{title}}",
+    "stackMerged": "統合済み · {{title}}",
+    "stackUndo": "取り出す"
   },
   "toolTitles": {
     "duplicate": "ノード複製",
@@ -1996,6 +2002,7 @@
     "retry": "再試行",
     "abandon": "中止",
     "noShotsLinked": "この絵コンテはまだ脚本にリンクされていません。下部ツールバーから「脚本をリンク」するか、「編集」から手動で作成してください。",
+    "currentEpisode": "現在のエピソード",
     "generateCurrentEpisode": "現在のエピソードの絵コンテを生成"
   },
   "storyboardRow": {
