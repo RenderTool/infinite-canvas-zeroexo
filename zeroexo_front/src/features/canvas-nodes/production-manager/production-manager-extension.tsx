@@ -75,7 +75,7 @@ export function createProductionManagerExtension(
     ],
     createDefaultData: () => createProductionManagerDefaultData(),
     getTools: () => getTools(),
-    renderNode: (props: NodeRendererProps) => <ProductionManagerView {...props} />,
+    renderNode: (props: NodeRendererProps) => <ProductionManagerView {...props} connectionController={controller} />,
   };
 }
 

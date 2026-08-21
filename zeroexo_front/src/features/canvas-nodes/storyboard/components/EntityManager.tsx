@@ -48,7 +48,8 @@ export function MentionDropdown({
         position: 'absolute',
         top: '100%',
         left: 0,
-        zIndex: Z_INDEX.SIDEBAR,
+        // 全局 z-index 体系:下拉菜单统一用 Z_INDEX.DROPDOWN(1000),非 SIDEBAR(50)
+        zIndex: Z_INDEX.DROPDOWN,
         width: 220,
         maxHeight: 160,
         overflow: 'auto',
