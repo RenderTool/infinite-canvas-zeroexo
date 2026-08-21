@@ -11,7 +11,8 @@
  */
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, X } from 'lucide-react';
+import { ArrowLeft, X, Maximize2 } from 'lucide-react';
+import { AssetDetailViewer } from '@/shared/components/asset-detail-viewer.js';
 import { Modal, App } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { apiGet } from '@/services/api-client.js';
@@ -362,6 +363,7 @@ function PreviewStep({
   accent: string; border: string; textMuted: string;
 }): React.ReactElement {
   const [expandedEp, setExpandedEp] = useState<number | null>(null);
+  const [viewerEp, setViewerEp] = useState<number | null>(null); // 放大查看:统一资源查看器(Monaco 大文本)
   const { t } = useTranslation();
 
   return (
@@ -398,6 +400,14 @@ function PreviewStep({
               <span style={{ color: accent, fontSize: 12, fontWeight: 600, flexShrink: 0 }}>#{ep.number}</span>
               <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{ep.title}</span>
               <span style={{ fontSize: 11, color: textMuted }}>{t('scriptImport.charCount', { chars: ep.content.length.toLocaleString() })}</span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setViewerEp(idx); }}
+                title={t('scriptImport.viewFullText')}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 4, border: 'none', background: 'transparent', color: textMuted, cursor: 'pointer', flexShrink: 0 }}
+              >
+                <Maximize2 size={12} />
+              </button>
               <span style={{ fontSize: 11, color: textMuted, transform: expandedEp === idx ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
                 <ArrowLeft size={11} />
               </span>
@@ -433,6 +443,20 @@ function PreviewStep({
           {t('scriptImport.confirmEnterScript')}
         </button>
       </div>
+
+      {/* 放大查看:统一资源查看器 AssetDetailViewer(script 类型, Monaco 大文本) */}
+      {viewerEp !== null && episodes[viewerEp] && (
+        <AssetDetailViewer
+          asset={{
+            id: `preview-ep-${viewerEp}`,
+            title: `#${episodes[viewerEp]!.number} ${episodes[viewerEp]!.title}`,
+            kind: 'script',
+            bytes: episodes[viewerEp]!.content.length,
+            data: { kind: 'script', content: episodes[viewerEp]!.content },
+          }}
+          onClose={() => setViewerEp(null)}
+        />
+      )}
     </div>
   );
 }

@@ -57,6 +57,8 @@ export function useCanvasHandlers(
   }, [ic]);
 
   const onNodePointerDown = useCallback((e: ReactPointerEvent, nodeId: string) => {
+    // 中键透传:不拦截，冒泡到画布层触发中键平移（controller.handleCanvasPointerDown 支持 button1）
+    if (e.button === 1) return;
     e.stopPropagation();
     ic?.handleNodePointerDown(e.nativeEvent, nodeId);
   }, [ic]);
@@ -74,6 +76,8 @@ export function useCanvasHandlers(
   }, [refs, ic]);
 
   const onEdgePointerDown = useCallback((e: ReactPointerEvent, edgeId: string) => {
+    // 中键透传:冒泡到画布层平移
+    if (e.button === 1) return;
     e.stopPropagation();
     ic?.handleEdgePointerDown(e.nativeEvent, edgeId);
   }, [ic]);
@@ -84,6 +88,8 @@ export function useCanvasHandlers(
       nodeId: string,
       handle: 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w',
     ) => {
+      // 中键透传:冒泡到画布层平移
+      if (e.button === 1) return;
       e.stopPropagation();
       ic?.handleResizeHandlePointerDown(e.nativeEvent, nodeId, handle);
     },
@@ -135,6 +141,8 @@ export function useCanvasHandlers(
       pinId: string,
       direction: 'input' | 'output',
     ) => {
+      // 中键透传:冒泡到画布层平移
+      if (e.button === 1) return;
       e.stopPropagation();
       refs.connectionController?.handlePinPointerDown(
         e.nativeEvent,

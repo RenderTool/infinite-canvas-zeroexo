@@ -7,7 +7,7 @@
 
 import { apiFetch } from '@/services/api-client.js';
 
-export type PromptCategory = 'role' | 'scene' | 'style' | 'shot' | 'other';
+export type PromptCategory = 'role' | 'scene' | 'prop' | 'style' | 'shot' | 'other';
 
 export interface Prompt {
   id: string;

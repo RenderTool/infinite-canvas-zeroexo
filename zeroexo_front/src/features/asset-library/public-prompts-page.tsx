@@ -60,6 +60,7 @@ const CATEGORIES = [
   { key: 'all', label: '全部' },
   { key: 'role', label: '角色' },
   { key: 'scene', label: '场景' },
+  { key: 'prop', label: '道具' },
   { key: 'style', label: '风格' },
   { key: 'shot', label: '镜头' },
   { key: 'other', label: '其他' },

@@ -96,6 +96,7 @@ interface PromptCreatePageProps {
 const CATEGORIES: Array<{ value: PromptCategory; i18nKey: string }> = [
   { value: 'role', i18nKey: 'categoryRole' },
   { value: 'scene', i18nKey: 'categoryScene' },
+  { value: 'prop', i18nKey: 'categoryProp' },
   { value: 'style', i18nKey: 'categoryStyle' },
   { value: 'shot', i18nKey: 'categoryShot' },
   { value: 'other', i18nKey: 'categoryOther' },

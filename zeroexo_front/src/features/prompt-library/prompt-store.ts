@@ -16,7 +16,7 @@ import { nanoid } from 'nanoid';
 export const PROMPT_DRAG_MIME = 'application/x-canvas-prompt';
 
 /** 提示词分类 */
-export type PromptCategory = 'role' | 'scene' | 'style' | 'shot' | 'other';
+export type PromptCategory = 'role' | 'scene' | 'prop' | 'style' | 'shot' | 'other';
 
 /** 提示词条目 */
 export interface Prompt {
