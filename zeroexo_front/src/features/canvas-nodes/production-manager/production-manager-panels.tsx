@@ -25,7 +25,7 @@ import {
   previewStageStyle, previewImageStyle, coverBadgeStyle, imageCounterStyle, emptyPreviewStyle,
   filmstripStyle, thumbItemStyle, thumbImageStyle, thumbCoverBadgeStyle, thumbHoverOverlayStyle, thumbActionBtnStyle, uploadTileStyle,
   formSectionStyle, formLabelStyle, formLabelRowStyle, copyBtnStyle,
-  promptBlockStyle, promptTextareaStyle, cardCoverStyle, stateNavItemStyle,
+  promptBlockStyle, promptTextareaStyle, tagInputStyle, cardCoverStyle, stateNavItemStyle,
 } from './production-editor-styles.js';
 
 export const KIND_ICON: Record<ProductionItemKind, React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>> = {
@@ -41,14 +41,15 @@ interface ItemImageCardProps {
   localPreview?: string;
   ordinal: number;
   isCover: boolean;
-  hasTag: boolean;
+  /** 自由标签（与资产库提示词 card 同款展示：前 4 个逗号连接 + +N） */
+  tags: string[];
   theme: ReturnType<typeof useTheme>['theme'];
   onClick: () => void;
   onDelete: () => void;
 }
 
 export const ItemImageCard = memo(function ItemImageCard({
-  storageKey, localPreview, ordinal, isCover, hasTag, theme, onClick, onDelete,
+  storageKey, localPreview, ordinal, isCover, tags, theme, onClick, onDelete,
 }: ItemImageCardProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -100,8 +101,10 @@ export const ItemImageCard = memo(function ItemImageCard({
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 11, color: theme.toolbar.textMuted, fontWeight: 500 }}>
-            {hasTag ? t('subject.promptReady') : t('subject.promptEmpty')}
+          <span style={{ fontSize: 11, color: theme.toolbar.textMuted, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {tags.length > 0
+              ? tags.slice(0, 4).join(', ') + (tags.length > 4 ? ` +${tags.length - 4}` : '')
+              : '—'}
           </span>
         </div>
       </div>
@@ -243,42 +246,66 @@ export function AlbumPanel({ images, selectedKey, coverKey, localPreviews, theme
   );
 }
 
-// ===== 单图详情（提示词页面同款表单；prompt 字段 = 自由标签） =====
+// ===== 单图详情（提示词页面同款表单；prompt=提示词，note=备注，tags=自由标签） =====
 
-export function SelectedImageDetail({ image, ordinal, theme, t, onPromptChange, onCopy }: {
+export function SelectedImageDetail({ image, ordinal, theme, t, onPromptChange, onNoteChange, onTagsChange, onCopy }: {
   image: ProductionItemImage;
   ordinal: number;
   theme: ReturnType<typeof useTheme>['theme'];
   t: ReturnType<typeof useTranslation>['t'];
   onPromptChange: (v: string) => void;
+  onNoteChange: (v: string) => void;
+  onTagsChange: (tags: string[]) => void;
   onCopy: () => void;
 }) {
   return (
-    <div style={{ ...formSectionStyle(), flex: 1, minHeight: 0 }}>
-      <div style={formLabelRowStyle()}>
-        <label style={formLabelStyle(theme)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          {t('productionManager.stills')}
-        </label>
-        <button
-          type="button"
-          onClick={onCopy}
-          style={copyBtnStyle(theme)}
-          title={t('subject.copyPrompt')}
-        >
-          <Copy size={12} />
-          {t('subject.copyPrompt')}
-        </button>
+    <div style={{ ...formSectionStyle(), flex: 1, minHeight: 0, gap: 14 }}>
+      {/* 提示词 */}
+      <div style={formSectionStyle()}>
+        <div style={formLabelRowStyle()}>
+          <label style={formLabelStyle(theme)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            {t('productionManager.prompt')}
+          </label>
+          <button
+            type="button"
+            onClick={onCopy}
+            style={copyBtnStyle(theme)}
+            title={t('subject.copyPrompt')}
+          >
+            <Copy size={12} />
+            {t('subject.copyPrompt')}
+          </button>
+        </div>
+        <div style={{ ...promptBlockStyle(theme), flex: 1, minHeight: 120, display: 'flex', flexDirection: 'column' }}>
+          <textarea
+            value={image.prompt ?? ''}
+            onChange={(e) => onPromptChange(e.target.value)}
+            placeholder={t('productionManager.promptPlaceholder')}
+            style={{ ...promptTextareaStyle(theme), flex: 1 }}
+          />
+        </div>
       </div>
-      <div style={{ ...promptBlockStyle(theme), flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <textarea
-          value={image.prompt ?? ''}
-          onChange={(e) => onPromptChange(e.target.value)}
+      {/* 标签（自由标签，区分不同时期/造型） */}
+      <div style={formSectionStyle()}>
+        <label style={formLabelStyle(theme)}>{t('productionManager.tags')}</label>
+        <input
+          value={image.tags.join(', ')}
+          onChange={(e) => onTagsChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))}
           placeholder={t('productionManager.tagPlaceholder')}
-          style={{ ...promptTextareaStyle(theme), flex: 1 }}
+          style={tagInputStyle(theme)}
         />
       </div>
-      <span style={{ fontSize: 11, color: theme.toolbar.textMuted, marginTop: 10 }}>
+      {/* 备注 */}
+      <div style={formSectionStyle()}>
+        <label style={formLabelStyle(theme)}>{t('productionManager.note')}</label>
+        <input
+          value={image.note ?? ''}
+          onChange={(e) => onNoteChange(e.target.value)}
+          style={tagInputStyle(theme)}
+        />
+      </div>
+      <span style={{ fontSize: 11, color: theme.toolbar.textMuted, marginTop: 'auto' }}>
         {t('subject.imageOrdinal', { n: ordinal })}
       </span>
     </div>
@@ -296,11 +323,13 @@ interface ItemNavItemProps {
   surfaceBg: string;
   textMuted: string;
   deletable: boolean;
+  /** 删除按钮 Tooltip 文案（antd Tooltip） */
+  tDelete: string;
   onClick: () => void;
   onDelete: () => void;
 }
 
-export function ItemNavItem({ index, name, count, isActive, accent, surfaceBg, textMuted, deletable, onClick, onDelete }: ItemNavItemProps) {
+export function ItemNavItem({ index, name, count, isActive, accent, surfaceBg, textMuted, deletable, tDelete, onClick, onDelete }: ItemNavItemProps) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -318,10 +347,12 @@ export function ItemNavItem({ index, name, count, isActive, accent, surfaceBg, t
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: isActive ? 600 : 400 }}>{name}</span>
       <span style={{ fontSize: 10, color: textMuted, flexShrink: 0 }}>{count}</span>
       {deletable && hovered && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', color: textMuted, flexShrink: 0 }}>
-          <Trash2 size={11} />
-        </button>
+        <Tooltip title={tDelete}>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', color: textMuted, flexShrink: 0 }}>
+            <Trash2 size={11} />
+          </button>
+        </Tooltip>
       )}
     </div>
   );

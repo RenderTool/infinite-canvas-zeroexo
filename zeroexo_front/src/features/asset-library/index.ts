@@ -7,6 +7,5 @@
 
 export { AssetLibraryPage } from './asset-library-page.js';
 export { AssetLibraryModal } from './asset-library-modal.js';
-export { SubjectEditorBridge } from './subject-editor-bridge.js';
 export { PromptCreatePage, type PublicPromptInitialData } from './prompt-create-page.js';
 export { PublicPromptsPage, getLocalizedTitle, type PublicPromptItem } from './public-prompts-page.js';

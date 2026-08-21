@@ -9,11 +9,15 @@
 
 export type ProductionItemKind = 'character' | 'scene' | 'prop';
 
-/** 剧照（prompt 字段存自由标签/备注，对齐 SubjectStateImage 契约） */
+/** 剧照（prompt=生成提示词，note=备注，tags=自由标签——对齐资产库提示词 card 标签体系） */
 export interface ProductionItemImage {
   storageKey: string;
-  /** 自由标签/备注（不限状态语义） */
+  /** 生成/描述提示词（发送到资产的内容源） */
   prompt?: string;
+  /** 备注 */
+  note?: string;
+  /** 自由标签（区分不同时期/造型的剧照，显示在 card 上） */
+  tags: string[];
 }
 
 /** 统筹条目（一个演员/场景/道具） */
@@ -36,8 +40,6 @@ export interface ProductionItem {
   images: ProductionItemImage[];
   /** 封面（条目级，对齐原主体 coverKey） */
   coverKey?: string | null;
-  /** 可提炼提示词（发送到资产 → 提示词条目） */
-  prompt: string;
 }
 
 export interface ProductionManagerData {
@@ -61,7 +63,6 @@ export function createProductionItem(kind: ProductionItemKind, name = ''): Produ
     episodeIds: [],
     images: [],
     coverKey: null,
-    prompt: '',
   };
 }
 

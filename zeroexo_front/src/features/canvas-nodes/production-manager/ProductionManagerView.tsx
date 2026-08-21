@@ -128,77 +128,78 @@ export const ProductionManagerView = memo(function ProductionManagerView({
 
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'row', width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
-        {/* 左侧垂直导航（与堆叠/主体同一套 ThumbNav 框架） */}
-        {showNav && (
-          <ThumbNav
-            orientation="vertical"
-            items={navItems}
-            activeIndex={activeIndex}
-            total={data.items.length}
-            onPrev={handlePrev}
-            onNext={handleNext}
-            onJump={handleJump}
-          />
-        )}
+      {/* BaseNodeView 包整个节点（含导航）：NodeShell 按节点全尺寸渲染壳与 pin，
+          pin 落在节点左右边缘；否则 pin 会渲染在内容区（右主区左缘，视觉贴着 sidebar）。
+          导航按钮自带 onPointerDown stopPropagation，不会误触发节点拖拽。 */}
+      <BaseNodeView
+        node={node}
+        pins={pins}
+        isSelected={isSelected}
+        isHovered={isHovered}
+        title={title}
+        color={PM_COLOR}
+        connectionController={connectionController}
+        forceShowPins={forceShowPins}
+        invK={invK}
+        titleIcon={<Rabbit size={Math.max(10, 13 * (invK ?? 1))} />}
+        updateNode={updateNode}
+        externalRenaming={externalRenaming}
+        onRenameFinish={onRenameFinish}
+        contentPadding="0"
+        store={store}
+      >
+        <div style={{ display: 'flex', width: '100%', height: '100%', minHeight: 0 }}>
+          {/* 左侧垂直导航（与堆叠/主体同一套 ThumbNav 框架） */}
+          {showNav && (
+            <ThumbNav
+              orientation="vertical"
+              items={navItems}
+              activeIndex={activeIndex}
+              total={data.items.length}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              onJump={handleJump}
+            />
+          )}
 
-        {/* 右侧主区：封面舞台 + 信息条 */}
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-          <BaseNodeView
-            node={node}
-            pins={pins}
-            isSelected={isSelected}
-            isHovered={isHovered}
-            title={title}
-            color={PM_COLOR}
-            connectionController={connectionController}
-            forceShowPins={forceShowPins}
-            invK={invK}
-            titleIcon={<Rabbit size={Math.max(10, 13 * (invK ?? 1))} />}
-            updateNode={updateNode}
-            externalRenaming={externalRenaming}
-            onRenameFinish={onRenameFinish}
-            contentPadding="0"
-            store={store}
-          >
-            <div style={cardRootStyle}>
-              {/* 封面舞台（当前条目首张剧照，contain） */}
-              <div style={coverAreaStyle(contentSurface)} onDoubleClick={() => setEditorOpen(true)}>
-                {activeItem ? (
-                  <ItemCover storageKey={activeItem.images[0]?.storageKey} dark={isDark} />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.3)' }}>
-                    <Rabbit size={40} />
-                    <span style={{ fontSize: 11, opacity: 0.75 }}>{t('productionManager.viewEmpty')}</span>
-                  </div>
-                )}
-              </div>
+          {/* 右侧主区：封面舞台 + 信息条 */}
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* 封面舞台（当前条目首张剧照，contain） */}
+            <div style={coverAreaStyle(contentSurface)} onDoubleClick={() => setEditorOpen(true)}>
+              {activeItem ? (
+                <ItemCover storageKey={activeItem.images[0]?.storageKey} dark={isDark} />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.3)' }}>
+                  <Rabbit size={40} />
+                  <span style={{ fontSize: 11, opacity: 0.75 }}>{t('productionManager.viewEmpty')}</span>
+                </div>
+              )}
+            </div>
 
-              {/* 信息条（低对比：图标 + 文字，不用色块徽章） */}
-              <div style={infoBarStyle(infoBg)}>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {activeItem ? (activeItem.name || t('productionManager.unnamed')) : (data.title || t('canvasNodes.stage.productionManager'))}
+            {/* 信息条（低对比：图标 + 文字，不用色块徽章） */}
+            <div style={infoBarStyle(infoBg)}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeItem ? (activeItem.name || t('productionManager.unnamed')) : (data.title || t('canvasNodes.stage.productionManager'))}
+                  </span>
+                  {activeItem && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: textMuted, flexShrink: 0 }}>
+                      <ActiveKindIcon size={10} />
+                      {t(`entity.${activeItem.kind}`)}
                     </span>
-                    {activeItem && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: textMuted, flexShrink: 0 }}>
-                        <ActiveKindIcon size={10} />
-                        {t(`entity.${activeItem.kind}`)}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 10, color: textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {activeItem
-                      ? (activeItem.consistency || t('productionManager.itemTotal', { count: data.items.length }))
-                      : t('productionManager.itemTotal', { count: 0 })}
-                  </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeItem
+                    ? (activeItem.consistency || t('productionManager.itemTotal', { count: data.items.length }))
+                    : t('productionManager.itemTotal', { count: 0 })}
                 </div>
               </div>
             </div>
-          </BaseNodeView>
+          </div>
         </div>
-      </div>
+      </BaseNodeView>
 
       {/* 统筹编辑器 Modal */}
       {editorOpen && (
@@ -214,11 +215,6 @@ export const ProductionManagerView = memo(function ProductionManagerView({
 });
 
 // ===== 样式（无边线风格：背景分层，同主体卡基线） =====
-
-const cardRootStyle: CSSProperties = {
-  width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-  overflow: 'hidden', minHeight: 0,
-};
 
 function coverAreaStyle(contentSurface: string): CSSProperties {
   return {

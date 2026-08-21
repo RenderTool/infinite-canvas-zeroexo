@@ -10,10 +10,11 @@
  * 音色 = 基线双入口（从资产选择 + 本地上传）；实时回写，无保存按钮。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Select, Tooltip, Empty, App as AntdApp } from 'antd';
+import { Modal, Select, Tooltip, Empty, Input, App as AntdApp } from 'antd';
+import { Virtuoso } from 'react-virtuoso';
 import {
   Mic, Play, Pause, ListMusic, Upload as UploadIcon,
-  Plus, X, Copy, LayoutGrid, Image as ImageIcon, Loader2, Send, Rabbit,
+  Plus, X, LayoutGrid, Image as ImageIcon, Loader2, Send, Rabbit, Search,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -31,7 +32,7 @@ import {
 import {
   modalHeaderStyle, modalTitleInputStyle, modalIconBtnStyle,
   ghostHoverHandlers, modalEditBtnStyle,
-  formSectionStyle, formLabelStyle, formLabelRowStyle, copyBtnStyle,
+  formSectionStyle, formLabelStyle, formLabelRowStyle,
   noteInputStyle, tagInputStyle, cardCoverStyle, viewSwitchBtnStyle, voiceCardStyle, pickerPanelStyle,
 } from './production-editor-styles.js';
 import { ItemImageCard, AlbumPanel, SelectedImageDetail, ItemNavItem, KIND_ICON } from './production-manager-panels.js';
@@ -78,6 +79,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
   const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const voiceFileInputRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
+  const [searchText, setSearchText] = useState('');
 
   // ===== 音色播放生命周期（基线同款：切换条目/关闭时停播 + 重置） =====
   useEffect(() => {
@@ -143,8 +145,11 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
 
   const handleAddItem = useCallback((kind: ProductionItemKind) => {
     const item = createProductionItem(kind);
+    // 主动递增命名：同类型计数 +1（演员 1 / 场景 2 / 道具 3）
+    const sameKindCount = data.items.filter((i) => i.kind === kind).length;
+    item.name = `${t(`entity.${kind}`)} ${sameKindCount + 1}`;
     onDataChange({ ...data, items: [...data.items, item], activeItemId: item.id });
-  }, [data, onDataChange]);
+  }, [data, onDataChange, t]);
 
   const handleDeleteItem = useCallback((itemId: string) => {
     const nextItems = data.items.filter((i) => i.id !== itemId);
@@ -166,7 +171,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
       const storageKey = d.storageKey ?? '';
       if (storageKey) {
         if (d.kind === 'image' && d.dataUrl) setLocalPreviews((prev) => ({ ...prev, [storageKey]: d.dataUrl! }));
-        const nextImages = [...images, { storageKey }];
+        const nextImages = [...images, { storageKey, tags: [] as string[] }];
         patchActiveItem(activeItem?.coverKey ? { images: nextImages } : { images: nextImages, coverKey: storageKey });
         setSelectedKey(storageKey);
       }
@@ -177,11 +182,11 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
     }
   }, [isAuthenticated, antdMessage, t, images, patchActiveItem, activeItem]);
 
-  // ===== 发送到资产 → 提示词条目（资产提炼） =====
+  // ===== 发送到资产 → 提示词条目（主动选用当前选中剧照的提示词，无需手动提炼） =====
   const handleSendToAsset = useCallback(async () => {
     if (!isAuthenticated) { antdMessage.warning(t('subjectCreate.loginRequired')); return; }
     if (!activeItem) return;
-    const content = (activeItem.prompt || activeItem.consistency || '').trim();
+    const content = (selectedImage?.prompt || activeItem.consistency || '').trim();
     if (!content) { antdMessage.warning(t('productionManager.noPromptToSend')); return; }
     if (!activeItem.name?.trim()) { antdMessage.warning(t('subject.aiGenerateEmptyName')); return; }
     if (sending) return;
@@ -200,7 +205,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
     } finally {
       setSending(false);
     }
-  }, [isAuthenticated, antdMessage, t, sending, activeItem]);
+  }, [isAuthenticated, antdMessage, t, sending, activeItem, selectedImage]);
 
   // ===== 单图操作 =====
   const patchImage = useCallback((storageKey: string, patch: Partial<ProductionItemImage>) => {
@@ -262,11 +267,26 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
     else { void audioRef.current.play(); setVoicePlaying(true); }
   }, [activeItem, voicePlaying]);
 
-  // 分组（左栏导航按 演员/场景/道具）
+  // 分组 + 搜索筛选（名称/别名匹配；flatRows 供 Virtuoso 虚拟化）
   const groups = useMemo(() => {
+    const kw = searchText.trim().toLowerCase();
+    const match = (it: ProductionItem) => !kw
+      || it.name.toLowerCase().includes(kw)
+      || it.aliases.some((a) => a.toLowerCase().includes(kw));
     const order: ProductionItemKind[] = ['character', 'scene', 'prop'];
-    return order.map((kind) => ({ kind, items: data.items.filter((i) => i.kind === kind) }));
-  }, [data.items]);
+    return order.map((kind) => ({ kind, items: data.items.filter((i) => i.kind === kind && match(i)) }));
+  }, [data.items, searchText]);
+
+  type NavRow = { type: 'header'; kind: ProductionItemKind; count: number } | { type: 'item'; item: ProductionItem; index: number };
+  const flatRows = useMemo<NavRow[]>(() => {
+    const rows: NavRow[] = [];
+    for (const g of groups) {
+      if (g.items.length === 0) continue;
+      rows.push({ type: 'header', kind: g.kind, count: g.items.length });
+      g.items.forEach((item, i) => rows.push({ type: 'item', item, index: i }));
+    }
+    return rows;
+  }, [groups]);
 
   return (
     <Modal
@@ -278,7 +298,16 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
       destroyOnHidden
       styles={{ body: { padding: 0, height: 'calc(100vh - 130px)', overflow: 'hidden', background: pageBg } }}
     >
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* 铁律（Modal 不得透传画布）：React portal 的合成事件沿 React 虚拟树（而非 DOM 树）冒泡——
+          本 Modal 挂载在节点视图内，不阻断则 pointer/wheel 会冒泡至节点/画布处理器，
+          误触发画布平移/缩放。在内容根阻断冒泡，Modal 内部交互不受影响。 */}
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerMove={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+        style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}
+      >
         {/* ===== 标题栏（提示词 Modal 同款：小图标 + 标题，无大图标块） ===== */}
         <div style={modalHeaderStyle(theme)}>
           <Rabbit size={15} style={{ color: accent, flexShrink: 0 }} />
@@ -305,49 +334,61 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
 
         {/* ===== 四栏主体（无边线：背景分层，栏间仅用留白分隔） ===== */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0, color: textPrimary }}>
-          {/* ① 左栏：实体 List */}
-          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '16px 12px 16px 20px', overflowY: 'auto', minHeight: 0 }} className="zx-thin-scroll">
-            {groups.map((g) => {
-              const GroupIcon = KIND_ICON[g.kind];
-              if (g.items.length === 0) return null;
-              return (
-                <div key={g.kind} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ ...formLabelStyle(theme), marginBottom: 2 }}>
-                    <GroupIcon size={11} style={{ opacity: 0.6 }} />
-                    {t(`entity.${g.kind}`)} · {g.items.length}
+          {/* ① 左栏：实体 List（搜索框 + 虚拟化列表 + 添加按钮固定底部，不被列表顶出） */}
+          <div style={{ width: 230, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 12px 16px 20px', minHeight: 0 }}>
+            <Input
+              size="small"
+              prefix={<Search size={13} style={{ opacity: 0.5 }} />}
+              placeholder={t('productionManager.searchPlaceholder')}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+            />
+            {flatRows.length > 0 ? (
+              <Virtuoso
+                data={flatRows}
+                style={{ flex: 1, minHeight: 0 }}
+                itemContent={(_, row) => row.type === 'header' ? (
+                  <label style={{ ...formLabelStyle(theme), marginBottom: 2, marginTop: 6 }}>
+                    {(() => { const GroupIcon = KIND_ICON[row.kind]; return <GroupIcon size={11} style={{ opacity: 0.6 }} />; })()}
+                    {t(`entity.${row.kind}`)} · {row.count}
                   </label>
-                  {g.items.map((item, i) => (
-                    <ItemNavItem
-                      key={item.id}
-                      index={i}
-                      name={item.name}
-                      count={item.images.length}
-                      isActive={activeItem?.id === item.id}
-                      accent={accent}
-                      surfaceBg={surfaceBg}
-                      textMuted={textMuted}
-                      deletable
-                      onClick={() => onDataChange({ ...data, activeItemId: item.id })}
-                      onDelete={() => handleDeleteItem(item.id)}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-            <div style={{ display: 'flex', gap: 4, marginTop: 'auto', paddingTop: 8 }}>
+                ) : (
+                  <ItemNavItem
+                    index={row.index}
+                    name={row.item.name}
+                    count={row.item.images.length}
+                    isActive={activeItem?.id === row.item.id}
+                    accent={accent}
+                    surfaceBg={surfaceBg}
+                    textMuted={textMuted}
+                    deletable
+                    tDelete={t('common.delete')}
+                    onClick={() => onDataChange({ ...data, activeItemId: row.item.id })}
+                    onDelete={() => handleDeleteItem(row.item.id)}
+                  />
+                )}
+              />
+            ) : (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: textMuted, fontSize: 12 }}>
+                {t('productionManager.emptyItems')}
+              </div>
+            )}
+            {/* 添加按钮：固定底部（flexShrink 0），条目再多也不会顶出视口 */}
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0, paddingTop: 4 }}>
               {(['character', 'scene', 'prop'] as ProductionItemKind[]).map((kind) => {
                 const Icon = KIND_ICON[kind];
                 return (
-                  <button
-                    key={kind}
-                    type="button"
-                    onClick={() => handleAddItem(kind)}
-                    {...ghostHoverHandlers(theme)}
-                    title={t(`productionManager.add_${kind}`)}
-                    style={{ ...modalEditBtnStyle(theme), flex: 1, justifyContent: 'center', gap: 4, padding: '0 6px' }}
-                  >
-                    <Plus size={12} /><Icon size={12} />
-                  </button>
+                  <Tooltip key={kind} title={t(`productionManager.add_${kind}`)}>
+                    <button
+                      type="button"
+                      onClick={() => handleAddItem(kind)}
+                      {...ghostHoverHandlers(theme)}
+                      style={{ ...modalEditBtnStyle(theme), flex: 1, justifyContent: 'center', gap: 4, padding: '0 6px' }}
+                    >
+                      <Plus size={12} /><Icon size={12} />
+                    </button>
+                  </Tooltip>
                 );
               })}
             </div>
@@ -398,7 +439,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                         localPreview={localPreviews[img.storageKey]}
                         ordinal={i + 1}
                         isCover={activeItem?.coverKey === img.storageKey}
-                        hasTag={!!img.prompt}
+                        tags={img.tags}
                         theme={theme}
                         onClick={() => handleOpenAlbum(img.storageKey)}
                         onDelete={() => handleRemoveImage(img.storageKey)}
@@ -440,6 +481,8 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                 theme={theme}
                 t={t}
                 onPromptChange={(v) => patchImage(selectedImage.storageKey, { prompt: v })}
+                onNoteChange={(v) => patchImage(selectedImage.storageKey, { note: v })}
+                onTagsChange={(tags) => patchImage(selectedImage.storageKey, { tags })}
                 onCopy={() => void handleCopy(selectedImage.prompt ?? '')}
               />
             ) : (
@@ -575,66 +618,47 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                   <label style={formLabelStyle(theme)}>{t('productionManager.note')}</label>
                   <input value={activeItem.note} onChange={(e) => patchActiveItem({ note: e.target.value })} style={tagInputStyle(theme)} />
                 </div>
-                {/* 提炼提示词（发送到资产的内容源） */}
-                <div style={{ ...formSectionStyle(), flex: 1, minHeight: 96 }}>
-                  <div style={formLabelRowStyle()}>
-                    <label style={formLabelStyle(theme)}>
-                      <Send size={11} style={{ opacity: 0.6 }} />
-                      {t('productionManager.prompt')}
-                    </label>
-                    <button type="button" onClick={() => void handleCopy(activeItem.prompt || activeItem.consistency)} style={copyBtnStyle(theme)} title={t('subject.copyPrompt')}>
-                      <Copy size={12} />
-                      {t('subject.copyPrompt')}
-                    </button>
-                  </div>
-                  <textarea
-                    value={activeItem.prompt}
-                    onChange={(e) => patchActiveItem({ prompt: e.target.value })}
-                    placeholder={t('productionManager.promptPlaceholder')}
-                    style={{ ...noteInputStyle(theme), flex: 1, minHeight: 72 }}
-                  />
-                </div>
               </>
             )}
           </div>
         </div>
-      </div>
 
-      {/* 音色资产选择器（基线同款：固定浮层 + pickerPanelStyle） */}
-      {voicePickerOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 40000, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setVoicePickerOpen(false)}>
-          <div style={pickerPanelStyle(theme.toolbar.background)} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeaderStyle(theme)}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>{t('subject.voiceFromAsset')}</span>
-              <button
-                type="button"
-                {...ghostHoverHandlers(theme)}
-                style={{ ...modalIconBtnStyle(theme, false), marginLeft: 'auto' }}
-                onClick={() => setVoicePickerOpen(false)}
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 12px 12px' }} className="zx-thin-scroll">
-              {audioAssets.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: textMuted }}>{t('subject.noVoiceAssets')}</div>
-              ) : (
-                audioAssets.map((a) => (
-                  <div key={a.id} onClick={() => handlePickVoiceAsset(a)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', transition: 'background 0.12s' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = surfaceBg; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <ListMusic size={14} style={{ color: accent, flexShrink: 0 }} />
-                    <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</span>
-                  </div>
-                ))
-              )}
+        {/* 音色资产选择器（基线同款：固定浮层 + pickerPanelStyle；置于隔离层内防透传） */}
+        {voicePickerOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 40000, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onClick={() => setVoicePickerOpen(false)}>
+            <div style={pickerPanelStyle(theme.toolbar.background)} onClick={(e) => e.stopPropagation()}>
+              <div style={modalHeaderStyle(theme)}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>{t('subject.voiceFromAsset')}</span>
+                <button
+                  type="button"
+                  {...ghostHoverHandlers(theme)}
+                  style={{ ...modalIconBtnStyle(theme, false), marginLeft: 'auto' }}
+                  onClick={() => setVoicePickerOpen(false)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 12px 12px' }} className="zx-thin-scroll">
+                {audioAssets.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: textMuted }}>{t('subject.noVoiceAssets')}</div>
+                ) : (
+                  audioAssets.map((a) => (
+                    <div key={a.id} onClick={() => handlePickVoiceAsset(a)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', transition: 'background 0.12s' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = surfaceBg; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <ListMusic size={14} style={{ color: accent, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </Modal>
   );
 });
