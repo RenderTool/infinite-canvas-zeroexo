@@ -37,7 +37,6 @@ import { HomePage } from '@/pages/home/home-page.js';
 import { EditorPage } from '@/pages/editor/editor-canvas/editor-page.js';
 import {
   AssetLibraryPage,
-  SubjectCreatePage,
   PublicPromptsPage,
 } from '@/features/asset-library/index.js';
 import { PolicyPage } from '@/pages/legal/index.js';
@@ -48,12 +47,14 @@ import { verifyInvite } from '@/features/collaboration/collaboration-api.js';
 import { ErrorBoundary } from '@/shared/components/index.js';
 
 import { CanvasPage } from '@/pages/home/canvas-page.js';
+import { CanvasV2Page } from '@/pages/canvas-v2/canvas-v2-page.js';
 import { AppearanceDialog, LanguageDialog } from '@/shared/components/index.js';
 
 type Route =
   | { name: 'home' }
   | { name: 'canvas'; canvasId?: string }
   | { name: 'editor'; canvasId: string; inviteCode?: string }
+  | { name: 'canvasV2' }
   | { name: 'assets'; defaultGroup?: string; defaultChild?: string; focusId?: string }
   | { name: 'subjectCreate'; subjectId?: string }
   | { name: 'publicPrompts' }
@@ -91,6 +92,8 @@ function parseHash(hash: string): Route {
       return parts[1] ? { name: 'canvas', canvasId: decodeURIComponent(parts[1]) } : { name: 'canvas' };
     case 'editor':
       return parts[1] ? { name: 'editor', canvasId: decodeURIComponent(parts[1]) } : { name: 'canvas' };
+    case 'canvas-v2':
+      return { name: 'canvasV2' };
     case 'assets':
       // /assets/subject/new | /assets/subject/:id
       if (parts[1] === 'subject' && parts[2]) {
@@ -128,6 +131,8 @@ function serializeRoute(route: Route): string {
       return route.canvasId ? `#/canvas/${encodeURIComponent(route.canvasId)}` : '#/canvas';
     case 'editor':
       return `#/editor/${encodeURIComponent(route.canvasId)}`;
+    case 'canvasV2':
+      return '#/canvas-v2';
     case 'assets':
       const qp: string[] = [];
       if (route.defaultGroup) qp.push(`group=${encodeURIComponent(route.defaultGroup)}`);
@@ -203,6 +208,11 @@ function InviteResolver({
     void verifyInvite(inviteCode)
       .then((info) => {
         if (cancelled) return;
+        if (!info) {
+          message.error(t('collab.inviteCodeInvalid'));
+          onFailed();
+          return;
+        }
         onResolved(info.canvasId, inviteCode);
       })
       .catch(() => {
@@ -291,8 +301,8 @@ export function App(): React.ReactElement {
     return <FullScreenLoading />;
   }
 
-  // 需要显示顶部栏 + 侧边栏的路由
-  const showHeaderAndSidebar = route.name !== 'editor' && route.name !== 'auth' && route.name !== 'legal' && route.name !== 'invite';
+  // 需要显示顶部栏 + 侧边栏的路由（canvasV2 / editor / canvas(带id) 为全屏独立画布页，不套主布局，避免与主页框架叠加）
+  const showHeaderAndSidebar = route.name !== 'editor' && route.name !== 'canvasV2' && route.name !== 'auth' && route.name !== 'legal' && route.name !== 'invite' && !(route.name === 'canvas' && !!route.canvasId);
 
   // 当前活跃路由名（用于侧边栏高亮）
   const activeRoute = route.name === 'canvas' ? 'canvas' : route.name === 'home' ? 'home' : route.name === 'assets' || route.name === 'subjectCreate' ? 'assets' : route.name === 'publicPrompts' ? 'publicPrompts' : route.name === 'legal' && route.page === 'policies' ? 'policies' : '';
@@ -440,9 +450,14 @@ export function App(): React.ReactElement {
                 onBack={() => setRoute({ name: 'canvas' })}
                 onOpenProject={(id) => setRoute({ name: 'editor', canvasId: id })}
               />
+            ) : route.name === 'canvasV2' ? (
+              <CanvasV2Page onBack={() => setRoute({ name: 'home' })} />
             ) : route.name === 'invite' ? (
               // 邀请码解析中(InviteResolver 完成后自动跳转 editor)
               <FullScreenLoading />
+            ) : route.name === 'subjectCreate' ? (
+              // Plan#29 V3: 主体入口已移除,subjectCreate 路由回退到资产页
+              <AssetLibraryPage onOpenSubject={() => {}} onNewSubject={() => {}} />
             ) : route.name === 'assets' ? (
               <AssetLibraryPage
                 defaultGroup={route.defaultGroup}
@@ -451,12 +466,6 @@ export function App(): React.ReactElement {
                 onOpenSubject={(id) => setRoute({ name: 'subjectCreate', subjectId: id })}
                 onNewSubject={() => setRoute({ name: 'subjectCreate' })}
                 onNavigateHome={() => setRoute({ name: 'home' })}
-              />
-            ) : route.name === 'subjectCreate' ? (
-              <SubjectCreatePage
-                subjectId={route.subjectId}
-                onBack={() => setRoute({ name: 'assets' })}
-                onSaved={() => setRoute({ name: 'assets' })}
               />
             ) : route.name === 'publicPrompts' ? (
               <PublicPromptsPage />
@@ -498,9 +507,9 @@ export function App(): React.ReactElement {
         <HomeCollaborationModal
           open={homeCollabOpen}
           theme={theme}
-          onOpenCanvas={(id) => {
+          onOpenCanvas={(id, inviteCode) => {
             setHomeCollabOpen(false);
-            setRoute({ name: 'canvas', canvasId: id });
+            setRoute({ name: 'editor', canvasId: id, inviteCode });
           }}
           onClose={() => setHomeCollabOpen(false)}
         />

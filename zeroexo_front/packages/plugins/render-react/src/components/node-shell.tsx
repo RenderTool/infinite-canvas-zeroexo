@@ -12,6 +12,19 @@ import { NodeScaleContext } from './node-scale-context.js';
 import { NodeConnectionHoverContext } from './node-connection-hover-context.js';
 import { NodeViewContractContext } from './node-view-contract-context.js';
 
+/**
+ * 节点 Overlay 模式（T6 three 渲染层内容 overlay）
+ * true = 节点外壳（背景/描边/阴影/PIN）由 three 引擎渲染，本层仅渲染标题栏+内容区（透明外壳透出引擎）；
+ * false = 默认完整外壳（DOM 渲染，行为不变）。
+ * overlay 由 ThreeCanvasHost 的 ContentOverlayLayer 提供，NodeShell 内部消费。
+ */
+export const NodeOverlayModeContext = React.createContext(false);
+
+/** 读取 overlay 模式（NodeShell 内部使用；外部无需调用） */
+export function useNodeOverlayMode(): boolean {
+  return React.useContext(NodeOverlayModeContext);
+}
+
 export interface NodeShellProps {
   node: NodeRecord;
   pins: Pin[];
@@ -246,6 +259,8 @@ export function NodeShell({
 
   const theme = node.theme ?? 'dark';
   const isLight = theme === 'light';
+  // T6 overlay 模式：外壳背景/描边/阴影由引擎渲染，此处透明化透出（标题栏/内容区仍 DOM）
+  const overlayMode = useNodeOverlayMode();
   // backgroundColor 优先级最高(支持 rgba 含 A 通道),其次 nodeColor,再回退 NodeDefaults.fillColor,
   // 最后回退 prop color(保持向后兼容:调用方显式传 color 时仍生效)
   const shellColor = node.backgroundColor ?? node.nodeColor ?? nodeDefaults.fillColor ?? color;
@@ -387,15 +402,18 @@ export function NodeShell({
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          backgroundColor: shellColor,
+          // T6 overlay 模式：背景透明透出引擎 SDF 外壳（圆角/描边/阴影/选中态由引擎渲染）
+          backgroundColor: overlayMode ? 'transparent' : shellColor,
           borderRadius: shellBorderRadius,
           overflow: 'hidden',
           // CSS outline 替代 border:不占布局空间,支持透明 rgba,跟随圆角
           // 选中态由 outline 颜色变红体现(选中光晕由外层 NodeItem box-shadow 负责)
-          outline: `${shellOutlineWidth}px solid ${shellOutlineColor}`,
+          // T6 overlay 模式：描边由引擎三态渲染，此处关闭避免双层描边
+          outline: overlayMode ? 'none' : `${shellOutlineWidth}px solid ${shellOutlineColor}`,
           outlineOffset: shellOutlineOffset,
           // hover 卡片投影统一由外层 NodeItem 负责(B9),内层不叠加第二层阴影
-          boxShadow: tileMode ? 'none' : '0 1px 1px rgba(0,0,0,0.03)',
+          // T6 overlay 模式：阴影由引擎 SDF 渲染，此处关闭
+          boxShadow: overlayMode || tileMode ? 'none' : '0 1px 1px rgba(0,0,0,0.03)',
           transition: 'box-shadow 0.15s cubic-bezier(0.22,1,0.36,1), outline-color 0.15s cubic-bezier(0.22,1,0.36,1)',
         }}
       >
@@ -428,6 +446,8 @@ export function NodeShell({
 
      {/* 左侧输入引脚(节点外部,圆形磁吸区域 2.2 倍 PIN 直径) */}
       {/* 使用 invK 和 nodeScale 调整偏移,确保 PIN 在节点缩放/视口缩放时保持恒定屏幕距离 */}
+      {/* T6 overlay 模式：PIN 由引擎渲染（hover 显示+磁吸），此处跳过避免双重 PIN */}
+      {overlayMode ? null : (
       <div
         ref={leftPinRef}
         onPointerMove={handlePinContainerPointerMove.bind(null, 'left')}
@@ -491,9 +511,12 @@ export function NodeShell({
           );
         })}
       </div>
+      )}
 
      {/* 右侧输出引脚(节点外部,圆形磁吸区域 2.2 倍 PIN 直径) */}
       {/* 使用 invK 和 nodeScale 调整偏移,确保 PIN 在节点缩放/视口缩放时保持恒定屏幕距离 */}
+      {/* T6 overlay 模式：PIN 由引擎渲染（hover 显示+磁吸），此处跳过避免双重 PIN */}
+      {overlayMode ? null : (
       <div
         ref={rightPinRef}
         onPointerMove={handlePinContainerPointerMove.bind(null, 'right')}
@@ -556,6 +579,7 @@ export function NodeShell({
           );
         })}
       </div>
+      )}
     </div>
   );
 }

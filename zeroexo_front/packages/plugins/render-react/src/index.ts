@@ -23,6 +23,7 @@ export { ReactGraphStoreContext, useReactGraphStore } from './store.js';
 
 // ===== 组件 =====
 export { CanvasView } from './components/canvas-view.js';
+export { CanvasViewPropsContext, useCanvasViewProps } from './components/canvas-view.js';
 
 export { ContextMenu } from './components/context-menu.js';
 export type { ContextMenuProps, ContextMenuItem } from './components/context-menu.js';
@@ -36,6 +37,7 @@ export type { EdgeLayerProps } from './components/edge-layer.js';
 export { quantizeZoom } from './components/edge-layer.js';
 export { NodeShell } from './components/node-shell.js';
 export type { NodeShellProps } from './components/node-shell.js';
+export { NodeOverlayModeContext, useNodeOverlayMode } from './components/node-shell.js';
 export { PinView } from './components/pin-view.js';
 export type { PinViewProps } from './components/pin-view.js';
 export { NodeHoverToolbar } from './components/node-hover-toolbar.js';

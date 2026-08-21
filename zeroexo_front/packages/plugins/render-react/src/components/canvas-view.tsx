@@ -19,6 +19,22 @@ import {
   useSelection,
 } from '../store.js';
 
+/**
+ * CanvasViewProps 透传 Context（T4 渲染层开关接线）
+ * renderer='three' 分支把完整 props 注入，外部注入的 threeHost 经 useCanvasViewProps 读取，
+ * 保证组装方（editor-page）仅需切换 renderer + 传入 threeHost 即可，无需重复传参。
+ */
+export const CanvasViewPropsContext = React.createContext<CanvasViewProps | null>(null);
+
+/** 读取 CanvasView 透传的完整 props（仅 renderer='three' 分支的 threeHost 内部使用） */
+export function useCanvasViewProps(): CanvasViewProps {
+  const ctx = React.useContext(CanvasViewPropsContext);
+  if (!ctx) {
+    throw new Error('useCanvasViewProps must be used inside CanvasView renderer="three" branch');
+  }
+  return ctx;
+}
+
 export interface CanvasViewProps {
   /** 状态存储(由 createRenderStore 或 RenderReactPlugin.getStore 提供) */
   store: ReactGraphStore;
@@ -100,6 +116,10 @@ export interface CanvasViewProps {
   welcomeHint?: string;
   /** 双击节点回调:缩放画布以聚焦该节点,传递实际尺寸(含 ext.defaultSize 回退) */
   onNodeDoubleClick?: (nodeId: string, width: number, height: number) => void;
+  /** 渲染层开关:dom=原 DOM 渲染(默认,行为完全不变);three=Three.js 引擎(配合 threeHost) */
+  renderer?: 'dom' | 'three';
+  /** Three.js 渲染宿主(renderer='three' 时使用;由外部组装注入,保持包边界解耦,默认 DOM 渲染不受影响) */
+  threeHost?: React.ReactElement | null;
 }
 
 export function CanvasView({
@@ -146,6 +166,8 @@ export function CanvasView({
   onRenameFinish,
   welcomeHint,
   onNodeDoubleClick,
+  renderer = 'dom',
+  threeHost,
 }: CanvasViewProps): React.ReactElement {
   const graph = useGraph(store);
   const viewport = useViewport(store);
@@ -181,6 +203,31 @@ export function CanvasView({
     },
     [onCanvasPointerDown],
   );
+
+  // three 渲染层：引擎 + DOM overlay 由 threeHost 自组装(数据仍走同一 store,接口同签名)
+  // T4: 完整 props 经 CanvasViewPropsContext 透传,threeHost 用 useCanvasViewProps 读取,
+  // 组装方无需重复传参(仅 renderer='three' + threeHost 两行接入)
+  if (renderer === 'three') {
+    return (
+      <CanvasViewPropsContext.Provider value={{
+        store, extensions, containerRef, background, backgroundColor, gridColor,
+        gridDotColor, gridLineColor, gridSize, edgeColor, edgeSelectedColor, edgeHoverColor,
+        onCanvasPointerDown, onCanvasPointerMove, onCanvasPointerUp, onCanvasWheel,
+        contextMenuItems, onCanvasContextMenu, onCanvasDrop, onCanvasDragOver,
+        onNodePointerDown, onNodePointerEnter, onNodePointerLeave,
+        onNodeTouchStart, onNodeTouchEnd, onNodeTouchMove,
+        onEdgePointerDown, onEdgePointerEnter, onEdgePointerLeave, onCutEdge,
+        onResizeHandlePointerDown, onUpdateNode, commandQueue, children, belowNodesLayer,
+        mode, forceShowPins, connectionHoverNodeId, hoveredNodeId,
+        externalRenaming, onRenameFinish, welcomeHint, onNodeDoubleClick,
+        renderer, threeHost,
+      }}>
+        <ReactGraphStoreContext.Provider value={store}>
+          {threeHost ?? <div style={{ position: 'absolute', inset: 0 }} />}
+        </ReactGraphStoreContext.Provider>
+      </CanvasViewPropsContext.Provider>
+    );
+  }
 
   return (
     <ReactGraphStoreContext.Provider value={store}>

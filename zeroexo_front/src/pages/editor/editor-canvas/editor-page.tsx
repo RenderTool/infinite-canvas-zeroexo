@@ -671,6 +671,8 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             keyboardShortcuts={keyboardShortcuts}
           />
           )}
+          {/* Plan#20 T12a/T12b: 合并/拆分主体 Modal(事件驱动,useEditorInteractions 渲染) */}
+          {interactions.subjectModals}
           {nodeCreateMenuPos ? (
             <NodeCreateMenu
               position={nodeCreateMenuPos}
