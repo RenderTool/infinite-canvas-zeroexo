@@ -13,10 +13,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Type as TypeIcon } from 'lucide-react';
+import { App as AntdApp } from 'antd';
 import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { TextNodeData } from '@zeroexo/plugin-ai-provider';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
 
 import { BaseNodeView } from '../base-node-view.js';
 import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
@@ -53,6 +55,7 @@ export function TextNodeView({
   const [isEditing, setIsEditing] = useState(false);
   const { t } = useTranslation();
   const { theme } = useTheme();
+  const { message: antdMessage } = AntdApp.useApp();
 
   // Plan#12: 编辑期草稿本地化——onChange 只写 draft,退出编辑时一次性提交命令
   // (一次编辑 = 一个撤销点,避免高频输入撑爆撤销栈)
@@ -186,6 +189,7 @@ export function TextNodeView({
             <SelfRichTextEditor
               value={draft}
               onChange={(html) => { draftRef.current = html; setDraft(html); }}
+              onLimitExceeded={() => antdMessage.warning(t('nodes.textLimitExceeded', { max: TEXT_MAX_LENGTH }))}
               placeholder={t('nodes.doubleClickToEdit')}
               isDark={theme.mode === 'dark'}
               hideToolbar

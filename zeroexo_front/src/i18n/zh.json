@@ -896,6 +896,7 @@
   "nodes": {
     "textTitle": "文本",
     "doubleClickToEdit": "双击编辑文字",
+    "textLimitExceeded": "文本超过 {{max}} 字符上限，超出部分已被截断",
     "generateImage": "生图",
     "retry": "重试",
     "generating": "生成中",

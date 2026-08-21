@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { SimpleSelect } from '@/shared/components/index.js';
+import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
 
 /**
  * 安全净化 HTML（修复 F2.2 XSS）。零依赖实现：
@@ -66,6 +67,8 @@ export interface SelfRichTextEditorProps {
   hideToolbar?: boolean;
   /** Escape 退出编辑回调 */
   onEscape?: () => void;
+  /** 文本超过上限被截断时的提示回调(防恶意超大文本拖垮协作同步) */
+  onLimitExceeded?: () => void;
 }
 
 const HEADER_OPTIONS = [
@@ -86,6 +89,7 @@ export function SelfRichTextEditor({
   isDark: _isDark,
   hideToolbar = false,
   onEscape,
+  onLimitExceeded,
 }: SelfRichTextEditorProps): React.ReactElement {
   const { theme } = useTheme();
   const isDark = _isDark ?? theme.mode === 'dark';
@@ -94,6 +98,32 @@ export function SelfRichTextEditor({
   const [textColor, setTextColor] = useState('#1f2937');
   // 高亮面板展开状态(点击按钮后展开到 toolbar 第二行,不再 inline 塞色块)
   const [highlightOpen, setHighlightOpen] = useState(false);
+
+  // 粘贴钳制:防恶意超大文本进入(协作同步 CRDT 合并/广播/落库放大风险)
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const el = editorRef.current;
+    if (!el) return;
+    const pasteText = e.clipboardData.getData('text');
+    const current = (el.innerText ?? '').length;
+    if (current + pasteText.length > TEXT_MAX_LENGTH) {
+      e.preventDefault();
+      const allowed = Math.max(0, TEXT_MAX_LENGTH - current);
+      if (allowed > 0) document.execCommand('insertText', false, pasteText.slice(0, allowed));
+      onLimitExceeded?.();
+    }
+  }, [onLimitExceeded]);
+
+  // 输入兑底钳制(防 IME/拖拽等绕过粘贴事件)
+  const handleInput = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const text = el.innerText ?? '';
+    if (text.length > TEXT_MAX_LENGTH) {
+      el.innerText = text.slice(0, TEXT_MAX_LENGTH);
+      onLimitExceeded?.();
+    }
+    onChange(el.innerHTML ?? '');
+  }, [onChange, onLimitExceeded]);
 
   useEffect(() => {
     const el = editorRef.current;
@@ -352,7 +382,8 @@ export function SelfRichTextEditor({
         contentEditable
         suppressContentEditableWarning
         data-placeholder={placeholder}
-        onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
+        onPaste={handlePaste}
+        onInput={handleInput}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.preventDefault();

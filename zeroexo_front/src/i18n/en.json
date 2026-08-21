@@ -897,6 +897,7 @@
   "nodes": {
     "textTitle": "Text",
     "doubleClickToEdit": "Double-click to edit",
+    "textLimitExceeded": "Text exceeds the {{max}}-character limit; the excess was truncated",
     "generateImage": "Gen Image",
     "retry": "Retry",
     "generating": "Generating",

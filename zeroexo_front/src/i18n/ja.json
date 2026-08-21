@@ -880,6 +880,7 @@
   "nodes": {
     "textTitle": "テキスト",
     "doubleClickToEdit": "ダブルクリックで編集",
+    "textLimitExceeded": "テキストが {{max}} 文字の上限を超えたため、超過分は切り捨てられました",
     "generateImage": "画像生成",
     "retry": "再試行",
     "generating": "生成中",
