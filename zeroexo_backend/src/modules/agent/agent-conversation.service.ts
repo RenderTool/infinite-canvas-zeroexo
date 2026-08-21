@@ -35,14 +35,22 @@ export class AgentConversationService {
     return conv;
   }
 
+  /** 分页参数强转钳制：URL query 以字符串传入，Prisma take/skip 要求 Int（另防恶意大数） */
+  private pagingOf(filters: { limit?: number; offset?: number }, defaultLimit: number, maxLimit: number) {
+    const limit = Math.min(maxLimit, Math.max(1, Math.trunc(Number(filters.limit)) || defaultLimit));
+    const offset = Math.max(0, Math.trunc(Number(filters.offset)) || 0);
+    return { limit, offset };
+  }
+
   /** 会话列表（含消息数与最后一条消息预览，按最近活动排序） */
   async listConversations(userId: string, filters: { limit?: number; offset?: number } = {}) {
+    const { limit, offset } = this.pagingOf(filters, 20, 100);
     const [items, total] = await Promise.all([
       this.prisma.agentConversation.findMany({
         where: { userId },
         orderBy: { updatedAt: 'desc' },
-        take: filters.limit ?? 20,
-        skip: filters.offset ?? 0,
+        take: limit,
+        skip: offset,
         include: {
           _count: { select: { messages: true } },
           messages: {
@@ -54,7 +62,7 @@ export class AgentConversationService {
       }),
       this.prisma.agentConversation.count({ where: { userId } }),
     ]);
-    return { items, total, limit: filters.limit ?? 20, offset: filters.offset ?? 0 };
+    return { items, total, limit, offset };
   }
 
   /** 会话详情（权限：仅本人） */
@@ -76,16 +84,17 @@ export class AgentConversationService {
   /** 历史消息分页（正序，旧 → 新） */
   async listMessages(id: string, userId: string, filters: { limit?: number; offset?: number } = {}) {
     await this.getConversation(id, userId);
+    const { limit, offset } = this.pagingOf(filters, 50, 200);
     const [items, total] = await Promise.all([
       this.prisma.agentMessage.findMany({
         where: { conversationId: id },
         orderBy: { createdAt: 'asc' },
-        take: filters.limit ?? 50,
-        skip: filters.offset ?? 0,
+        take: limit,
+        skip: offset,
       }),
       this.prisma.agentMessage.count({ where: { conversationId: id } }),
     ]);
-    return { items, total, limit: filters.limit ?? 50, offset: filters.offset ?? 0 };
+    return { items, total, limit, offset };
   }
 
   /** 写入消息（任务执行时由 worker / execute 入口调用），并刷新会话活动时间 */

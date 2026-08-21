@@ -203,6 +203,8 @@ export function useEditorInteractions({
   // P3.5 失败机制: 每个节点的 AbortController 映射(用户点停止时 abort)
   // 同时跟踪每个节点连续失败次数(用于达 3 次时建议检查 API KEY)
   const nodeAbortControllersRef = useRef<Map<string, any>>(new Map());
+  // 已取消生成的分镜节点集合(防取消后 SSE 尾马事件把状态写成 error)
+  const cancelledStoryboardsRef = useRef<Set<string>>(new Set());
   const nodeFailureCountRef = useRef<Map<string, number>>(new Map());
 
   // ===== useSyncExternalStore 状态(订阅 connectionController) =====
@@ -996,6 +998,37 @@ export function useEditorInteractions({
       }
       handlePromptStop(event.nodeId);
     });
+    // 停止分镜生成(加载态取消按钮):取消后端任务 + 断开 SSE + 恢复节点初始态(修复:此前无订阅,取消无效且节点卡死在生成中)
+    const unsubStopGen = nodeActionBus.on('storyboard:stopGenerate', (event: { nodeId: string }) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const ctlMap = nodeAbortControllersRef.current.get(event.nodeId);
+      if (ctlMap instanceof Map) {
+        for (const ctl of ctlMap.values()) {
+          if (ctl?.taskId) void agentClient.cancelTask(ctl.taskId);
+        }
+        agentClient.unsubscribe();
+        nodeAbortControllersRef.current.delete(event.nodeId);
+      }
+      cancelledStoryboardsRef.current.add(event.nodeId);
+      // 恢复初始态:整体 idle + 生成中的集改回 idle 并清进度
+      const node = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
+      const d = (node?.data ?? {}) as Record<string, unknown>;
+      const statusByEpisode = { ...((d.statusByEpisode as Record<string, string>) ?? {}) };
+      const progressByEpisode = { ...((d.progressByEpisode as Record<string, number>) ?? {}) };
+      for (const [ep, st] of Object.entries(statusByEpisode)) {
+        if (st === 'generating') {
+          statusByEpisode[ep] = 'idle';
+          progressByEpisode[ep] = 0;
+        }
+      }
+      q.execute(new UpdateNodeDataCommand(event.nodeId, {
+        status: 'idle',
+        statusByEpisode,
+        progressByEpisode,
+      }));
+    });
     // ==== AI 生成分镜(真实剧本)的复用逻辑:支持进度条与按集生成,供初次生成/重试/切换集共用 ====
     // Plan#9: 直连 provider 改为后端 storyboard_generate 任务(后端 storyboard_assistant 分块编排 + SSE)
     // Plan#29 T6: 确保剧本关联的统筹节点存在(剧级资产管理器,首次生成自动建 + 剧本→统筹连线)
@@ -1143,6 +1176,11 @@ export function useEditorInteractions({
             },
             onError: (error) => {
               console.error('生成分镜失败:', error);
+              // 已取消的节点:不写 error 态(停止处理已恢复初始态)
+              if (cancelledStoryboardsRef.current.has(storyboardId)) {
+                cancelledStoryboardsRef.current.delete(storyboardId);
+                return;
+              }
               setEpData({ statusByEpisode: 'error' });
               q.execute(new UpdateNodeDataCommand(storyboardId, { status: 'error' }));
             },
@@ -1442,6 +1480,7 @@ export function useEditorInteractions({
       unsubLinkStory();
       unsubAbandonStory();
       unsubEpisodesDeleted();
+      unsubStopGen();
     };
   }, [refs.store, handlePromptGenerate, handlePromptStop, message]);
 

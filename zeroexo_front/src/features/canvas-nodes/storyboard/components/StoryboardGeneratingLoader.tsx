@@ -29,12 +29,12 @@ export interface StoryboardGeneratingLoaderProps {
   onRestart?: () => void;
 }
 
-/** 分镜生成阶段文案（i18n key 数组，按时间轮播） */
+/** 分镜生成阶段文案（i18n key 数组，按时间轮播；键位于 editor.loader 段） */
 const STAGE_KEYS = [
-  'storyboard.loader.analyzing',
-  'storyboard.loader.drafting',
-  'storyboard.loader.refining',
-  'storyboard.loader.finalizing',
+  'editor.loader.analyzing',
+  'editor.loader.drafting',
+  'editor.loader.refining',
+  'editor.loader.finalizing',
 ];
 
 /** CSS keyframes 注入（幂等：只注入一次） */
@@ -285,7 +285,7 @@ export const StoryboardGeneratingLoader = memo(function StoryboardGeneratingLoad
                 e.currentTarget.style.color = textMuted;
               }}
             >
-              {t('storyboard.loader.cancel')}
+              {t('editor.loader.cancel')}
             </button>
           )}
         </>
@@ -296,7 +296,7 @@ export const StoryboardGeneratingLoader = memo(function StoryboardGeneratingLoad
             {status === 'cancelled' ? <X size={16} /> : <Check size={16} />}
           </div>
           <p style={doneTextStyle}>
-            {status === 'cancelled' ? t('storyboard.loader.cancelled') : t('storyboard.loader.done')}
+            {status === 'cancelled' ? t('editor.loader.cancelled') : t('editor.loader.done')}
           </p>
           {onRestart && (
             <button
@@ -308,7 +308,7 @@ export const StoryboardGeneratingLoader = memo(function StoryboardGeneratingLoad
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <RotateCcw size={12} />
-                {t('storyboard.loader.restart')}
+                {t('editor.loader.restart')}
               </span>
             </button>
           )}
