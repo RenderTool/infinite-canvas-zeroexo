@@ -9,10 +9,11 @@
 
 export type ProductionItemKind = 'character' | 'scene' | 'prop';
 
-/** 剧照（自由标签替代旧「状态」枚举） */
+/** 剧照（prompt 字段存自由标签/备注，对齐 SubjectStateImage 契约） */
 export interface ProductionItemImage {
   storageKey: string;
-  tags: string[];
+  /** 自由标签/备注（不限状态语义） */
+  prompt?: string;
 }
 
 /** 统筹条目（一个演员/场景/道具） */
@@ -25,14 +26,16 @@ export interface ProductionItem {
   aliases: string[];
   /** 一致性提示词 */
   consistency: string;
-  /** 音色（演员） */
-  voice: string;
+  /** 音色（音频资产引用，对齐原主体状态级 voice） */
+  voice?: { key: string; name: string };
   /** 备注 */
   note: string;
   /** 出场集（展示标记，非过滤维度） */
   episodeIds: string[];
-  /** 剧照集（不同时期形象 + 自由标签） */
+  /** 剧照集 */
   images: ProductionItemImage[];
+  /** 封面（条目级，对齐原主体 coverKey） */
+  coverKey?: string | null;
   /** 可提炼提示词（发送到资产 → 提示词条目） */
   prompt: string;
 }
@@ -51,10 +54,11 @@ export function createProductionItem(kind: ProductionItemKind, name = ''): Produ
     kind,
     aliases: [],
     consistency: '',
-    voice: '',
+    voice: undefined,
     note: '',
     episodeIds: [],
     images: [],
+    coverKey: null,
     prompt: '',
   };
 }
