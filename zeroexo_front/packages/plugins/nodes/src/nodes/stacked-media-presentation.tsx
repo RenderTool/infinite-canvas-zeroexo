@@ -1,7 +1,7 @@
 /** StackNode 的纯呈现组件：媒体预览、替换按钮和导航，不持有图事务状态。 */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Upload, Video } from 'lucide-react';
+import { FileText, Image as ImageIcon, Upload, Video } from 'lucide-react';
 import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { VideoNodeView } from './video-node-view.js';
@@ -9,9 +9,7 @@ import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
 import { useHydratedContent, resolveAnyThumbUrl, resolveContentUrl } from '../utils/hydrate.js';
 import { resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import type { StackCard } from './stacked-media-types.js';
-
-/** 最大缩略图数(容器宽度充足时) */
-const THUMB_COUNT_MAX = 5;
+import { ThumbNav } from './thumb-nav.js';
 
 /** 未 hydrate 时的头像式占位：sourceType 图标骨架(不再显示灰块) */
 function ThumbSkeleton({ card, dark }: { card: StackCard; dark: boolean }): React.ReactElement {
@@ -60,6 +58,9 @@ function Thumbnail({ card, dark }: { card: StackCard; dark: boolean }): React.Re
   }
   return <ImageCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} card={card} dark={dark} />;
 }
+
+/** 供详情面板(StackDetailsModal)/导航复用:卡片缩略图(视频回退链 + 图标骨架) */
+export { Thumbnail };
 
 function ImageCardThumb({ storageKey, content, card, dark }: { storageKey?: string; content: string; card: StackCard; dark: boolean }): React.ReactElement {
   const src = useHydratedContent(storageKey, content);
@@ -207,120 +208,17 @@ export function MainReplaceButton({ onClick, visible = false }: { onClick: () =>
 export function StackBottomNav({ cards, activeIndex, onJump, onPrev, onNext }: { cards: StackCard[]; activeIndex: number; onJump: (index: number) => void; onPrev: () => void; onNext: () => void }): React.ReactElement {
   const { theme } = useTheme();
   const dark = theme.mode === 'dark';
-  const total = cards.length;
-  // 宽度自适应:节点缩窄时缩略图 5→3→1 降档,保证导航永不溢出
-  // 预算:箭头 26×2 + 页码 ≈34 + gap/padding ≈83 → 固定开销 ≈117,单缩略图 ≈38
-  const navRef = useRef<HTMLDivElement>(null);
-  const [navWidth, setNavWidth] = useState(620);
-  useEffect(() => {
-    const el = navRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width;
-      if (typeof w === 'number' && w > 0) setNavWidth(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  // T10: 降档阈值 ±10px 滞回 —— resize 在阈值(300/220)附近逐帧抖动时，
-  // 无滞回会让缩略图数量 1/3/5 反复切换(图标来回跳动)；升档需越过 阈值+10，降档需跌破 阈值-10
-  const [thumbTier, setThumbTier] = useState<number>(THUMB_COUNT_MAX);
-  useEffect(() => {
-    setThumbTier((prev) => {
-      const H = 10;
-      let next = prev;
-      if (next === THUMB_COUNT_MAX && navWidth < 300 - H) next = navWidth < 220 - H ? 1 : 3;
-      else if (next === 3 && navWidth < 220 - H) next = 1;
-      else if (next === 1 && navWidth >= 220 + H) next = navWidth >= 300 + H ? THUMB_COUNT_MAX : 3;
-      else if (next === 3 && navWidth >= 300 + H) next = THUMB_COUNT_MAX;
-      return next;
-    });
-  }, [navWidth]);
-  const thumbCount = thumbTier;
-  const half = Math.floor(thumbCount / 2);
-  const start = Math.max(0, Math.min(activeIndex - half, Math.max(0, total - thumbCount)));
-  // 导航底色对齐剧本节点「黑色标题栏」:暗色 #1b1b1b / 亮色 #fafaf7
-  const navBg = dark ? '#1b1b1b' : '#fafaf7';
-  const borderSubtle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
-  const muted = dark ? 'rgba(255,255,255,0.68)' : 'var(--color-text-secondary, #57534e)';
-  // 空态与有卡态同一底色/透明度,仅缩略图位显示空占位,不再整体发灰
-  const arrowBase: React.CSSProperties = {
-    width: 26,
-    height: 26,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: 'none',
-    borderRadius: 7,
-    background: 'transparent',
-    color: muted,
-    cursor: 'pointer',
-    padding: 0,
-    transition: 'background 0.15s cubic-bezier(0.22,1,0.36,1), color 0.15s',
-  };
-  const arrowStyle = (disabled: boolean): React.CSSProperties => ({
-    ...arrowBase,
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.32 : 1,
-  });
-  const arrowHover = (disabled: boolean): React.CSSProperties =>
-    disabled ? {} : { background: dark ? 'rgba(255,255,255,0.09)' : 'rgba(15,23,42,0.07)', color: dark ? '#fff' : '#17191c' };
-  const thumbBtnBase: React.CSSProperties = {
-    width: 34,
-    height: 34,
-    // 降档阈值间隙内空间不足时也不得被压扁(否则圆形变椭圆,视觉"挤压")
-    flexShrink: 0,
-    border: 'none',
-    borderRadius: 999,
-    overflow: 'hidden',
-    cursor: 'pointer',
-    background: dark ? 'rgba(255,255,255,0.1)' : '#fff',
-    // 头像式满幅:无内边距,缩略图 cover 填满圆形
-    padding: 0,
-    transition: 'box-shadow 0.15s, transform 0.15s',
-  };
-  return <div ref={navRef} style={{ display: 'flex', alignItems: 'center', width: '100%', height: 48, padding: '0 8px', gap: 5, background: navBg, borderRadius: '0 0 8px 8px', minWidth: 0, overflow: 'hidden' }}>
-    <button
-      type="button"
-      title="上一张"
-      aria-label="上一张"
-      disabled={activeIndex <= 0}
-      onClick={onPrev}
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseEnter={(e) => Object.assign(e.currentTarget.style, arrowHover(activeIndex <= 0))}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = muted; }}
-      style={arrowStyle(activeIndex <= 0)}
-    ><ChevronLeft size={17} /></button>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, justifyContent: 'center', minWidth: 0 }}>{Array.from({ length: thumbCount }, (_, offset) => {
-      const index = start + offset; const card = cards[index];
-      return card ? (
-        <button
-          key={card.id}
-          type="button"
-          title={card.title ?? card.sourceType}
-          aria-label={`切换到 ${card.title ?? card.sourceType}`}
-          onClick={() => onJump(index)}
-          onPointerDown={(event) => event.stopPropagation()}
-          style={{
-            ...thumbBtnBase,
-            outline: index === activeIndex ? `2px solid var(--color-primary, #e94560)` : 'none',
-            outlineOffset: 2,
-            boxShadow: index === activeIndex ? `0 0 0 2px ${navBg}, 0 0 0 3.5px var(--color-primary, #e94560)` : 'none',
-          }}
-        ><Thumbnail card={card} dark={dark} /></button>
-      ) : <div key={`empty-${offset}`} style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 999, border: `1px dashed ${borderSubtle}`, background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)' }} />;
-    })}</div>
-    <button
-      type="button"
-      title="下一张"
-      aria-label="下一张"
-      disabled={activeIndex >= total - 1}
-      onClick={onNext}
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseEnter={(e) => Object.assign(e.currentTarget.style, arrowHover(activeIndex >= total - 1))}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = muted; }}
-      style={arrowStyle(activeIndex >= total - 1)}
-    ><ChevronRight size={17} /></button>
-    <span style={{ color: muted, fontSize: 12, minWidth: 24, textAlign: 'center', fontVariantNumeric: 'tabular-nums', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeIndex + 1}/{total}</span>
-  </div>;
+  // 通用缩略图导航(thumb-nav.tsx):宽度自适应降档 5→3→1 + 上限5滑动窗口 + 1/N 页码,
+  // 行为契约与主体节点垂直导航完全一致(同一套框架)
+  return (
+    <ThumbNav
+      orientation="horizontal"
+      items={cards.map((card) => ({ id: card.id, title: card.title ?? card.sourceType, thumb: <Thumbnail card={card} dark={dark} /> }))}
+      activeIndex={activeIndex}
+      total={cards.length}
+      onPrev={onPrev}
+      onNext={onNext}
+      onJump={onJump}
+    />
+  );
 }

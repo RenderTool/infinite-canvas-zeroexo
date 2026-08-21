@@ -5,14 +5,15 @@
  * 单行编辑逻辑已抽离至 StoryboardRow，运镜选择器已抽离至 ShotStatePicker。
  */
 import { memo, type CSSProperties, type ReactElement } from 'react';
-import { Button, Progress } from 'antd';
-import { RotateCcw, Maximize, Sparkles } from 'lucide-react';
+import { Button } from 'antd';
+import { RotateCcw, Maximize } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import i18n from '@/i18n/config';
-import type { Shot, StoryboardEntity, EpisodeStatus } from '../storyboard-types';
+import type { Shot, StoryboardEntity, EpisodeStatus, AiSubject } from '../storyboard-types';
 import { StoryboardRow } from './StoryboardRow';
+import { StoryboardGeneratingLoader } from './StoryboardGeneratingLoader';
 
 // ===== 运镜预设选项 =====
 
@@ -20,26 +21,29 @@ export const CAMERA_MOVEMENT_OPTIONS = ['固定', '推', '拉', '摇', '移', '�
 
 // ===== 列配置 =====
 
+// Plan#20 T3: prompt→promptText 对齐后端契约 + 补 dayNight/entities 列(列序与 NODE_COLUMN_KEYS 一致)
 export const COLUMN_CONFIG = {
-  gridTemplateColumns: '5.89% 6.59% 17.94% 7.63% 10.57% 17.59% 8.84% 9.01% 10.05% 5.89%',
+  gridTemplateColumns: '5.6% 5.0% 5.6% 18.0% 12.0% 7.4% 9.7% 13.8% 7.4% 7.9% 4.0% 3.6%',
   columns: [
-    { key: 'number', title: i18n.t('storyboardTable.shotNumber'), widthPct: 5.89 },
-    { key: 'duration', title: i18n.t('storyboardTable.duration'), widthPct: 6.59 },
-    { key: 'description', title: i18n.t('storyboardTable.description'), widthPct: 17.94, textLeft: true },
-    { key: 'shotType', title: i18n.t('storyboardTable.shotType'), widthPct: 7.63 },
-    { key: 'lighting', title: i18n.t('storyboardTable.lighting'), widthPct: 10.57, textLeft: true },
-    { key: 'dialogue', title: i18n.t('storyboardTable.dialogue'), widthPct: 17.59, textLeft: true },
-    { key: 'sfx', title: i18n.t('storyboardTable.sfx'), widthPct: 8.84, textLeft: true },
-    { key: 'cameraMovement', title: i18n.t('storyboardTable.cameraMovement'), widthPct: 9.01, textLeft: true },
-    { key: 'prompt', title: i18n.t('storyboardTable.finalPrompt'), widthPct: 10.05 },
-    { key: 'actions', title: i18n.t('storyboardTable.actions'), widthPct: 5.89 },
+    { key: 'number', title: i18n.t('storyboardTable.shotNumber'), widthPct: 5.6 },
+    { key: 'dayNight', title: i18n.t('storyboardTable.dayNight'), widthPct: 5.0 },
+    { key: 'duration', title: i18n.t('storyboardTable.duration'), widthPct: 5.6 },
+    { key: 'description', title: i18n.t('storyboardTable.description'), widthPct: 18.0, textLeft: true },
+    { key: 'entities', title: i18n.t('storyboardTable.entities'), widthPct: 12.0, textLeft: true },
+    { key: 'shotType', title: i18n.t('storyboardTable.shotType'), widthPct: 7.4 },
+    { key: 'lighting', title: i18n.t('storyboardTable.lighting'), widthPct: 9.7, textLeft: true },
+    { key: 'dialogue', title: i18n.t('storyboardTable.dialogue'), widthPct: 13.8, textLeft: true },
+    { key: 'sfx', title: i18n.t('storyboardTable.sfx'), widthPct: 7.4, textLeft: true },
+    { key: 'cameraMovement', title: i18n.t('storyboardTable.cameraMovement'), widthPct: 7.9, textLeft: true },
+    { key: 'promptText', title: i18n.t('storyboardTable.finalPrompt'), widthPct: 4.0 },
+    { key: 'actions', title: i18n.t('storyboardTable.actions'), widthPct: 3.6 },
   ],
 };
 
-export const NODE_COLUMN_KEYS = ['number', 'duration', 'description', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement'];
-export const NODE_GRID_TEMPLATE = '7.01% 7.84% 21.34% 9.08% 12.57% 20.92% 10.52% 10.72%';
+export const NODE_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'entities', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement'];
+export const NODE_GRID_TEMPLATE = '6.0% 5.5% 6.0% 19.5% 13.0% 8.0% 10.5% 15.0% 8.0% 8.5%';
 export const EDIT_COLUMN_KEYS = [...NODE_COLUMN_KEYS, 'actions'];
-export const EDIT_GRID_TEMPLATE = '6.55% 7.33% 19.95% 8.48% 11.75% 19.55% 9.83% 10.02% 6.55%';
+export const EDIT_GRID_TEMPLATE = '5.6% 5.1% 5.6% 18.2% 12.1% 7.5% 9.8% 14.0% 7.5% 8.0% 6.6%';
 
 // ===== 网格样式函数 =====
 
@@ -77,6 +81,10 @@ export interface StoryboardTableProps {
   onCameraOpen: (shotId: string, rect: { top: number; left: number; width: number }) => void;
   onCameraClose: () => void;
   entities: StoryboardEntity[];
+  /** Plan#20 T3: 后端主体字典(主体列 kind 徽章查找源, 未命中 entities 时兑底) */
+  aiSubjects?: AiSubject[];
+  /** Plan#20 T9c: 实体名/别名 → 画布主体卡状态列表(shot entities 的 stateId 选择选项源) */
+  subjectStatesByEntity?: Record<string, Array<{ id: string; name: string }>>;
   mentionOpen: boolean;
   mentionShotId: string | null;
   onMentionSelect: (entity: StoryboardEntity) => void;
@@ -108,6 +116,8 @@ export const StoryboardTable = memo(function StoryboardTable({
   onCameraOpen,
   onCameraClose,
   entities,
+  aiSubjects,
+  subjectStatesByEntity,
   mentionOpen,
   mentionShotId,
   onMentionSelect,
@@ -124,7 +134,6 @@ export const StoryboardTable = memo(function StoryboardTable({
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
   const mutedColor = theme.toolbar.textMuted;
-  const accent = theme.toolbar.accent;
   const bgHeader = isDark ? '#1f1f1f' : '#f5f5f5';
   const borderMuted = isDark ? '#2e2e2e' : '#e5e5e5';
   const textSecondary = isDark ? '#a8a8a8' : '#57534e';
@@ -165,24 +174,11 @@ export const StoryboardTable = memo(function StoryboardTable({
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', cursor: 'default' }}>
       {renderHeader()}
       {shots.length === 0 && status === 'generating' ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
-          <div style={{ fontSize, color: textSecondary, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Sparkles size={14} style={{ color: accent }} />
-            {t('storyboardTable.aiGenerating')}
-          </div>
-          {progress != null && progress > 0 && (
-            <div style={{ width: 168 }}>
-              <Progress
-                percent={Math.min(100, Math.round(progress))}
-                size="small"
-                strokeColor={accent}
-                railColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
-                format={(pct) => `${pct}%`}
-              />
-            </div>
-          )}
-          <div style={{ fontSize: 12, color: mutedColor }}>{t('storyboardTable.pleaseWait')}</div>
-        </div>
+        <StoryboardGeneratingLoader
+          status="generating"
+          progress={progress}
+          onCancel={() => nodeActionBus.emit('storyboard:stopGenerate', { nodeId })}
+        />
       ) : shots.length === 0 && status === 'error' ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
           <div style={{ fontSize, color: textSecondary }}>{t('storyboardTable.generationFailed')}</div>
@@ -248,6 +244,8 @@ export const StoryboardTable = memo(function StoryboardTable({
               onCameraOpen={onCameraOpen}
               onCameraClose={onCameraClose}
               entities={entities}
+              aiSubjects={aiSubjects}
+              subjectStatesByEntity={subjectStatesByEntity}
               mentionOpen={mentionOpen}
               mentionShotId={mentionShotId}
               onMentionSelect={onMentionSelect}

@@ -15,7 +15,7 @@ import type { AddNodeType } from './components/node-create-menu.js';
 
 /** 所有节点类型 */
 const ALL_NODE_TYPES: AddNodeType[] = [
-  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench',
+  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench', 'subject',
 ];
 
 /**
@@ -24,7 +24,7 @@ const ALL_NODE_TYPES: AddNodeType[] = [
  */
 const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
   // 生成:可输出到所有节点(含自身,支持链式生成)
-  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench'],
+  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench', 'subject'],
   // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成/堆叠
   text: ['text', 'image', 'video', 'audio', 'stacked-media', 'script', 'generator'],
   // 图片:图生图/图生视频/图生音频/生成/堆叠
@@ -33,12 +33,14 @@ const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
   video: ['video', 'audio', 'stacked-media', 'generator'],
   // 音频:音频生视频(多模态)/生成/堆叠
   audio: ['video', 'stacked-media', 'generator'],
-  // 剧本:只能连分镜
+  // 分镜:只能连工作台
   script: ['storyboard'],
   // 分镜:只能连工作台
-  storyboard: ['workbench'],
+  storyboard: ['workbench', 'subject'],
   // 工作台:终端节点,不接下游
   workbench: [],
+  // 主体节点:可连入工作台（视频生成上游）
+  subject: ['workbench'],
   // 堆叠是当前 item 的切换器：可进入生成链路，也可连入另一个 StackNode 触发合并。
   'stacked-media': ['image', 'video', 'audio', 'generator', 'stacked-media'],
 };

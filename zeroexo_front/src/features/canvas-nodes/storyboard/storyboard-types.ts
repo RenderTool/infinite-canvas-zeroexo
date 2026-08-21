@@ -121,6 +121,14 @@ export interface StepRecord {
 
 // ===== 画布分镜节点数据 =====
 
+/** Plan#20 T4: 后端汇总阶段产出的主体字典条目(T3: 表格主体列 kind 查找源) */
+export interface AiSubject {
+  name: string;
+  kind: EntityKind;
+  aliases: string[];
+  description: string;
+}
+
 /** 单集分镜的生成状态 */
 export type EpisodeStatus = 'idle' | 'generating' | 'ready' | 'error';
 
@@ -147,5 +155,72 @@ export interface StoryboardNodeData {
   /** 实体冲突列表 */
   conflicts?: EntityConflict[];
   /** Plan#20 T4: 后端汇总阶段产出的主体字典(供占位主体堆叠创建/主体标注匹配) */
-  aiSubjects?: Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }>;
+  aiSubjects?: AiSubject[];
+}
+
+// ===== Plan#20 T5: 主体节点数据类型 =====
+
+/** 状态级音色（选填，Plan#20 重设计 v2：**音频资产引用**而非预设） */
+export interface SubjectStateVoice {
+  /** 音频素材 storageKey（从资产库选择或用户上传） */
+  key: string;
+  /** 显示名 */
+  name: string;
+  /** 备注（选填） */
+  note?: string;
+}
+
+/** 状态内单张图片（一图一提示词，提示词互相隔离，选填） */
+export interface SubjectStateImage {
+  storageKey: string;
+  /** 该图的独立生成提示词（选填；生成同款等操作无提示词时给出提示） */
+  prompt?: string;
+}
+
+/** 主体状态（形象剧照 + 一图一提示词） */
+export interface SubjectState {
+  id: string;
+  name: string;
+  /** 形象图列表（每张带独立提示词，备选方案全保留） */
+  images: SubjectStateImage[];
+  /** 备注 */
+  note: string;
+  /** 状态级音色（选填，音频资产引用，无则不显示播放器） */
+  voice?: SubjectStateVoice;
+  /** 停用标记（被引用状态禁删只可停用，防引用断裂；停用后下拉不可选） */
+  disabled?: boolean;
+}
+
+/** 音效素材条目（voice/ambient/sfx 三类通用） */
+export interface SubjectAudio {
+  key: string;
+  name: string;
+  kind: 'voice' | 'ambient' | 'sfx';
+  note: string;
+}
+
+/** 主体节点 node.data 结构（Plan#20 T5） */
+export interface SubjectCardData {
+  /** 主体名 */
+  name: string;
+  /** 主体类型 */
+  kind: EntityKind;
+  /** 一致性描述（逐字复用到视频生成提示词） */
+  consistency: string;
+  /** 别名列表（再生成对账用） */
+  aliases: string[];
+  /** 封面立绘 storageKey */
+  coverKey: string | null;
+  /** 状态集合 */
+  states: SubjectState[];
+  /** 当前活跃状态 id */
+  activeStateId: string | null;
+  /** 音效素材 */
+  audio: SubjectAudio[];
+  /** 跨集归属（多集关联用） */
+  episodeIds: string[];
+  /** 资产库 Subject id（用户「发送资产」后回填） */
+  assetSubjectId: string | null;
+  /** AI 占位创建未转正（AI 建卡标记 true；用户任何编辑后清除；占位未转正风险检测依据） */
+  placeholder?: boolean;
 }

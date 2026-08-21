@@ -30,6 +30,7 @@ import type { AwarenessState } from '@/features/collaboration/collaboration-type
 // 光标链路调试埋点(左上角调试面板数据总线,O(1) 计数)
 import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
+import { createSubjectExtensions } from '@/features/canvas-nodes/subject/subject-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
 import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT, PROJECT_CONFLICT_EVENT } from '@/services/sync/broadcast-channel-service.js';
 import { collectImageStorageKeys, getProject, loadProjectGraph, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
@@ -38,7 +39,7 @@ import type { GraphModel } from '@zeroexo/core';
 export type InteractionMode = 'select' | 'pan';
 
 /** 画布支持的节点类型(资产节点 + 剧创节点 + 堆叠节点) */
-export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench';
+export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject';
 
 /**
  * 收集节点列表中的视频/音频 storageKey(用于删除时清理本地媒体文件与视频缩略图)。
@@ -206,6 +207,12 @@ export function useEditorState(canvasId: string): {
       createCreationExtensions(
         ed.plugins.connection?.getController() ?? null,
         () => ed.store,
+      ),
+    );
+    // Plan#20 T5: 注册主体节点扩展
+    ed.plugins.nodes.registerAll(
+      createSubjectExtensions(
+        ed.plugins.connection?.getController() ?? null,
       ),
     );
 

@@ -12,7 +12,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { useReactGraphStore, useGraph } from '@zeroexo/plugin-render-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { StoryboardNodeData, Shot, StoryboardEntity } from './storyboard-types';
-import { createNewShot, normalizeUpdate, buildStepRecords } from './storyboard-utils';
+import { createNewShot, normalizeUpdate, buildStepRecords, SAMPLE_SUBJECTS } from './storyboard-utils';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import { StoryboardAssociateModal } from './storyboard-associate-modal';
 import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown';
@@ -77,6 +77,30 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const status = data.statusByEpisode?.[activeEpisodeId] ?? (hasByEpisode ? 'idle' : (data.status ?? 'idle'));
   const progress = data.progressByEpisode?.[activeEpisodeId] ?? data.progress ?? 0;
   const entities = data.entities ?? [];
+  // Plan#20 T3: 主体字典兜底——修复前生成的旧范文节点无 aiSubjects, 用 SAMPLE_SUBJECTS 展示(不写回数据)
+  const aiSubjects = data.aiSubjects?.length ? data.aiSubjects : (data.isSample ? SAMPLE_SUBJECTS : undefined);
+  // Plan#20 T9c: 画布主体卡 → 实体名/别名 → 状态列表映射(shot entities 的 stateId 选择选项源, 同名字体卡状态合并去重)
+  const subjectStatesByEntity = useMemo(() => {
+    const map: Record<string, Array<{ id: string; name: string }>> = {};
+    for (const n of graph.nodes) {
+      if (n.type !== 'subject') continue;
+      const d = (n.data ?? {}) as { name?: string; aliases?: string[]; states?: Array<{ id: string; name: string; disabled?: boolean }> };
+      // Plan#20 T12c: 停用状态(disabled)不进入选择选项——被引用状态禁删只可停用,停用即从引用下拉隐藏
+      const states = Array.isArray(d.states)
+        ? d.states.filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string' && s.disabled !== true)
+          .map((s) => ({ id: s.id, name: s.name }))
+        : [];
+      if (states.length === 0) continue;
+      const keys = new Set<string>();
+      if (d.name) keys.add(d.name);
+      for (const a of Array.isArray(d.aliases) ? d.aliases : []) if (a) keys.add(a);
+      for (const k of keys) {
+        if (!map[k]) map[k] = [];
+        for (const s of states) if (!map[k].some((x) => x.id === s.id)) map[k].push(s);
+      }
+    }
+    return map;
+  }, [graph.nodes]);
   const activeEpisode = scriptEpisodes.find((e) => e.id === activeEpisodeId) ?? scriptEpisodes[0];
   const activeEpisodeIndex = Math.max(0, scriptEpisodes.findIndex((e) => e.id === activeEpisodeId));
 
@@ -258,7 +282,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
             </div>
           </>
         ) : (
-          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
         )}
       </div>
 
@@ -297,7 +321,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
                   </div>
                 </>
               ) : (
-                <StoryboardTable readOnly={false} shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+                <StoryboardTable readOnly={false} shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
               )}
             </div>
           </div>

@@ -11,7 +11,8 @@ import type { ThemeConfig } from '@zeroexo/shared';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ContextMenu, AssetDetailViewer } from '@/shared/components/index.js';
 import { PromptViewer } from '@/shared/components/index.js';
-import { PromptCreatePage, SubjectCreatePage } from '../index.js';
+import { PromptCreatePage } from '../index.js';
+import { SubjectEditorBridge } from '../subject-editor-bridge.js';
 import { ScriptFullscreenEditor } from '@/features/canvas-nodes/storyboard/script-fullscreen-editor.js';
 import { ScriptImportFlow } from '@/features/canvas-nodes/storyboard/components/script-import-flow.js';
 import { UploadQueueOverlay } from '@/features/upload-queue/index.js';
@@ -215,24 +216,14 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
         onClose={props.onCtxMenuClose}
       />
 
-      {/* 主体创建/编辑弹窗 */}
-      <Modal
-        title={null}
-        open={props.subjectCreateOpen}
-        onCancel={props.onSubjectCreateClose}
-        footer={null}
-        centered
-        width="calc(100vw - 32px)"
-        style={{ maxWidth: 900 }}
-        destroyOnHidden
-      >
-        <SubjectCreatePage
-          modal
+      {/* 主体编辑弹窗（Plan#20 重设计：统一走 SubjectEditorModal，适配桥自带 Modal 壳） */}
+      {props.subjectCreateOpen && (
+        <SubjectEditorBridge
           subjectId={props.subjectCreateId}
           onBack={props.onSubjectCreateClose}
           onSaved={props.onSubjectCreateSaved}
         />
-      </Modal>
+      )}
 
       {/* 提示词创建/编辑弹窗 */}
       <Modal

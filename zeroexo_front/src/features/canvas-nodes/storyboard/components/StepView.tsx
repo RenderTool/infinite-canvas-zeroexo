@@ -8,6 +8,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import type { StepRecord, Shot, StoryboardEntity, EntityConflict } from '../storyboard-types';
+import { ENTITY_KIND_META } from '../storyboard-utils';
 
 export interface StepViewProps {
   step: StepRecord;
@@ -82,7 +83,7 @@ export function StepView({
         {entity.placeholderImageUrl ? (
           <img src={entity.placeholderImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
-          entity.kind === 'character' ? '\u{1F464}' : entity.kind === 'scene' ? '\u{1F4CD}' : '\u{1F4E6}'
+          ENTITY_KIND_META[entity.kind].emoji
         )}
       </div>
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -90,7 +91,7 @@ export function StepView({
           {entity.name}
         </div>
         <div style={{ fontSize: 10, color: mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {entity.kind === 'character' ? t('entity.character') : entity.kind === 'scene' ? t('entity.scene') : t('entity.prop')}
+          {t(ENTITY_KIND_META[entity.kind].labelKey)}
         </div>
       </div>
     </div>

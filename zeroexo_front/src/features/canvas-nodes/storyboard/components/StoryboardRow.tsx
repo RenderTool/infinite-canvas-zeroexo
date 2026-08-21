@@ -3,13 +3,13 @@
  *
  * 从 StoryboardTable.tsx 中抽离的单行编辑逻辑，包含：景别选择/运镜选择/时长输入/描述编辑/删除该行数据。
  */
-import { memo, type CSSProperties, type ReactElement } from 'react';
+import { memo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { Input, Tooltip, Button } from 'antd';
 import { Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign } from '../storyboard-types';
-import { formatLighting, formatEnvironment } from '../storyboard-utils';
+import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign, AiSubject, EntityRef } from '../storyboard-types';
+import { formatLighting, formatEnvironment, entityDisplayName, resolveEntityKind, ENTITY_KIND_META } from '../storyboard-utils';
 import { MentionDropdown } from './EntityManager';
 import { ShotStatePicker } from './ShotStatePicker';
 import { CAMERA_MOVEMENT_OPTIONS, NODE_GRID_TEMPLATE, EDIT_GRID_TEMPLATE, gridCellStyle } from './StoryboardTable';
@@ -28,6 +28,10 @@ export interface StoryboardRowProps {
   onCameraOpen: (shotId: string, rect: { top: number; left: number; width: number }) => void;
   onCameraClose: () => void;
   entities: StoryboardEntity[];
+  /** Plan#20 T3: 后端主体字典(主体列 kind 徽章兑底查找源) */
+  aiSubjects?: AiSubject[];
+  /** Plan#20 T9c: 实体名/别名 → 画布主体卡状态列表(shot entities 的 stateId 选择选项源) */
+  subjectStatesByEntity?: Record<string, Array<{ id: string; name: string }>>;
   mentionOpen: boolean;
   mentionShotId: string | null;
   onMentionSelect: (entity: StoryboardEntity) => void;
@@ -49,6 +53,8 @@ export const StoryboardRow = memo(function StoryboardRow({
   onCameraOpen,
   onCameraClose,
   entities,
+  aiSubjects,
+  subjectStatesByEntity,
   mentionOpen,
   mentionShotId,
   onMentionSelect,
@@ -67,6 +73,9 @@ export const StoryboardRow = memo(function StoryboardRow({
   const textSecondary = isDark ? '#a8a8a8' : '#57534e';
   const accentCyan = '#5DDCFF';
 
+  // Plan#20 T9c: entities 列状态选择器(点击实体 chip 弹 ShotStatePicker)
+  const [statePicker, setStatePicker] = useState<{ index: number; rect: { top: number; left: number; width: number } } | null>(null);
+
   const sfx = Array.isArray(shot.sfx) ? shot.sfx : [];
   // Plan#20 T2: 光影/环境双兼容字符串化展示(后端产出字符串 / 旧数据对象)
   const lightingText = formatLighting(shot.lighting);
@@ -75,9 +84,40 @@ export const StoryboardRow = memo(function StoryboardRow({
   if (lightingText) moodLocParts.push(lightingText);
   if (envText) moodLocParts.push(envText);
   const moodLocText = moodLocParts.join(' · ') || null;
+  // Plan#20 T3: 主体列条目(双兼容 EntityRef|string) + 描述主体名高亮词表(长名优先避免短名吞长名)
+  const entityItems = (Array.isArray(shot.entities) ? shot.entities : []).map(entityDisplayName).filter(Boolean);
+  const highlightNames = [
+    ...new Set([
+      ...entities.map((e) => e.name),
+      ...(aiSubjects ?? []).map((s) => s.name),
+    ]),
+  ].filter(Boolean).sort((a, b) => b.length - a.length);
   const gridTemplate = readOnly ? NODE_GRID_TEMPLATE : EDIT_GRID_TEMPLATE;
   const cellBase: CSSProperties = { display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '0.375rem 0.25rem', fontSize: 12, width: '100%', height: '100%', minHeight: 60, color: textColor, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'hidden' };
   const editInput: CSSProperties = { width: '100%', fontSize: 12, lineHeight: '20px', color: textColor, whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: 60, padding: '0.375rem 0.25rem', resize: 'none', background: 'transparent', border: 'none', boxShadow: 'none', outline: 'none' };
+
+  // Plan#20 T3: 描述列主体名高亮(只读态; 长名优先匹配, 命中用 accent 色标注)
+  const highlightMentions = (text: string): ReactNode => {
+    if (!text) return '';
+    if (highlightNames.length === 0) return text;
+    const nodes: ReactNode[] = [];
+    let rest = text;
+    let key = 0;
+    while (rest.length > 0) {
+      let best: { name: string; idx: number } | null = null;
+      for (const name of highlightNames) {
+        const idx = rest.indexOf(name);
+        if (idx >= 0 && (best == null || idx < best.idx || (idx === best.idx && name.length > best.name.length))) {
+          best = { name, idx };
+        }
+      }
+      if (!best) { nodes.push(rest); break; }
+      if (best.idx > 0) nodes.push(rest.slice(0, best.idx));
+      nodes.push(<span key={key++} style={{ color: accent, fontWeight: 600 }}>{best.name}</span>);
+      rest = rest.slice(best.idx + best.name.length);
+    }
+    return nodes;
+  };
 
   return (
     <div
@@ -118,6 +158,21 @@ export const StoryboardRow = memo(function StoryboardRow({
         {shot.number}
       </div>
 
+      {/* 日/夜 — Plan#20 T3 新增列 */}
+      <div
+        style={{
+          ...gridCellStyle(borderMuted, bgCanvas),
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 12,
+          color: textSecondary,
+          minHeight: 60,
+        }}
+      >
+        {shot.dayNight || '—'}
+      </div>
+
       {/* 时长 */}
       <div
         style={{
@@ -134,10 +189,10 @@ export const StoryboardRow = memo(function StoryboardRow({
         {shot.duration}s
       </div>
 
-      {/* 画面描述 — 编辑态直接编辑 + @ 提及;只读态纯文本 */}
+      {/* 画面描述 — 编辑态直接编辑 + @ 提及;只读态纯文本(主体名高亮) */}
       <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px 4px' }}>
         {readOnly ? (
-          <div style={{ ...cellBase, justifyContent: 'flex-start', textAlign: 'left' }}>{shot.description || '—'}</div>
+          <div style={{ ...cellBase, justifyContent: 'flex-start', textAlign: 'left' }}>{shot.description ? highlightMentions(shot.description) : '—'}</div>
         ) : (
           <div style={{ position: 'relative', width: '100%' }}>
             <Input.TextArea
@@ -169,6 +224,56 @@ export const StoryboardRow = memo(function StoryboardRow({
             )}
           </div>
         )}
+      </div>
+
+      {/* 主体 — Plan#20 T3 新增列: kind 徽章(角色/场景/道具色区分, 色板对齐 ENTITY_KIND_META) */}
+      <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px 4px' }}>
+        <div style={{ ...cellBase, justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          {entityItems.length === 0 ? '—' : entityItems.map((name, i) => {
+            const kind = resolveEntityKind(name, entities, aiSubjects);
+            const meta = kind ? ENTITY_KIND_META[kind] : undefined;
+            // Plan#20 T9c: EntityRef 形态且能匹配到画布主体卡状态 → 可点击选择状态
+            const raw = shot.entities?.[i];
+            const ref = raw && typeof raw === 'object' ? (raw as EntityRef) : undefined;
+            const states = ref && subjectStatesByEntity ? (subjectStatesByEntity[name] ?? []) : [];
+            const activeState = states.find((s) => s.id === ref?.stateId);
+            const clickable = states.length > 0 && !readOnly;
+            return (
+              <span
+                key={`${name}-${i}`}
+                onClick={clickable ? (e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setStatePicker({ index: i, rect: { top: r.top, left: r.left, width: r.width } });
+                } : undefined}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: '1px 6px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  lineHeight: '16px',
+                  color: meta?.color ?? textSecondary,
+                  background: meta ? `${meta.color}1f` : 'transparent',
+                  border: `1px solid ${meta ? `${meta.color}55` : borderMuted}`,
+                  whiteSpace: 'nowrap',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  cursor: clickable ? 'pointer' : 'default',
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: meta?.color ?? textSecondary, flexShrink: 0 }} />
+                {name}
+                {activeState && (
+                  <span style={{ fontSize: 10, color: textSecondary, background: bgHover, borderRadius: 999, padding: '0 5px', lineHeight: '14px', flexShrink: 0 }}>
+                    {activeState.name}
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
       {/* 景别 — 编辑态点击弹出取景器;只读态纯文本 */}
@@ -284,6 +389,43 @@ export const StoryboardRow = memo(function StoryboardRow({
           currentValue={shot.cameraMovement}
           onSelect={(opt) => { onUpdateShot(shot.id, { cameraMovement: opt as any }); onCameraClose(); }}
           onClose={onCameraClose}
+          textColor={textColor}
+          mutedColor={mutedColor}
+          bgHover={bgHover}
+          bgCanvas={bgCanvas}
+          borderMuted={borderMuted}
+          accent={accent}
+        />
+      )}
+
+      {/* Plan#20 T9c: entities 列状态选择器(点实体 chip 弹窗选状态,stateId 落 shot.entities) */}
+      {!readOnly && statePicker && (
+        <ShotStatePicker
+          rect={statePicker.rect}
+          options={(() => {
+            const name = entityItems[statePicker.index];
+            const states = (name && subjectStatesByEntity ? subjectStatesByEntity[name] : undefined) ?? [];
+            return states.map((s) => s.name);
+          })()}
+          currentValue={(() => {
+            const raw = shot.entities?.[statePicker.index];
+            const ref = raw && typeof raw === 'object' ? (raw as EntityRef) : undefined;
+            const name = entityItems[statePicker.index];
+            const states = (name && subjectStatesByEntity ? subjectStatesByEntity[name] : undefined) ?? [];
+            return states.find((s) => s.id === ref?.stateId)?.name ?? '';
+          })()}
+          onSelect={(opt) => {
+            const name = entityItems[statePicker.index];
+            const states = (name && subjectStatesByEntity ? subjectStatesByEntity[name] : undefined) ?? [];
+            const target = states.find((s) => s.name === opt);
+            const ents = Array.isArray(shot.entities) ? shot.entities.map((e, i) => {
+              if (i !== statePicker.index || typeof e !== 'object' || !e) return e;
+              return { ...e, stateId: target?.id ?? undefined };
+            }) : shot.entities;
+            onUpdateShot(shot.id, { entities: ents as unknown as Shot['entities'] });
+            setStatePicker(null);
+          }}
+          onClose={() => setStatePicker(null)}
           textColor={textColor}
           mutedColor={mutedColor}
           bgHover={bgHover}

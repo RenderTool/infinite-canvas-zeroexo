@@ -35,8 +35,10 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 
 // 基类组件
+import { nodeActionBus } from './base-node-view.js';
 export { BaseNodeView, AIStateView, createPinHandlers, nodeActionBus } from './base-node-view.js';
 export type { BaseNodeViewProps, AIStateViewProps, PinHandlers, NodeActionEvent } from './base-node-view.js';
+export { NODE_ICONS } from './icons.js';
 
 // 冒泡评论层(从 comment-box 插件迁入,评论是节点本身的功能)
 export { CommentLayer } from './comment-layer.js';
@@ -57,6 +59,10 @@ export { replaceNodeImage } from './utils/replace-node-image.js';
 export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
 export { convertToStack, createStackNode, resolveStackSpawnPosition } from './node-tools.js';
 export { stackSelectedNodes } from './nodes/stacked-media-model.js';
+export { ThumbNav, useThumbTier, THUMB_COUNT_MAX } from './nodes/thumb-nav.js';
+export type { ThumbNavItem, ThumbNavProps } from './nodes/thumb-nav.js';
+export { StackDetailsModal } from './nodes/stack-details-modal.js';
+export type { StackDetailsModalProps } from './nodes/stack-details-modal.js';
 // 视图组件 import(供 extension factory 使用)
 import { TextNodeView, getTextNodePins } from './nodes/text-node-view.js';
 import { GeneratorNodeView, getGeneratorNodePins } from './nodes/generator-node-view.js';
@@ -137,6 +143,20 @@ import {
   MEDIA_MIN_SIZE,
   STACKED_MEDIA_MIN_SIZE,
   TEXT_MIN_SIZE,
+} from './utils/node-contracts.js';
+export {
+  TEXT_DEFAULT_SIZE,
+  GENERATOR_DEFAULT_SIZE,
+  IMAGE_DEFAULT_SIZE,
+  VIDEO_DEFAULT_SIZE,
+  AUDIO_DEFAULT_SIZE,
+  AI_PLACEHOLDER_DEFAULT_SIZE,
+  STACKED_MEDIA_DEFAULT_SIZE,
+  MEDIA_MIN_SIZE,
+  STACKED_MEDIA_MIN_SIZE,
+  TEXT_MIN_SIZE,
+  SUBJECT_DEFAULT_SIZE,
+  SUBJECT_MIN_SIZE,
 } from './utils/node-contracts.js';
 
 // ===== 扩展定义工厂 =====
@@ -400,6 +420,16 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
           tools.push({ ...t, targetNode: () => activeTarget });
         }
       }
+
+      // 详情按钮(Plan#20 验收反馈 #2:>5 卡断层兜底,打开全部卡片网格;与主体「详情」同模式)
+      tools.push({
+        id: 'detail',
+        label: '',
+        title: i18next.t('nodes.stackDetails'),
+        icon: <NODE_ICONS.stack size={14} />,
+        group: 'basic',
+        run: (node) => { nodeActionBus.emit('stack:openDetails', { nodeId: node.id }); },
+      });
 
       // 移出按钮(仅 StackNode 显示;图标走注册表 eject 语义=Combine,与移出组 LogOut 区分——用户拍板表 2026-08-20)
       tools.push({

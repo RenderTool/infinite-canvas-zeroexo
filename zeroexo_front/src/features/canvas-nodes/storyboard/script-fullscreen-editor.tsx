@@ -23,6 +23,7 @@ import { X, FileUp, BookOpen, ListOrdered, Eye, EyeOff, ArrowUpDown, GripVertica
 import { App, Button, ConfigProvider, Tooltip, Input, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme, AnimatedThemeToggler } from '@zeroexo/plugin-theme';
+import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { ScriptStructuredEditor } from '@/features/canvas-nodes/script-editor/script-structured-editor.js';
 import { serializeScriptLines, buildSampleLines } from '@/features/canvas-nodes/script-editor/script-lines.js';
@@ -296,6 +297,8 @@ export function ScriptFullscreenEditor({
 
   const handleDeleteEpisode = useCallback((ep: Episode) => {
     const filtered = episodes.filter((e) => e.id !== ep.id);
+    // Plan#20 T9: 删集级联清理——通知画布层清理主体 episodeIds 与分镜按集映射
+    nodeActionBus.emit('script:episodesDeleted', { nodeId: '', deletedIds: [ep.id] } as any);
     if (filtered.length === 0) {
       const newEp: Episode = { id: `ep-${Date.now()}`, number: 1, title: '第1集', content: '' };
       onEpisodesAndActiveChange([newEp], newEp.id);

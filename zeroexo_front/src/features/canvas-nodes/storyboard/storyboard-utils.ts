@@ -3,7 +3,7 @@
  *
  * 从 storyboard-sheet.tsx 中抽离的辅助函数。
  */
-import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityConflict, StepRecord } from './storyboard-types';
+import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, EntityConflict, StepRecord, AiSubject } from './storyboard-types';
 
 /** 创建新空 shot */
 export function createNewShot(shots: Shot[]): Shot {
@@ -118,5 +118,42 @@ export function normalizeShotForUi(raw: Record<string, any>): Shot {
   if (!Array.isArray(shot.sfx)) {
     shot.sfx = typeof shot.sfx === 'string' && shot.sfx ? [shot.sfx] : [];
   }
+  // 2026-08-20 T3: dayNight 默认值兜底(旧数据无此字段时空列不致异常)
+  if (typeof shot.dayNight !== 'string') shot.dayNight = shot.dayNight != null ? String(shot.dayNight) : '';
   return shot;
+}
+
+// ===== 主体 kind 展示元数据(Plan#20 T3: 表格主体列/StepView 单一事实源, 图标对齐 StepView 体系) =====
+
+/** 范文模板分镜主体字典(T3: 生成时写入 node.data; 修复前旧节点无此字段时作兜底展示源) */
+export const SAMPLE_SUBJECTS: AiSubject[] = [
+  { name: '男主', kind: 'character', aliases: [], description: '三十岁左右，神情怅惘的都市男性' },
+  { name: '女主', kind: 'character', aliases: [], description: '步态轻盈、笑容温暖的女性' },
+  { name: '江边栈桥', kind: 'scene', aliases: ['江边'], description: '黄昏江边的木质栈桥，夕阳洒在江面' },
+  { name: '老茶馆', kind: 'scene', aliases: ['茶馆'], description: '木桌竹椅、茶香袅袅的老式茶馆' },
+];
+
+export const ENTITY_KIND_META: Record<EntityKind, { emoji: string; color: string; labelKey: string }> = {
+  character: { emoji: '\u{1F464}', color: '#5DDCFF', labelKey: 'entity.character' },
+  scene: { emoji: '\u{1F4CD}', color: '#4ade80', labelKey: 'entity.scene' },
+  prop: { emoji: '\u{1F4E6}', color: '#fbbf24', labelKey: 'entity.prop' },
+};
+
+/**
+ * 实体名 → kind 查找链(Plan#20 T3):
+ * 1. entities(节点内主体列表, EntityRef.id 或名字匹配)
+ * 2. aiSubjects(后端主体字典, 名字/别名匹配)
+ * 均未命中返回 undefined(展示中性色)
+ */
+export function resolveEntityKind(
+  name: string,
+  entities: StoryboardEntity[],
+  aiSubjects?: AiSubject[],
+): EntityKind | undefined {
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+  const ent = entities.find((e) => e.name === trimmed || e.id === trimmed);
+  if (ent) return ent.kind;
+  const subj = aiSubjects?.find((s) => s.name === trimmed || s.aliases.includes(trimmed));
+  return subj?.kind;
 }

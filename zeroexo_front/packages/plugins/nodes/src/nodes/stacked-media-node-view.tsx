@@ -23,6 +23,7 @@ import { BaseNodeView, nodeActionBus } from '../base-node-view.js';
 import { IMAGE_DEFAULT_SIZE, STACKED_MEDIA_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { activateStackCard, appendCards, collectCard, dismissCollected, mergeStacks, replaceCardContent, updateCardData } from './stacked-media-model.js';
 import { MainReplaceButton, StackBottomNav, StackMediaContent } from './stacked-media-presentation.js';
+import { StackDetailsModal } from './stack-details-modal.js';
 import {
   parseStackedMediaData,
   type StackCard,
@@ -212,6 +213,15 @@ export function StackedMediaNodeView({
     }
     setActiveIndex(index);
   }, [activeIndex, beginSwitchAnimation, commandQueue, data, node, updateNode]);
+
+  // ===== 详情面板(Plan#20 验收反馈 #2):胶囊菜单「详情」→ 打开全部卡片网格,>5 卡断层兜底 =====
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => {
+    const unsub = nodeActionBus.on('stack:openDetails', (event) => {
+      if (event.nodeId === node.id) setDetailsOpen(true);
+    });
+    return unsub;
+  }, [node.id]);
 
   // ===== 收纳:连线预览 → 卡片(删边 + 删源节点 + 追加卡片,自动执行 + message「移出」可撤销) =====
   const handleCollect = useCallback((edge: EdgeRecord, sourceNode: NodeRecord) => {
@@ -588,6 +598,17 @@ export function StackedMediaNodeView({
           e.target.value = '';
         }}
       />
+
+      {/* 详情面板:全部卡片网格(与主体编辑器同框架,antd Modal 壳) */}
+      {detailsOpen && (
+        <StackDetailsModal
+          open={detailsOpen}
+          onClose={() => setDetailsOpen(false)}
+          cards={data.cards}
+          activeIndex={activeIndex}
+          onJump={handleJump}
+        />
+      )}
     </div>
   );
 }

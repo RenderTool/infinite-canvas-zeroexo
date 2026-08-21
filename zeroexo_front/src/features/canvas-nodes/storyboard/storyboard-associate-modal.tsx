@@ -52,6 +52,7 @@ export function StoryboardAssociateModal({
   const [step, setStep] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mode, setMode] = useState<'generate' | 'link'>(defaultGenerate ? 'generate' : 'link');
+  const [createSubjects, setCreateSubjects] = useState(true); // Plan#20 T8: 同步创建主体堆叠开关
 
   // 每次打开时重置
   useEffect(() => {
@@ -77,6 +78,7 @@ export function StoryboardAssociateModal({
       targetNodeId,
       episodeIds: selectedIds,
       autoGenerate: mode === 'generate',
+      createSubjects: mode === 'generate' && createSubjects, // Plan#20 T8
     } as any);
     onClose();
   };
@@ -251,6 +253,21 @@ export function StoryboardAssociateModal({
               </div>
             </Radio>
           </Radio.Group>
+          {/* Plan#20 T8: 同步创建主体堆叠开关 */}
+          {mode === 'generate' && (
+            <div style={{ marginTop: 16, padding: '10px 14px', borderRadius: 10, background: isDark ? 'rgba(167,139,250,0.08)' : 'rgba(167,139,250,0.06)', border: `1px solid ${isDark ? 'rgba(167,139,250,0.2)' : 'rgba(167,139,250,0.15)'}` }}>
+              <Checkbox
+                checked={createSubjects}
+                onChange={(e) => setCreateSubjects(e.target.checked)}
+                style={{ color: text }}
+              >
+                <span style={{ fontSize: 13, color: text, fontWeight: 600 }}>{t('storyboard.createSubjectStack')}</span>
+              </Checkbox>
+              <div style={{ fontSize: 11, color: textMuted, marginTop: 4, marginLeft: 24 }}>
+                {t('storyboard.createSubjectStackDesc')}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

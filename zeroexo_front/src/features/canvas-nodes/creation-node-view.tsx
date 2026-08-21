@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clapperboard, Film, FileText } from 'lucide-react';
+import { Tooltip } from 'antd';
+import { Clapperboard, Film, FileText, TriangleAlert } from 'lucide-react';
 import type { NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -22,6 +23,7 @@ import { serializeScriptLines, buildSampleLines, createScriptLine } from '@/feat
 import { ScriptEditorSheet } from './storyboard/script-editor-sheet.js';
 import { StoryboardSheet } from './storyboard/storyboard-sheet.js';
 import { WorkbenchSheet } from './storyboard/workbench-sheet.js';
+import { useGraphSafe, subjectRiskInputOf, detectSubjectRisks, detectBrokenRefs, detectCrossEpisodeStateConflicts, RISK_KIND_META } from './subject/subject-risks.js';
 
 export interface CreationNodeViewProps extends NodeRendererProps {
   connectionController: ConnectionController | null;
@@ -58,6 +60,69 @@ export function CreationNodeView({
   const { theme } = useTheme();
 
   const data = (node.data ?? {}) as Record<string, unknown>;
+  // Plan#20 T10a: 分镜聚合风险角标——下游主体卡(edge 关联)风险总数
+  const graph = useGraphSafe(store);
+  const subjectRiskSummary = useMemo(() => {
+    if (kind !== 'storyboard') return null;
+    const nodes = graph.nodes as Array<{ id: string; type: string }>;
+    const edges = graph.edges as Array<{ source?: { nodeId: string }; target?: { nodeId: string } }>;
+    const subjectIds = new Set(nodes.filter((n) => n.type === 'subject').map((n) => n.id));
+    const subjectCards = nodes.filter((n) => n.type === 'subject');
+    const downstreamIds = new Set(
+      edges.filter((e) => e.source?.nodeId === node.id && e.target?.nodeId && subjectIds.has(e.target.nodeId))
+        .map((e) => e.target!.nodeId!),
+    );
+    if (downstreamIds.size === 0 && subjectCards.length === 0) return null;
+    // Plan#20 T12d: 引用断裂——本分镜 shots 中引用名在画布主体卡集合找不到(有卡时才检测,避免旧数据全量误报)
+    const brokenRefs = subjectCards.length > 0 ? detectBrokenRefs([node], subjectCards) : [];
+    const list: Array<{ name: string; risks: ReturnType<typeof detectSubjectRisks> }> = [];
+    if (brokenRefs.length > 0) {
+      list.push({
+        name: t('canvasNodes.stage.storyboard'),
+        risks: brokenRefs.map((b) => ({ kind: 'brokenRef' as const, subjectName: b.mention })),
+      });
+    }
+    for (const n of graph.nodes) {
+      const x = n as { id: string; type: string };
+      if (x.type !== 'subject' || !downstreamIds.has(x.id)) continue;
+      const input = subjectRiskInputOf(n);
+      const others = graph.nodes.filter((o) => {
+        const y = o as { id: string; type: string };
+        return y.type === 'subject' && y.id !== x.id;
+      });
+      const risks = detectSubjectRisks(input, others);
+      // Plan#20 T12d: 跨集形象冲突——该卡被多集引用且引用到不同有图状态
+      const rawStates = ((n as { data?: Record<string, unknown> }).data?.states as Array<{ id?: string; images?: unknown[] }> | undefined) ?? [];
+      const cross = detectCrossEpisodeStateConflicts(
+        graph.nodes,
+        input.name,
+        input.aliases,
+        rawStates.filter((s) => typeof s.id === 'string').map((s) => ({ id: s.id as string, images: Array.isArray(s.images) ? s.images : [] })),
+      );
+      for (const c of cross) risks.push({ kind: 'crossEpisodeState', subjectName: c.subjectName });
+      if (risks.length > 0) list.push({ name: input.name || t('canvasNodes.stage.subject'), risks });
+    }
+    if (list.length === 0) return null;
+    // Plan#20 T12d: 六类风险 short 文案映射(与 SubjectNodeView 角标一致)
+    const shortOf = (kind: string) => {
+      const keys: Record<string, string> = {
+        noImage: 'subject.riskNoImageShort',
+        placeholderPending: 'subject.riskPlaceholderPendingShort',
+        sameName: 'subject.riskSameNameShort',
+        samePerson: 'subject.riskSamePersonShort',
+        brokenRef: 'subject.riskBrokenRefShort',
+        crossEpisodeState: 'subject.riskCrossEpisodeStateShort',
+      };
+      return t(keys[kind] ?? 'subject.riskNoImageShort');
+    };
+    return {
+      count: list.length,
+      hasClash: list.some((x) => x.risks.some((r) => RISK_KIND_META[r.kind]?.tone === 'red')),
+      detail: list
+        .map((x) => `${x.name}(${x.risks.map((r) => shortOf(r.kind)).join(',')})`)
+        .join('; '),
+    };
+  }, [kind, graph, node.id, t]);
   // 剧本剧集(持久化到 node.data.episodes) + 当前选中集
   // 向后兼容:旧节点仅有 data.content(单集 HTML)而无 episodes,则从 content 迁移出首集
   const episodes = useMemo<Episode[]>(() => {
@@ -217,6 +282,23 @@ export function CreationNodeView({
       store={store}
     >
       <div style={contentShellStyle}>
+        {/* Plan#20 T10a/T12d: 聚合风险角标——下游主体卡存在缺图/占位/重名/断引用/跨集冲突风险 */}
+        {subjectRiskSummary && (
+          <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 5 }}>
+            <Tooltip title={`${t('subject.riskAggregateDesc')} ${subjectRiskSummary.detail}`}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                padding: '0 7px', height: 20, borderRadius: 999, cursor: 'help',
+                background: subjectRiskSummary.hasClash ? 'rgba(239,68,68,0.92)' : 'rgba(245,158,11,0.9)',
+                color: '#fff', fontSize: 11, fontWeight: 700,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+              }}>
+                <TriangleAlert size={12} />
+                {subjectRiskSummary.count}
+              </span>
+            </Tooltip>
+          </div>
+        )}
         {kind === 'script' ? (
           <ScriptEditorSheet
             nodeId={node.id}
@@ -252,4 +334,5 @@ const contentShellStyle: CSSProperties = {
   flexDirection: 'column',
   overflow: 'hidden',
   boxSizing: 'border-box',
+  position: 'relative',
 };

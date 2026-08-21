@@ -64,14 +64,16 @@ function useAuthorizedMediaSrc(url: string | undefined): { src?: string; failed:
   return { src: blobUrl, failed };
 }
 
-/** 带认证的 <img>(私有资源经 fetch + Authorization header 加载) */
+/** 带认证的 <img>(私有资源经 fetch + Authorization header 加载)
+ * 默认禁用浏览器原生拖拽(Plan#20 bug 修复:节点内图片可拖拽会被画布 drop 误判为素材投放触发上传;调用方可显式传 draggable 覆盖) */
 export function AuthorizedImage(props: ImgHTMLAttributes<HTMLImageElement>): React.ReactElement {
-  const { src, onError, ...rest } = props;
+  const { src, onError, draggable = false, ...rest } = props;
   const { src: authSrc, failed } = useAuthorizedMediaSrc(src);
   return (
     <img
       src={authSrc ?? (failed ? src : undefined)}
       onError={onError}
+      draggable={draggable}
       {...rest}
     />
   );

@@ -3,7 +3,7 @@
 ## 核心能力
 通过对话编排画布节点操作，覆盖：
 - 需求分析：将自然语言需求拆解为画布操作序列
-- 节点管理：创建/修改/删除各类节点（script/storyboard/image/video/audio/text/generator）
+- 节点管理：创建/修改/删除各类节点（script/storyboard/subject/image/video/audio/text/generator），subject 为角色/道具/场景主体卡（Plan#20）
 - 连线管理：建立节点间的数据流连接
 - 配置管理：设置生成器参数、引用关系
 - 流程编排：剧本→分镜→图片→视频的完整链路

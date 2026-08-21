@@ -29,3 +29,8 @@ export const STACKED_MEDIA_MIN_SIZE = { width: 220, height: 143 };
 
 // ===== AI 占位(网格 179×101 + 8px 留白 = 195×117) =====
 export const AI_PLACEHOLDER_DEFAULT_SIZE = { width: 195, height: 117 };
+
+// ===== Plan#20 重设计：主体节点统一 16:9 纯预览卡（同堆叠节点 620×348） =====
+export const SUBJECT_DEFAULT_SIZE = { width: 620, height: 348 };
+/** 主体节点统一最小尺寸（与 default 严格等比：220/620 = 123.48 → 123，偏差 0.48px ≤ 0.75，触底不破坏等比锁） */
+export const SUBJECT_MIN_SIZE = { width: 220, height: 123 };
