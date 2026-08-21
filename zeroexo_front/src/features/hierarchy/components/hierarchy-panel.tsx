@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { Select, Tooltip } from 'antd';
 import {
   ChevronDown, ChevronRight, FolderOpen, Image as ImageIcon,
-  Settings2, Type as TypeIcon, File, FileText, Clapperboard, Film,
+  Settings2, Type as TypeIcon, File, FileText, Aperture, Film,
   Layers, X, Search, Download, CheckSquare, Square,
   Lock, Video,
 } from 'lucide-react';
@@ -75,7 +75,7 @@ function getTypeIcon(node: SceneNode): ReactNode {
       return <HIERARCHY_ICONS.stack {...cls} />;
     }
     case 'script': return <FileText {...cls} />;
-    case 'storyboard': return <Clapperboard {...cls} />;
+    case 'storyboard': return <Aperture {...cls} />;
     case 'workbench': return <Film {...cls} />;
     default: return <File {...cls} />;
   }

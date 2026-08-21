@@ -10,7 +10,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
 import {
-  Maximize, FileUp, BookOpen, Clapperboard,
+  Maximize, FileUp, BookOpen, Aperture,
   RotateCcw,
 } from 'lucide-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -96,7 +96,7 @@ function getScriptTools(): ToolDefinition[] {
       id: 'generateStoryboard',
       label: '分镜',
       title: '根据当前剧本生成分镜节点并自动连线',
-      icon: <Clapperboard size={14} />,
+      icon: <Aperture size={14} />,
       group: 'edit',
       primary: true,
       // Plan#20 T0(征集#13): 不再硬编码 mode:'template'——改 emit 请求事件,

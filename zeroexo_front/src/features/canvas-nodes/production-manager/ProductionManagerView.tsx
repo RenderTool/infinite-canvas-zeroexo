@@ -1,80 +1,54 @@
 /**
- * ProductionManagerView - 统筹节点视图（Plan#29 V3）
+ * ProductionManagerView - 统筹节点视图（Plan#29 V3，堆叠同框架）
  *
- * 视觉 1:1 继承 SubjectNodeView（Plan#20 打磨成果），禁止自由发挥：
- * - BaseNodeView 壳（标题栏 + pins + 重命名，titleIcon=Clapperboard 琥珀色）
- * - 内容区 = 封面舞台（条目网格：asset-card 同款 239.2/135.4 缩略卡 + kind 徽章）+ 信息条（剧名 + 分组统计徽章）
+ * 布局 = 主体卡基线同款（左垂直导航 + 右封面舞台 + 信息条），禁止自由发挥：
+ * - 左侧 sidebar = ThumbNav 垂直导航（与堆叠/主体同一套框架：上限 5 + 滑动窗口 + 1/N 页码 + 自适应降档）
+ *   切换不同实体条目（activeItemId 落 node.data，对齐堆叠 activeIndex 模式）
+ * - 右侧 content = 当前条目封面舞台（首张剧照 contain，无图 → Rabbit 骨架）+ 信息条（名称 + 类型 + 摘要）
+ * - 低对比设计：类型用图标 + 文字，不用高饱和色块
  * - 详情编辑走胶囊菜单「详情」→ nodeActionBus 'productionManager:openEditor' → 打开 ProductionManagerModal
  * - 图片 draggable=false，拖拽节点不误触发素材投放
  */
-import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clapperboard, UserRound, MapPin, Package } from 'lucide-react';
+import { Rabbit } from 'lucide-react';
 import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, nodeActionBus, useHydratedContent } from '@zeroexo/plugin-nodes';
+import { BaseNodeView, nodeActionBus, ThumbNav, useHydratedContent } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
-import type { ProductionItem, ProductionItemKind, ProductionManagerData } from './production-manager-types';
+import type { ProductionManagerData } from './production-manager-types';
 import { ProductionManagerModal } from './ProductionManagerModal';
+import { ItemThumb, KIND_ICON } from './production-manager-panels';
 
 export interface ProductionManagerViewProps extends NodeRendererProps {
   connectionController: any;
   store?: any;
 }
 
-const PM_COLOR = '#f59e0b'; // 琥珀色（制片/统筹氛围）
-
-const KIND_ICON: Record<ProductionItemKind, React.ComponentType<{ size?: number | string }>> = {
-  character: UserRound,
-  scene: MapPin,
-  prop: Package,
-};
-
-const KIND_COLOR: Record<ProductionItemKind, string> = {
-  character: '#5DDCFF',
-  scene: '#4ade80',
-  prop: '#fbbf24',
-};
+const PM_COLOR = '#64748b'; // 低饱和石板色（与 production-manager-extension 一致）
 
 function parseData(data: Record<string, unknown> | undefined): ProductionManagerData {
   if (!data) return { title: '', items: [] };
   return {
     title: (data.title as string) ?? '',
     scriptId: data.scriptId as string | undefined,
-    items: Array.isArray(data.items) ? (data.items as ProductionItem[]) : [],
+    items: Array.isArray(data.items) ? (data.items as ProductionManagerData['items']) : [],
+    activeItemId: data.activeItemId as string | undefined,
   };
 }
 
-/** 条目缩略卡（asset-card 同款比例 239.2/135.4 + kind 徽章；无图 → kind 图标骨架） */
-function ItemCard({ item, dark }: { item: ProductionItem; dark: boolean }): React.ReactElement {
-  const firstKey = item.images[0]?.storageKey;
-  const hydrated = useHydratedContent(firstKey ?? '', firstKey ? (getResourceUrl(firstKey, 'preview') ?? '') : '');
-  const Icon = KIND_ICON[item.kind];
-  const color = KIND_COLOR[item.kind];
-  return (
-    <div style={{
-      position: 'relative', width: '100%', aspectRatio: '239.2 / 135.4', borderRadius: 8, overflow: 'hidden',
-      background: dark ? 'rgba(255,255,255,0.02)' : '#ffffff',
-      border: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#e5e7eb'}`,
-    }}>
-      {hydrated ? (
-        <img src={hydrated} alt={item.name} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-      ) : (
-        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.35)' : 'rgba(15,23,42,0.3)' }}>
-          <Icon size={22} />
-        </div>
-      )}
-      {/* kind 徽章（与主体卡同款：color 20% 底 + 色字） */}
-      <span style={{
-        position: 'absolute', left: 4, bottom: 4,
-        fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 6,
-        background: `${color}20`, color, backdropFilter: 'blur(4px)',
-        maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {item.name || '—'}
-      </span>
-    </div>
-  );
+/** 封面舞台：当前条目首张剧照（contain，对齐主体卡 StateCover） */
+function ItemCover({ storageKey, dark }: { storageKey?: string; dark: boolean }): React.ReactElement {
+  const fallback = storageKey ? (getResourceUrl(storageKey, 'preview') ?? '') : '';
+  const hydrated = useHydratedContent(storageKey ?? '', fallback);
+  if (!hydrated) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: dark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.3)' }}>
+        <Rabbit size={40} />
+      </div>
+    );
+  }
+  return <img src={hydrated} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />;
 }
 
 export const ProductionManagerView = memo(function ProductionManagerView({
@@ -104,75 +78,127 @@ export const ProductionManagerView = memo(function ProductionManagerView({
     return unsub;
   }, [node.id]);
 
-  const counts = useMemo(() => ({
-    character: data.items.filter((i) => i.kind === 'character').length,
-    scene: data.items.filter((i) => i.kind === 'scene').length,
-    prop: data.items.filter((i) => i.kind === 'prop').length,
-  }), [data.items]);
+  // 当前活跃条目 + 索引（对齐堆叠 activeIndex 模式）
+  const activeItem = useMemo(
+    () => data.items.find((i) => i.id === data.activeItemId) ?? data.items[0] ?? null,
+    [data.items, data.activeItemId],
+  );
+  const activeIndex = useMemo(
+    () => Math.max(0, data.items.findIndex((i) => i.id === (activeItem?.id ?? ''))),
+    [data.items, activeItem],
+  );
+
+  // 条目切换（数据落 activeItemId，与堆叠切卡语义一致）
+  const handleItemChange = useCallback((index: number) => {
+    const target = data.items[index];
+    if (!target || target.id === activeItem?.id) return;
+    updateNode({ data: { ...(node.data as Record<string, unknown>), activeItemId: target.id } });
+  }, [data.items, activeItem, updateNode, node.data]);
+
+  const handlePrev = useCallback(() => {
+    if (data.items.length <= 1) return;
+    handleItemChange(Math.max(0, activeIndex - 1));
+  }, [data.items.length, activeIndex, handleItemChange]);
+
+  const handleNext = useCallback(() => {
+    if (data.items.length <= 1) return;
+    handleItemChange(Math.min(data.items.length - 1, activeIndex + 1));
+  }, [data.items.length, activeIndex, handleItemChange]);
+
+  const handleJump = useCallback((index: number) => {
+    handleItemChange(index);
+  }, [handleItemChange]);
+
+  // 导航条目（缩略图 = 首张剧照，无图 → kind 图标骨架）
+  const navItems = useMemo(() => data.items.map((it) => ({
+    id: it.id,
+    title: it.name || undefined,
+    thumb: <ItemThumb kind={it.kind} storageKey={it.images[0]?.storageKey} dark={isDark} />,
+  })), [data.items, isDark]);
 
   const textPrimary = theme.toolbar.text;
   const textMuted = theme.toolbar.textMuted;
   const infoBg = theme.node.fill;
-  // 内容区表面（对齐主体卡 contentSurface：明暗主题分支取中性表面色）
+  // 内容区表面（对齐主体卡 contentSurface）
   const contentSurface = isDark ? '#161616' : '#ffffff';
 
   const title = node.title ?? (data.title || t('canvasNodes.stage.productionManager'));
+  const ActiveKindIcon = activeItem ? KIND_ICON[activeItem.kind] : Rabbit;
+  const showNav = data.items.length > 1;
 
   return (
     <>
-      <BaseNodeView
-        node={node}
-        pins={pins}
-        isSelected={isSelected}
-        isHovered={isHovered}
-        title={title}
-        color={PM_COLOR}
-        connectionController={connectionController}
-        forceShowPins={forceShowPins}
-        invK={invK}
-        titleIcon={<Clapperboard size={Math.max(10, 13 * (invK ?? 1))} />}
-        updateNode={updateNode}
-        externalRenaming={externalRenaming}
-        onRenameFinish={onRenameFinish}
-        contentPadding="0"
-        store={store}
-      >
-        <div style={cardRootStyle}>
-          {/* 封面舞台：条目网格 */}
-          <div style={coverAreaStyle(contentSurface)} onDoubleClick={() => setEditorOpen(true)}>
-            {data.items.length === 0 ? (
-              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.3)' }}>
-                <Clapperboard size={40} />
-                <span style={{ fontSize: 11, opacity: 0.75 }}>{t('productionManager.viewEmpty')}</span>
-              </div>
-            ) : (
-              <div style={{
-                width: '100%', height: '100%', overflow: 'auto', padding: 10,
-                display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 8, alignContent: 'start',
-              }}>
-                {data.items.map((item) => <ItemCard key={item.id} item={item} dark={isDark} />)}
-              </div>
-            )}
-          </div>
+      <div style={{ display: 'flex', flexDirection: 'row', width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
+        {/* 左侧垂直导航（与堆叠/主体同一套 ThumbNav 框架） */}
+        {showNav && (
+          <ThumbNav
+            orientation="vertical"
+            items={navItems}
+            activeIndex={activeIndex}
+            total={data.items.length}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            onJump={handleJump}
+          />
+        )}
 
-          {/* 信息条（与主体卡同款：名字 + 徽章 + 摘要） */}
-          <div style={infoBarStyle(infoBg)}>
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {data.title || t('canvasNodes.stage.productionManager')}
-                </span>
-                <span style={kindBadgeStyle(KIND_COLOR.character)}>{t('entity.character')} {counts.character}</span>
-                <span style={kindBadgeStyle(KIND_COLOR.scene)}>{t('entity.scene')} {counts.scene}</span>
-                <span style={kindBadgeStyle(KIND_COLOR.prop)}>{t('entity.prop')} {counts.prop}</span>
+        {/* 右侧主区：封面舞台 + 信息条 */}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <BaseNodeView
+            node={node}
+            pins={pins}
+            isSelected={isSelected}
+            isHovered={isHovered}
+            title={title}
+            color={PM_COLOR}
+            connectionController={connectionController}
+            forceShowPins={forceShowPins}
+            invK={invK}
+            titleIcon={<Rabbit size={Math.max(10, 13 * (invK ?? 1))} />}
+            updateNode={updateNode}
+            externalRenaming={externalRenaming}
+            onRenameFinish={onRenameFinish}
+            contentPadding="0"
+            store={store}
+          >
+            <div style={cardRootStyle}>
+              {/* 封面舞台（当前条目首张剧照，contain） */}
+              <div style={coverAreaStyle(contentSurface)} onDoubleClick={() => setEditorOpen(true)}>
+                {activeItem ? (
+                  <ItemCover storageKey={activeItem.images[0]?.storageKey} dark={isDark} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.3)' }}>
+                    <Rabbit size={40} />
+                    <span style={{ fontSize: 11, opacity: 0.75 }}>{t('productionManager.viewEmpty')}</span>
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 10, color: textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {t('productionManager.itemTotal', { count: data.items.length })}
+
+              {/* 信息条（低对比：图标 + 文字，不用色块徽章） */}
+              <div style={infoBarStyle(infoBg)}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {activeItem ? (activeItem.name || t('productionManager.unnamed')) : (data.title || t('canvasNodes.stage.productionManager'))}
+                    </span>
+                    {activeItem && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: textMuted, flexShrink: 0 }}>
+                        <ActiveKindIcon size={10} />
+                        {t(`entity.${activeItem.kind}`)}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeItem
+                      ? (activeItem.consistency || t('productionManager.itemTotal', { count: data.items.length }))
+                      : t('productionManager.itemTotal', { count: 0 })}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </BaseNodeView>
         </div>
-      </BaseNodeView>
+      </div>
 
       {/* 统筹编辑器 Modal */}
       {editorOpen && (
@@ -187,7 +213,7 @@ export const ProductionManagerView = memo(function ProductionManagerView({
   );
 });
 
-// ===== 样式（无边线风格：背景分层替代硬边框，遵循 DESIGN.md，同 SubjectNodeView） =====
+// ===== 样式（无边线风格：背景分层，同主体卡基线） =====
 
 const cardRootStyle: CSSProperties = {
   width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
@@ -205,12 +231,5 @@ function infoBarStyle(bg: string): CSSProperties {
   return {
     flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
     padding: '8px 12px', background: bg,
-  };
-}
-
-function kindBadgeStyle(color: string): CSSProperties {
-  return {
-    fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-    background: `${color}20`, color, flexShrink: 0,
   };
 }

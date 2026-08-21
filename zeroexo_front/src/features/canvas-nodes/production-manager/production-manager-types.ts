@@ -45,6 +45,8 @@ export interface ProductionManagerData {
   /** 关联剧本节点 id（剧本→统筹自动建联） */
   scriptId?: string;
   items: ProductionItem[];
+  /** 当前活跃条目（节点垂直导航切换，对齐堆叠 activeIndex 模式） */
+  activeItemId?: string;
 }
 
 export function createProductionItem(kind: ProductionItemKind, name = ''): ProductionItem {

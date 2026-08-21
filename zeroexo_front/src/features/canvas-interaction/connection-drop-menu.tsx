@@ -7,7 +7,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Type, Image as ImageIcon, Sparkles, FileText, Clapperboard, Film } from 'lucide-react';
+import { Type, Image as ImageIcon, Sparkles, FileText, Aperture, Film } from 'lucide-react';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand } from '@zeroexo/core';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -47,7 +47,7 @@ function createNodeTypeDefs(): NodeTypeDef[] {
     { type: 'video', icon: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>, labelKey: 'toolbar.video', category: 'media' },
     { type: 'audio', icon: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>, labelKey: 'toolbar.audio', category: 'media' },
     { type: 'script', icon: <FileText size={14} />, labelKey: 'canvasNodes.stage.script', category: 'creation' },
-    { type: 'storyboard', icon: <Clapperboard size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
+    { type: 'storyboard', icon: <Aperture size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
     { type: 'workbench', icon: <Film size={14} />, labelKey: 'canvasNodes.stage.workbench', category: 'creation' },
   ];
 }

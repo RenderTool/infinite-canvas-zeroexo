@@ -8,12 +8,12 @@
 import type { NodeTypeExtension, NodeRendererProps, NodeRuntimeContract, NodeCapabilities, ToolDefinition } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { Clapperboard } from 'lucide-react';
+import { Rabbit } from 'lucide-react';
 import i18next from 'i18next';
 import { ProductionManagerView } from './ProductionManagerView.js';
 import { createProductionManagerDefaultData } from './production-manager-types.js';
 
-const PM_COLOR = '#f59e0b'; // 琥珀色（制片/统筹氛围）
+const PM_COLOR = '#64748b'; // 低饱和石板色（不与 script/storyboard/workbench/subject 节点色重复，避免高对比色块）
 const PM_DEFAULT_SIZE = { width: 620, height: 348 };
 const PM_MIN_SIZE = { width: 220, height: 123 };
 
@@ -40,7 +40,7 @@ function getTools(): ToolDefinition[] {
       id: 'detail',
       label: '',
       title: i18next.t('productionManager.detail'),
-      icon: <Clapperboard size={14} />,
+      icon: <Rabbit size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('productionManager:openEditor', { nodeId: node.id }); },
     },
