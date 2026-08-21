@@ -77,30 +77,24 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const status = data.statusByEpisode?.[activeEpisodeId] ?? (hasByEpisode ? 'idle' : (data.status ?? 'idle'));
   const progress = data.progressByEpisode?.[activeEpisodeId] ?? data.progress ?? 0;
   const entities = data.entities ?? [];
-  // Plan#20 T3: 主体字典兜底——修复前生成的旧范文节点无 aiSubjects, 用 SAMPLE_SUBJECTS 展示(不写回数据)
-  const aiSubjects = data.aiSubjects?.length ? data.aiSubjects : (data.isSample ? SAMPLE_SUBJECTS : undefined);
-  // Plan#20 T9c: 画布主体卡 → 实体名/别名 → 状态列表映射(shot entities 的 stateId 选择选项源, 同名字体卡状态合并去重)
-  const subjectStatesByEntity = useMemo(() => {
-    const map: Record<string, Array<{ id: string; name: string }>> = {};
-    for (const n of graph.nodes) {
-      if (n.type !== 'subject') continue;
-      const d = (n.data ?? {}) as { name?: string; aliases?: string[]; states?: Array<{ id: string; name: string; disabled?: boolean }> };
-      // Plan#20 T12c: 停用状态(disabled)不进入选择选项——被引用状态禁删只可停用,停用即从引用下拉隐藏
-      const states = Array.isArray(d.states)
-        ? d.states.filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string' && s.disabled !== true)
-          .map((s) => ({ id: s.id, name: s.name }))
-        : [];
-      if (states.length === 0) continue;
-      const keys = new Set<string>();
-      if (d.name) keys.add(d.name);
-      for (const a of Array.isArray(d.aliases) ? d.aliases : []) if (a) keys.add(a);
-      for (const k of keys) {
-        if (!map[k]) map[k] = [];
-        for (const s of states) if (!map[k].some((x) => x.id === s.id)) map[k].push(s);
-      }
-    }
-    return map;
-  }, [graph.nodes]);
+  // Plan#29 T4: 主体字典并集 = 本节点 AI 字典 ∪ 画布统筹条目(手动登记的条目也能命中 mention/kind 徽章);范文节点无字典时用 SAMPLE_SUBJECTS 兑底
+  const aiSubjects = useMemo(() => {
+    const pmItems = graph.nodes
+      .filter((n: any) => n.type === 'production-manager')
+      .flatMap((n: any) => (Array.isArray(n.data?.items) ? n.data.items : []) as Array<{ name?: string; kind?: string; aliases?: string[]; consistency?: string }>)
+      .map((it: { name?: string; kind?: string; aliases?: string[]; consistency?: string }) => ({
+        name: it.name ?? '',
+        kind: (it.kind ?? 'character') as 'character' | 'scene' | 'prop',
+        aliases: Array.isArray(it.aliases) ? it.aliases : [],
+        description: it.consistency ?? '',
+      }))
+      .filter((s) => s.name.trim());
+    const base = data.aiSubjects?.length ? data.aiSubjects : (data.isSample ? SAMPLE_SUBJECTS : undefined);
+    if (!base || base.length === 0) return pmItems.length > 0 ? pmItems : undefined;
+    return [...base, ...pmItems];
+  }, [graph.nodes, data.aiSubjects, data.isSample]);
+  // Plan#29: 「状态」概念废弃(改为剧照集 + 自由标签),stateId 选择选项停用
+  const subjectStatesByEntity = useMemo(() => ({} as Record<string, Array<{ id: string; name: string }>>), []);
   const activeEpisode = scriptEpisodes.find((e) => e.id === activeEpisodeId) ?? scriptEpisodes[0];
   const activeEpisodeIndex = Math.max(0, scriptEpisodes.findIndex((e) => e.id === activeEpisodeId));
 

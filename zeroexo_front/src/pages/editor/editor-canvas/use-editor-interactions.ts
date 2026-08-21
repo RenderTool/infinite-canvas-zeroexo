@@ -5,7 +5,7 @@
  * 从 EditorPage 提取的交互回调、计算值和事件监听,统一管理。
  */
 
-import { useCallback, createElement, useEffect, useMemo, useRef, useState, useSyncExternalStore, Fragment } from 'react';
+import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { App } from 'antd';
 import { Pencil, Trash2, Copy as CopyIcon, Download, FolderOpen, Palette, Maximize2, Crosshair, RefreshCw } from 'lucide-react';
 import { EDITOR_ICONS } from './icons.js';
@@ -36,9 +36,7 @@ import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
-import { collectSubjectShotRefs, rewriteShotRefs, rewriteMentionInEntities, subjectNameKeys } from '@/features/canvas-nodes/subject/subject-risks.js';
-import { MergeSubjectModal, type MergeTargetInfo } from '@/features/canvas-nodes/subject/merge-subject-modal.js';
-import { SplitSubjectModal, shotRefKey } from '@/features/canvas-nodes/subject/split-subject-modal.js';
+import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
@@ -201,140 +199,6 @@ export function useEditorInteractions({
 }) {
   const { theme } = useTheme();
   const { message, modal } = App.useApp();
-
-  // Plan#20 T12a/T12b: 合并/拆分主体 Modal 状态(画布层事件驱动,由 useEditorInteractions 渲染)
-  const [mergeState, setMergeState] = useState<{ sourceNodeId: string } | null>(null);
-  const [splitState, setSplitState] = useState<{ nodeId: string } | null>(null);
-
-  // Plan#20 T12a: 合并主体执行——全画布引用改写 + 目标卡别名吸收 + 源卡及其边删除（BatchCommand 可撤销）
-  const executeMergeSubjects = useCallback((sourceNodeId: string, targetNodeId: string) => {
-    const store = refs.store;
-    const q = refs.commandQueue;
-    if (!store || !q) return;
-    const graph = store.getGraph();
-    const src = graph.nodes.find((n: any) => n.id === sourceNodeId);
-    const tgt = graph.nodes.find((n: any) => n.id === targetNodeId);
-    if (!src || !tgt) return;
-    const srcData = (src.data ?? {}) as { name?: string; aliases?: string[] };
-    const tgtData = (tgt.data ?? {}) as { name?: string; aliases?: string[] };
-    const srcKeys = subjectNameKeys(srcData.name ?? '', srcData.aliases ?? []);
-    const targetName = tgtData.name ?? '';
-    if (!targetName) return;
-    const refsCount = collectSubjectShotRefs(graph.nodes, srcData.name ?? '', srcData.aliases ?? []).length;
-    const cmds: Command[] = [];
-    for (const n of graph.nodes) {
-      if (n.type !== 'storyboard') continue;
-      const d = (n.data ?? {}) as Record<string, unknown>;
-      const shots = Array.isArray(d.shots) ? (d.shots as Array<Record<string, unknown>>) : [];
-      const shotsByEpisode = (d.shotsByEpisode as Record<string, Array<Record<string, unknown>>> | undefined) ?? {};
-      const patch: Record<string, unknown> = {};
-      const nextShots = rewriteShotRefs(shots, srcKeys, targetName);
-      if (nextShots !== shots) patch.shots = nextShots;
-      const nextByEp: Record<string, unknown> = {};
-      for (const [ep, list] of Object.entries(shotsByEpisode)) {
-        const next = rewriteShotRefs(Array.isArray(list) ? list : [], srcKeys, targetName);
-        if (next !== list) nextByEp[ep] = next;
-      }
-      if (Object.keys(nextByEp).length > 0) patch.shotsByEpisode = { ...shotsByEpisode, ...nextByEp };
-      if (Object.keys(patch).length > 0) cmds.push(new UpdateNodeDataCommand(n.id, patch));
-    }
-    // 目标卡吸收源卡名+别名(去重)
-    const mergedAliases = [...new Set([
-      ...(Array.isArray(tgtData.aliases) ? tgtData.aliases : []),
-      ...(Array.isArray(srcData.aliases) ? srcData.aliases : []),
-      ...(srcData.name ? [srcData.name] : []),
-    ])];
-    cmds.push(new UpdateNodeDataCommand(targetNodeId, { aliases: mergedAliases }));
-    // 源卡及其全部连接边删除(RemoveNodeCommand 不清理边,孤儿边显式移除)
-    for (const e of graph.edges) {
-      if (e.source?.nodeId === sourceNodeId || e.target?.nodeId === sourceNodeId) {
-        cmds.push(new RemoveEdgeCommand(e.id));
-      }
-    }
-    cmds.push(new RemoveNodeCommand(sourceNodeId));
-    q.execute(new BatchCommand(cmds, 'merge-subjects'));
-    message.success(i18n.t('subject.mergeSuccess', { count: refsCount, target: targetName }));
-    setMergeState(null);
-  }, [refs, message]);
-
-  // Plan#20 T12b: 拆分主体执行——建新卡 + 勾选镜头引用改写（BatchCommand 可撤销）
-  const executeSplitSubject = useCallback((sourceNodeId: string, newName: string, selectedKeys: string[]) => {
-    const store = refs.store;
-    const q = refs.commandQueue;
-    if (!store || !q) return;
-    const graph = store.getGraph();
-    const src = graph.nodes.find((n: any) => n.id === sourceNodeId);
-    if (!src) return;
-    const srcData = (src.data ?? {}) as { name?: string; aliases?: string[]; kind?: string; episodeIds?: string[] };
-    const keys = new Set(selectedKeys);
-    // 按分镜聚合勾选的镜头引用
-    const byStoryboard = new Map<string, Array<{ episodeId?: string; shotIndex: number; mention: string }>>();
-    for (const ref of collectSubjectShotRefs(graph.nodes, srcData.name ?? '', srcData.aliases ?? [])) {
-      if (!keys.has(shotRefKey(ref))) continue;
-      const list = byStoryboard.get(ref.storyboardId) ?? [];
-      list.push({ episodeId: ref.episodeId, shotIndex: ref.shotIndex, mention: ref.mention });
-      byStoryboard.set(ref.storyboardId, list);
-    }
-    const cmds: Command[] = [];
-    // 建新卡（源卡右侧）
-    const newId = `node-subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const srcW = src.size?.width ?? 620;
-    cmds.push(new AddNodeCommand({
-      id: newId,
-      type: 'subject',
-      position: { x: src.position.x + srcW + 120, y: src.position.y },
-      title: newName,
-      data: {
-        title: newName,
-        name: newName,
-        kind: srcData.kind ?? 'character',
-        consistency: '',
-        aliases: [],
-        coverKey: null,
-        states: [{ id: 'state-default', name: '默认', images: [], note: '' }],
-        activeStateId: 'state-default',
-        audio: [],
-        episodeIds: Array.isArray(srcData.episodeIds) ? srcData.episodeIds : [],
-        assetSubjectId: null,
-        placeholder: false,
-      },
-    }));
-    // 改写勾选镜头引用为 newName
-    for (const [sbId, list] of byStoryboard) {
-      const sb = graph.nodes.find((n: any) => n.id === sbId);
-      if (!sb) continue;
-      const d = (sb.data ?? {}) as Record<string, unknown>;
-      const patch: Record<string, unknown> = {};
-      const singleList = list.filter((x) => !x.episodeId);
-      if (singleList.length > 0) {
-        const shots = Array.isArray(d.shots) ? (d.shots as Array<Record<string, unknown>>) : [];
-        patch.shots = shots.map((shot, idx) => {
-          const target = singleList.find((x) => x.shotIndex === idx);
-          if (!target) return shot;
-          return { ...shot, entities: rewriteMentionInEntities(shot.entities, target.mention, newName) };
-        });
-      }
-      const shotsByEpisode = (d.shotsByEpisode as Record<string, Array<Record<string, unknown>>> | undefined) ?? {};
-      const nextByEp: Record<string, unknown> = {};
-      for (const [ep, epList] of Object.entries(shotsByEpisode)) {
-        if (!Array.isArray(epList)) continue;
-        const targets = list.filter((x) => x.episodeId === ep);
-        if (targets.length === 0) continue;
-        nextByEp[ep] = epList.map((shot, idx) => {
-          const target = targets.find((x) => x.shotIndex === idx);
-          if (!target) return shot;
-          return { ...shot, entities: rewriteMentionInEntities(shot.entities, target.mention, newName) };
-        });
-      }
-      if (Object.keys(nextByEp).length > 0) patch.shotsByEpisode = { ...shotsByEpisode, ...nextByEp };
-      if (Object.keys(patch).length > 0) cmds.push(new UpdateNodeDataCommand(sbId, patch));
-    }
-    if (cmds.length > 0) {
-      q.execute(new BatchCommand(cmds, 'split-subject'));
-      message.success(i18n.t('subject.splitSuccess', { name: newName, count: keys.size }));
-    }
-    setSplitState(null);
-  }, [refs, message]);
 
   // P3.5 失败机制: 每个节点的 AbortController 映射(用户点停止时 abort)
   // 同时跟踪每个节点连续失败次数(用于达 3 次时建议检查 API KEY)
@@ -835,7 +699,7 @@ export function useEditorInteractions({
   }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
-  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject') => {
+  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject' | 'production-manager') => {
     setNodeCreateMenuPos(null);
     if (!nodeCreateMenuPos || !containerRef.current || !refs.store) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -846,10 +710,12 @@ export function useEditorInteractions({
     const offsetY = (Math.random() - 0.5) * 80;
     const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const sameTypeCount = refs.store?.getGraph().nodes.filter((n: any) => n.type === type).length ?? 0;
-    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench' || type === 'subject';
+    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench' || type === 'subject' || type === 'production-manager';
     const isGenerator = type === 'generator';
     const isStackedMedia = type === 'stacked-media';
-    const baseNameKey = isCreation
+    const baseNameKey = type === 'production-manager'
+      ? 'canvasNodes.stage.productionManager'
+      : isCreation
       ? `canvasNodes.stage.${type}`
       : isGenerator ? 'nodes.generatorTitle'
         : isStackedMedia ? 'nodes.stackedMediaTitle'
@@ -870,7 +736,9 @@ export function useEditorInteractions({
             ? { title: nodeTitle, status: 'idle', content: '' }
             : type === 'subject'
               ? { title: nodeTitle, name: '', kind: 'character', consistency: '', aliases: [], coverKey: null, states: [{ id: 'state-default', name: '默认', images: [], note: '' }], activeStateId: 'state-default', audio: [], episodeIds: [], assetSubjectId: null, status: 'idle' }
-              : { title: nodeTitle, status: 'idle' }
+              : type === 'production-manager'
+                ? { title: nodeTitle, items: [] }
+                : { title: nodeTitle, status: 'idle' }
           : isStackedMedia
             ? { cards: [], activeIndex: 0, title: nodeTitle }
             : isGenerator
@@ -1130,196 +998,61 @@ export function useEditorInteractions({
     });
     // ==== AI 生成分镜(真实剧本)的复用逻辑:支持进度条与按集生成,供初次生成/重试/切换集共用 ====
     // Plan#9: 直连 provider 改为后端 storyboard_generate 任务(后端 storyboard_assistant 分块编排 + SSE)
-    // Plan#20 T8: 生成完成后自动创建主体节点（episodeIds 随当前集写入，供多集关联）
-    const createSubjectNodesFromAi = (store: any, q: any, storyboardId: string, aiSubjects: Array<{ name: string; kind: string; aliases: string[]; description: string }>, episodeId?: string) => {
-      if (!aiSubjects || aiSubjects.length === 0) return;
+    // Plan#29 T6: 确保剧本关联的统筹节点存在(剧级资产管理器,首次生成自动建 + 剧本→统筹连线)
+    const ensureProductionManager = (store: any, q: any, scriptNode: any): string => {
       const graph = store.getGraph();
-      const sbNode = graph.nodes.find((n: any) => n.id === storyboardId);
-      if (!sbNode) return;
+      const existing = graph.nodes.find((n: any) => n.type === 'production-manager' && n.data?.scriptId === scriptNode.id);
+      if (existing) return existing.id;
+      const pmId = `node-pm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      q.execute(new BatchCommand([
+        new AddNodeCommand({
+          id: pmId,
+          type: 'production-manager',
+          position: { x: scriptNode.position.x + (scriptNode.size?.width ?? 400) + 96, y: scriptNode.position.y + 420 },
+          title: i18n.t('productionManager.editorTitle'),
+          data: { title: ((scriptNode.data?.title as string) || i18n.t('productionManager.editorTitle')), scriptId: scriptNode.id, items: [] },
+        }),
+        new AddEdgeCommand({
+          id: `edge-pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          source: { nodeId: scriptNode.id, pinId: 'output' },
+          target: { nodeId: pmId, pinId: 'input' },
+        }),
+      ], 'create-production-manager'));
+      return pmId;
+    };
 
-      const sbX = sbNode.position.x;
-      const sbY = sbNode.position.y;
-      const sbWidth = sbNode.size?.width ?? 400;
-      const startX = sbX + sbWidth + 120; // 主体节点在分镜右侧
-      const startY = sbY - (aiSubjects.length - 1) * 60; // 垂直居中
-
-      const commands: Command[] = [];
-      for (let i = 0; i < aiSubjects.length; i++) {
-        const subj = aiSubjects[i]!;
-        const subjId = `node-subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`;
-        commands.push(new AddNodeCommand({
-          id: subjId,
-          type: 'subject',
-          position: { x: startX, y: startY + i * 120 },
-          title: subj.name,
-          data: {
-            title: subj.name,
-            name: subj.name,
-            kind: subj.kind || 'character',
-            consistency: subj.description || '',
-            aliases: subj.aliases || [],
-            coverKey: null,
-            states: [{ id: 'state-default', name: '默认', images: [], note: '' }],
-            activeStateId: 'state-default',
-            audio: [],
+    // Plan#29 T5: AI 识别主体幂等登记进统筹条目(名字/别名命中 → 合并别名+出场集;新名字 → 新建条目)
+    const registerAiSubjectsToProduction = (store: any, q: any, scriptNode: any, aiSubjects: Array<{ name: string; kind: string; aliases: string[]; description: string }>, episodeId?: string) => {
+      if (!aiSubjects || aiSubjects.length === 0) return;
+      const pmId = ensureProductionManager(store, q, scriptNode);
+      const pm = store.getGraph().nodes.find((n: any) => n.id === pmId);
+      const items: ProductionItem[] = Array.isArray(pm?.data?.items)
+        ? (pm.data.items as ProductionItem[]).map((it) => ({ ...it }))
+        : [];
+      let added = 0;
+      for (const subj of aiSubjects) {
+        if (!subj.name) continue;
+        const subjKeys = productionItemKeys({ name: subj.name, aliases: Array.isArray(subj.aliases) ? subj.aliases : [] });
+        const hit = items.find((it) => [...productionItemKeys(it)].some((k) => subjKeys.has(k)));
+        if (hit) {
+          hit.aliases = [...new Set([...hit.aliases, ...(Array.isArray(subj.aliases) ? subj.aliases : [])])];
+          if (episodeId && !hit.episodeIds.includes(episodeId)) hit.episodeIds = [...hit.episodeIds, episodeId];
+        } else {
+          const kind = (subj.kind === 'scene' || subj.kind === 'prop' ? subj.kind : 'character') as ProductionItemKind;
+          items.push({
+            ...createProductionItem(kind, subj.name),
+            aliases: Array.isArray(subj.aliases) ? subj.aliases : [],
+            consistency: subj.description ?? '',
             episodeIds: episodeId ? [episodeId] : [],
-            assetSubjectId: null,
-            status: 'idle',
-            // Plan#20 T12d: AI 建卡标记占位,用户编辑后清除(占位未转正风险检测依据)
-            placeholder: true,
-          },
-        }));
-        // 建立分镜→主体连线
-        commands.push(new AddEdgeCommand({
-          id: `edge-subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`,
-          source: { nodeId: storyboardId, pinId: 'output' },
-          target: { nodeId: subjId, pinId: 'input' },
-        }));
+          });
+          added += 1;
+        }
       }
-      if (commands.length > 0) {
-        q.execute(new BatchCommand(commands, 'create-subject-stack'));
-        message.success(i18n.t('storyboard.subjectStackCreated', { count: aiSubjects.length }));
-      }
+      q.execute(new UpdateNodeDataCommand(pmId, { items }));
+      if (added > 0) message.success(i18n.t('productionManager.registered', { count: added }));
     };
 
-    // Plan#20 T9: 后续集生成对账——按名字/别名匹配既有主体卡，仅追加当前集到 episodeIds（不重复建卡）
-    // Plan#20 BUG修复(2026-08-21): 全键匹配 + 新分镜→主体卡建边 + 关联反馈（原实现静默零反馈）
-    const appendEpisodeToExistingSubjects = (store: any, q: any, aiSubjects: Array<{ name: string; aliases?: string[] }>, episodeId: string, storyboardId?: string) => {
-      if (!episodeId || !aiSubjects?.length) return;
-      const graph = store.getGraph();
-      const cmds: Command[] = [];
-      let linked = 0;
-      for (const subj of aiSubjects) {
-        const subjKeys = subjectNameKeys(subj.name ?? '', Array.isArray(subj.aliases) ? subj.aliases : []);
-        if (subjKeys.size === 0) continue;
-        const node = graph.nodes.find((n: any) => {
-          if (n.type !== 'subject') return false;
-          const d = (n.data ?? {}) as { name?: string; aliases?: string[] };
-          const cardKeys = subjectNameKeys(d.name ?? '', Array.isArray(d.aliases) ? d.aliases : []);
-          return [...subjKeys].some((k) => cardKeys.has(k));
-        });
-        if (!node) continue;
-        const epIds = Array.isArray(node.data?.episodeIds) ? node.data.episodeIds : [];
-        if (!epIds.includes(episodeId)) {
-          cmds.push(new UpdateNodeDataCommand(node.id, { episodeIds: [...epIds, episodeId] }));
-        }
-        if (storyboardId) {
-          const exists = graph.edges.some((e: any) => e.source?.nodeId === storyboardId && e.target?.nodeId === node.id);
-          if (!exists) {
-            cmds.push(new AddEdgeCommand({
-              id: `edge-subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${linked}`,
-              source: { nodeId: storyboardId, pinId: 'output' },
-              target: { nodeId: node.id, pinId: 'input' },
-            }));
-          }
-        }
-        linked += 1;
-      }
-      if (cmds.length > 0) q.execute(new BatchCommand(cmds, 'append-episode-to-subjects'));
-      if (linked > 0) message.success(i18n.t('subject.appendLinked', { count: linked }));
-    };
-
-    // Plan#20 T12e: 候选主体回收——AI 新名字与既有卡高度相似时弹确认(并入既有卡/创建新卡)，防同人不同名
-    // Plan#20 BUG修复(2026-08-21): 精确同名/别名命中直接并入(不弹框) + 并入时 AI 别名一并改写吸收 + 新分镜→主体卡建边 + 反馈
-    const recycleSimilarSubjects = (store: any, q: any, storyboardId: string, aiSubjects: Array<{ name: string; kind: string; aliases: string[]; description: string }>, episodeId?: string) => {
-      if (!aiSubjects || aiSubjects.length === 0) return;
-      const graph = store.getGraph();
-      const existing = graph.nodes
-        .filter((n: any) => n.type === 'subject')
-        .map((n: any) => ({ nodeId: n.id, data: (n.data ?? {}) as { name?: string; aliases?: string[]; episodeIds?: string[] } }))
-        .filter((d: any) => d.data.name);
-      if (existing.length === 0) {
-        createSubjectNodesFromAi(store, q, storyboardId, aiSubjects, episodeId);
-        return;
-      }
-
-      // 并入执行体:引用改写(srcKeys=名字+AI 别名) + 别名吸收 + 集数追加 + 分镜→卡建边(BatchCommand 可撤销)
-      const mergeInto = (subj: { name: string; aliases?: string[] }, tgt: { nodeId: string; data: { name?: string; aliases?: string[]; episodeIds?: string[] } }) => {
-        const g = store.getGraph();
-        const srcKeys = subjectNameKeys(subj.name, Array.isArray(subj.aliases) ? subj.aliases : []);
-        const targetName = tgt.data.name ?? '';
-        if (!targetName) return;
-        const cmds: Command[] = [];
-        for (const n of g.nodes) {
-          if (n.type !== 'storyboard') continue;
-          const d = n.data ?? {};
-          const shots = Array.isArray(d.shots) ? (d.shots as Array<Record<string, unknown>>) : [];
-          const shotsByEpisode = (d.shotsByEpisode as Record<string, Array<Record<string, unknown>>> | undefined) ?? {};
-          const patch: Record<string, unknown> = {};
-          const nextShots = rewriteShotRefs(shots, srcKeys, targetName);
-          if (nextShots !== shots) patch.shots = nextShots;
-          const nextByEp: Record<string, unknown> = {};
-          for (const [ep, list] of Object.entries(shotsByEpisode)) {
-            const next = rewriteShotRefs(Array.isArray(list) ? list : [], srcKeys, targetName);
-            if (next !== list) nextByEp[ep] = next;
-          }
-          if (Object.keys(nextByEp).length > 0) patch.shotsByEpisode = { ...shotsByEpisode, ...nextByEp };
-          if (Object.keys(patch).length > 0) cmds.push(new UpdateNodeDataCommand(n.id, patch));
-        }
-        const tData = tgt.data;
-        const aliases = Array.isArray(tData.aliases) ? tData.aliases : [];
-        const mergedAliases = [...new Set([...aliases, ...(Array.isArray(subj.aliases) ? subj.aliases : []), subj.name])].filter(Boolean) as string[];
-        const epIds = Array.isArray(tData.episodeIds) ? tData.episodeIds : [];
-        const patch: Record<string, unknown> = { aliases: mergedAliases };
-        if (episodeId && !epIds.includes(episodeId)) patch.episodeIds = [...epIds, episodeId];
-        cmds.push(new UpdateNodeDataCommand(tgt.nodeId, patch));
-        // 新分镜 → 主体卡建边(去重,与新建卡行为一致,避免「连线还是老分镜的」)
-        const exists = g.edges.some((e: any) => e.source?.nodeId === storyboardId && e.target?.nodeId === tgt.nodeId);
-        if (!exists) {
-          cmds.push(new AddEdgeCommand({
-            id: `edge-subj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            source: { nodeId: storyboardId, pinId: 'output' },
-            target: { nodeId: tgt.nodeId, pinId: 'input' },
-          }));
-        }
-        if (cmds.length > 0) q.execute(new BatchCommand(cmds, 'recycle-subject'));
-      };
-
-      // 1) 精确同名/别名命中 → 直接并入既有卡(不弹框,防重复确认骚扰)
-      const exactMatched = new Set<string>();
-      for (const subj of aiSubjects) {
-        if (!subj.name) continue;
-        const subjKeys = subjectNameKeys(subj.name, Array.isArray(subj.aliases) ? subj.aliases : []);
-        const exact = existing.find((d: any) => {
-          const dKeys = subjectNameKeys(d.data.name!, Array.isArray(d.data.aliases) ? d.data.aliases : []);
-          return [...subjKeys].some((k) => dKeys.has(k));
-        });
-        if (!exact) continue;
-        exactMatched.add(subj.name);
-        mergeInto(subj, exact);
-      }
-      if (exactMatched.size > 0) message.success(i18n.t('subject.recycleMerged', { count: exactMatched.size }));
-
-      // 2) 相似候选(包含关系,非精确同名)→ 弹确认框(并入/创建新卡)
-      const remaining = aiSubjects.filter((s) => !exactMatched.has(s.name));
-      for (const subj of remaining) {
-        if (!subj.name) continue;
-        const similar = existing.find((d: any) => d.data.name && (d.data.name.includes(subj.name) || subj.name.includes(d.data.name)));
-        if (!similar) continue;
-        const subjName = subj.name;
-        const existingName = similar.data.name!;
-        modal.confirm({
-          title: i18n.t('subject.candidateRecycleTitle'),
-          content: i18n.t('subject.candidateRecycleDesc', { new: subjName, existing: existingName }),
-          centered: true,
-          okText: i18n.t('subject.candidateRecycleMerge'),
-          cancelText: i18n.t('subject.candidateRecycleCreate'),
-          onOk: () => { mergeInto(subj, similar); },
-          onCancel: () => {
-            createSubjectNodesFromAi(store, q, storyboardId, [{ ...subj }], episodeId);
-          },
-        });
-      }
-
-      // 3) 无精确无相似 → 直接建卡(现有行为)
-      const direct = remaining.filter((s) => {
-        if (!s.name) return true;
-        return !existing.some((d: any) => d.data.name && (d.data.name.includes(s.name) || s.name.includes(d.data.name)));
-      });
-      if (direct.length > 0) createSubjectNodesFromAi(store, q, storyboardId, direct, episodeId);
-    };
-
-    const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, createSubjects?: boolean) => {
+    const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, _createSubjects?: boolean) => {
       const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string }>; activeEpisodeId?: string };
       const episodes = scriptData.episodes ?? [];
       const targetEp = episodes.find((e) => e.id === episodeId) ?? episodes.find((e) => e.id === scriptData.activeEpisodeId) ?? episodes[0];
@@ -1363,13 +1096,11 @@ export function useEditorInteractions({
       const ctlInfo = { taskId: '' };
       nodeCtlMap.set(epKey, ctlInfo);
 
-      // Plan#20 T11: 注入画布既有主体字典(跨集续写时后端提示 AI 沿用既有命名, 不重复建卡)
+      // Plan#29: 注入统筹条目字典(跨集续写时后端提示 AI 沿用既有命名, 不重复登记)
       const existingSubjects = _store.getGraph().nodes
-        .filter((n: any) => n.type === 'subject')
-        .map((n: any) => {
-          const d = (n.data ?? {}) as { name?: string; kind?: string; aliases?: string[]; consistency?: string };
-          return { name: d.name ?? '', kind: d.kind, aliases: d.aliases ?? [], description: d.consistency ?? '' };
-        })
+        .filter((n: any) => n.type === 'production-manager')
+        .flatMap((n: any) => (Array.isArray(n.data?.items) ? n.data.items : []) as Array<{ name?: string; kind?: string; aliases?: string[]; consistency?: string }>)
+        .map((it: { name?: string; kind?: string; aliases?: string[]; consistency?: string }) => ({ name: it.name ?? '', kind: it.kind, aliases: it.aliases ?? [], description: it.consistency ?? '' }))
         .filter((s: { name: string }) => s.name.trim());
 
       // 提交后端分块生成任务(超长剧本由后端切块并发, 进度按块折算 0-95)
@@ -1402,15 +1133,9 @@ export function useEditorInteractions({
                 status: 'ready',
                 aiSubjects,
               }));
-              // Plan#20 T8: 同步创建主体堆叠（带当前集 episodeId）; 后续集则对账追加,不重复建卡
-              // Plan#20 BUG修复(2026-08-21): 直接生成/重试/切集入口也默认开,识别到既有卡时走回收或对账关联
+              // Plan#29 T5/T6: AI 主体幂等登记进统筹条目(替代散落主体卡)
               if (aiSubjects && aiSubjects.length > 0) {
-                if (createSubjects) {
-                  // Plan#20 T12e: 候选回收——新名字与既有卡相似时先确认再建卡
-                  recycleSimilarSubjects(_store, q, storyboardId, aiSubjects, epKey);
-                } else {
-                  appendEpisodeToExistingSubjects(_store, q, aiSubjects, epKey, storyboardId);
-                }
+                registerAiSubjectsToProduction(_store, q, scriptNode, aiSubjects, epKey);
               }
               if (Array.isArray(failed) && failed.length > 0) {
                 message.warning(i18n.t('editor.storyboardPartialFailed', { failed: failed.length, total: result?.blocks?.total ?? 0 }));
@@ -1706,32 +1431,6 @@ export function useEditorInteractions({
       if (cmds.length > 0) q.execute(new BatchCommand(cmds, 'cascade-episode-delete'));
     });
 
-    // ===== Plan#20 T12a: 合并主体 =====
-    // 胶囊菜单「合并到…」→ 打开目标选择 Modal(执行逻辑在 hook 顶层 executeMergeSubjects)
-    const unsubMergeReq = nodeActionBus.on('subject:mergeRequested', (event: { nodeId: string }) => {
-      const store = refs.store;
-      if (!store) return;
-      const src = store.getGraph().nodes.find((n: any) => n.id === event.nodeId && n.type === 'subject');
-      if (!src) {
-        message.warning(i18n.t('errors.NOT_FOUND'));
-        return;
-      }
-      setMergeState({ sourceNodeId: event.nodeId });
-    });
-
-    // ===== Plan#20 T12b: 拆分主体 =====
-    // 编辑器头部「拆分主体」→ 打开镜头勾选 Modal(执行逻辑在 hook 顶层 executeSplitSubject)
-    const unsubSplitReq = nodeActionBus.on('subject:splitRequested', (event: { nodeId: string }) => {
-      const store = refs.store;
-      if (!store) return;
-      const src = store.getGraph().nodes.find((n: any) => n.id === event.nodeId && n.type === 'subject');
-      if (!src) {
-        message.warning(i18n.t('errors.NOT_FOUND'));
-        return;
-      }
-      setSplitState({ nodeId: event.nodeId });
-    });
-
     return () => {
       unsubRetry();
       unsubCancel();
@@ -1743,8 +1442,6 @@ export function useEditorInteractions({
       unsubLinkStory();
       unsubAbandonStory();
       unsubEpisodesDeleted();
-      unsubMergeReq();
-      unsubSplitReq();
     };
   }, [refs.store, handlePromptGenerate, handlePromptStop, message]);
 
@@ -2271,55 +1968,8 @@ export function useEditorInteractions({
     nodeAbortControllersRef,
     nodeFailureCountRef,
 
-    // Plan#20 T12a/T12b: 合并/拆分主体 Modal(事件驱动,渲染层挂载)
-    subjectModals: createElement(
-      Fragment,
-      null,
-      createElement(MergeSubjectModal, {
-        open: mergeState !== null,
-        source: mergeState ? (() => {
-          const g = refs.store?.getGraph?.();
-          const n = g?.nodes.find((x: any) => x.id === mergeState.sourceNodeId);
-          const d = (n?.data ?? {}) as { name?: string; kind?: string };
-          return { name: d.name ?? '', kind: (d.kind as any) ?? 'character' };
-        })() : null,
-        targets: mergeState ? (() => {
-          const g = refs.store?.getGraph?.();
-          return (g?.nodes ?? [])
-            .filter((n: any) => n.type === 'subject' && n.id !== mergeState.sourceNodeId)
-            .map((n: any) => ({
-              nodeId: n.id,
-              name: ((n.data ?? {}) as { name?: string }).name ?? '',
-              kind: ((n.data ?? {}) as { kind?: string }).kind ?? 'character',
-              aliases: ((n.data ?? {}) as { aliases?: string[] }).aliases ?? [],
-            })) as MergeTargetInfo[];
-        })() : [],
-        refCount: mergeState ? (() => {
-          const g = refs.store?.getGraph?.();
-          const n = g?.nodes.find((x: any) => x.id === mergeState.sourceNodeId);
-          const d = (n?.data ?? {}) as { name?: string; aliases?: string[] };
-          return collectSubjectShotRefs(g?.nodes ?? [], d.name ?? '', d.aliases ?? []).length;
-        })() : 0,
-        onClose: () => setMergeState(null),
-        onConfirm: (targetNodeId: string) => { if (mergeState) executeMergeSubjects(mergeState.sourceNodeId, targetNodeId); },
-      }),
-      createElement(SplitSubjectModal, {
-        open: splitState !== null,
-        sourceName: splitState ? (() => {
-          const g = refs.store?.getGraph?.();
-          const n = g?.nodes.find((x: any) => x.id === splitState.nodeId);
-          return ((n?.data ?? {}) as { name?: string }).name ?? '';
-        })() : '',
-        shotRefs: splitState ? (() => {
-          const g = refs.store?.getGraph?.();
-          const n = g?.nodes.find((x: any) => x.id === splitState.nodeId);
-          const d = (n?.data ?? {}) as { name?: string; aliases?: string[] };
-          return collectSubjectShotRefs(g?.nodes ?? [], d.name ?? '', d.aliases ?? []);
-        })() : [],
-        onClose: () => setSplitState(null),
-        onConfirm: (newName: string, selectedKeys: string[]) => { if (splitState) executeSplitSubject(splitState.nodeId, newName, selectedKeys); },
-      }),
-    ),
+    // Plan#29 T7: 主体散落卡体系已移除(改为统筹节点);保留字段避免 editor-page 挂载点引用报错
+    subjectModals: null,
 
     // 回调函数
     handleCutEdge,

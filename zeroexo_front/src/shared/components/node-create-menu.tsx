@@ -13,12 +13,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Type, Image as ImageIcon, Sparkles, FileText, Clapperboard, Film, User } from 'lucide-react';
+import { Type, Image as ImageIcon, Sparkles, FileText, Clapperboard, Film, ClipboardList } from 'lucide-react';
 import { CREATE_MENU_ICONS } from './icons.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 
 /** 节点类型 */
-export type AddNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject';
+export type AddNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject' | 'production-manager';
 
 export interface NodeCreateMenuProps {
   /** 菜单位置(固定定位) */
@@ -62,7 +62,7 @@ function createNodeTypeDefs(_t: (key: string) => string): NodeTypeDef[] {
     { type: 'script', icon: <FileText size={14} />, labelKey: 'canvasNodes.stage.script', category: 'creation' },
     { type: 'storyboard', icon: <Clapperboard size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
     { type: 'workbench', icon: <Film size={14} />, labelKey: 'canvasNodes.stage.workbench', category: 'creation' },
-    { type: 'subject', icon: <User size={14} />, labelKey: 'canvasNodes.stage.subject', category: 'creation' },
+    { type: 'production-manager', icon: <ClipboardList size={14} />, labelKey: 'canvasNodes.stage.productionManager', category: 'creation' },
   ];
 }
 

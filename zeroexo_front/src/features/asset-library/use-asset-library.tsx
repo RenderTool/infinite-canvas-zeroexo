@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App as AntdApp } from 'antd';
-import { Package, Users, FileText, BookOpen } from 'lucide-react';
+import { Package, FileText, BookOpen } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
@@ -284,20 +284,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
         { key: 'text', label: t('assetLibrary.filterText'), count: assets.filter((a) => (a.kind as string) === 'text' || (a.kind as string) === 'zeroexo-text').length },
       ],
     },
-    {
-      group: 'subject',
-      label: t('assetLibrary.filterSubject'),
-      icon: <Users size={16} />,
-      color: '#e94560',
-      count: subjects.filter((s) => s.type === 'character' || s.type === 'scene' || s.type === 'prop').length,
-      children: [
-        { key: 'favorite', label: t('assetLibrary.filterFavorite'), count: subjects.filter((s) => s.favorite).length },
-        { key: 'all', label: t('assetLibrary.filterAll'), count: subjects.length },
-        { key: 'character', label: t('assetLibrary.filterCharacter'), count: subjects.filter((s) => s.type === 'character').length },
-        { key: 'scene', label: t('assetLibrary.filterScene'), count: subjects.filter((s) => s.type === 'scene').length },
-        { key: 'prop', label: t('assetLibrary.filterProp'), count: subjects.filter((s) => s.type === 'prop').length },
-      ],
-    },
+    // Plan#29 V3: 「主体」分组已移除(主体升维为画布统筹节点,资产库不再存主体)
     {
       group: 'prompt',
       label: t('assetLibrary.filterPrompt'),
@@ -309,6 +296,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
         { key: 'all', label: t('assetLibrary.filterAll'), count: prompts.length },
         { key: 'role', label: t('assetLibrary.filterRole'), count: prompts.filter((p) => p.category === 'role').length },
         { key: 'scene', label: t('assetLibrary.filterScene'), count: prompts.filter((p) => p.category === 'scene').length },
+        { key: 'prop', label: t('assetLibrary.filterProp'), count: prompts.filter((p) => p.category === 'prop').length },
         { key: 'style', label: t('assetLibrary.filterStyle'), count: prompts.filter((p) => p.category === 'style').length },
         { key: 'shot', label: t('assetLibrary.filterShot'), count: prompts.filter((p) => p.category === 'shot').length },
         { key: 'other', label: t('assetLibrary.filterOther'), count: prompts.filter((p) => p.category === 'other').length },
