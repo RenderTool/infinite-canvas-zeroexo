@@ -28,6 +28,7 @@ import { getModelIconComponent } from '@zeroexo/shared';
 import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { useTheme } from '@zeroexo/plugin-theme';
+import type { ThemeConfig } from '@zeroexo/plugin-theme';
 import { resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { BaseNodeView, nodeActionBus } from '../base-node-view.js';
@@ -36,6 +37,7 @@ import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-con
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import type { ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
 import { DynamicParamForm } from '@/features/prompt-panel/components/dynamic-param-form.js';
+import { SettingsPopoverShell, SettingGroup, OptionPill, SwitchRow } from '@/features/prompt-panel/components/settings-popover-shell.js';
 import GeneratorPromptEditor, { type GeneratorPromptEditorHandle, type ReferenceItem } from './generator-prompt-editor.js';
 import { useHydratedContent, resolveContentUrl, resolveAnyThumbUrl } from '../utils/hydrate.js';
 import { resolveVideoThumbUrl } from '../utils/video-thumb.js';
@@ -44,6 +46,8 @@ import {
   computeReferenceCompatibility,
   deriveIncomingReferences,
   encodeModelValue,
+  GENERATOR_TYPE_META,
+  getTargetNodeType,
   mergeGeneratorParams,
   referencesChanged,
   setGenerationMode,
@@ -51,6 +55,7 @@ import {
   setModelSelection,
   type GeneratorMode,
   type GeneratorNodeData,
+  type GeneratorParamDef,
 } from './generator-model.js';
 
 // 类型重导出(保持既有消费方 import 路径兼容)
@@ -71,11 +76,14 @@ export interface GeneratorNodeViewProps extends NodeRendererProps {
   store: ReactGraphStore | null;
 }
 
-// 生成模式选项
+// 生成模式选项(Plan#33 D1: 全类型化 6 类)
 const MODE_OPTIONS = [
   { value: 'image', label: '图片' },
   { value: 'video', label: '视频' },
   { value: 'audio', label: '音频' },
+  { value: 'text', label: '文本' },
+  { value: 'script', label: '剧本' },
+  { value: 'storyboard', label: '分镜' },
 ];
 
 // 节点类型 → 图标/Label 映射
@@ -308,8 +316,8 @@ export function GeneratorNodeView({
     return () => { cancelled = true; };
   }, []);
 
-  // 按生成模式筛选具有对应能力的模型
-  const capability = generationMode === 'image' ? 'image' : generationMode === 'video' ? 'video' : 'audio';
+  // 按生成模式筛选具有对应能力的模型(script/storyboard 走文本能力)
+  const capability = generationMode === 'image' ? 'image' : generationMode === 'video' ? 'video' : generationMode === 'audio' ? 'audio' : 'text';
   const filteredModelOptions = useMemo(() => {
     const encoded = filterChannelModelsByCapability(channels, capability);
     return encoded.map((enc) => {
@@ -461,13 +469,19 @@ export function GeneratorNodeView({
   nodeRef.current = node;
 
   // ===== 生成类型切换(命令化,支持撤销) =====
+  // Plan#33 D2: 切换类型后通知编辑器层——下游产物类型若不匹配则自动转换/重建
   const handleModeChange = useCallback((mode: string) => {
     const currentData = nodeRef.current.data ?? {};
     if (commandQueue) {
       commandQueue.execute(setGenerationMode(node.id, currentData as Partial<GeneratorNodeData>, mode as GeneratorMode));
-      return;
+    } else {
+      updateNode({ data: { ...currentData, generationMode: mode } });
     }
-    updateNode({ data: { ...currentData, generationMode: mode } });
+    nodeActionBus.emit('generator:modeChanged', {
+      nodeId: node.id,
+      mode: mode as GeneratorMode,
+      targetNodeType: getTargetNodeType(mode as GeneratorMode),
+    });
   }, [commandQueue, node.id, updateNode]);
 
   // ===== 模型切换(命令化,编码值由模型层解析) =====
@@ -577,7 +591,21 @@ export function GeneratorNodeView({
     return referenceImages.filter(() => true);
   }, [referenceImages]);
 
+  // 连入的剧本节点集数(供 storyboard 参数面板集数多选 / 生成事件携带)
+  const scriptEpisodes = useMemo(() => {
+    const scriptNode = incomingNodes.find((n) => n.type === 'script');
+    if (!scriptNode) return [];
+    const nodeData = _store?.getNode(scriptNode.id);
+    const eps = (nodeData?.data as Record<string, unknown>)?.episodes as
+      Array<{ id: string; number?: number; title?: string }> | undefined;
+    return (eps ?? []).map((e) => ({
+      id: e.id,
+      label: e.title || `第 ${e.number ?? ''} 集`,
+    }));
+  }, [incomingNodes, _store]);
+
   const handleGenerate = useCallback(() => {
+    const genData = (nodeRef.current.data ?? {}) as Partial<GeneratorNodeData>;
     nodeActionBus.emit('generator:generate', {
       nodeId: node.id,
       generationMode,
@@ -585,8 +613,10 @@ export function GeneratorNodeView({
       channelId,
       model,
       referenceImages: compatibleRefs,
+      params: genData.params ?? {}, // Plan#33: 携带类型专用参数(分镜集数/剧管提取/小说附件)
+      scriptEpisodes,
     });
-  }, [node.id, generationMode, promptInput, channelId, model, compatibleRefs]);
+  }, [node.id, generationMode, promptInput, channelId, model, compatibleRefs, scriptEpisodes]);
 
   // ===== 标题图标 =====
   // T10: 图标尺寸 CSS 连续化——原 JS 量化(Math.max/min + 量化 invK)缩放跨桶瞬间跳变,
@@ -1090,15 +1120,25 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             height={26}
           />
 
-          {/* 参数设置 — 使用 DynamicParamForm 动态加载参数(与 Admin 配置一致) */}
-          <DynamicParamForm
-            model={encodedModel}
-            generationMode={generationMode}
-            paramValues={params}
-            onChange={handleConfigChange}
-            theme={theme}
-            titlePrefix={generationMode === 'image' ? '图片' : generationMode === 'video' ? '视频' : '音频'}
-          />
+          {/* 参数设置 — image/video/audio/text 走 AI 渠道模板;script/storyboard 走类型专用参数面板(Plan#33 D1/D3) */}
+          {(generationMode === 'image' || generationMode === 'video' || generationMode === 'audio' || generationMode === 'text') ? (
+            <DynamicParamForm
+              model={encodedModel}
+              generationMode={generationMode}
+              paramValues={params}
+              onChange={handleConfigChange}
+              theme={theme}
+              titlePrefix={GENERATOR_TYPE_META[generationMode]?.label ?? ''}
+            />
+          ) : (
+            <GeneratorStaticParams
+              mode={generationMode}
+              params={params}
+              onChange={handleConfigChange}
+              theme={theme}
+              scriptEpisodes={scriptEpisodes}
+            />
+          )}
 
           <div style={{ flex: 1 }} />
 
@@ -1124,5 +1164,223 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
         </div>
       </div>
     </BaseNodeView>
+  );
+}
+
+// ===== 类型专用参数面板(Plan#33 D3: storyboard/script 静态参数) =====
+
+/** 智能读取文本文件:严格 UTF-8 优先,失败回落 GB18030(text-import-encoding-detect 契约) */
+async function readTextFileSmart(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    try {
+      return new TextDecoder('gb18030').decode(buf);
+    } catch {
+      return new TextDecoder('utf-8').decode(buf);
+    }
+  }
+}
+
+/** 剧本小说附件参数(string dynamic: 本地读取文本,不产生画布节点) */
+function ScriptAttachmentParam({
+  value,
+  onChange,
+  theme,
+}: {
+  value: unknown;
+  onChange: (v: { name: string; content: string }) => void;
+  theme: ThemeConfig;
+}): React.ReactElement {
+  const [reading, setReading] = useState(false);
+  const attachName = typeof value === 'object' && value ? (value as { name: string }).name : '';
+
+  const handleUpload = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.txt,.md,.doc,.docx';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setReading(true);
+      void readTextFileSmart(file)
+        .then((content) => onChange({ name: file.name, content }))
+        .catch(() => { /* 读取失败保持原值 */ })
+        .finally(() => setReading(false));
+    };
+    input.click();
+  }, [onChange]);
+
+  const btnBg = theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)';
+  const textMuted = theme.toolbar.textMuted ?? '';
+  const textColor = theme.toolbar.text ?? '';
+  const borderColor = theme.toolbar.border ?? '';
+
+  return (
+    <SettingGroup title="小说附件" color={textMuted}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          type="button"
+          onClick={handleUpload}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            height: 28, padding: '0 10px', borderRadius: 6,
+            border: `1px solid ${borderColor}`,
+            background: btnBg, color: textColor,
+            fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <Upload size={12} />
+          <span>{reading ? '读取中...' : attachName ? '重新上传' : '上传附件'}</span>
+        </button>
+        {attachName && (
+          <span style={{ fontSize: 11, color: textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
+            {attachName}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: textMuted, marginTop: 4, lineHeight: 1.5 }}>
+        可选:上传小说文本作为剧本生成的小说原文;仅输入框内容会作为提示词追加
+      </div>
+    </SettingGroup>
+  );
+}
+
+function GeneratorStaticParams({
+  mode,
+  params,
+  onChange,
+  theme,
+  scriptEpisodes,
+}: {
+  mode: GeneratorMode;
+  params: Record<string, unknown>;
+  onChange: (patch: Record<string, unknown>) => void;
+  theme: ThemeConfig;
+  scriptEpisodes: Array<{ id: string; label: string }>;
+}): React.ReactElement {
+  const meta = GENERATOR_TYPE_META[mode];
+  const template = meta?.paramTemplate ?? [];
+  const textColor = theme.toolbar.text ?? '';
+  const mutedColor = theme.toolbar.textMuted ?? '';
+
+  // 集数多选: 默认全选(候选来自连入剧本)
+  const episodesValue = useMemo(() => {
+    const current = (params.episodes as string[] | undefined) ?? [];
+    if (current.length === 0 && scriptEpisodes.length > 0) {
+      return scriptEpisodes.map((e) => e.id);
+    }
+    return current;
+  }, [params.episodes, scriptEpisodes]);
+  const allSelected = episodesValue.length === scriptEpisodes.length && scriptEpisodes.length > 0;
+
+  // 参数摘要(与 DynamicParamForm 风格一致,位于弹层入口)
+  const summary = useMemo(() => {
+    const parts: string[] = [];
+    if (mode === 'storyboard') {
+      if (scriptEpisodes.length > 0) {
+        parts.push(allSelected ? '全部集数' : `${episodesValue.length} 集`);
+      }
+      if (params.autoExtractProductionManager !== false) parts.push('提取剧管');
+      if (params.useSubjectDictionary === false) parts.push('无主体字典');
+    } else if (mode === 'script') {
+      const att = params.attachment;
+      if (typeof att === 'object' && att) parts.push(`附件:${(att as { name: string }).name}`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : '参数';
+  }, [mode, params, scriptEpisodes.length, episodesValue.length, allSelected]);
+
+  const renderParam = (param: GeneratorParamDef): React.ReactNode => {
+    const value = params[param.name] ?? param.default;
+    switch (param.type) {
+      case 'boolean':
+        return (
+          <SwitchRow
+            key={param.name}
+            label={param.label}
+            checked={!!value}
+            theme={theme}
+            onChange={(checked) => onChange({ [param.name]: checked })}
+          />
+        );
+      case 'multi': {
+        if (scriptEpisodes.length === 0) {
+          return (
+            <SettingGroup key={param.name} title={param.label} color={mutedColor}>
+              <div style={{ fontSize: 11, color: mutedColor }}>
+                连入剧本节点后可选生成集数,默认全选
+              </div>
+            </SettingGroup>
+          );
+        }
+        return (
+          <SettingGroup key={param.name} title={param.label} color={mutedColor}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <OptionPill
+                selected={allSelected}
+                theme={theme}
+                onClick={() => onChange({ [param.name]: allSelected ? [] : scriptEpisodes.map((e) => e.id) })}
+              >
+                全选
+              </OptionPill>
+              {scriptEpisodes.map((ep) => {
+                const selected = episodesValue.includes(ep.id);
+                return (
+                  <OptionPill
+                    key={ep.id}
+                    selected={selected}
+                    theme={theme}
+                    onClick={() => {
+                      const next = selected
+                        ? episodesValue.filter((id) => id !== ep.id)
+                        : [...episodesValue, ep.id];
+                      onChange({ [param.name]: next });
+                    }}
+                  >
+                    {ep.label}
+                  </OptionPill>
+                );
+              })}
+            </div>
+            {param.tooltip && (
+              <div style={{ fontSize: 10, color: mutedColor, marginTop: 6 }}>{param.tooltip}</div>
+            )}
+          </SettingGroup>
+        );
+      }
+      case 'string': {
+        if (param.name === 'attachment') {
+          return (
+            <ScriptAttachmentParam
+              key={param.name}
+              value={value}
+              onChange={(v) => onChange({ attachment: v })}
+              theme={theme}
+            />
+          );
+        }
+        return null;
+      }
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: textColor }}>
+          {meta?.label ?? mode} 参数
+        </div>
+        {template.length === 0 ? (
+          <div style={{ fontSize: 12, color: mutedColor }}>该类型无额外参数</div>
+        ) : (
+          template.map((p) => renderParam(p))
+        )}
+      </div>
+    </SettingsPopoverShell>
   );
 }

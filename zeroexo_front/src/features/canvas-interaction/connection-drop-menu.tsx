@@ -135,10 +135,79 @@ export const ConnectionDropMenu = memo(function ConnectionDropMenu({
     };
   }, [handleClose]);
 
+  /** Plan#33 A3: 可生成类型(与 use-editor-interactions 三件套收敛保持一致) */
+  const GENERATABLE_TYPES = new Set(['image', 'video', 'audio', 'text', 'script', 'storyboard']);
+
   const createAndConnect = useCallback(
     (type: AddNodeType) => {
+      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const isCreation = type === 'script' || type === 'storyboard';
       const data = { label: t(`toolbar.${type}`) };
+
+      // ===== Plan#33 A3: 三件套收敛(生成类型 → 目标节点 + 生成器 + 连线) =====
+      if (GENERATABLE_TYPES.has(type)) {
+        const genPos = { x: worldX, y: worldY };
+        // 生成器默认宽度约 224 + 间距 96 → 目标节点放右侧
+        const targetPos = { x: worldX + 320, y: worldY };
+        const targetData = isCreation
+          ? type === 'script'
+            ? { title: data.label, status: 'idle', content: '' }
+            : { title: data.label, status: 'idle' }
+          : type === 'text'
+            ? { content: '', prompt: '', status: 'idle', title: data.label }
+            : { prompt: '', content: '', status: 'idle', title: data.label };
+        const genNode: NodeRecord = {
+          id: genId,
+          type: 'generator',
+          position: genPos,
+          data: { prompt: '', status: 'idle', generationMode: type, referenceImages: [], channelId: '', model: '', title: data.label },
+        };
+        const targetNode: NodeRecord = {
+          id: nodeId,
+          type,
+          position: targetPos,
+          data: targetData,
+        };
+        commandQueue.execute(new AddNodeCommand(genNode));
+        commandQueue.execute(new AddNodeCommand(targetNode));
+        if (source.direction === 'output') {
+          // 源节点.output → 生成器.input; 生成器.output → 目标.input
+          commandQueue.execute(
+            new AddEdgeCommand({
+              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              source: { nodeId: source.nodeId, pinId: source.pinId },
+              target: { nodeId: genId, pinId: 'input' },
+            }),
+          );
+          commandQueue.execute(
+            new AddEdgeCommand({
+              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              source: { nodeId: genId, pinId: 'output' },
+              target: { nodeId: nodeId, pinId: 'input' },
+            }),
+          );
+        } else {
+          // 生成器.output → 目标.input; 目标.output → 源.input
+          commandQueue.execute(
+            new AddEdgeCommand({
+              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              source: { nodeId: genId, pinId: 'output' },
+              target: { nodeId: nodeId, pinId: 'input' },
+            }),
+          );
+          commandQueue.execute(
+            new AddEdgeCommand({
+              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              source: { nodeId: nodeId, pinId: 'output' },
+              target: { nodeId: source.nodeId, pinId: source.pinId },
+            }),
+          );
+        }
+        handleClose();
+        return;
+      }
+
       const node: NodeRecord = {
         id: nodeId,
         type,

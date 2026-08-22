@@ -9,8 +9,122 @@ import { UpdateNodeDataCommand, BatchCommand } from '@zeroexo/core';
 
 // ===== 类型定义(从 generator-node-view.tsx 迁移) =====
 
-export type GeneratorMode = 'image' | 'video' | 'audio';
+export type GeneratorMode = 'image' | 'video' | 'audio' | 'text' | 'script' | 'storyboard';
 export type GeneratorStatus = 'idle' | 'generating' | 'success' | 'error';
+
+// ===== 生成类型矩阵(Plan#33 D1: 全类型化) =====
+
+/** 参数模板参数类型(与 DynamicParamForm 对齐,multi=多选集数动态注入) */
+export type GeneratorParamType = 'boolean' | 'enum' | 'number' | 'string' | 'multi';
+
+export interface GeneratorParamDef {
+  name: string;
+  type: GeneratorParamType;
+  label: string;
+  default: unknown;
+  values?: string[];
+  labels?: Record<string, string>;
+  tooltip?: string;
+  /** multi/动态参数: 运行时由上游节点注入候选集(如剧本集数) */
+  dynamic?: boolean;
+}
+
+export interface GeneratorTypeMeta {
+  /** 目标产物节点类型 */
+  targetNodeType: string;
+  /** 该类型可连入的输入源节点类型(连线校验/参考素材过滤) */
+  supportedInputs: string[];
+  /** 是否展示模型选择 */
+  showModelSelect: boolean;
+  /** 标题前缀 */
+  label: string;
+  /** 参数模板(静态配置,渲染在生成器参数面板) */
+  paramTemplate?: GeneratorParamDef[];
+}
+
+/**
+ * 生成类型元信息矩阵(单一事实源)
+ * - image/video/audio/text: 走 AI 渠道模板(DynamicParamForm)
+ * - script: 只接受文本输入 + 小说附件参数
+ * - storyboard: 只接受文本/剧本输入 + 集数多选(默认全选)/剧管提取(默认开)/主体字典
+ */
+export const GENERATOR_TYPE_META: Record<GeneratorMode, GeneratorTypeMeta> = {
+  image: {
+    targetNodeType: 'image',
+    supportedInputs: ['text', 'image', 'generator'],
+    showModelSelect: true,
+    label: '图片',
+  },
+  video: {
+    targetNodeType: 'video',
+    supportedInputs: ['text', 'image', 'video', 'generator'],
+    showModelSelect: true,
+    label: '视频',
+  },
+  audio: {
+    targetNodeType: 'audio',
+    supportedInputs: ['text', 'audio', 'generator'],
+    showModelSelect: true,
+    label: '音频',
+  },
+  text: {
+    targetNodeType: 'text',
+    supportedInputs: ['text', 'generator'],
+    showModelSelect: true,
+    label: '文本',
+  },
+  script: {
+    targetNodeType: 'script',
+    supportedInputs: ['text', 'generator'],
+    showModelSelect: true,
+    label: '剧本',
+    paramTemplate: [
+      {
+        name: 'attachment',
+        type: 'string',
+        label: '小说附件',
+        default: '',
+        tooltip: '可选:上传小说文本附件,作为剧本生成的小说原文(复用剧本节点导入能力)',
+        dynamic: true,
+      },
+    ],
+  },
+  storyboard: {
+    targetNodeType: 'storyboard',
+    supportedInputs: ['text', 'script', 'generator'],
+    showModelSelect: true,
+    label: '分镜',
+    paramTemplate: [
+      {
+        name: 'episodes',
+        type: 'multi',
+        label: '生成集数',
+        default: [],
+        tooltip: '选择要生成分镜的剧集,默认全选',
+        dynamic: true,
+      },
+      {
+        name: 'autoExtractProductionManager',
+        type: 'boolean',
+        label: '自动提取剧管',
+        default: true,
+        tooltip: '生成分镜时自动从剧本提取一次剧管节点并作为分镜上游',
+      },
+      {
+        name: 'useSubjectDictionary',
+        type: 'boolean',
+        label: '主体字典',
+        default: true,
+        tooltip: '生成分镜时使用剧管主体字典约束实体',
+      },
+    ],
+  },
+};
+
+/** 生成类型 → 目标产物节点类型(便捷访问) */
+export function getTargetNodeType(mode: GeneratorMode): string {
+  return GENERATOR_TYPE_META[mode]?.targetNodeType ?? mode;
+}
 
 export interface GeneratorNodeData {
   generationMode: GeneratorMode;

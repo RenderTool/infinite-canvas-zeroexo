@@ -699,6 +699,8 @@ export function useEditorInteractions({
   }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
+  // Plan#33 A3: image/video/audio/text/script/storyboard 收敛为「三件套」(目标节点 + 生成器 + 连线)
+  const GENERATABLE_TYPES = useMemo(() => new Set(['image', 'video', 'audio', 'text', 'script', 'storyboard']), []);
   const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager') => {
     setNodeCreateMenuPos(null);
     if (!nodeCreateMenuPos || !containerRef.current || !refs.store) return;
@@ -725,6 +727,59 @@ export function useEditorInteractions({
                 : type === 'audio' ? 'nodeTypes.ai.audio'
                   : 'nodes.generatorTitle';
     const nodeTitle = `${t(baseNameKey)}${sameTypeCount + 1}`;
+
+    // ===== Plan#33 A3: 三件套收敛(生成类型) =====
+    if (GENERATABLE_TYPES.has(type)) {
+      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const targetId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const genSize = resolveNodeSize({}, state.extensions.get('generator'));
+      const targetSize = resolveNodeSize({}, state.extensions.get(type));
+      const genCount = refs.store.getGraph().nodes.filter((n: any) => n.type === 'generator').length ?? 0;
+      const genPos = { x: worldX + offsetX, y: worldY + offsetY };
+      const targetPos = { x: genPos.x + genSize.width + 96, y: genPos.y };
+      const targetData = isCreation
+        ? type === 'script'
+          ? { title: nodeTitle, status: 'idle', content: '' }
+          : { title: nodeTitle, status: 'idle' }
+        : type === 'text'
+          ? { content: t('editor.newTextNode'), prompt: '', status: 'idle', title: nodeTitle }
+          : { prompt: '', content: '', status: 'idle', title: nodeTitle };
+      refs.commandQueue?.execute(
+        new BatchCommand([
+          new AddNodeCommand({
+            id: genId,
+            type: 'generator',
+            position: genPos,
+            size: { ...genSize },
+            title: `${t('nodes.generatorTitle')}${genCount + 1}`,
+            data: {
+              prompt: '',
+              status: 'idle',
+              generationMode: type,
+              referenceImages: [],
+              channelId: '',
+              model: '',
+              title: `${t('nodes.generatorTitle')}${genCount + 1}`,
+            },
+          }),
+          new AddNodeCommand({
+            id: targetId,
+            type,
+            position: targetPos,
+            size: { ...targetSize },
+            title: nodeTitle,
+            data: targetData,
+          }),
+          new AddEdgeCommand({
+            id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            source: { nodeId: genId, pinId: 'output' },
+            target: { nodeId: targetId, pinId: 'input' },
+          }),
+        ], 'create-generator-chain'),
+      );
+      return;
+    }
+
     refs.commandQueue?.execute(
       new AddNodeCommand({
         id,
@@ -746,7 +801,7 @@ export function useEditorInteractions({
                 : { prompt: '', content: '', status: 'idle', title: nodeTitle },
       }),
     );
-  }, [refs, containerRef, nodeCreateMenuPos, t]);
+  }, [refs, containerRef, nodeCreateMenuPos, t, state.extensions, GENERATABLE_TYPES]);
 
   const handlePromptChange = useCallback(
     (nodeId: string, prompt: string): void => {
@@ -1111,7 +1166,7 @@ export function useEditorInteractions({
       if (added > 0) message.success(i18n.t('productionManager.registered', { count: added }));
     };
 
-    const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, _createSubjects?: boolean) => {
+    const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, _createSubjects?: boolean, autoExtractSubjects = true) => {
       const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string }>; activeEpisodeId?: string };
       const episodes = scriptData.episodes ?? [];
       // 2026-08-21 BUG 修复: episodeId 未传入时,优先读取 storyboard 节点自身的 activeEpisodeId
@@ -1197,7 +1252,8 @@ export function useEditorInteractions({
                 aiSubjects,
               }));
               // Plan#29 T5/T6 + 2026-08-21: AI 主体幂等登记进剧管条目(剧管=分镜后置,锚定分镜节点)
-              if (aiSubjects && aiSubjects.length > 0) {
+              // Plan#33 A4/B3: autoExtractSubjects=false 时跳过自动提取(生成器参数「自动提取剧管」可关闭)
+              if (aiSubjects && aiSubjects.length > 0 && autoExtractSubjects) {
                 const sbNode = _store.getGraph().nodes.find((n: any) => n.id === storyboardId);
                 if (sbNode) registerAiSubjectsToProduction(_store, q, sbNode, aiSubjects, epKey);
               }
@@ -1274,6 +1330,116 @@ export function useEditorInteractions({
       }
 
       runAiStoryboard(store, q, scriptNode, id, undefined, true); // Plan#20 BUG修复: 直接生成默认创建主体(与选集 Modal 开关默认一致)
+    });
+
+    // Plan#33 B1: 剧本侧「生成分镜」→ 生成器链路(生成器 + 分镜节点 + 双连线),不再弹 step 弹窗
+    const unsubCreateSbGen = nodeActionBus.on('script:createStoryboardGenerator', (event: { nodeId: string }) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const graph = store.getGraph();
+      const scriptNode = graph.nodes.find((n: any) => n.id === event.nodeId);
+      if (!scriptNode) return;
+
+      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const targetId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const genSize = resolveNodeSize({}, state.extensions.get('generator'));
+      const targetSize = resolveNodeSize({}, state.extensions.get('storyboard'));
+      const genPos = resolvePlacement({
+        anchor: scriptNode,
+        ext: state.extensions.get('generator'),
+        existingNodes: graph.nodes,
+      });
+      const targetPos = { x: genPos.x + genSize.width + 96, y: genPos.y };
+      const genCount = graph.nodes.filter((n: any) => n.type === 'generator').length;
+      const sbCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
+      const genTitle = `${t('nodes.generatorTitle')}${genCount + 1}`;
+      const sbTitle = `分镜${sbCount + 1}`;
+      q.execute(new BatchCommand([
+        new AddNodeCommand({
+          id: genId,
+          type: 'generator',
+          position: genPos,
+          size: { ...genSize },
+          title: genTitle,
+          data: { prompt: '', status: 'idle', generationMode: 'storyboard', referenceImages: [], channelId: '', model: '', title: genTitle },
+        }),
+        new AddNodeCommand({
+          id: targetId,
+          type: 'storyboard',
+          position: targetPos,
+          size: { ...targetSize },
+          title: sbTitle,
+          data: { title: sbTitle, status: 'idle' },
+        }),
+        new AddEdgeCommand({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          source: { nodeId: scriptNode.id, pinId: 'output' },
+          target: { nodeId: genId, pinId: 'input' },
+        }),
+        new AddEdgeCommand({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          source: { nodeId: genId, pinId: 'output' },
+          target: { nodeId: targetId, pinId: 'input' },
+        }),
+      ], 'create-storyboard-generator-chain'));
+      store.setSelection({ selectedNodeIds: new Set([genId]), selectedEdgeIds: new Set() });
+    });
+
+    // Plan#33 B3/A4: 生成器(分镜模式)生成 → 复用 runAiStoryboard 链路
+    // 参数: params.episodes(集数多选,默认全选) / autoExtractProductionManager(剧管提取,默认开) / useSubjectDictionary(主体字典,默认开)
+    const unsubGenSb = nodeActionBus.on('generator:generateStoryboard', (event: { nodeId: string; params?: Record<string, unknown>; scriptEpisodes?: Array<{ id: string }> }) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const graph = store.getGraph();
+      const genNode = graph.nodes.find((n: any) => n.id === event.nodeId);
+      if (!genNode) return;
+
+      // 1. 定位生成器连入的剧本节点(剧本→生成器)
+      const genInEdge = graph.edges.find((e: any) => {
+        const tgt = typeof e.target === 'object' ? e.target?.nodeId : e.target;
+        return tgt === event.nodeId && (typeof e.target === 'object' ? e.target?.pinId : undefined) === 'input';
+      });
+      const scriptNode = genInEdge
+        ? graph.nodes.find((n: any) => n.id === (typeof genInEdge.source === 'object' ? genInEdge.source?.nodeId : genInEdge.source) && n.type === 'script')
+        : undefined;
+      if (!scriptNode) {
+        message.warning(i18n.t('errors.SCRIPT_NOT_FOUND'));
+        return;
+      }
+      const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string; title?: string }> };
+      const episodes = scriptData.episodes ?? [];
+
+      // 2. 定位生成器 output 连的目标分镜节点
+      const genOutEdge = graph.edges.find((e: any) => {
+        const src = typeof e.source === 'object' ? e.source?.nodeId : e.source;
+        return src === event.nodeId && (typeof e.source === 'object' ? e.source?.pinId : undefined) === 'output';
+      });
+      const sbNode = genOutEdge
+        ? graph.nodes.find((n: any) => n.id === (typeof genOutEdge.target === 'object' ? genOutEdge.target?.nodeId : genOutEdge.target) && n.type === 'storyboard')
+        : undefined;
+      if (!sbNode) {
+        message.warning('请先连接分镜节点到生成器');
+        return;
+      }
+
+      // 3. 解析参数: 集数多选(默认全选) / 剧管提取(默认开) / 主体字典(默认开)
+      const params = event.params ?? {};
+      const autoExtract = params.autoExtractProductionManager !== false;
+      const epIds = Array.isArray(params.episodes) && (params.episodes as unknown[]).length > 0
+        ? (params.episodes as string[])
+        : episodes.map((e) => e.id);
+      if (epIds.length === 0) {
+        message.warning('剧本暂无剧集内容，请先导入或编辑剧本');
+        return;
+      }
+
+      // 4. 逐集生成(串行避免打爆)
+      q.execute(new UpdateNodeDataCommand(sbNode.id, { sourceScriptId: scriptNode.id, activeEpisodeId: epIds[0]! }));
+      epIds.forEach((epId) => {
+        runAiStoryboard(store, q, scriptNode, sbNode.id, epId, true, autoExtract);
+      });
     });
 
     // 统一"关联+选集+生成方式":剧本侧生成分镜 / 分镜侧关联剧本 共用。
@@ -1528,6 +1694,8 @@ export function useEditorInteractions({
       unsubRetry();
       unsubCancel();
       unsubGenStory();
+      unsubCreateSbGen();
+      unsubGenSb();
       unsubAssociate();
       unsubRealized();
       unsubRetryStory();

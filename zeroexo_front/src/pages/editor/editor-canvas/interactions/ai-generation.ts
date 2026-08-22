@@ -15,7 +15,7 @@ import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { GenerationMode } from '@/features/prompt-panel/components/prompt-panel';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
-import { replacePlaceholderWithNode, restoreOldNode } from './ai-generation-utils.js';
+import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources } from './ai-generation-utils.js';
 import { CanvasOpExecutor } from './canvas-op-executor.js';
 import type { ResourceReference } from '@/features/prompt-panel/resource-references.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
@@ -542,7 +542,22 @@ export function useAiGeneration({
       const genData = (genNode.data ?? {}) as Record<string, unknown>;
 
       const generationMode = event.generationMode || 'image';
-      const prompt = event.prompt || '';
+
+      // Plan#33 B3: 分镜模式走分镜生成链路(剧管前置提取/集数多选/进度展示),绕开通用 generator agent
+      if (generationMode === 'storyboard') {
+        nodeActionBus.emit('generator:generateStoryboard', {
+          nodeId: event.nodeId,
+          params: event.params ?? {},
+          scriptEpisodes: event.scriptEpisodes ?? [],
+        });
+        return;
+      }
+
+      // Plan#33 A6: 输入框描述必追加 + 连入文本源(text/script)按小说附件/参考文本组装
+      const promptInput = event.prompt || '';
+      const textSources = collectGeneratorTextSources(graph as any, event.nodeId);
+      const assembled = assembleGeneratorPrompt(promptInput, textSources);
+      const prompt = assembled.prompt;
       if (!prompt.trim()) return;
 
       const model = event.model || (genData.model as string) || 'gpt-4o';
@@ -557,9 +572,12 @@ export function useAiGeneration({
       const audioFormat = (genData.audioFormat as string) || '';
       const audioSpeed = (genData.audioSpeed as number) ?? 1;
 
-      // 确定目标载体类型
+      // 确定目标载体类型(Plan#33 A2/A6: 支持 script/storyboard/text)
       const targetType = generationMode === 'image' ? 'image'
         : generationMode === 'video' ? 'video'
+        : generationMode === 'script' ? 'script'
+        : generationMode === 'storyboard' ? 'storyboard'
+        : generationMode === 'text' ? 'text'
         : 'audio';
 
       // Step 7: 检查生成器 output 是否连线到 StackNode
@@ -615,6 +633,9 @@ export function useAiGeneration({
         audioSpeed,
         targetType,
         nodeId: event.nodeId,
+        // Plan#33 A6: 提示词组装元信息(调试/日志用)
+        appendedTextSources: assembled.appendedCount,
+        truncated: assembled.truncated,
       };
 
       const ctl = new AbortController();
@@ -716,6 +737,34 @@ export function useAiGeneration({
         });
     });
 
+    // ==== 生成器节点:类型切换(generator:modeChanged, Plan#33 D2) ====
+    // 切换生成类型后,若下游产物节点类型不匹配 → 自动转换为新目标类型(stacked-media/生成中占位跳过)
+    const unsubGeneratorModeChanged = nodeActionBus.on('generator:modeChanged', (event: any) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+
+      const graph = store.getGraph();
+      const genNode = graph.nodes.find((n: any) => n.id === event.nodeId);
+      if (!genNode) return;
+
+      const outputEdge = graph.edges.find((e: any) => {
+        const src = typeof e.source === 'object' ? e.source?.nodeId : e.source;
+        return src === event.nodeId && e.source?.pinId === 'output';
+      });
+      if (!outputEdge) return;
+      const tgt = typeof outputEdge.target === 'object' ? outputEdge.target?.nodeId : outputEdge.target;
+      const tgtNode = graph.nodes.find((n: any) => n.id === tgt);
+      if (!tgtNode) return;
+      if (tgtNode.type === 'stacked-media' || tgtNode.type === 'ai-placeholder') return;
+      if (tgtNode.type === event.targetNodeType) return;
+
+      const newNodeId = convertTargetNodeType(q, tgtNode.id, event.targetNodeType, extensions);
+      if (newNodeId) {
+        store.setSelection({ selectedNodeIds: new Set([newNodeId]), selectedEdgeIds: new Set() });
+      }
+    });
+
     return () => {
       unsubRetry();
       unsubCancel();
@@ -723,6 +772,7 @@ export function useAiGeneration({
       unsubPlaceholderRemove();
       unsubStopRegen();
       unsubGeneratorGenerate();
+      unsubGeneratorModeChanged();
     };
   }, [refs.store, handlePromptGenerate, handlePromptStop, message]);
 

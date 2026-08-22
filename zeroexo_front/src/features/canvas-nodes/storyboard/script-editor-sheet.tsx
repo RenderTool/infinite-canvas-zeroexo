@@ -147,13 +147,13 @@ export function ScriptEditorSheet({
     return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim().length;
   }, [episodes.length, activeEpisode]);
 
-  // 生成分镜:范文态走"模板分镜"(标注范文示例);真实剧本弹出共享选集 Modal(多选集 + 立即/仅关联)
+  // 生成分镜:范文态走"模板分镜"(标注范文示例);真实剧本收敛为生成器链路(Plan#33 B1: 不再弹选集 step 弹窗)
   const handleGenerateStoryboard = useCallback(() => {
     if (isSample) {
       nodeActionBus.emit('script:generateStoryboard', { nodeId, mode: 'template' });
       return;
     }
-    setAssociateOpen(true);
+    nodeActionBus.emit('script:createStoryboardGenerator', { nodeId });
   }, [nodeId, isSample]);
 
   // ========== 内容变更 ==========

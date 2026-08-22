@@ -229,6 +229,113 @@ export async function generateStoryboardShotsByEpisode(
   return results;
 }
 
+// ===== Plan#33 A6: 生成器提示词组装 =====
+
+/** 提示词超限保护阈值(字符)。对齐后端 ai.scriptChunkSize(40000) 留裕量 */
+export const MAX_GENERATOR_PROMPT_CHARS = 30000;
+
+/** 连入文本源归一化结果 */
+export interface GeneratorTextSource {
+  nodeId: string;
+  nodeType: string;
+  title: string;
+  content: string;
+}
+
+/**
+ * 组装生成器最终提示词(Plan#33 A6,需求 6)
+ *
+ * 规则:
+ * 1. 输入框描述(prompt)始终必追加;
+ * 2. 连入文本源(text/script)作为「参考文本/小说原文」段落附加(带来源标注),
+ *    文本源认定为小说附件: script 模式尽量完整携带(后端有分批拆分链路),
+ *    其余模式同样携带但受 MAX_GENERATOR_PROMPT_CHARS 整体保护;
+ * 3. 超限时: 优先保留输入框描述,截断附加段落并在结果标记 truncated;
+ * 4. 默认只有输入框中的内容必追加,连入文本源为空时不产生任何附加。
+ *
+ * @returns 组装后的提示词 + 是否截断 + 实际附加的文本源数量
+ */
+export function assembleGeneratorPrompt(
+  prompt: string,
+  textSources: GeneratorTextSource[],
+  opts?: { maxChars?: number },
+): { prompt: string; truncated: boolean; appendedCount: number } {
+  const maxChars = opts?.maxChars ?? MAX_GENERATOR_PROMPT_CHARS;
+  const promptPart = prompt.trim();
+  if (!textSources || textSources.length === 0) {
+    return { prompt: promptPart, truncated: false, appendedCount: 0 };
+  }
+  const sections: string[] = [];
+  let appendedCount = 0;
+  for (const src of textSources) {
+    const content = (src.content ?? '').trim();
+    if (!content) continue;
+    sections.push(`【参考文本：${src.title || src.nodeType}】\n${content}`);
+    appendedCount++;
+  }
+  if (sections.length === 0) {
+    return { prompt: promptPart, truncated: false, appendedCount: 0 };
+  }
+
+  const attachment = `\n\n${sections.join('\n\n---\n\n')}`;
+  const full = promptPart + attachment;
+  if (full.length <= maxChars) {
+    return { prompt: full, truncated: false, appendedCount };
+  }
+  // 超限保护: 优先保留输入框描述,截断附件段落
+  const budget = Math.max(0, maxChars - promptPart.length);
+  const truncatedAttachment = attachment.slice(0, budget) + '\n\n[已截断：参考文本超长,已省略部分内容,可在生成器输入框补充要点]';
+  return {
+    prompt: (promptPart + truncatedAttachment).slice(0, maxChars),
+    truncated: true,
+    appendedCount,
+  };
+}
+
+/**
+ * 从图数据收集生成器的连入文本源(text/script 节点内容)
+ * 过滤条件: 以 genNodeId 为 input 目标的边,源节点类型为 text/script
+ */
+export function collectGeneratorTextSources(
+  graph: { nodes: Array<{ id: string; type: string; data?: Record<string, unknown>; title?: string }>; edges: Array<{ id: string; source: any; target: any }> },
+  genNodeId: string,
+): GeneratorTextSource[] {
+  const sources: GeneratorTextSource[] = [];
+  for (const edge of graph.edges) {
+    const tgt = typeof edge.target === 'object' ? edge.target?.nodeId : edge.target;
+    const pin = typeof edge.target === 'object' ? edge.target?.pinId : undefined;
+    if (tgt !== genNodeId || (pin !== undefined && pin !== 'input')) continue;
+    const src = typeof edge.source === 'object' ? edge.source?.nodeId : edge.source;
+    const node = graph.nodes.find((n) => n.id === src);
+    if (!node || !['text', 'script'].includes(node.type)) continue;
+    const data = node.data ?? {};
+    let content = '';
+    if (node.type === 'script') {
+      // 剧本: 优先收集剧集内容拼接(单集 HTML→纯文本),无剧集时回退 content 字段
+      const episodes = (data.episodes as Array<{ content?: string; title?: string }> | undefined) ?? [];
+      if (episodes.length > 0) {
+        content = episodes
+          .map((ep) => ep.content ?? '')
+          .map(htmlToPlainText)
+          .filter(Boolean)
+          .join('\n\n');
+      } else {
+        content = typeof data.content === 'string' ? (data.content as string) : '';
+      }
+    } else {
+      content = typeof data.content === 'string' ? (data.content as string) : '';
+    }
+    if (!content.trim()) continue;
+    sources.push({
+      nodeId: node.id,
+      nodeType: node.type,
+      title: (node.title as string) || data.title as string || node.id.slice(0, 8),
+      content,
+    });
+  }
+  return sources;
+}
+
 // ===== 占位节点替换 / 恢复工具函数 =====
 
 /**
@@ -332,6 +439,69 @@ export function restoreOldNode(
     q.execute(new AddEdgeCommand(edge));
   }
   savedOldNodes.delete(origNodeId);
+}
+
+/**
+ * Plan#33 D2: 生成器切换类型时,将下游产物节点转换为新目标类型
+ * - 通用字段迁移(title/prompt);类型专用字段丢弃
+ * - 调用方需确保非 stacked-media / ai-placeholder
+ * @returns 新节点 ID,或 null(失败/类型已匹配)
+ */
+export function convertTargetNodeType(
+  q: any,
+  targetNodeId: string,
+  newType: string,
+  extensions: Map<string, NodeTypeExtension>,
+): string | null {
+  const graph = q.getState();
+  const oldNode = graph.nodes.find((n: any) => n.id === targetNodeId);
+  if (!oldNode) return null;
+  if (oldNode.type === newType) return oldNode.id;
+
+  const incomingEdges = graph.edges.filter((e: any) => {
+    const tgt = typeof e.target === 'object' ? e.target?.nodeId : e.target;
+    return tgt === targetNodeId;
+  });
+  const outgoingEdges = graph.edges.filter((e: any) => {
+    const src = typeof e.source === 'object' ? e.source?.nodeId : e.source;
+    return src === targetNodeId;
+  });
+  for (const edge of [...incomingEdges, ...outgoingEdges]) {
+    q.execute(new RemoveEdgeCommand(edge.id));
+  }
+  q.execute(new RemoveNodeCommand(targetNodeId));
+
+  const newNodeId = `${newType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ext = extensions.get(newType);
+  const defaultSize = resolveNodeSize({}, ext);
+  const oldData = (oldNode.data ?? {}) as Record<string, unknown>;
+  const migrated: Record<string, unknown> = {};
+  if (typeof oldData.prompt === 'string') migrated.prompt = oldData.prompt;
+
+  q.execute(new AddNodeCommand({
+    id: newNodeId,
+    type: newType,
+    position: { ...oldNode.position },
+    size: { ...defaultSize },
+    title: oldNode.title ?? '',
+    data: migrated,
+  }));
+
+  for (const edge of incomingEdges) {
+    q.execute(new AddEdgeCommand({
+      id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      source: typeof edge.source === 'object' ? edge.source : { nodeId: edge.source },
+      target: { nodeId: newNodeId, pinId: 'input' },
+    }));
+  }
+  for (const edge of outgoingEdges) {
+    q.execute(new AddEdgeCommand({
+      id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      source: { nodeId: newNodeId, pinId: 'output' },
+      target: typeof edge.target === 'object' ? edge.target : { nodeId: edge.target },
+    }));
+  }
+  return newNodeId;
 }
 
 /**

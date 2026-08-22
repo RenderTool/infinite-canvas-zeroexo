@@ -65,8 +65,8 @@ export interface TemplateDef {
 export interface DynamicParamFormProps {
   /** 当前模型 ID(编码后的 "channelId::model" 格式) */
   model: string;
-  /** 生成模式 */
-  generationMode: 'image' | 'video' | 'audio';
+  /** 生成模式(Plan#33: 扩展 text,script/storyboard 走 GeneratorStaticParams 不走本组件) */
+  generationMode: 'image' | 'video' | 'audio' | 'text';
   /** 当前参数值 */
   paramValues: Record<string, any>;
   /** 参数值变更回调 */
@@ -473,6 +473,7 @@ function getTemplateType(mode: string): string {
     case 'image': return 'image';
     case 'video': return 'video';
     case 'audio': return 'audio';
+    case 'text': return 'text';
     default: return 'image';
   }
 }

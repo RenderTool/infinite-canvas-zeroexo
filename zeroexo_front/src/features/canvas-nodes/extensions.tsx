@@ -181,7 +181,7 @@ function createCreationExtension(
   nameKey: string,
   getStore: () => ReactGraphStore | null,
 ): NodeTypeExtension {
-  // 分镜节点仅允许剧本节点连入 input pin
+  // 分镜节点允许剧本 + 生成器节点连入 input pin(Plan#33 A7: 剧本不强制,生成器可直连分镜)
   // 出片节点仅允许分镜/统筹/主体节点连入 input pin
   const canConnect: NodeTypeExtension['canConnect'] =
     kind === 'storyboard'
@@ -191,8 +191,8 @@ function createCreationExtension(
           if (!store) return;
           const graph = store.getGraph();
           const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
-          if (sourceNode && sourceNode.type !== 'script') {
-            return { valid: false, reason: '分镜节点仅支持关联剧本节点' };
+          if (sourceNode && !['script', 'generator'].includes(sourceNode.type)) {
+            return { valid: false, reason: '分镜节点支持关联剧本或生成器节点' };
           }
         }
       : kind === 'workbench'
