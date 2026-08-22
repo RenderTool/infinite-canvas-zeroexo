@@ -26,6 +26,7 @@ export interface CollaborationSocketHandle {
 interface ActiveConnection {
   ac: AbortController;
   canvasId: string;
+  userId: string;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -37,9 +38,10 @@ const RECONNECT_DELAY_MS = 3000;
 
 /**
  * 建立画布协作房间的实时事件连接
+ * @param userId 当前用户 ID（用于检测自己被踢出）
  * @returns 连接句柄（close 方法）
  */
-export function connectCollaborationEvents(canvasId: string): CollaborationSocketHandle {
+export function connectCollaborationEvents(canvasId: string, userId?: string): CollaborationSocketHandle {
   const existing = activeConnections.get(canvasId);
   if (existing) {
     return { close: () => closeConnection(canvasId) };
@@ -48,6 +50,7 @@ export function connectCollaborationEvents(canvasId: string): CollaborationSocke
   const conn: ActiveConnection = {
     ac: new AbortController(),
     canvasId,
+    userId: userId ?? '',
     reconnectTimer: null,
   };
   activeConnections.set(canvasId, conn);
@@ -71,6 +74,14 @@ async function openStream(conn: ActiveConnection): Promise<void> {
       signal: ac.signal,
     });
     if (!response.ok) {
+      // 401/403/404 表示房间不存在或用户无权限 → 直接停止连接，不重连
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        const store = useCollaborationStore;
+        store.getState().setError('collaboration room not available');
+        store.getState().setActive(false);
+        activeConnections.delete(canvasId);
+        return;
+      }
       throw new Error(`HTTP ${response.status}`);
     }
 
@@ -176,9 +187,21 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       break;
     }
     case 'member_joined':
+      void refreshMembers(canvasId);
+      break;
     case 'member_left':
-    case 'member_updated':
-      // 成员列表变化 → 重新拉取
+      // 检测是否自己被踢出
+      if (event.meta?.kicked === true && event.userId) {
+        const conn = activeConnections.get(canvasId);
+        if (conn && conn.userId === event.userId) {
+          // 自己被踢出 → 断开 SSE 连接，停止重连，通知用户
+          closeConnection(canvasId);
+          store.getState().setActive(false);
+          store.getState().setError('你已被移出协作房间');
+          return;
+        }
+      }
+      // 非自己 → 刷新成员列表
       void refreshMembers(canvasId);
       break;
     case 'room_updated':
@@ -186,10 +209,12 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       void refreshRoom(canvasId);
       break;
     case 'room_closed':
+      // 房间已关闭 → 断开当前用户的 SSE 连接，停止所有同步
+      closeConnection(canvasId);
       store.getState().setRoom(null);
       store.getState().setActive(false);
       store.getState().setAgentStatus(null);
-      void refreshMembers(canvasId);
+      store.getState().setError('协作房间已关闭');
       break;
     case 'agent_thinking': {
       // Agent 开始思考

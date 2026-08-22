@@ -525,6 +525,13 @@ async function main(): Promise<void> {
         '根据上游剧本生成、维护、修正分镜表与主体清单。支持全量生成、单行重生成、主体合并、错误识别纠正、主体图替换等',
       maxIterations: 20,
     },
+    {
+      agentType: 'canvas_agent',
+      name: '画布编排助手',
+      description:
+        '通过对话编排画布节点操作，覆盖需求分析、节点管理、连线管理、配置管理、流程编排等',
+      maxIterations: 20,
+    },
   ];
   for (const cfg of agentConfigs) {
     await prisma.aiAgentConfig.upsert({

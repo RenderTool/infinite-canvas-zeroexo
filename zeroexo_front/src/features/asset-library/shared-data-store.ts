@@ -1,5 +1,5 @@
 /**
- * shared-data-store - 主体/提示词共享数据缓存层
+ * shared-data-store - 提示词共享数据缓存层
  *
  * 模块级外部 store（useSyncExternalStore），供 AssetLibraryPage 与
  * AssetLibraryModal 等多个 useAssetLibrary 实例共享同一份数据：
@@ -10,7 +10,6 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { listSubjects, type Subject } from './subjects-api.js';
 import { listPrompts, type Prompt } from './prompts-api.js';
 
 /** 缓存有效期：30s 内重复挂载不发请求 */
@@ -24,7 +23,6 @@ interface DataSlice<T> {
   fetchedAt: number;
 }
 
-let subjectsSlice: DataSlice<Subject> = { data: [], loading: false, fetchedAt: 0 };
 let promptsSlice: DataSlice<Prompt> = { data: [], loading: false, fetchedAt: 0 };
 
 const listeners = new Set<() => void>();
@@ -42,33 +40,6 @@ function subscribe(listener: () => void): () => void {
 
 function isFresh(fetchedAt: number): boolean {
   return fetchedAt > 0 && Date.now() - fetchedAt < TTL_MS;
-}
-
-// ── 主体 ──
-
-let subjectsInflight: Promise<void> | null = null;
-
-async function fetchSubjects(force: boolean): Promise<void> {
-  if (!force && isFresh(subjectsSlice.fetchedAt)) return;
-  if (subjectsInflight) {
-    if (!force) return subjectsInflight;
-    // 强制刷新：等待在途请求结束后重新拉取，避免并发竞态
-    await subjectsInflight;
-  }
-  subjectsInflight = (async () => {
-    try {
-      const list = await listSubjects();
-      subjectsSlice = { data: list, loading: false, fetchedAt: Date.now() };
-    } catch (err) {
-      console.error('[shared-data-store] load subjects failed', err);
-      subjectsSlice = { ...subjectsSlice, loading: false };
-    } finally {
-      emit();
-    }
-  })().finally(() => {
-    subjectsInflight = null;
-  });
-  return subjectsInflight;
 }
 
 // ── 提示词 ──
@@ -118,41 +89,12 @@ export function updatePromptFavoriteLocal(id: string, favorite: boolean): void {
   }
 }
 
-/** 乐观更新主体收藏状态，避免刷新后列表重新排列 */
-export function updateSubjectFavoriteLocal(id: string, favorite: boolean): void {
-  const idx = subjectsSlice.data.findIndex((s) => s.id === id);
-  if (idx >= 0) {
-    subjectsSlice = {
-      ...subjectsSlice,
-      data: subjectsSlice.data.map((s) => (s.id === id ? { ...s, favorite } : s)),
-    };
-    emit();
-  }
-}
-
 // ── 对外 Hook ──
-
-export interface SharedSubjectsResult {
-  subjects: Subject[];
-  loading: boolean;
-  /** force=true 强制刷新（写操作后）；false 走 TTL 缓存 */
-  refreshSubjects: (force?: boolean) => Promise<void>;
-}
 
 export interface SharedPromptsResult {
   prompts: Prompt[];
   loading: boolean;
   refreshPrompts: (force?: boolean) => Promise<void>;
-}
-
-/** 订阅共享主体数据（多实例共用同一份缓存） */
-export function useSharedSubjects(): SharedSubjectsResult {
-  const slice = useSyncExternalStore(subscribe, () => subjectsSlice);
-  const refreshSubjects = useCallback(
-    (force = true) => fetchSubjects(force),
-    [],
-  );
-  return { subjects: slice.data, loading: slice.loading, refreshSubjects };
 }
 
 /** 订阅共享提示词数据（多实例共用同一份缓存） */

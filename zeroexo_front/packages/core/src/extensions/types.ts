@@ -161,6 +161,21 @@ export interface NodeTypeExtension {
   defaultSize?: { width: number; height: number };
   validate?(node: NodeRecord): { valid: boolean; errors?: string[] };
 
+  /**
+   * 默认布局契约(2026-08-22): 创建新节点时的默认排布方式。
+   * 与 defaultSize 同级, 是"创建节点的默认排序契约参数"——
+   * 全创建入口必须通过 resolvePlacement 统一读取, 禁止业务层硬编码 position 偏移。
+   * 缺省 direction='auto'(锚点右侧), avoidOverlap=true(垂直整理避让)。
+   */
+  placement?: {
+    /** 相对锚点节点的默认方向: 水平右侧 / 垂直下方 / 自动(先右后下) */
+    direction?: 'right' | 'down' | 'auto';
+    /** 间距(px), 默认 96 */
+    gap?: number;
+    /** 是否自动避让重叠(垂直整理, 默认 true) */
+    avoidOverlap?: boolean;
+  };
+
   /** 是否允许 resize(默认 false,需显式启用) */
   resizable?: boolean;
   /** 最小尺寸约束 */

@@ -290,7 +290,7 @@ export function SelectedImageDetail({ image, ordinal, theme, t, onPromptChange, 
       <div style={formSectionStyle()}>
         <label style={formLabelStyle(theme)}>{t('productionManager.tags')}</label>
         <input
-          value={image.tags.join(', ')}
+          value={(image.tags ?? []).join(', ')}
           onChange={(e) => onTagsChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))}
           placeholder={t('productionManager.tagPlaceholder')}
           style={tagInputStyle(theme)}
@@ -340,7 +340,7 @@ export function ItemNavItem({ index, name, count, isActive, accent, surfaceBg, t
     >
       <span style={{
         width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 10, fontWeight: 700, background: isActive ? accent : 'rgba(128,128,128,0.2)', color: isActive ? '#fff' : 'inherit',
+        fontSize: 10, fontWeight: 700, color: '#fff', background: accent,
       }}>
         {index + 1}
       </span>

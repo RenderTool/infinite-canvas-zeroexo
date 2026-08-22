@@ -4,18 +4,27 @@
  * 校验 JWT 身份 + 确认用户是该画布协作房间的活跃成员。
  * 从 URL query 参数 `token` 或 Authorization header 中提取 JWT 直接验证签名，
  * 不依赖 AuthModule/Passport，避免 cyclic dependency。
+ *
+ * 同时限制每用户每房间最多 5 个 SSE 连接，防止连接耗尽。
  */
 
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { unauthorized, forbidden } from '../../common/errors/app-exception.js';
+import { unauthorized, forbidden, badRequest } from '../../common/errors/app-exception.js';
 import * as jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 
 @Injectable()
 export class CollaborationSseGuard implements CanActivate {
+  private readonly logger = new Logger(CollaborationSseGuard.name);
   private readonly secret: string;
+
+  /** 每用户每房间 SSE 连接数上限 */
+  private static readonly MAX_SSE_PER_ROOM = 5;
+
+  /** 活跃 SSE 连接计数: key=`userId:canvasId` → count */
+  private static readonly sseConnectionCounts = new Map<string, number>();
 
   constructor(
     configService: ConfigService,
@@ -63,8 +72,34 @@ export class CollaborationSseGuard implements CanActivate {
       if (!member) {
         throw forbidden('FORBIDDEN', 'You are not an active member of this room');
       }
+
+      // SSE 连接数限制
+      const key = `${userId}:${canvasId}`;
+      const currentCount = CollaborationSseGuard.sseConnectionCounts.get(key) ?? 0;
+      if (currentCount >= CollaborationSseGuard.MAX_SSE_PER_ROOM) {
+        this.logger.warn(`[SSE_LIMIT] 用户 ${userId} 在房间 ${canvasId} 的 SSE 连接数已达上限 (${CollaborationSseGuard.MAX_SSE_PER_ROOM})`);
+        throw badRequest('SSE_CONNECTION_LIMIT', `SSE 连接数已达上限 (${CollaborationSseGuard.MAX_SSE_PER_ROOM} 个)`);
+      }
     }
 
     return true;
+  }
+
+  /** 注册一个 SSE 连接（由 controller 在连接建立时调用） */
+  static incrementConnection(userId: string, canvasId: string): void {
+    const key = `${userId}:${canvasId}`;
+    const current = CollaborationSseGuard.sseConnectionCounts.get(key) ?? 0;
+    CollaborationSseGuard.sseConnectionCounts.set(key, current + 1);
+  }
+
+  /** 注销一个 SSE 连接（由 controller 在连接关闭时调用） */
+  static decrementConnection(userId: string, canvasId: string): void {
+    const key = `${userId}:${canvasId}`;
+    const current = CollaborationSseGuard.sseConnectionCounts.get(key) ?? 0;
+    if (current <= 1) {
+      CollaborationSseGuard.sseConnectionCounts.delete(key);
+    } else {
+      CollaborationSseGuard.sseConnectionCounts.set(key, current - 1);
+    }
   }
 }

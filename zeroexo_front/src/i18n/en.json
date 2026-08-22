@@ -584,7 +584,6 @@
       "script": "Script",
       "storyboard": "Storyboard",
       "workbench": "Workbench",
-      "subject": "Subject",
       "productionManager": "Production Manager"
     },
     "unbound": "No creation project bound",
@@ -1416,7 +1415,6 @@
     "PROMPT_NOT_FOUND": "Prompt not found",
     "PROMPT_FAVORITE_NOT_FOUND": "Favorite not found",
     "CREDIT_INSUFFICIENT": "Insufficient balance, please top up first",
-    "SUBJECT_NOT_FOUND": "Subject not found",
     "SCRIPT_NOT_FOUND": "Script not found",
     "FOLDER_NOT_FOUND": "Folder not found",
     "RESOURCE_NOT_FOUND": "Resource not found"
@@ -1578,6 +1576,9 @@
     "noScriptContent": "There is no script content to import",
     "untitledScript": "Untitled script",
     "addedToAssetLibrary": "Added to asset library",
+    "noSubjectsToManage": "No subjects recognized yet. Regenerate this episode first",
+    "cancelMapping": "Clear mapping",
+    "mappedToProduction": "Mapped to production item \"{{name}}\"",
     "addToAssetLibraryFailed": "Failed to add to asset library",
     "episodeLabel": "Episode {{number}}",
     "sampleBadge": "Sample",
@@ -1722,6 +1723,9 @@
       "muted": "Muted"
     },
     "kick": "Remove",
+    "kickConfirmTitle": "Confirm Remove Member",
+    "kickConfirmContent": "Are you sure you want to remove this member?",
+    "kickAndBan": "Also ban (prevent rejoining)",
     "memberKicked": "Member removed",
     "kickFailed": "Failed to remove member",
     "closeRoom": "Close Collaboration",
@@ -2063,6 +2067,8 @@
     "retry": "Retry",
     "abandon": "Abandon",
     "noShotsLinked": "This storyboard is not yet linked to a script. You can link a script from the toolbar below or click \"Edit\" to create manually.",
+    "linkedScriptNotGenerated": "Linked to script \"{{script}}\" {{episode}}, but storyboard not generated yet",
+    "linkedScriptNoEpisode": "Linked to a script, but no episode found. Re-select one from the toolbar below",
     "currentEpisode": "Current episode",
     "generateCurrentEpisode": "Generate storyboard for current episode"
   },

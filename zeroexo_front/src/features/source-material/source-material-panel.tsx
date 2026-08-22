@@ -802,12 +802,18 @@ export function SourceMaterialPanel({
 
 // ─── 工具函数 ───────────────────────────────────────────────────────
 
-/** 读取 File 为文本字符串 */
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('文件读取失败'));
-    reader.readAsText(file, 'utf-8');
-  });
+/** 读取 File 为文本字符串：UTF-8 优先，失败回落 GB18030（修复 Windows 中文 txt 常见 GBK 编码导致的中文乱码） */
+async function readFileAsText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    // 严格 UTF-8：非法字节序列会抛错，据此判定非 UTF-8 文件
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    try {
+      // GB18030 是 GBK/GB2312 超集，兼容 Windows 中文 txt 常见编码
+      return new TextDecoder('gb18030').decode(buf);
+    } catch {
+      return new TextDecoder('utf-8').decode(buf);
+    }
+  }
 }

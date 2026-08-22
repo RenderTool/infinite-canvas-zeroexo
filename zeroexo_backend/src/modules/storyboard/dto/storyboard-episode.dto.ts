@@ -71,6 +71,12 @@ export class ShotResponse {
   environment!: { location: string; time: string; weather: string };
   continuity!: { transition: string };
   prompt!: string;
+
+  /** 视频提示词生成 - 图片生成提示词(用于首帧/尾帧/宫格图) */
+  imagePrompt?: string;
+
+  /** 视频提示词生成 - 视频生成提示词(用于图生视频/文生视频) */
+  videoPrompt?: string;
 }
 
 /** 分镜按集生成响应 */

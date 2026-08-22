@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiGenerateService } from '../ai-generate/ai-generate.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { VideoPromptService } from '../video-prompt/video-prompt.service';
 import { StoryboardEpisodeDto, StoryboardEpisodeResponse } from './dto/storyboard-episode.dto';
 import { badRequest } from '../../common/errors/app-exception.js';
 
@@ -44,6 +45,7 @@ export class StoryboardService {
   constructor(
     private readonly aiGenerateService: AiGenerateService,
     private readonly promptsService: PromptsService,
+    private readonly videoPromptService: VideoPromptService,
   ) {}
 
   /**
@@ -103,7 +105,39 @@ export class StoryboardService {
     // 3. 解析 JSON 响应
     const shots = this.parseShotsFromText(result.text);
 
-    // 4. 返回结构化结果
+    // 4. 同步生成视频提示词(imagePrompt + videoPrompt)
+    try {
+      const promptResults = this.videoPromptService.generateVideoPromptBatch(
+        shots.map((s) => ({
+          description: s.description,
+          shotType: s.shotType,
+          cameraMovement: s.cameraMovement,
+          dialogue: s.dialogue,
+          voiceoverText: s.voiceoverText,
+          monologue: s.monologue,
+          sfx: s.sfx,
+          emotion: s.emotion,
+          lighting: s.lighting.mood,
+          environment: s.environment.location,
+          entities: s.entities.map((e) => ({
+            name: e.mention,
+            kind: 'character',
+            description: e.mention,
+            imageKey: undefined,
+          })),
+          duration: s.duration,
+        })),
+      );
+      promptResults.forEach((p, i) => {
+        shots[i].imagePrompt = p.imagePrompt;
+        shots[i].videoPrompt = p.videoPrompt;
+      });
+    } catch (err) {
+      // 视频提示词生成失败不阻塞主流程
+      this.logger.warn(`视频提示词生成失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 5. 返回结构化结果
     return {
       episodeNumber,
       episodeTitle,

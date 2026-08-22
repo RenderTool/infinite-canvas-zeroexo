@@ -1721,6 +1721,11 @@ export function createToolsForAgentType(
     return storyboardAssistantTools(ctx);
   }
 
+  // canvas_agent: 画布编排助手,使用 canvasTools + commonTools
+  if (agentType === 'canvas_agent') {
+    return [...canvasTools(ctx), ...commonTools(ctx)];
+  }
+
   const legacy = legacyToolFactories[agentType];
   if (legacy) {
     return legacy(ctx);

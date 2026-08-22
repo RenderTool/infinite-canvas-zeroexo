@@ -30,6 +30,7 @@
     "@zeroexo/plugin-render-react": "workspace:*",
     "@zeroexo/plugin-theme": "workspace:*",
     "@zeroexo/shared": "workspace:*",
+    "antd": "^6.5.1",
     "lucide-react": "^0.469.0",
     "wavesurfer.js": "^7.12.11"
   },

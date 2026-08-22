@@ -5,7 +5,7 @@
  * - 私有提示词：promptId 模式，可编辑
  * - 公共提示词：readOnly 模式，只读查看，支持收藏副本
  */
-import { Modal } from 'antd';
+import { App, Modal } from 'antd';
 import { FileText, X } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTranslation } from 'react-i18next';
@@ -71,9 +71,11 @@ export function PromptViewer({
   // ===================== 编辑脏态关闭拦截 =====================
   const [editDirty, setEditDirty] = useState(false);
 
+  const { modal } = App.useApp();
+
   const handleRequestClose = useCallback(() => {
     if (editDirty) {
-      Modal.confirm({
+      modal.confirm({
         title: t('promptViewer.discardUnsavedTitle'),
         content: t('promptViewer.discardUnsavedContent'),
         okText: t('promptViewer.discardAndExit'),

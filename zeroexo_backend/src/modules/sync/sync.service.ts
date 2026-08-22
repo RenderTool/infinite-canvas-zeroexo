@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import type { IncomingMessage, Server as HttpServer } from 'http';
 import type { Duplex } from 'stream';
 import * as jwt from 'jsonwebtoken';
-import { Server } from '@hocuspocus/server';
+import { Server, Extension } from '@hocuspocus/server';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /** 命名空间 → Project 字段映射（canvas 走 Project 表，不在此映射） */
@@ -19,6 +19,63 @@ type SyncNamespace = keyof typeof NAMESPACE_FIELD | typeof CANVAS_NAMESPACE;
 
 /** 合法命名空间列表（决定是否允许建立连接） */
 const VALID_NAMESPACES: readonly string[] = ['script', 'storyboard', 'generations', CANVAS_NAMESPACE];
+
+/**
+ * WebSocket 消息保护 Extension
+ * - 大小限制：单条更新不超过 1MB
+ * - 频率限制：每用户每秒最多 60 条更新
+ */
+class RateLimitExtension implements Extension {
+  private readonly logger = new Logger('RateLimitExtension');
+  private readonly updateCounts = new Map<string, { count: number; resetAt: number }>();
+  private cleanupTimer?: ReturnType<typeof setInterval>;
+
+  constructor() {
+    // 每 5 分钟清理过期记录，防止内存泄漏
+    this.cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, record] of this.updateCounts) {
+        if (now > record.resetAt + 60_000) {
+          this.updateCounts.delete(key);
+        }
+      }
+    }, 300_000);
+  }
+
+  // 实现 Extension.onChange(data) 钩子 — 每个 Yjs 更新都会触发
+  async onChange(data: { documentName: string; context: any; update: Uint8Array }) {
+    // 1. 检查消息大小（单条更新不超过 1MB）
+    if (data.update && data.update.byteLength > 1_048_576) {
+      this.logger.warn(`[SIZE] 更新过大: ${data.documentName}, size=${(data.update.byteLength / 1024).toFixed(1)}KB`);
+      throw new Error('Update too large (max 1MB)');
+    }
+
+    // 2. 检查频率
+    const userId = data.context?.userId as string | undefined;
+    if (!userId) return;
+
+    const now = Date.now();
+    const record = this.updateCounts.get(userId);
+    if (!record || now > record.resetAt) {
+      this.updateCounts.set(userId, { count: 1, resetAt: now + 1000 });
+      return;
+    }
+
+    record.count++;
+    if (record.count > 60) {
+      this.logger.warn(`[RATE] 用户 ${userId} 更新频率过高: ${data.documentName}`);
+      throw new Error('Update rate limit exceeded (max 60 updates/second)');
+    }
+  }
+
+  // 清理定时器
+  destroy() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+  }
+}
 
 /** 从 docName 解析命名空间与项目 ID（兼容 `/ws-sync/script:xxx` 等多段路径） */
 function parseDocName(docName: string): { namespace: SyncNamespace; artifactId: string } | null {
@@ -109,6 +166,9 @@ export class SyncService implements OnModuleDestroy {
 
     this.server = new Server({
       name: 'zeroexo-sync',
+      extensions: [
+        new RateLimitExtension(),
+      ],
       // 关键：不能把 NestJS httpServer 传给 websocketOptions.server！
       // crossws 的 node adapter 内部先置 noServer:true 再展开 serverOptions，
       // 传 server 后 ws 会走自身 handleUpgrade 链路，request 缺少 crossws 注入的

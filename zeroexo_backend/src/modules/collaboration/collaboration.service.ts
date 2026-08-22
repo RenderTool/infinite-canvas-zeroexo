@@ -374,28 +374,35 @@ export class CollaborationService {
     });
 
     if (existingMembers.length === 0) {
-      // 账户不在房间中（房主邀请了其他用户后，房主自己的新设备加入）
-      const sessionIndex = 0; // 房主身份，设为 0
+      // 账户不在房间中（可能是邀请加入，也可能是房主的新设备）
+      const isOwner = room.ownerId === userId;
+      const role = isOwner ? 'owner' : 'viewer';
+      const permissions = isOwner ? 'view,chat,edit,agent,download' : 'view,chat';
+      const sessionIndex = isOwner ? 0 : existingMembers.length;
+
       await this.prisma.collaborationMember.create({
         data: {
           roomId: room.id,
           userId,
-          role: 'owner',
-          permissions: 'view,chat,edit,agent,download',
+          role,
+          permissions,
           status: 'online',
           deviceType: deviceType ?? 'desktop',
           sessionIndex,
         },
       });
-      this.logger.log(`[auto-self] 用户 ${userId} 首次加入房间 ${room.id}`);
+      this.logger.log(`[autoJoin] 用户 ${userId} 首次加入房间 ${room.id} (role=${role})`);
       // 广播成员加入
       this.eventsService.broadcastToRoom(canvasId, {
         type: 'member_joined',
         userId,
-        meta: { role: 'owner', sessionIndex },
+        meta: { role, sessionIndex },
       });
     } else {
       // 账户已在房间中（多设备场景）
+      // 使用已有成员的角色
+      const existingRole = existingMembers[0].role;
+      const existingPermissions = existingMembers[0].permissions;
       // 计算新的 sessionIndex
       const maxIndex = Math.max(...existingMembers.map((m) => m.sessionIndex));
       const newSessionIndex = maxIndex + 1;
@@ -409,19 +416,19 @@ export class CollaborationService {
         data: {
           roomId: room.id,
           userId,
-          role: 'owner',
-          permissions: 'view,chat,edit,agent,download',
+          role: existingRole,
+          permissions: existingPermissions,
           status: 'online',
           deviceType: deviceType ?? 'desktop',
           sessionIndex: newSessionIndex,
         },
       });
-      this.logger.log(`[auto-self] 同账户多设备加入: userId=${userId}, 新sessionIndex=${newSessionIndex}`);
+      this.logger.log(`[autoJoin] 同账户多设备加入: userId=${userId}, role=${existingRole}, 新sessionIndex=${newSessionIndex}`);
       // 广播成员加入（新 session）
       this.eventsService.broadcastToRoom(canvasId, {
         type: 'member_joined',
         userId,
-        meta: { role: 'owner', sessionIndex: newSessionIndex },
+        meta: { role: existingRole, sessionIndex: newSessionIndex },
       });
     }
 
@@ -443,7 +450,7 @@ export class CollaborationService {
       data: { status: 'offline' },
     });
 
-    // 如果房主的最后一个会话离开，关闭房间
+    // 如果房主的最后一个会话离开，关闭房间（自清理机制：房间关闭 = 邀请码失效）
     const ownerActiveCount = await this.prisma.collaborationMember.count({
       where: { roomId: room.id, userId: room.ownerId, status: 'online' },
     });
@@ -453,7 +460,7 @@ export class CollaborationService {
         data: { status: 'closed' },
       });
       this.logger.log(`房主离开，关闭房间: ${room.id}`);
-      // 实时广播房间关闭事件
+      // 实时广播房间关闭事件（前端据此显示"协作房间已关闭"）
       this.eventsService.broadcastToRoom(canvasId, {
         type: 'room_closed',
         userId,
@@ -473,8 +480,9 @@ export class CollaborationService {
    * 获取用户已加入的所有协作房间列表
    */
   async listMyRooms(userId: string) {
+    // 查询用户所有房间（包括 offline 状态），避免用户感觉房间"刷新不出来"
     const memberships = await this.prisma.collaborationMember.findMany({
-      where: { userId, status: 'online' },
+      where: { userId, status: { notIn: ['banned'] } },
       include: {
         room: {
           include: {

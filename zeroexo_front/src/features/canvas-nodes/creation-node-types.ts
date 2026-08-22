@@ -29,7 +29,7 @@ export const CREATION_DEFAULT_SIZE: Record<CreationNodeType, { width: number; he
 export const CREATION_MIN_SIZE: Record<CreationNodeType, { width: number; height: number }> = {
   script: { width: 480, height: 360 },
   storyboard: { width: 640, height: 400 },
-  workbench: { width: 480, height: 360 },
+  workbench: { width: 640, height: 400 },
 };
 
 /** 分镜节点生成中的紧凑占位尺寸(生成完成后展开到 defaultSize) */

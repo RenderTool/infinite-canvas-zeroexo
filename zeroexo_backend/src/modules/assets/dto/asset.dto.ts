@@ -77,9 +77,13 @@ export class CreateAssetDto {
   @MinLength(1)
   filename!: string;
 
-  @ApiProperty({ description: 'MinIO 对象 key(由 presign 接口返回)' })
+  @ApiPropertyOptional({
+    description:
+      'MinIO 对象 key(由 presign 接口返回);text/script 类纯元数据资产无需传入,由服务端自动生成',
+  })
+  @IsOptional()
   @IsString()
-  storageKey!: string;
+  storageKey?: string;
 
   @ApiProperty({ example: 'image/png', description: 'MIME 类型' })
   @IsString()

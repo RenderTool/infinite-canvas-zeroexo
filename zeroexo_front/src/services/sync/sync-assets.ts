@@ -260,10 +260,11 @@ async function pushAssetToCloud(asset: Asset): Promise<string | undefined> {
   if (!local.cloudId) {
     if ((local.kind as string) === 'text' || (local.kind as string) === 'script') {
       const data = local.data as { content?: string };
+      // 纯元数据资产(内容存后端 text 字段,无存储文件):不传 storageKey,由服务端自动生成,
+      // 避免命中后端 resources/ 前缀校验
       const cloud = await apiPost<CloudAsset>('/resources', {
         kind: local.kind,
         filename: local.title,
-        storageKey: `text/${local.id}.txt`,
         mimeType: local.mimeType ?? 'text/plain',
         size: local.bytes,
         text: typeof data.content === 'string' ? data.content : '',

@@ -133,10 +133,11 @@ export const SAMPLE_SUBJECTS: AiSubject[] = [
   { name: '老茶馆', kind: 'scene', aliases: ['茶馆'], description: '木桌竹椅、茶香袅袅的老式茶馆' },
 ];
 
+/** 实体类型颜色标准(对齐 production-manager-types KIND_COLOR, 全站统一) */
 export const ENTITY_KIND_META: Record<EntityKind, { emoji: string; color: string; labelKey: string }> = {
-  character: { emoji: '\u{1F464}', color: '#5DDCFF', labelKey: 'entity.character' },
-  scene: { emoji: '\u{1F4CD}', color: '#4ade80', labelKey: 'entity.scene' },
-  prop: { emoji: '\u{1F4E6}', color: '#fbbf24', labelKey: 'entity.prop' },
+  character: { emoji: '\u{1F464}', color: '#22c55e', labelKey: 'entity.character' }, // 角色绿色
+  scene: { emoji: '\u{1F4CD}', color: '#3b82f6', labelKey: 'entity.scene' },        // 场景蓝色
+  prop: { emoji: '\u{1F4E6}', color: '#a855f7', labelKey: 'entity.prop' },           // 道具紫色
 };
 
 /**

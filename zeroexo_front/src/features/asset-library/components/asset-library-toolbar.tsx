@@ -10,7 +10,6 @@ import {
   Search,
   Upload,
   BookOpen,
-  User as UserIcon,
   Sparkles,
   Grid3X3,
   List,
@@ -43,7 +42,6 @@ export interface AssetLibraryToolbarProps {
   onUploadMaterial: (files: FileList) => void;
   /** 上传文件选择器 ref（与页面右键菜单「上传素材」共用同一入口） */
   materialFileInputRef: { current: HTMLInputElement | null };
-  onNewSubject: () => void;
   onNewPrompt: () => void;
   onNewScript: () => void;
 }
@@ -66,7 +64,6 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
   onMultiSelectToggle,
   onUploadMaterial,
   materialFileInputRef,
-  onNewSubject,
   onNewPrompt,
   onNewScript,
 }: AssetLibraryToolbarProps): React.ReactElement {
@@ -165,13 +162,6 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
             e.target.value = '';
           }}
         />
-        <Tooltip title="新建主体">
-          <Button
-            size="small"
-            icon={<UserIcon size={14} />}
-            onClick={onNewSubject}
-          />
-        </Tooltip>
         <Tooltip title="新建提示词">
           <Button
             size="small"

@@ -16,9 +16,9 @@
 - canvasRemoveNode: 删除前必须确认无下游依赖
 - canvasSetSelection/canvasFocus: 辅助操作
 
-## 统筹节点专项（Plan#29 主体系统 V3）
-统筹（type=production-manager）是一部剧的资产管理器（剧级聚合节点），data 字段：title、scriptId（关联剧本）、items（条目数组：id/name/kind(character|scene|prop)/aliases/consistency/voice/note/episodeIds/images(剧照集，每张挂自由 tags)/prompt）。
-1. **唯一事实源**: 一部剧只有一个统筹节点（按 scriptId 关联）；角色/场景/道具一律登记为条目，不建散落节点
+## 剧管节点专项（Plan#29 主体系统 V3）
+剧管（type=production-manager）是一部剧的资产管理器（剧级聚合节点），data 字段：title、scriptId（关联剧本）、items（条目数组：id/name/kind(character|scene|prop)/aliases/consistency/voice/note/episodeIds/images(剧照集，每张挂自由 tags)/prompt）。
+1. **唯一事实源**: 一部剧只有一个剧管节点（按 scriptId 关联）；角色/场景/道具一律登记为条目，不建散落节点
 2. **幂等登记**: AI 识别的主体按 name/aliases 匹配既有条目——命中则合并别名/出场集，未命中才新建条目，严禁重复登记
 3. **条目稳定 id**: 分镜引用以条目 id 为锚（改名不断链）；条目被引用时删除需用户确认
 4. **状态已废弃**: 不再有「状态」枚举，形象图是「剧照集 + 自由标签」，不要生成 states 字段

@@ -583,8 +583,7 @@
       "script": "剧本",
       "storyboard": "分镜",
       "workbench": "出片",
-      "subject": "主体",
-      "productionManager": "统筹"
+      "productionManager": "剧管"
     },
     "unbound": "尚未绑定创作项目",
     "bindButton": "选择创作项目",
@@ -1415,7 +1414,6 @@
     "PROMPT_NOT_FOUND": "提示词不存在",
     "PROMPT_FAVORITE_NOT_FOUND": "收藏不存在",
     "CREDIT_INSUFFICIENT": "余额不足，请先充值",
-    "SUBJECT_NOT_FOUND": "主体不存在",
     "SCRIPT_NOT_FOUND": "剧本不存在",
     "FOLDER_NOT_FOUND": "文件夹不存在",
     "RESOURCE_NOT_FOUND": "资源不存在"
@@ -1577,6 +1575,9 @@
     "noScriptContent": "当前没有可导入的剧本内容",
     "untitledScript": "未命名剧本",
     "addedToAssetLibrary": "已加入资产库",
+    "noSubjectsToManage": "暂无识别主体，请先点击「重新生成」生成该集分镜",
+    "cancelMapping": "取消映射",
+    "mappedToProduction": "已映射到剧管「{{name}}」",
     "addToAssetLibraryFailed": "加入资产库失败",
     "episodeLabel": "第 {{number}} 集",
     "sampleBadge": "范文示例",
@@ -1721,6 +1722,9 @@
       "muted": "已禁言"
     },
     "kick": "移出",
+    "kickConfirmTitle": "确认移出成员",
+    "kickConfirmContent": "确定要移出该成员吗？",
+    "kickAndBan": "同时封禁（禁止重新加入）",
     "memberKicked": "已移出该成员",
     "kickFailed": "移出失败",
     "closeRoom": "关闭协作",
@@ -2062,6 +2066,8 @@
     "retry": "重试生成",
     "abandon": "放弃",
     "noShotsLinked": "此分镜尚未关联剧本，可在下方工具栏「关联剧本」，或点击「编辑」手动创建",
+    "linkedScriptNotGenerated": "已关联剧本「{{script}}」{{episode}}，尚未生成分镜",
+    "linkedScriptNoEpisode": "已关联剧本，但未找到分镜集，可在下方工具栏重新选择",
     "currentEpisode": "当前集",
     "generateCurrentEpisode": "生成当前集分镜"
   },
@@ -2074,7 +2080,7 @@
   },
   "productionManager": {
     "detail": "编辑资产清单",
-    "editorTitle": "统筹",
+    "editorTitle": "剧管",
     "emptyItems": "暂无条目",
     "unnamed": "未命名",
     "selectToEdit": "选择条目",
@@ -2097,7 +2103,7 @@
     "add_character": "添加演员",
     "add_scene": "添加场景",
     "add_prop": "添加道具",
-    "registered": "已登记 {{count}} 个条目进统筹",
+    "registered": "已登记 {{count}} 个条目进剧管",
     "sendToAsset": "发送到资产（提示词）",
     "sentToAsset": "已作为提示词条目发送到资产",
     "noPromptToSend": "提示词为空",

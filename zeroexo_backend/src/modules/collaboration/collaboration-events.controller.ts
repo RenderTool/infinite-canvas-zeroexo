@@ -7,7 +7,7 @@
  * 连接建立后收到该画布协作房间的实时事件（成员加入/离开、消息、权限变更等）。
  */
 
-import { Controller, Get, Param, UseGuards, Sse } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards, Sse, Logger } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { CollaborationEventsService, CollaborationEvent } from './collaboration-events.service';
 import { CollaborationSseGuard } from './collaboration-sse.guard';
@@ -16,6 +16,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @Controller('collaboration')
 @UseGuards(CollaborationSseGuard)
 export class CollaborationEventsController {
+  private readonly logger = new Logger(CollaborationEventsController.name);
+
   constructor(private readonly eventsService: CollaborationEventsService) {}
 
   /**
@@ -27,9 +29,12 @@ export class CollaborationEventsController {
     @Param('canvasId') canvasId: string,
     @CurrentUser() user: { id: string },
   ): Observable<CollaborationEvent> {
+    // 注册 SSE 连接（前置守卫已通过，计数在连接建立时递增）
+    CollaborationSseGuard.incrementConnection(user.id, canvasId);
+    this.logger.debug(`[SSE] 用户 ${user.id} 连接房间 ${canvasId}`);
+
     const events = this.eventsService.subscribe(canvasId);
 
-    // 连接建立后先发送欢迎事件，让客户端确认已进入房间事件流
     return new Observable<CollaborationEvent>((subscriber) => {
       const sub = events.subscribe(subscriber);
       subscriber.next({
@@ -39,7 +44,12 @@ export class CollaborationEventsController {
         timestamp: Date.now(),
         meta: { connectedAt: Date.now() },
       });
-      return () => sub.unsubscribe();
-    });
+      return () => {
+        sub.unsubscribe();
+        // 连接关闭时注销计数
+        CollaborationSseGuard.decrementConnection(user.id, canvasId);
+        this.logger.debug(`[SSE] 用户 ${user.id} 断开房间 ${canvasId}`);
+      };
+    }) as Observable<CollaborationEvent>;
   }
 }

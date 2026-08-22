@@ -170,12 +170,25 @@ export function ScriptFullscreenEditor({
       importFileRef.current?.click();
     }
   }, [onImportClick]);
+  /** 智能读取文本文件:UTF-8 优先,失败回落 GB18030(修复 Windows 中文 txt 常见 GBK 编码导致的中文乱码) */
+  const readFileSmart = useCallback(async (file: File): Promise<string> => {
+    const buf = await file.arrayBuffer();
+    try {
+      // 严格 UTF-8:非法字节序列会抛错,据此判定非 UTF-8 文件
+      return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    } catch {
+      try {
+        // GB18030 是 GBK/GB2312 超集,兼容 Windows 中文 txt 常见编码
+        return new TextDecoder('gb18030').decode(buf);
+      } catch {
+        return new TextDecoder('utf-8').decode(buf);
+      }
+    }
+  }, []);
   const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string ?? '';
+    void readFileSmart(file).then((text) => {
       if (!text.trim()) return;
       // 将导入内容作为新剧集
       const newEp: Episode = {
@@ -185,10 +198,9 @@ export function ScriptFullscreenEditor({
         content: text,
       };
       onEpisodesAndActiveChange([...episodes, newEp], newEp.id);
-    };
-    reader.readAsText(file);
+    });
     e.target.value = '';
-  }, [episodes, onEpisodesAndActiveChange]);
+  }, [episodes, onEpisodesAndActiveChange, readFileSmart]);
 
   // ── 可拖拽分割线 ──
   const [episodeListWidth, setEpisodeListWidth] = useState(DEFAULT_EPISODE_LIST_WIDTH);

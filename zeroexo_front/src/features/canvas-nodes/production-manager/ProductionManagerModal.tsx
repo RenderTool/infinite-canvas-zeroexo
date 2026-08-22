@@ -25,8 +25,7 @@ import { createPrompt } from '@/features/asset-library/prompts-api.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { useImagePanZoom } from '@/shared/components/image-viewer.js';
 import { useAuth } from '@/features/auth/auth-store.js';
-import {
-  createProductionItem,
+import { createProductionItem, KIND_COLOR,
   type ProductionItem, type ProductionItemImage, type ProductionItemKind, type ProductionManagerData,
 } from './production-manager-types.js';
 import {
@@ -41,11 +40,13 @@ export interface ProductionManagerModalProps {
   open: boolean;
   onClose: () => void;
   data: ProductionManagerData;
+  /** 打开时默认选中的条目 id（视图态同步，来自节点当前活跃项） */
+  initialActiveItemId?: string | null;
   onDataChange: (next: ProductionManagerData) => void;
 }
 
 export const ProductionManagerModal = memo(function ProductionManagerModal({
-  open, onClose, data, onDataChange,
+  open, onClose, data, initialActiveItemId = null, onDataChange,
 }: ProductionManagerModalProps) {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -59,14 +60,15 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
   const pageBg = theme.canvas.background;
   const surfaceBg = theme.node.fill;
 
-  // ===== 当前活跃条目 =====
+  // ===== 当前活跃条目（纯视图态：不落 node.data、不进撤销栈） =====
+  const [activeItemId, setActiveItemId] = useState<string | null>(initialActiveItemId ?? null);
   const activeItem = useMemo(
-    () => data.items.find((i) => i.id === data.activeItemId) ?? data.items[0] ?? null,
-    [data.items, data.activeItemId],
+    () => data.items.find((i) => i.id === activeItemId) ?? data.items[0] ?? null,
+    [data.items, activeItemId],
   );
 
-  // ===== 图库视图模式 =====
-  const [galleryView, setGalleryView] = useState<'grid' | 'album'>('grid');
+  // ===== 图库视图模式(2026-08-22: 图册为首选展示, 避免画面内容在没图时太空) =====
+  const [galleryView, setGalleryView] = useState<'grid' | 'album'>('album');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState<Record<string, number>>({});
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
@@ -148,14 +150,21 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
     // 主动递增命名：同类型计数 +1（演员 1 / 场景 2 / 道具 3）
     const sameKindCount = data.items.filter((i) => i.kind === kind).length;
     item.name = `${t(`entity.${kind}`)} ${sameKindCount + 1}`;
-    onDataChange({ ...data, items: [...data.items, item], activeItemId: item.id });
+    onDataChange({ ...data, items: [...data.items, item] });
+    setActiveItemId(item.id);
   }, [data, onDataChange, t]);
 
   const handleDeleteItem = useCallback((itemId: string) => {
+    const target = data.items.find((i) => i.id === itemId);
     const nextItems = data.items.filter((i) => i.id !== itemId);
-    const nextActive = data.activeItemId === itemId ? (nextItems[0]?.id ?? null) : data.activeItemId;
-    onDataChange({ ...data, items: nextItems, activeItemId: nextActive ?? undefined });
-  }, [data, onDataChange]);
+    const nextActive = activeItemId === itemId ? (nextItems[0]?.id ?? null) : activeItemId;
+    // 记录删除的实体名: 防止 LLM 重新识别时把已删条目复活进剧管(幂等)
+    const deletedNames = target?.name && !(data.deletedNames ?? []).includes(target.name)
+      ? [...(data.deletedNames ?? []), target.name]
+      : (data.deletedNames ?? []);
+    onDataChange({ ...data, items: nextItems, deletedNames });
+    setActiveItemId(nextActive);
+  }, [data, onDataChange, activeItemId]);
 
   // ===== 图片导入 =====
   const handleImportImage = useCallback(async (file: File) => {
@@ -196,7 +205,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
         title: activeItem.name.trim(),
         content,
         category: activeItem.kind === 'character' ? 'role' : activeItem.kind,
-        tags: [...activeItem.aliases],
+        tags: [...(activeItem.aliases ?? [])],
         imageKeys: activeItem.images.map((i) => i.storageKey),
       });
       antdMessage.success(t('productionManager.sentToAsset'));
@@ -272,7 +281,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
     const kw = searchText.trim().toLowerCase();
     const match = (it: ProductionItem) => !kw
       || it.name.toLowerCase().includes(kw)
-      || it.aliases.some((a) => a.toLowerCase().includes(kw));
+      || (it.aliases ?? []).some((a) => a.toLowerCase().includes(kw));
     const order: ProductionItemKind[] = ['character', 'scene', 'prop'];
     return order.map((kind) => ({ kind, items: data.items.filter((i) => i.kind === kind && match(i)) }));
   }, [data.items, searchText]);
@@ -349,9 +358,9 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                 data={flatRows}
                 style={{ flex: 1, minHeight: 0 }}
                 itemContent={(_, row) => row.type === 'header' ? (
-                  <label style={{ ...formLabelStyle(theme), marginBottom: 2, marginTop: 6 }}>
-                    {(() => { const GroupIcon = KIND_ICON[row.kind]; return <GroupIcon size={11} style={{ opacity: 0.6 }} />; })()}
-                    {t(`entity.${row.kind}`)} · {row.count}
+                  <label style={{ ...formLabelStyle(theme), marginBottom: 2, marginTop: 6, gap: 6 }}>
+                    {(() => { const GroupIcon = KIND_ICON[row.kind]; return <GroupIcon size={11} style={{ color: KIND_COLOR[row.kind] }} />; })()}
+                    <span style={{ color: KIND_COLOR[row.kind] }}>{t(`entity.${row.kind}`)}</span> · {row.count}
                   </label>
                 ) : (
                   <ItemNavItem
@@ -359,12 +368,12 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                     name={row.item.name}
                     count={row.item.images.length}
                     isActive={activeItem?.id === row.item.id}
-                    accent={accent}
+                    accent={KIND_COLOR[row.item.kind]}
                     surfaceBg={surfaceBg}
                     textMuted={textMuted}
                     deletable
                     tDelete={t('common.delete')}
-                    onClick={() => onDataChange({ ...data, activeItemId: row.item.id })}
+                    onClick={() => setActiveItemId(row.item.id)}
                     onDelete={() => handleDeleteItem(row.item.id)}
                   />
                 )}
@@ -439,7 +448,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                         localPreview={localPreviews[img.storageKey]}
                         ordinal={i + 1}
                         isCover={activeItem?.coverKey === img.storageKey}
-                        tags={img.tags}
+                        tags={img.tags ?? []}
                         theme={theme}
                         onClick={() => handleOpenAlbum(img.storageKey)}
                         onDelete={() => handleRemoveImage(img.storageKey)}
@@ -522,7 +531,7 @@ export const ProductionManagerModal = memo(function ProductionManagerModal({
                 <div style={formSectionStyle()}>
                   <label style={formLabelStyle(theme)}>{t('productionManager.aliases')}</label>
                   <input
-                    value={activeItem.aliases.join(', ')}
+                    value={(activeItem.aliases ?? []).join(', ')}
                     onChange={(e) => patchActiveItem({ aliases: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
                     placeholder={t('productionManager.aliasesPlaceholder')}
                     style={tagInputStyle(theme)}

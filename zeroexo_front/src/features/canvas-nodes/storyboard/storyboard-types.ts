@@ -10,8 +10,10 @@
 
 // ===== 枚举 =====
 
-export type ShotType = '特写' | '近景' | '中景' | '中近景' | '中远景' | '远景' | '大全景' | '全景';
-export type CameraMovement = '固定' | '推' | '拉' | '摇' | '移' | '跟' | '升' | '降' | '推拉' | '环绕' | '航拍';
+// 2026-08-22 多景别兼容(用户拍板): 放宽为自由文本——一镜到底等复合景别(如「全景→特写」)直接以字符串承载,
+// 与 CameraMovement 同策略(预设 + 自定义输入); 预设清单见 ShotSizePickerModal SHOTS
+export type ShotType = string;
+export type CameraMovement = string;
 export type ShotTransition = 'cut' | 'fade' | 'dissolve' | 'wipe' | 'match' | 'jump';
 export type EntityKind = 'character' | 'scene' | 'prop';
 
@@ -21,6 +23,8 @@ export interface EntityRef {
   entityId: string;
   mention: string;
   stateId?: string;
+  /** 2026-08-21: 映射到的剧管条目 id(剧管=分镜后置, 分镜主体列点击实体可映射到剧管条目) */
+  cardId?: string;
   position?: string;
   appearance?: string;
 }
@@ -156,6 +160,8 @@ export interface StoryboardNodeData {
   conflicts?: EntityConflict[];
   /** Plan#20 T4: 后端汇总阶段产出的主体字典(供占位主体堆叠创建/主体标注匹配) */
   aiSubjects?: AiSubject[];
+  /** 2026-08-21: 关联剧管节点 id(剧管=分镜后置工序, 分镜主体列映射到剧管条目) */
+  productionManagerId?: string;
 }
 
 // ===== Plan#20 T5: 主体节点数据类型 =====

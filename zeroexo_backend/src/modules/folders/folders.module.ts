@@ -5,7 +5,7 @@ import { LogsModule } from '../logs/logs.module';
 
 /**
  * 文件夹模块 - 提供树形文件夹 CRUD 与系统根目录懒加载。
- * 导出 FoldersService 供 AssetsModule / PromptsModule / SubjectsModule 引用。
+ * 导出 FoldersService 供 AssetsModule / PromptsModule 引用。
  */
 @Module({
   imports: [LogsModule],

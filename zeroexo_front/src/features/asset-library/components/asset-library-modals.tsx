@@ -72,13 +72,7 @@ export interface AssetLibraryModalsProps {
   ctxMenuItems: ContextMenuItem[];
   onCtxMenuClose: () => void;
 
-  // 主体创建
-  subjectCreateOpen: boolean;
-  subjectCreateId: string | undefined;
-  onSubjectCreateClose: () => void;
-  onSubjectCreateSaved: () => void;
-
-  // 提示词创建
+  // 提示词创建/编辑
   promptCreateOpen: boolean;
   promptCreateId: string | undefined;
   onPromptCreateClose: () => void;

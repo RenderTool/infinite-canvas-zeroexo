@@ -3,20 +3,22 @@
  *
  * 布局 = 主体卡基线同款（左垂直导航 + 右封面舞台 + 信息条），禁止自由发挥：
  * - 左侧 sidebar = ThumbNav 垂直导航（与堆叠/主体同一套框架：上限 5 + 滑动窗口 + 1/N 页码 + 自适应降档）
- *   切换不同实体条目（activeItemId 落 node.data，对齐堆叠 activeIndex 模式）
+ *   切换不同实体条目（纯视图态 useState，不落 node.data、不进撤销栈——切卡只是浏览，非持久化变更）
  * - 右侧 content = 当前条目封面舞台（首张剧照 contain，无图 → Rabbit 骨架）+ 信息条（名称 + 类型 + 摘要）
  * - 低对比设计：类型用图标 + 文字，不用高饱和色块
- * - 详情编辑走胶囊菜单「详情」→ nodeActionBus 'productionManager:openEditor' → 打开 ProductionManagerModal
+ * - 详情编辑走胶囊菜单「编辑」→ nodeActionBus 'productionManager:fullscreen' → 打开 ProductionManagerModal
  * - 图片 draggable=false，拖拽节点不误触发素材投放
+ * 图标契约：Rabbit 为装饰性图标（空态骨架/KIND_ICON 兜底/标题占位），允许直连 lucide；胶囊交互图标一律走 ../icons.ts。
  */
 import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Rabbit } from 'lucide-react';
+import { Rabbit } from 'lucide-react'; // 装饰性图标（空态骨架），契约允许直连，禁止用于胶囊交互
 import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView, nodeActionBus, ThumbNav, useHydratedContent } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import type { ProductionManagerData } from './production-manager-types';
+import { KIND_COLOR } from './production-manager-types';
 import { ProductionManagerModal } from './ProductionManagerModal';
 import { ItemThumb, KIND_ICON } from './production-manager-panels';
 
@@ -33,7 +35,6 @@ function parseData(data: Record<string, unknown> | undefined): ProductionManager
     title: (data.title as string) ?? '',
     scriptId: data.scriptId as string | undefined,
     items: Array.isArray(data.items) ? (data.items as ProductionManagerData['items']) : [],
-    activeItemId: data.activeItemId as string | undefined,
   };
 }
 
@@ -72,28 +73,24 @@ export const ProductionManagerView = memo(function ProductionManagerView({
 
   // 胶囊菜单「详情」→ 打开编辑器
   useEffect(() => {
-    const unsub = nodeActionBus.on('productionManager:openEditor', (event: { nodeId: string }) => {
+    const unsub = nodeActionBus.on('productionManager:fullscreen', (event: { nodeId: string }) => {
       if (event.nodeId === node.id) setEditorOpen(true);
     });
     return unsub;
   }, [node.id]);
 
-  // 当前活跃条目 + 索引（对齐堆叠 activeIndex 模式）
-  const activeItem = useMemo(
-    () => data.items.find((i) => i.id === data.activeItemId) ?? data.items[0] ?? null,
-    [data.items, data.activeItemId],
-  );
-  const activeIndex = useMemo(
-    () => Math.max(0, data.items.findIndex((i) => i.id === (activeItem?.id ?? ''))),
-    [data.items, activeItem],
-  );
+  // 当前活跃条目索引（纯视图态：不落 node.data、不进撤销栈；items 收缩时回落 0）
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => {
+    if (activeIndex >= data.items.length) setActiveIndex(0);
+  }, [data.items.length, activeIndex]);
+  const activeItem = data.items[Math.min(activeIndex, data.items.length - 1)] ?? null;
 
-  // 条目切换（数据落 activeItemId，与堆叠切卡语义一致）
+  // 条目切换（仅本地视图态，无副作用）
   const handleItemChange = useCallback((index: number) => {
-    const target = data.items[index];
-    if (!target || target.id === activeItem?.id) return;
-    updateNode({ data: { ...(node.data as Record<string, unknown>), activeItemId: target.id } });
-  }, [data.items, activeItem, updateNode, node.data]);
+    if (index < 0 || index >= data.items.length) return;
+    setActiveIndex(index);
+  }, [data.items.length]);
 
   const handlePrev = useCallback(() => {
     if (data.items.length <= 1) return;
@@ -164,8 +161,8 @@ export const ProductionManagerView = memo(function ProductionManagerView({
 
           {/* 右侧主区：封面舞台 + 信息条 */}
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            {/* 封面舞台（当前条目首张剧照，contain） */}
-            <div style={coverAreaStyle(contentSurface)} onDoubleClick={() => setEditorOpen(true)}>
+            {/* 封面舞台（当前条目首张剧照，contain）— 2026-08-22: 移除双击打开编辑器, 双击回归画布聚焦契约(viewport-focus-contract); 全屏编辑统一走胶囊菜单 */}
+            <div style={coverAreaStyle(contentSurface)}>
               {activeItem ? (
                 <ItemCover storageKey={activeItem.images[0]?.storageKey} dark={isDark} />
               ) : (
@@ -184,7 +181,7 @@ export const ProductionManagerView = memo(function ProductionManagerView({
                     {activeItem ? (activeItem.name || t('productionManager.unnamed')) : (data.title || t('canvasNodes.stage.productionManager'))}
                   </span>
                   {activeItem && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: textMuted, flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, background: `${KIND_COLOR[activeItem.kind]}18`, color: KIND_COLOR[activeItem.kind], borderRadius: 999, padding: '1px 8px 1px 5px', fontSize: 10, fontWeight: 600, lineHeight: '18px' }}>
                       <ActiveKindIcon size={10} />
                       {t(`entity.${activeItem.kind}`)}
                     </span>
@@ -207,6 +204,7 @@ export const ProductionManagerView = memo(function ProductionManagerView({
           open={editorOpen}
           onClose={() => setEditorOpen(false)}
           data={data}
+          initialActiveItemId={activeItem?.id ?? null}
           onDataChange={(next) => updateNode({ data: { ...(node.data as Record<string, unknown>), ...next } })}
         />
       )}

@@ -9,6 +9,13 @@
 
 export type ProductionItemKind = 'character' | 'scene' | 'prop';
 
+/** 实体类型颜色标准：角色绿色、场景蓝色、道具紫色 */
+export const KIND_COLOR: Record<ProductionItemKind, string> = {
+  character: '#22c55e', // 绿色
+  scene: '#3b82f6',     // 蓝色
+  prop: '#a855f7',      // 紫色
+};
+
 /** 剧照（prompt=生成提示词，note=备注，tags=自由标签——对齐资产库提示词 card 标签体系） */
 export interface ProductionItemImage {
   storageKey: string;
@@ -47,8 +54,8 @@ export interface ProductionManagerData {
   /** 关联剧本节点 id（剧本→统筹自动建联） */
   scriptId?: string;
   items: ProductionItem[];
-  /** 当前活跃条目（节点垂直导航切换，对齐堆叠 activeIndex 模式） */
-  activeItemId?: string;
+  /** 用户删除过的实体名(LLM 识别注册时跳过, 防止重新生成时已删条目复活; 用户手动添加同名条目时清除) */
+  deletedNames?: string[];
 }
 
 export function createProductionItem(kind: ProductionItemKind, name = ''): ProductionItem {
@@ -67,7 +74,7 @@ export function createProductionItem(kind: ProductionItemKind, name = ''): Produ
 }
 
 export function createProductionManagerDefaultData(): ProductionManagerData {
-  return { title: '统筹', items: [] };
+  return { title: '剧管', items: [] };
 }
 
 /** 条目名字键集合（名字 + 别名，供幂等匹配） */

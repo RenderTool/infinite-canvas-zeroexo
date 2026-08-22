@@ -29,7 +29,7 @@ interface AuthedRequest extends Request {
  *
  * 邀请码:
  *   POST   /api/collaboration/rooms/:canvasId/invite       生成/重置邀请码
- *   GET    /api/collaboration/rooms/:canvasId/invite/:code 验证邀请码
+ *   GET    /api/collaboration/invite/:code                  验证邀请码
  *
  * 加入/离开:
  *   POST   /api/collaboration/rooms/:canvasId/join         通过邀请码加入
@@ -41,6 +41,7 @@ interface AuthedRequest extends Request {
  *   PATCH  /api/collaboration/rooms/:canvasId/members/:userId    更新成员权限
  *   DELETE /api/collaboration/rooms/:canvasId/members/:userId    踢出成员
  *   POST   /api/collaboration/rooms/:canvasId/members/:userId/ban     封禁
+ *   POST   /api/collaboration/rooms/:canvasId/members/:userId/unban   解禁
  *   POST   /api/collaboration/rooms/:canvasId/members/:userId/mute    禁言
  *
  * 消息:
@@ -105,7 +106,7 @@ export class CollaborationController {
     return this.collaborationService.regenerateInvite(req.user.id, canvasId, expiresInHours);
   }
 
-  @Get('rooms/:canvasId/invite/:code')
+  @Get('invite/:code')
   async verifyInvite(@Param('code') code: string) {
     return this.collaborationService.verifyInvite(code);
   }
@@ -170,6 +171,15 @@ export class CollaborationController {
     @Param('userId') memberUserId: string,
   ) {
     return this.memberService.banMember(canvasId, memberUserId, req.user.id);
+  }
+
+  @Post('rooms/:canvasId/members/:userId/unban')
+  async unbanMember(
+    @Req() req: AuthedRequest,
+    @Param('canvasId') canvasId: string,
+    @Param('userId') memberUserId: string,
+  ) {
+    return this.memberService.unbanMember(canvasId, memberUserId, req.user.id);
   }
 
   @Post('rooms/:canvasId/members/:userId/mute')

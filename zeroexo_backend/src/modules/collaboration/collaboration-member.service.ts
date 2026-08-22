@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UpdateMemberDto, SendMessageDto } from './dto/collaboration.dto';
 import { CollaborationEventsService } from './collaboration-events.service';
@@ -9,13 +9,27 @@ import { badRequest, notFound, forbidden } from '../../common/errors/app-excepti
  * 成员权限变更 / 消息发送删除时通过 SSE 向房间所有成员实时广播。
  */
 @Injectable()
-export class CollaborationMemberService {
+export class CollaborationMemberService implements OnModuleDestroy {
   private readonly logger = new Logger(CollaborationMemberService.name);
+
+  // 聊天消息频率限制：每用户每秒最多 5 条
+  private readonly chatRateLimit = new Map<string, { count: number; resetAt: number }>();
+  private readonly chatRateCleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventsService: CollaborationEventsService,
-  ) {}
+  ) {
+    // 每 5 分钟清理过期记录
+    this.chatRateCleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, record] of this.chatRateLimit) {
+        if (now > record.resetAt + 60_000) {
+          this.chatRateLimit.delete(key);
+        }
+      }
+    }, 300_000);
+  }
 
   /**
    * 获取房间成员列表
@@ -257,6 +271,19 @@ export class CollaborationMemberService {
     if (member.status === 'muted') throw forbidden('COLLAB_MEMBER_MUTED', 'You are muted');
     if (!room.allowChat) throw forbidden('FORBIDDEN', 'Chat is disabled in this room');
 
+    // 聊天频率限制：每秒最多 5 条，防止刷屏
+    const now = Date.now();
+    const rateRecord = this.chatRateLimit.get(senderId);
+    if (rateRecord && now <= rateRecord.resetAt) {
+      rateRecord.count++;
+      if (rateRecord.count > 5) {
+        this.logger.warn(`[CHAT_RATE] 用户 ${senderId} 聊天消息频率过高`);
+        throw badRequest('COLLAB_CHAT_RATE_LIMIT', '消息发送太快，请稍后再试');
+      }
+    } else {
+      this.chatRateLimit.set(senderId, { count: 1, resetAt: now + 1000 });
+    }
+
     const sender = await this.prisma.user.findUnique({ where: { id: senderId } });
     if (!sender) throw notFound('USER_NOT_FOUND', 'User not found');
 
@@ -348,5 +375,9 @@ export class CollaborationMemberService {
       case 'viewer': return 1;
       default: return 0;
     }
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.chatRateCleanupTimer);
   }
 }

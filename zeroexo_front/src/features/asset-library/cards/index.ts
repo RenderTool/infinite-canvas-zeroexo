@@ -9,7 +9,6 @@ export { registerCard, getCardRenderer, getRegisteredTypes, isRegistered } from 
 export type { GridCardRendererProps, ListCardRendererProps } from './card-registry.js';
 
 // 导入卡片组件以触发注册（side-effect import）
-import './subject-card.js';
 import './asset-card.js';
 import './script-card.js';
 import './prompt-card.js';

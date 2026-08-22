@@ -28,11 +28,9 @@ import type { PageItem } from './types.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 
 export interface AssetLibraryPageProps {
-  onOpenSubject: (id: string) => void;
-  onNewSubject: () => void;
   onNavigateHome?: () => void;
   onOpenAppearance?: () => void;
-  onSendToCanvas?: (item: { type: 'asset' | 'prompt' | 'subject' | 'script'; id: string; data: any }) => void;
+  onSendToCanvas?: (item: { type: 'asset' | 'prompt' | 'script'; id: string; data: any }) => void;
   sidebarRadius?: number;
   defaultAssetKind?: AssetKindFilter;
   /** 进入资产库时默认激活的分组（如 prompt） */
@@ -103,10 +101,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     const items: ContextMenuItem[] = [
       { key: 'open', label: t('common.open'), icon: null, onClick: () => ctx.handleOpenItem(item) },
       { key: 'rename', label: t('assetLibrary.rename'), icon: null, onClick: () => {
-        if (ItemType === 'subject') {
-          ctx.setRenameItemTarget({ type: 'subject', id: item.data.id });
-          ctx.setRenameItemName(item.data.name);
-        } else if (ItemType === 'prompt') {
+        if (ItemType === 'prompt') {
           ctx.setRenameItemTarget({ type: 'prompt', id: item.data.id });
           ctx.setRenameItemName(item.data.title);
         } else {
@@ -117,8 +112,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       }},
       { key: 'download', label: t('common.download'), icon: null, onClick: () => ctx.handleDownloadItem({ type: ItemType as any, data: item.data }) },
       { key: 'delete', label: t('assetLibrary.delete'), icon: null, danger: true, onClick: () => {
-        const name = ItemType === 'subject' ? item.data.name : item.data.title;
-        ctx.setConfirmDelete({ type: ItemType as any, id: item.data.id, name });
+        ctx.setConfirmDelete({ type: ItemType as any, id: item.data.id, name: item.data.title });
       }},
     ];
     if (props.onSendToCanvas) {
@@ -143,25 +137,18 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
   // 稳定化 Toolbar 回调，避免重新渲染导致选项卡闪烁
   const handleGroupClick = useCallback((group: string) => ctx.setActiveGroup(group), [ctx.setActiveGroup]);
   const handleChildClick = useCallback((key: string | null) => { ctx.setActiveChild(key); ctx.setPage(1); }, [ctx.setActiveChild, ctx.setPage]);
-  const handleNewSubject = useCallback(() => { ctx.setSubjectCreateId(undefined); ctx.setSubjectCreateOpen(true); }, [ctx.setSubjectCreateId, ctx.setSubjectCreateOpen]);
   const handleNewPrompt = useCallback(() => { ctx.setPromptCreateId(undefined); ctx.setPromptCreateOpen(true); }, [ctx.setPromptCreateId, ctx.setPromptCreateOpen]);
   const handleMultiSelectToggle = useCallback(() => ctx.setMultiSelectEnabled(!ctx.multiSelectEnabled), [ctx.multiSelectEnabled, ctx.setMultiSelectEnabled]);
 
   // 稳定化 GridView 回调，避免内联函数每次重渲染创建新引用导致 GridView 重渲染
   const handleRenameItem = useCallback((item: PageItem) => {
-    if (item.type === 'subject') {
-      ctx.setRenameItemTarget({ type: 'subject', id: item.data.id });
-      ctx.setRenameItemName(item.data.name);
-    } else {
-      ctx.setRenameItemTarget({ type: item.type as any, id: item.data.id });
-      ctx.setRenameItemName(item.data.title);
-    }
+    ctx.setRenameItemTarget({ type: item.type as any, id: item.data.id });
+    ctx.setRenameItemName(item.data.title);
     ctx.setRenameItemOpen(true);
   }, [ctx.setRenameItemTarget, ctx.setRenameItemName, ctx.setRenameItemOpen]);
 
   const handleDeleteItem = useCallback((item: PageItem) => {
-    const name = item.type === 'subject' ? item.data.name : item.data.title;
-    ctx.setConfirmDelete({ type: item.type as any, id: item.data.id, name });
+    ctx.setConfirmDelete({ type: item.type as any, id: item.data.id, name: item.data.title });
   }, [ctx.setConfirmDelete]);
 
   const handleDownloadItem = useCallback((item: PageItem) => {
@@ -183,11 +170,10 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     setCtxMenuPosition({ x: e.clientX, y: e.clientY });
     setCtxMenuItems([
       { key: 'upload-material', label: '上传素材', icon: null, onClick: () => materialFileInputRef.current?.click() },
-      { key: 'new-subject', label: '新建主体', icon: null, onClick: () => { ctx.setSubjectCreateId(undefined); ctx.setSubjectCreateOpen(true); } },
       { key: 'new-prompt', label: '新建提示词', icon: null, onClick: () => { ctx.setPromptCreateId(undefined); ctx.setPromptCreateOpen(true); } },
       { key: 'new-script', label: '新建剧本', icon: null, onClick: () => ctx.handleNewScript() },
     ]);
-  }, [setCtxMenuPosition, setCtxMenuItems, ctx.setSubjectCreateId, ctx.setSubjectCreateOpen, ctx.setPromptCreateId, ctx.setPromptCreateOpen, ctx.handleNewScript]);
+  }, [setCtxMenuPosition, setCtxMenuItems, ctx.setPromptCreateId, ctx.setPromptCreateOpen, ctx.handleNewScript]);
 
   // 使用 useMemo 完全隔离 Toolbar 的 JSX 创建，避免父组件重渲染时重建
   const toolbar = useMemo(() => (
@@ -209,7 +195,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       onMultiSelectToggle={handleMultiSelectToggle}
       onUploadMaterial={handleUploadMaterial}
       materialFileInputRef={materialFileInputRef}
-      onNewSubject={handleNewSubject}
       onNewPrompt={handleNewPrompt}
       onNewScript={ctx.handleNewScript}
     />
@@ -221,7 +206,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     handleGroupClick, handleChildClick,
     ctx.setSearch, ctx.setViewMode,
     handleMultiSelectToggle, handleUploadMaterial,
-    handleNewSubject, handleNewPrompt, ctx.handleNewScript,
+    handleNewPrompt, ctx.handleNewScript,
   ]);
 
   // 使用 useMemo 完全隔离主内容区（工具栏 + 网格视图 + 多选栏 + 分页器），
@@ -234,7 +219,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         {ctx.viewMode === 'grid' ? (
           <AssetLibraryGridView
             pageItems={ctx.pageItems}
-            loading={ctx.loadingSubjects || ctx.loadingPrompts || ctx.loadingAssets}
+            loading={ctx.loadingPrompts || ctx.loadingAssets}
             multiSelectEnabled={ctx.multiSelectEnabled}
             selectedIds={ctx.selectedIds}
             highlightId={highlightId}
@@ -312,7 +297,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     </div>
   ), [
     isMobile, toolbar, ctx.viewMode, ctx.pageItems,
-    ctx.loadingSubjects, ctx.loadingPrompts, ctx.loadingAssets,
+    ctx.loadingPrompts, ctx.loadingAssets,
     ctx.multiSelectEnabled, ctx.selectedIds, highlightId, theme,
     ctx.dragOver, ctx.dragCounterRef, ctx.handleToggleSelect,
     ctx.handleOpenItem, handleRenameItem, handleDeleteItem,
@@ -373,10 +358,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         ctxMenuPosition={ctxMenuPosition}
         ctxMenuItems={ctxMenuItems}
         onCtxMenuClose={closeCtxMenu}
-        subjectCreateOpen={ctx.subjectCreateOpen}
-        subjectCreateId={ctx.subjectCreateId}
-        onSubjectCreateClose={() => ctx.setSubjectCreateOpen(false)}
-        onSubjectCreateSaved={() => { ctx.setSubjectCreateOpen(false); ctx.setActiveGroup('subject'); void ctx.refreshSubjects(); }}
         promptCreateOpen={ctx.promptCreateOpen}
         promptCreateId={ctx.promptCreateId}
         onPromptCreateClose={() => ctx.setPromptCreateOpen(false)}

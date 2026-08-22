@@ -9,11 +9,8 @@ import type { NodeTypeExtension, NodeRendererProps, ToolDefinition, NodeRuntimeC
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
-import {
-  Maximize, FileUp, BookOpen, Aperture,
-  RotateCcw,
-} from 'lucide-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
+import { CANVAS_NODE_ICONS } from './icons.js';
 import {
   CREATION_DEFAULT_SIZE,
   CREATION_MIN_SIZE,
@@ -72,7 +69,7 @@ function getScriptTools(): ToolDefinition[] {
       id: 'edit',
       label: '编辑',
       title: '全屏编辑',
-      icon: <Maximize size={14} />,
+      icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('script:edit', { nodeId: node.id }); },
     },
@@ -80,7 +77,7 @@ function getScriptTools(): ToolDefinition[] {
       id: 'import',
       label: '导入',
       title: '导入剧本',
-      icon: <FileUp size={14} />,
+      icon: <CANVAS_NODE_ICONS.import size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('script:import', { nodeId: node.id }); },
     },
@@ -88,7 +85,7 @@ function getScriptTools(): ToolDefinition[] {
       id: 'read',
       label: '阅读',
       title: '全屏翻阅',
-      icon: <BookOpen size={14} />,
+      icon: <CANVAS_NODE_ICONS.read size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('script:read', { nodeId: node.id }); },
     },
@@ -96,7 +93,7 @@ function getScriptTools(): ToolDefinition[] {
       id: 'generateStoryboard',
       label: '分镜',
       title: '根据当前剧本生成分镜节点并自动连线',
-      icon: <Aperture size={14} />,
+      icon: <CANVAS_NODE_ICONS.generateStoryboard size={14} />,
       group: 'edit',
       primary: true,
       // Plan#20 T0(征集#13): 不再硬编码 mode:'template'——改 emit 请求事件,
@@ -114,7 +111,7 @@ function getStoryboardTools(): ToolDefinition[] {
       id: 'edit',
       label: '编辑',
       title: '全屏编辑',
-      icon: <Maximize size={14} />,
+      icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('storyboard:fullscreen', { nodeId: node.id }); },
     },
@@ -122,9 +119,58 @@ function getStoryboardTools(): ToolDefinition[] {
       id: 'regenerate',
       label: '重新生成',
       title: 'AI 生成当前集分镜',
-      icon: <RotateCcw size={14} />,
+      icon: <CANVAS_NODE_ICONS.regenerate size={14} />,
       group: 'edit',
-      run: (node) => { nodeActionBus.emit('storyboard:regenerateEpisode', { nodeId: node.id }); },
+      // 2026-08-21 BUG 修复: 传入 activeEpisodeId; 有分镜内容时弹出确认弹窗
+      run: (node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const episodeId = (data.activeEpisodeId as string) ?? '';
+        const shotsByEpisode = data.shotsByEpisode as Record<string, unknown> | undefined;
+        const shots = data.shots as unknown[] | undefined;
+        // 检查当前集是否有分镜内容
+        const hasShots = episodeId
+          ? Array.isArray(shotsByEpisode?.[episodeId]) && (shotsByEpisode[episodeId] as unknown[]).length > 0
+          : Array.isArray(shots) && shots.length > 0;
+        if (hasShots) {
+          // 已有内容 → 弹出确认弹窗(由 storyboard-sheet 监听处理)
+          nodeActionBus.emit('storyboard:requestRegenerate', { nodeId: node.id, episodeId: episodeId || undefined });
+        } else {
+          // 无内容 → 直接生成
+          nodeActionBus.emit('storyboard:regenerateEpisode', { nodeId: node.id, episodeId: episodeId || undefined });
+        }
+      },
+    },
+    {
+      id: 'production',
+      label: '剧管',
+      title: '生成/关联剧中管理(角色·场景·道具)',
+      icon: <CANVAS_NODE_ICONS.production size={14} />,
+      group: 'edit',
+      // 2026-08-21 架构修正: 剧管=分镜后置工序, 仅分镜时也可主动生成/关联剧管
+      run: (node) => { nodeActionBus.emit('storyboard:manageProduction', { nodeId: node.id }); },
+    },
+  ];
+}
+
+// ===== 出片节点工具(通过 nodeActionBus 广播,workbench-sheet 订阅) =====
+
+function getWorkbenchTools(): ToolDefinition[] {
+  return [
+    {
+      id: 'edit',
+      label: '编辑',
+      title: '全屏编辑',
+      icon: <CANVAS_NODE_ICONS.play size={14} />,
+      group: 'basic',
+      run: (node) => { nodeActionBus.emit('workbench:fullscreen', { nodeId: node.id }); },
+    },
+    {
+      id: 'regenerate',
+      label: '重新生成',
+      title: '重新检测上游分镜并同步',
+      icon: <CANVAS_NODE_ICONS.regenerate size={14} />,
+      group: 'edit',
+      run: (node) => { nodeActionBus.emit('workbench:resync', { nodeId: node.id }); },
     },
   ];
 }
@@ -136,10 +182,10 @@ function createCreationExtension(
   getStore: () => ReactGraphStore | null,
 ): NodeTypeExtension {
   // 分镜节点仅允许剧本节点连入 input pin
+  // 出片节点仅允许分镜/统筹/主体节点连入 input pin
   const canConnect: NodeTypeExtension['canConnect'] =
     kind === 'storyboard'
       ? (source, target) => {
-          // 仅阻止连入分镜的 input pin
           if (target.direction !== 'input') return;
           const store = getStore();
           if (!store) return;
@@ -149,7 +195,18 @@ function createCreationExtension(
             return { valid: false, reason: '分镜节点仅支持关联剧本节点' };
           }
         }
-      : undefined;
+      : kind === 'workbench'
+        ? (source, target) => {
+            if (target.direction !== 'input') return;
+            const store = getStore();
+            if (!store) return;
+            const graph = store.getGraph();
+            const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
+            if (sourceNode && !['storyboard', 'production-manager'].includes(sourceNode.type)) {
+              return { valid: false, reason: '出片节点仅支持关联分镜/剧管节点' };
+            }
+          }
+        : undefined;
 
   return {
     type: kind,
@@ -159,6 +216,12 @@ function createCreationExtension(
     defaultSize: CREATION_DEFAULT_SIZE[kind],
     minSize: CREATION_MIN_SIZE[kind],
     resizable: true,
+    // 2026-08-22 布局契约: 创建新节点的默认排序参数(统一走 resolvePlacement, 禁硬编码偏移)
+    placement: {
+      direction: 'right',
+      gap: 96,
+      avoidOverlap: true,
+    },
     // P5 契约接入:声明领域能力(不参与堆叠)与运行时缩放/外观契约
     capabilities: CREATION_CAPABILITIES[kind],
     runtime: createCreationRuntime(CREATION_DEFAULT_SIZE[kind]),
@@ -172,7 +235,7 @@ function createCreationExtension(
     },
     getPins: () => CREATION_PINS[kind],
     canConnect,
-    getTools: kind === 'script' ? () => getScriptTools() : kind === 'storyboard' ? () => getStoryboardTools() : undefined,
+    getTools: kind === 'script' ? () => getScriptTools() : kind === 'storyboard' ? () => getStoryboardTools() : kind === 'workbench' ? () => getWorkbenchTools() : undefined,
     createDefaultData: () => ({
       title: '',
       status: 'idle',

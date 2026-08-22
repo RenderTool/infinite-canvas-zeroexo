@@ -255,6 +255,12 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename }: InnerPro
                 largeFileOptimizations: true,
                 maxTokenizationLineLength: 5000,
                 stopRenderingLineAfter: 5000,
+                // 关闭 unicode 模糊字符告警：中文剧本内容属误报，只读文档预览无需防混淆字符检测（修复 "ambiguous unicode characters" 警告）
+                unicodeHighlight: {
+                  ambiguousCharacters: false,
+                  invisibleCharacters: false,
+                  nonBasicASCII: false,
+                },
               }}
             />
           </div>

@@ -22,7 +22,7 @@ export const SYSTEM_FOLDERS: ReadonlyArray<{
  * 1. 用户首次访问文件夹 API 时,自动确保 5 个系统根目录存在
  * 2. 系统目录 system=true,禁止 rename / delete / move
  * 3. 移动文件夹时检测循环引用(不能移到自身或子孙)
- * 4. 删除文件夹时,所属 asset/prompt/subject 的 folderId 自动置 null(SetNull)
+ * 4. 删除文件夹时,所属 asset/prompt 的 folderId 自动置 null(SetNull)
  */
 @Injectable()
 export class FoldersService {
@@ -164,7 +164,7 @@ export class FoldersService {
 
   /**
    * 删除文件夹(系统目录禁止删除)
-   * 注意: 关联的 asset/prompt/subject 的 folderId 由 Prisma SetNull 关联自动处理
+   * 注意: 关联的 asset/prompt 的 folderId 由 Prisma SetNull 关联自动处理
    */
   async remove(ownerId: string, id: string) {
     const folder = await this.findOne(ownerId, id);

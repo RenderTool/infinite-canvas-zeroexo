@@ -127,13 +127,31 @@ export class CanvasService extends BaseProjectService {
     return project;
   }
 
-  // 获取单个项目(仅限所有者)
+  // 获取单个项目(所有者优先;协作成员也可读取)
   async findOne(ownerId: string, id: string) {
     const project = await this.prisma.project.findUnique({ where: { id } });
-    if (!project || project.ownerId !== ownerId) {
-      throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
+    if (!project) {
+      throw notFound('PROJECT_NOT_FOUND', 'Project not found');
     }
-    return project;
+    // 项目所有者直接返回
+    if (project.ownerId === ownerId) {
+      return project;
+    }
+    // 非所有者:检查是否是该画布协作房间的活跃成员
+    const room = await this.prisma.collaborationRoom.findFirst({
+      where: { canvasId: id, status: 'active' },
+      select: { id: true },
+    });
+    if (room) {
+      const member = await this.prisma.collaborationMember.findFirst({
+        where: { roomId: room.id, userId: ownerId, status: { notIn: ['offline', 'banned'] } },
+        select: { id: true },
+      });
+      if (member) {
+        return project;
+      }
+    }
+    throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
   }
 
   // 更新项目(每次更新自增 version,刷新 lastSyncedAt)

@@ -4,9 +4,11 @@
  * 语义键遵循拍板语义表（.project-rules/zeroexo_front/rules/interaction-metadata-mapping.md）：
  * stack=GalleryThumbnails
  */
-import { GalleryThumbnails } from 'lucide-react';
+import { GalleryThumbnails, Rabbit } from 'lucide-react';
 
 /** 节点创建菜单图标映射 */
 export const CREATE_MENU_ICONS = {
   stack: GalleryThumbnails,
+  /** 剧管（ProductionManager）节点图标 */
+  productionManager: Rabbit,
 } as const;

@@ -584,7 +584,6 @@
       "script": "脚本",
       "storyboard": "絵コンテ",
       "workbench": "出画",
-      "subject": "主体",
       "productionManager": "制作進行"
     },
     "unbound": "制作プロジェクト未バインド",
@@ -1361,7 +1360,6 @@
     "PROMPT_NOT_FOUND": "プロンプトが見つかりません",
     "PROMPT_FAVORITE_NOT_FOUND": "お気に入りが見つかりません",
     "CREDIT_INSUFFICIENT": "残高が不足しています。先にチャージしてください",
-    "SUBJECT_NOT_FOUND": "主題が見つかりません",
     "SCRIPT_NOT_FOUND": "脚本が見つかりません",
     "FOLDER_NOT_FOUND": "フォルダが見つかりません",
     "RESOURCE_NOT_FOUND": "リソースが見つかりません"
@@ -1667,6 +1665,9 @@
       "muted": "ミュート中"
     },
     "kick": "退出させる",
+    "kickConfirmTitle": "メンバー退出の確認",
+    "kickConfirmContent": "このメンバーを退出させてもよろしいですか？",
+    "kickAndBan": "同時にBAN（再入室禁止）",
     "memberKicked": "メンバーを退出させました",
     "kickFailed": "メンバーの退出に失敗しました",
     "closeRoom": "コラボレーションを終了",
@@ -2046,6 +2047,8 @@
     "retry": "再試行",
     "abandon": "中止",
     "noShotsLinked": "この絵コンテはまだ脚本にリンクされていません。下部ツールバーから「脚本をリンク」するか、「編集」から手動で作成してください。",
+    "linkedScriptNotGenerated": "脚本「{{script}}」の{{episode}}にリンク済みですが、まだ絵コンテが生成されていません",
+    "linkedScriptNoEpisode": "脚本にはリンク済みですが、エピソードが見つかりません。下部ツールバーから選択し直してください",
     "currentEpisode": "現在のエピソード",
     "generateCurrentEpisode": "現在のエピソードの絵コンテを生成"
   },

@@ -76,14 +76,26 @@ export function computeResizeRect(
     newH = maxH;
   }
 
-  // 锁定宽高比(仅角点 handle,按起始比例)
+  // 锁定宽高比(仅角点 handle)
+  // 基准比例自适应:当前比例贴近契约(相对 defaultSize 高度偏差 ≤0.75px,即 isUniformScale
+  // 判定通过的区间)时锁契约比例 —— round 引入的 ≤0.5px 偏差不会按 newW/startW 放大累积
+  // (堆叠 220×143 触底放大回 620 时,若锁起始比例偏差会累积到 1.0px > 0.75px 容差
+  // → useScale=false → 回退真实尺寸渲染,内容挤压/跳变);
+  // 当前比例偏离契约(文本卡 scaleOverride 自由 resize 后、媒体节点 minSize 80×80 非等比
+  // 触底等)时锁起始比例 —— 否则拖角点瞬间拉回契约比例,高度塌陷 + 内容跳变。
   if (
     config.lockAspectRatio &&
     start.width > 0 &&
     start.height > 0 &&
     (handle === 'nw' || handle === 'ne' || handle === 'se' || handle === 'sw')
   ) {
-    const ratio = start.width / start.height;
+    const ds = config.defaultSize;
+    const nearContract =
+      !!ds &&
+      ds.width > 0 &&
+      ds.height > 0 &&
+      Math.abs(start.width / ds.width - start.height / ds.height) * ds.height <= 0.75;
+    const ratio = nearContract ? ds.width / ds.height : start.width / start.height;
     // 优先用 width 算 height,再按 handle 方向修正 position
     const newHFromW = newW / ratio;
     const diff = newHFromW - newH;

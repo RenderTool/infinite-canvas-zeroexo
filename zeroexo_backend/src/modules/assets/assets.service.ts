@@ -146,17 +146,26 @@ export class AssetsService {
 
   /**
    * 创建资产元数据 - 上传完成后调用。
-   * 同时增加对应 Resource 的引用计数。
+   * 二进制资产同时增加对应 Resource 的引用计数;纯元数据资产(text/script)由服务端生成 key,不涉及存储文件。
    */
   async create(userId: string, dto: CreateAssetDto) {
-    // 服务端校验 storageKey 前缀与路径穿越,不信任客户端任意路径
-    assertSafeStorageKey(dto.storageKey);
+    // text/script 为纯元数据资产(内容存 text 字段,无存储文件):
+    // 服务端自动生成 storageKey(同 createScriptAsset),不信任客户端路径,也不参与引用计数;
+    // 其余类型必须使用 presign 返回的 resources/ 前缀 key
+    const isMetadataOnly = dto.kind === 'text' || dto.kind === 'script';
+    if (!isMetadataOnly) {
+      // 服务端校验 storageKey 前缀与路径穿越,不信任客户端任意路径
+      assertSafeStorageKey(dto.storageKey ?? '');
+    }
+    const storageKey = isMetadataOnly
+      ? `${dto.kind}/${userId}/${nanoid()}`
+      : dto.storageKey!;
     const asset = await this.prisma.asset.create({
       data: {
         ownerId: userId,
         kind: dto.kind,
         filename: dto.filename,
-        storageKey: dto.storageKey,
+        storageKey,
         mimeType: dto.mimeType,
         size: BigInt(dto.size),
         ...(dto.width !== undefined ? { width: dto.width } : {}),
@@ -173,8 +182,10 @@ export class AssetsService {
       },
     });
 
-    // 增加资源引用计数
-    await this.resourceService.incrementRef(dto.storageKey);
+    // 增加资源引用计数(纯元数据资产无存储文件,跳过)
+    if (!isMetadataOnly) {
+      await this.resourceService.incrementRef(storageKey);
+    }
 
     this.logsService.log('asset', `上传素材: ${dto.filename}`, {
       userId,
@@ -183,7 +194,7 @@ export class AssetsService {
         filename: dto.filename,
         size: dto.size,
         mimeType: dto.mimeType,
-        storageKey: dto.storageKey,
+        storageKey,
         folderId: dto.folderId,
       },
     });

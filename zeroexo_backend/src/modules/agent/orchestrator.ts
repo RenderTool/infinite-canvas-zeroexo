@@ -30,6 +30,8 @@ export interface StoryboardGenerateInput {
   episodeId?: string;
   providerId?: string;
   model?: string;
+  /** Plan#20 T11: 画布既有主体字典(跨集续写命名对齐) */
+  subjects?: Array<{ name: string; kind?: string; aliases?: string[]; description?: string }>;
 }
 
 /** 单块子任务执行结果 */
@@ -72,7 +74,7 @@ const CHUNK_SCHEMA_DIRECTIVE_FALLBACK = [
   '   sfx: 音效数组(如["江水声","风声"]; 无则空数组[])',
   '   promptText: 中文提示词(含[主体描述][场景与氛围][动作与情节][镜头语言]段落)',
   '   promptEn: 英文提示词(与 promptText 结构一致)',
-  '   entities: 实体名数组(如["沈渔"])',
+  '   entities: 实体名数组(含角色、场景、道具，如["沈渔","江边","旧书"])',
   '   dayNight: 日/夜/黄昏/黎明',
   '   environment: 环境描述(地点+时间+纵深层次)',
 ].join('\n');
@@ -163,6 +165,12 @@ export class AgentOrchestrator {
       return;
     }
 
+    // 0. 生成全局剧情摘要(Plan#9 防幻觉增强): 提取整部小说的世界观/核心人物/主线走向
+    const globalContext = await this.generateGlobalContext(taskId, projectId, userId, scriptText);
+    if (globalContext) {
+      this.logger.log(`全局剧情摘要生成完成: ${taskId}, 长度 ${globalContext.length} 字符`);
+    }
+
     // 1. 切块
     const rawChunks = this.splitIntoChunks(scriptText);
     const chunks: StoryboardChunk[] = rawChunks.map((text, index) => ({ index, text }));
@@ -177,6 +185,19 @@ export class AgentOrchestrator {
     }
 
     // 3. 为每块确定子任务(completed 复用 / 其余重建)
+    // Plan#20 T11: 画布既有主体字典序列化为子任务注入段(跨集续写时 AI 沿用既有命名)
+    const subjectDict = Array.isArray(input.subjects) && input.subjects.length > 0
+      ? input.subjects
+          .filter((s) => s && typeof s.name === 'string' && s.name.trim())
+          .map((s) => {
+            const parts = [s.name.trim()];
+            if (s.kind) parts.push(`类型:${s.kind}`);
+            if (Array.isArray(s.aliases) && s.aliases.length > 0) parts.push(`别名:${s.aliases.join('/')}`);
+            if (s.description) parts.push(`描述:${String(s.description).slice(0, 80)}`);
+            return parts.join(' | ');
+          })
+          .join('\n')
+      : undefined;
     const plans: Array<{ chunk: StoryboardChunk; child: any; reuse: boolean }> = [];
     for (const chunk of chunks) {
       const existingChild = existingByIndex.get(chunk.index);
@@ -198,21 +219,38 @@ export class AgentOrchestrator {
           episodeId: input.episodeId,
           providerId: input.providerId,
           model: input.model,
+          ...(subjectDict ? { subjectDict } : {}),
+          ...(globalContext ? { globalContext } : {}),
         },
       });
       plans.push({ chunk, child, reuse: false });
     }
 
-    // 4. 并发池执行
+    // 4. 并发池执行(Plan#9 防幻觉增强: 滑动窗口——前一块摘要注入后一块)
     const results: StoryboardChunkResult[] = [];
     const executing = new Map<number, Promise<StoryboardChunkResult>>();
     let nextIndex = 0;
+    // 滑动窗口: 存储每块的剧情摘要(供后一块注入)
+    const chunkSummaries = new Map<number, string>();
 
     const runChunk = (plan: { chunk: StoryboardChunk; child: any; reuse: boolean }): Promise<StoryboardChunkResult> => (async () => {
       const { chunk, child, reuse } = plan;
+      // 滑动窗口: 获取前一块摘要(最多回看 2 块)
+      const prevSummaries: string[] = [];
+      for (let prevIdx = chunk.index - 1; prevIdx >= Math.max(0, chunk.index - 2); prevIdx--) {
+        const s = chunkSummaries.get(prevIdx);
+        if (s) prevSummaries.unshift(s);
+      }
+      const prevContextStr = prevSummaries.length > 0
+        ? `【前情提要(近 ${prevSummaries.length} 块剧情走向)】\n${prevSummaries.join('\n')}`
+        : undefined;
+
       if (reuse) {
         try {
           const shots = this.parseShotsFromOutput((child.output as any)?.output ?? '');
+          // 断点续跑也需要重建摘要
+          const shotSummary = this.generateChunkSummary(shots, chunk.text.slice(0, 100));
+          if (shotSummary) chunkSummaries.set(chunk.index, shotSummary);
           return { index: chunk.index, taskId: child.id, shots };
         } catch (err) {
           // 复用解析失败(旧输出格式不兼容): 降级为重新生成
@@ -221,8 +259,15 @@ export class AgentOrchestrator {
       }
       try {
         await this.taskService.updateTask(child.id, { status: 'running', progress: 0 });
+        // 注入前情提要到子任务 input(Plan#9 防幻觉增强)
+        if (prevContextStr) {
+          child.input = { ...(child.input as any), prevContext: prevContextStr };
+        }
         const output = await this.executeChildAgent(child, projectId, userId);
         const shots = this.parseShotsFromOutput(output);
+        // 生成当前块摘要存入滑动窗口
+        const shotSummary = this.generateChunkSummary(shots, chunk.text.slice(0, 100));
+        if (shotSummary) chunkSummaries.set(chunk.index, shotSummary);
         await this.taskService.updateTask(child.id, {
           status: 'completed',
           output: { output, shots },
@@ -312,8 +357,17 @@ export class AgentOrchestrator {
     // Plan#20 T4: 汇总阶段生成主体字典(零额外 LLM 成本): 剧本文本提取角色/场景 + shots.entities 去重归类
     const subjects = this.buildSubjectsDictionary(scriptText, mergedShots);
 
+    // 改进建议 #4: 汇总阶段场景一致性校验(检测 hallucinated sceneId)
+    const sceneValidation = this.validateSceneConsistency(scriptText, mergedShots);
+    if (sceneValidation.warnings.length > 0) {
+      this.logger.warn(`场景一致性校验: ${taskId} 发现 ${sceneValidation.warnings.length} 个警告`);
+      for (const w of sceneValidation.warnings) {
+        this.logger.warn(`  [场景校验] ${w}`);
+      }
+    }
+
     this.logger.log(
-      `分镜汇总: ${taskId} 共 ${mergedShots.length} 个镜头, 失败块 ${failedBlocks.length}/${plans.length}, 主体 ${subjects.length} 个`,
+      `分镜汇总: ${taskId} 共 ${mergedShots.length} 个镜头, 失败块 ${failedBlocks.length}/${plans.length}, 主体 ${subjects.length} 个${sceneValidation.warnings.length > 0 ? `, 场景警告 ${sceneValidation.warnings.length}` : ''}`,
     );
 
     yield {
@@ -344,16 +398,20 @@ export class AgentOrchestrator {
    */
   private normalizeShotFields(raw: any): Record<string, any> {
     const patch: Record<string, any> = {};
+    // 折叠换行: LLM 常把描述按句/按字分行输出, 前端 pre-wrap 原样渲染成竖排阅读, 统一折叠为空格(横排)
+    const flatten = (v: string): string => v.replace(/\s*\n+\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
     if (!raw.description) {
       const desc = [raw.subject, raw.action].filter((v) => typeof v === 'string' && v.trim()).join('，');
-      if (desc) patch.description = desc;
+      if (desc) patch.description = flatten(desc);
+    } else if (typeof raw.description === 'string') {
+      patch.description = flatten(raw.description);
     }
     if (!raw.dayNight && raw.timeOfDay) patch.dayNight = raw.timeOfDay;
     if (!raw.environment) {
       const env = [raw.scene, raw.location, raw.composition]
         .filter((v) => typeof v === 'string' && v.trim())
         .join('，');
-      if (env) patch.environment = env;
+      if (env) patch.environment = flatten(env);
     }
     return patch;
   }
@@ -458,53 +516,159 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Plan#20 T4: 主体字典生成(汇总阶段零额外 LLM 成本)
-   * - 角色: 剧本对白说话人(「名字: 对白」行首)提取
-   * - 场景: 【场景 N: 地点 - 时间】标题提取
-   * - shots.entities 全局去重 → kind 归类(命中角色集→character, 场景集→scene, 其余→prop)
+   * Plan#20 T4 + 2026-08-21 BUG 修复: 主体字典生成(三类型全覆盖)
+   * - 角色: 剧本对白说话人(「名字: 对白」行首)提取, 支持 2-14 字中文名
+   * - 场景: 【场景 N: 地点 - 时间】标题提取 + shots.environment 补全
+   * - 道具: shots.entities 中非角色非场景的实体 + shots.description 中提取
    * - description: 首个含该名的 shot.description 截取
    */
   private buildSubjectsDictionary(
     scriptText: string,
     shots: any[],
   ): Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }> {
-    // 角色: 对白行首「名字: 内容」(排除场景标题/括号开头)
+    // ── 角色: 对白行首「名字: 内容」(支持 2-14 字, 含全角冒号, 排除场景标题/括号开头) ──
     const characterSet = new Set<string>();
-    const dialogueRe = /^([^\s:：【】（）()\d]{1,12})[:：]\s*\S/gm;
+    const dialogueRe = /^([^\s:：、【】（）()\d]{2,14})[:：]\s*\S/gm;
     let m: RegExpExecArray | null;
     while ((m = dialogueRe.exec(scriptText)) !== null) {
       const name = m[1].trim();
-      if (name && !/^(场景|转场|第)/.test(name)) characterSet.add(name);
+      if (name && !/^(场景|转场|第|镜头|旁白|画外音|音效|字幕)/.test(name)) {
+        characterSet.add(name);
+      }
     }
-    // 场景: 【场景 N: 地点 - 时间】提取地点
+
+    // ── 场景: 【场景 N: 地点 - 时间】提取地点 ──
     const sceneSet = new Set<string>();
     const sceneRe = /【场景\s*\d*\s*[:：]?\s*([^\-—】]{1,20}?)\s*[-—]/g;
     while ((m = sceneRe.exec(scriptText)) !== null) {
       const loc = m[1].trim();
       if (loc) sceneSet.add(loc);
     }
-    // shots.entities 去重(兼容字符串/数组形态)
+
+    // ── 从 shot.environment 中提取场景/地点关键词兜底 ──
+    // 2026-08-22 BUG 修复: environment 是「地点+时间+纵深层次」复合文本, 分割后需剔除时间/氛围词,
+    // 否则「黄昏」「江面波光粼粼」等词被当场景, 且后续 includes 匹配会把角色/道具误判成场景蓝
+    const ENV_TIME_WORDS = new Set([
+      '日', '夜', '白天', '夜晚', '黄昏', '黎明', '清晨', '早晨', '早上', '上午', '中午',
+      '午后', '傍晚', '晚上', '午夜', '正午', '深夜', '凌晨', '晴天', '阴天', '雨天', '雪天',
+      '晴天白日', '霞光', '月光', '阳光', '灯光', '光线', '夕阳', '朝阳',
+    ]);
+    const envSceneSet = new Set<string>();
+    for (const shot of shots) {
+      const env = typeof shot.environment === 'string' ? shot.environment : '';
+      // 用逗号/顿号/空格/句号分割环境描述, 取 2-12 字片段作为候选场景(排除时间/氛围词)
+      const envParts = env.split(/[,，、。\s]+/).filter(Boolean);
+      for (const part of envParts) {
+        const trimmed = part.trim();
+        if (trimmed.length >= 2 && trimmed.length <= 12 && !ENV_TIME_WORDS.has(trimmed)) {
+          envSceneSet.add(trimmed);
+        }
+      }
+    }
+
+    // ── shots.entities 去重(兼容字符串/数组/对象形态) ──
     const entityNames = new Set<string>();
     for (const shot of shots) {
-      const list = Array.isArray(shot.entities) ? shot.entities : typeof shot.entities === 'string' ? [shot.entities] : [];
+      const list = Array.isArray(shot.entities) ? shot.entities
+        : typeof shot.entities === 'string' ? [shot.entities]
+        : [];
       for (const e of list) {
-        const name = typeof e === 'string' ? e.trim() : (e?.mention ?? e?.name ?? '').trim();
+        const name = typeof e === 'string' ? e.trim()
+          : (e?.mention ?? e?.name ?? '').trim();
         if (name) entityNames.add(name);
       }
     }
-    // 归类 + 描述(首个含名镜头描述截取 80 字)
+
+    // ── 归类: 优先命中对话角色 → character, 场景标题 → scene, 环境描述(整片段精确命中) → scene, 其余 → prop ──
+    // 2026-08-22 BUG 修复: 删除 inEnv 子串包含兜底——environment 是复合文本(如「江边栈桥,黄昏,男主与女主并肩而立」),
+    // includes 会把「旧书」「男主」等出现在环境描述中的实体全部误判为 scene(全蓝)。场景判定只认
+    // 场景标题(sceneSet) 与 环境分割片段的「整词精确命中」(envSceneSet), 杜绝角色/道具被吞进场景色。
     const subjects: Array<{ name: string; kind: 'character' | 'scene' | 'prop'; aliases: string[]; description: string }> = [];
     for (const name of entityNames) {
-      const kind = characterSet.has(name) ? 'character' : sceneSet.has(name) ? 'scene' : 'prop';
+      let kind: 'character' | 'scene' | 'prop' = 'prop';
+      if (characterSet.has(name)) {
+        kind = 'character';
+      } else if (sceneSet.has(name) || envSceneSet.has(name)) {
+        kind = 'scene';
+      }
       const hit = shots.find((s) => typeof s.description === 'string' && s.description.includes(name));
       const description = hit ? String(hit.description).slice(0, 80) : '';
       subjects.push({ name, kind, aliases: [], description });
     }
-    // 剧本中出现但未进任何镜头实体的角色也收录(占位主体完备性)
+
+    // ── 剧本中出现但未进任何镜头实体的角色也收录(占位主体完备性) ──
     for (const name of characterSet) {
-      if (!entityNames.has(name)) subjects.push({ name, kind: 'character', aliases: [], description: '' });
+      if (!entityNames.has(name)) {
+        subjects.push({ name, kind: 'character', aliases: [], description: '' });
+      }
     }
+
+    // ── 剧本场景标题中未进 entities 的场景也收录 ──
+    for (const name of sceneSet) {
+      if (!entityNames.has(name) && !subjects.some(s => s.name === name)) {
+        subjects.push({ name, kind: 'scene', aliases: [], description: '' });
+      }
+    }
+
     return subjects;
+  }
+
+  /**
+   * 改进建议 #4: 汇总阶段场景一致性校验
+   * 检测分镜中是否出现剧本原文中不存在的场景/地点环境。
+   * 通过比对 shot.environment 与剧本中的场景标题来识别 hallucinated 场景。
+   * 不阻断输出,仅记录警告供后续人工审核或自动过滤。
+   */
+  private validateSceneConsistency(
+    scriptText: string,
+    shots: any[],
+  ): { warnings: string[] } {
+    const warnings: string[] = [];
+    // 从剧本中提取所有场景标题 /* 场景 N: 地点 */
+    const knownScenes: string[] = [];
+    const sceneRe = /【场景\s*\d*\s*[:：]\s*([^】]+)/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = sceneRe.exec(scriptText)) !== null) {
+      knownScenes.push(sm[1].trim());
+    }
+    // 从剧本中提取所有地点关键词
+    const knownLocations = new Set<string>();
+    for (const scene of knownScenes) {
+      const parts = scene.split(/[-—]/).map((s) => s.trim());
+      for (const p of parts) {
+        if (p.length >= 2) knownLocations.add(p);
+      }
+    }
+    // 剧本中提到的所有场景/地点关键词
+    const scriptKeywords = [
+      '江边', '茶馆', '小院', '老街', '房间', '街道', '门口', '窗前',
+      '客厅', '卧室', '厨房', '阳台', '花园', '庭院', '走廊', '楼梯',
+      '办公室', '会议室', '教室', '食堂', '操场', '医院', '病房', '诊室',
+      '酒吧', '咖啡', '餐厅', '饭店', '酒店', '宾馆', '车站', '机场',
+      '公园', '广场', '马路', '路上', '车内', '车里', '车上', '地铁',
+      '山顶', '海边', '沙滩', '田野', '树林', '湖边', '河边', '桥',
+      '战场', '基地', '城堡', '宫殿', '寺庙', '教堂', '学校', '大学',
+      '超市', '商场', '市场', '工地', '厂房', '仓库', '车库', '码头',
+    ];
+    // 检查每个 shot
+    for (const shot of shots) {
+      const env = (shot.environment || '').toLowerCase();
+      const desc = (shot.description || '').toLowerCase();
+      const combined = `${env} ${desc}`;
+      // 检查是否出现剧本中明确不存在的场景关键词
+      for (const kw of scriptKeywords) {
+        if (combined.includes(kw) && !knownLocations.has(kw)) {
+          // 从剧本原文中检查是否间接提到(如对话中提及)
+          const scriptContains = scriptText.toLowerCase().includes(kw);
+          if (!scriptContains) {
+            warnings.push(
+              `shot #${shot.number ?? '?'} sceneId=${shot.sceneId ?? '?'} 出现剧本中不存在的场景"${kw}"`,
+            );
+          }
+        }
+      }
+    }
+    return { warnings };
   }
 
   /** 执行单个子任务 Agent(不走 worker,避免循环依赖),返回最终输出文本 */
@@ -512,14 +676,29 @@ export class AgentOrchestrator {
     const agent = await this.agentFactory.create('storyboard_assistant', projectId, userId);
     // 分块模式强指令置于 user 消息首位(比 system prompt 更近输出层,遵从度更高);
     // schema 段单源化自 SYSTEM_PROMPT.md(Plan#20 T4, 征集#16 前置项)
+    // Plan#20 T11: subjectDict 独立成段(比混在任务数据 JSON 里遵从度更高)
+    // Plan#9 防幻觉增强: 注入全局剧情摘要 + 前情提要 + 防幻觉铁律
+    const subjectDict = (child.input as any)?.subjectDict as string | undefined;
+    const globalContext = (child.input as any)?.globalContext as string | undefined;
+    const prevContext = (child.input as any)?.prevContext as string | undefined;
     const inputStr = [
       '【分块生成模式·必须遵守】',
       '1. 你是分块处理模式: 禁止调用任何工具,直接输出镜头 JSON 数组;',
       '2. 禁止任何解释、前言、总结或 Markdown 代码块;',
       '3. 输出第一行必须是 JSON 数组本身,sceneId 从 1 开始编号;',
       this.loadChunkSchemaDirective(),
-      '任务数据:',
-      JSON.stringify(child.input ?? {}),
+      ...(globalContext
+        ? ['【全局剧情摘要·整部小说核心背景(所有分块必须遵守)】', globalContext]
+        : []),
+      ...(prevContext
+        ? [prevContext]
+        : []),
+      ...(subjectDict
+        ? ['【已有主体字典(续写本集时必须沿用这些主体的名字/别名, 不得改名或为同一主体新建名称)】', subjectDict]
+        : []),
+      '【当前任务数据(仅 scriptChunk 字段是本块剧本原文)】',
+      // 过滤掉注入的 meta 字段,只保留原始任务数据
+      JSON.stringify(this.buildChunkTaskPayload(child.input)),
     ].join('\n');
     let output = '';
 
@@ -597,5 +776,106 @@ export class AgentOrchestrator {
       } catch { /* 继续向前找断点 */ }
     }
     return [];
+  }
+
+  // ===== Plan#9 防幻觉增强: 全局上下文生成 =====
+
+  /**
+   * 生成整部小说的全局剧情摘要(Plan#9 防幻觉增强):
+   * 提取世界观、核心人物关系、主线走向,作为所有分块的上下文约束。
+   * 使用轻量级 storyboard_assistant agent 做摘要, 不增加额外模型调用成本。
+   * 输入过长时截断前 50k 字符(通常足够涵盖核心设定)。
+   * 支持 1 次自动重试(改进建议 #3)。
+   */
+  private async generateGlobalContext(
+    _taskId: string,
+    projectId: string,
+    userId: string,
+    fullScript: string,
+  ): Promise<string | undefined> {
+    const MAX_CONTEXT_INPUT = 50000;
+    const truncated = fullScript.length > MAX_CONTEXT_INPUT
+      ? fullScript.slice(0, MAX_CONTEXT_INPUT)
+      : fullScript;
+
+    const agent = await this.agentFactory.create('storyboard_assistant', projectId, userId);
+    const inputStr = [
+      '请阅读以下剧本全文,生成一份结构化的剧情摘要,必须包含:',
+      '1. 世界观/故事背景(时代、地点、社会环境)',
+      '2. 核心人物列表(姓名、身份、关键特征)',
+      '3. 主要人物关系(谁和谁是什么关系)',
+      '4. 主线剧情走向(故事的核心冲突和走向)',
+      '5. 关键场景地点列表',
+      '',
+      '要求: 简洁精准,不超过 500 字。不要分镜,不要镜头描述,只做剧情摘要。',
+      '',
+      '=== 剧本全文 ===',
+      truncated,
+    ].join('\n');
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        let output = '';
+        for await (const event of agent.execute(inputStr, projectId, userId)) {
+          if (event.type === 'agent:complete') {
+            output = (event.data as any)?.output ?? '';
+          } else if (event.type === 'agent:error') {
+            this.logger.warn(`全局摘要生成失败(第${attempt + 1}次): ${(event.data as any)?.error}`);
+            if (attempt === 0) continue; // 重试
+            return undefined;
+          }
+        }
+        if (output && output.length > 100) {
+          return output.slice(0, 2000);
+        }
+        // 摘要过短: 重试
+        if (attempt === 0) {
+          this.logger.warn(`全局摘要过短(${output?.length ?? 0}字符), 重试`);
+          continue;
+        }
+        return undefined;
+      } catch (err) {
+        this.logger.warn(`全局摘要生成异常(第${attempt + 1}次): ${(err as Error).message}`);
+        if (attempt === 0) continue; // 重试
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * 生成单块分镜的剧情走向摘要(Plan#9 防幻觉增强):
+   * 从已生成的 shots 中提取核心剧情点,供后一块作为前情提要。
+   */
+  private generateChunkSummary(shots: any[], _scriptHead: string): string | undefined {
+    if (!shots || shots.length === 0) return undefined;
+    const summaries: string[] = [];
+    for (const shot of shots.slice(0, 5)) {
+      const sceneId = shot.sceneId ?? '?';
+      const desc = typeof shot.description === 'string'
+        ? shot.description.slice(0, 60)
+        : '';
+      const entities = Array.isArray(shot.entities) ? shot.entities.slice(0, 3).join('/') : '';
+      const parts: string[] = [`[${sceneId}]`];
+      if (entities) parts.push(`涉及:${entities}`);
+      if (desc) parts.push(desc);
+      summaries.push(parts.join(' '));
+    }
+    if (summaries.length === 0) return undefined;
+    return `本块分镜走向: ${summaries.join('; ')}`;
+  }
+
+  /**
+   * 构建子任务的原始 payload, 过滤掉注入的 meta 字段(Plan#9 防幻觉增强)
+   */
+  private buildChunkTaskPayload(input: any): Record<string, any> {
+    const metaKeys = new Set(['globalContext', 'prevContext']);
+    const result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(input ?? {})) {
+      if (!metaKeys.has(key)) {
+        result[key] = value;
+      }
+    }
+    return result;
   }
 }

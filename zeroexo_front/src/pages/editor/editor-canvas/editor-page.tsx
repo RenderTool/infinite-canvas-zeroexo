@@ -509,6 +509,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
+          onOpenCollaborationDock={dialogs.onOpenCollaborationDock}
           onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
           keyboardShortcuts={keyboardShortcuts}
@@ -991,6 +992,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           pendingInviteCode={inviteCode}
           onClose={() => dialogs.setCollaborationOpen(false)}
           theme={theme}
+          onNavigateToCanvas={onOpenProject}
         />
       )}
 

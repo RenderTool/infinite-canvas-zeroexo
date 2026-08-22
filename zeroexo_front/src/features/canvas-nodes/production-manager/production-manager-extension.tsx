@@ -3,13 +3,14 @@
  *
  * 注册 'production-manager' 节点类型：一部剧的资产管理器（演员/场景/道具聚合）。
  * 与主体卡同一套尺寸契约（16:9 uniform 620×348）。
- * 胶囊「详情」→ emit 'productionManager:openEditor' → 节点视图打开 ProductionManagerModal。
+ * 胶囊「编辑」→ emit 'productionManager:fullscreen' → 节点视图打开 ProductionManagerModal。
+ * 图标契约：胶囊工具图标统一走 CANVAS_NODE_ICONS 模块 Map（见 ../icons.ts），禁止内联 lucide。
  */
 import type { NodeTypeExtension, NodeRendererProps, NodeRuntimeContract, NodeCapabilities, ToolDefinition } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { Rabbit } from 'lucide-react';
 import i18next from 'i18next';
+import { CANVAS_NODE_ICONS } from '../icons.js';
 import { ProductionManagerView } from './ProductionManagerView.js';
 import { createProductionManagerDefaultData } from './production-manager-types.js';
 
@@ -37,12 +38,13 @@ function createRuntime(): NodeRuntimeContract {
 function getTools(): ToolDefinition[] {
   return [
     {
-      id: 'detail',
-      label: '',
-      title: i18next.t('productionManager.detail'),
-      icon: <Rabbit size={14} />,
+      // 2026-08-22 胶囊统一契约: 与剧本/分镜/出片完全一致(id/label/title/icon)
+      id: 'edit',
+      label: '编辑',
+      title: '全屏编辑',
+      icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
       group: 'basic',
-      run: (node) => { nodeActionBus.emit('productionManager:openEditor', { nodeId: node.id }); },
+      run: (node) => { nodeActionBus.emit('productionManager:fullscreen', { nodeId: node.id }); },
     },
   ];
 }
@@ -60,6 +62,12 @@ export function createProductionManagerExtension(
     minSize: PM_MIN_SIZE,
     resizable: true,
     lockAspectRatio: true,
+    // 2026-08-22 布局契约: 剧管=分镜后置, 创建时默认右侧 + 垂直整理避让
+    placement: {
+      direction: 'right',
+      gap: 96,
+      avoidOverlap: true,
+    },
     capabilities: { stackable: false, capabilities: ['production-manager'] } as NodeCapabilities,
     runtime: createRuntime(),
     viewContract: {

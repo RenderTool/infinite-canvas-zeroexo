@@ -4,8 +4,8 @@
  * 可视化取景器，直观预览每种景别的构图范围。
  * 使用 antd Modal 组件，通过 @zeroexo/plugin-theme 的 useTheme 适配暗色/亮色主题。
  */
-import { useState, useEffect, useCallback, type CSSProperties } from 'react';
-import { X, ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { useState, useEffect, useCallback, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { X, ArrowLeft, ArrowRight, Check, PenLine } from 'lucide-react';
 import { Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -160,12 +160,20 @@ export function ShotSizePickerModal({
 
   const [currentIdx, setCurrentIdx] = useState<number>(getInitialIdx);
 
+  // 2026-08-22 多景别兼容(用户拍板): 同运镜策略——预设 + 自定义输入, 支持复合景别如「全景→特写」
+  // currentValue 不在预设中 → 视为自定义值(保留原文本); 打开取景器时若为自定义值则自动进入自定义输入态
+  const isCustom = currentValue ? !SHOTS.some((s) => s.name === currentValue) : false;
+  const [customOpen, setCustomOpen] = useState<boolean>(isCustom);
+  const [customValue, setCustomValue] = useState<string>('');
+
   // Reset when opening
   useEffect(() => {
     if (open) {
       setCurrentIdx(getInitialIdx());
+      setCustomOpen(isCustom);
+      setCustomValue(isCustom ? (currentValue ?? '') : '');
     }
-  }, [open, getInitialIdx]);
+  }, [open, getInitialIdx, isCustom, currentValue]);
 
   const currentShot = SHOTS[currentIdx];
 
@@ -192,8 +200,29 @@ export function ShotSizePickerModal({
   }, [open, currentIdx]);
 
   const handleConfirmClick = () => {
+    // 自定义态确认自定义值(空值不确认); 预设态确认当前选中景别
+    if (customOpen) {
+      const val = customValue.trim();
+      if (val) {
+        onConfirm(val);
+        onClose();
+      }
+      return;
+    }
     onConfirm(currentShot.name);
     onClose();
+  };
+
+  // 自定义输入键盘: 阻止冒泡避免触发 document 的方向键/Enter 导航
+  const handleCustomKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleConfirmClick();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setCustomOpen(false);
+    }
   };
 
   // ─── Theme-derived colors ───
@@ -573,6 +602,52 @@ export function ShotSizePickerModal({
     color: isDark ? '#fff' : '#292524',
   };
 
+  // 2026-08-22 自定义景别(同运镜策略): 虚线卡片 + 内联输入行
+  const customShotBtnStyle: CSSProperties = {
+    ...shotOptionBase,
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 110,
+    borderStyle: 'dashed',
+    borderColor: isDark ? '#3a3a3a' : '#c8c4bc',
+    background: 'transparent',
+    color: isDark ? '#aaa' : '#78716c',
+  };
+  const customInputStyle: CSSProperties = {
+    flex: 1,
+    fontSize: 13,
+    padding: '6px 10px',
+    borderRadius: 8,
+    border: `1.5px solid ${isDark ? '#3a3a3a' : '#d0ccc4'}`,
+    background: isDark ? '#1f1f1f' : '#fff',
+    color: text,
+    outline: 'none',
+    fontFamily: 'inherit',
+  };
+  const customOkBtnStyle: CSSProperties = {
+    padding: '6px 14px',
+    borderRadius: 8,
+    border: 'none',
+    background: accent,
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+  };
+  const customCancelBtnStyle: CSSProperties = {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: `1px solid ${isDark ? '#3a3a3a' : '#d0ccc4'}`,
+    background: 'transparent',
+    color: textMuted,
+    fontSize: 13,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+  };
+
   const optDotStyle = (color: string): CSSProperties => ({
     width: 10,
     height: 10,
@@ -736,52 +811,67 @@ export function ShotSizePickerModal({
 
           {/* 右侧：详情面板 */}
           <div className="shot-info-panel" style={infoPanelStyle}>
-            <div style={shotNameStyle}>{currentShot.name}</div>
-            <div style={shotEnStyle}>{currentShot.en}</div>
-            <div style={shotDescStyle}>{currentShot.desc}</div>
-
-            <div style={usageSectionStyle}>
-              <div style={usageTitleStyle}>{t('storyboard.commonUsages')}</div>
-              <div style={usageTagsWrapStyle}>
-                {currentShot.usages.map((u) => (
-                  <span key={u} style={usageTagStyle}>{u}</span>
-                ))}
-              </div>
+            {/* 自定义态: 标题显示自定义复合景别文本; 预设态: 显示预设详情 */}
+            <div style={{ ...shotNameStyle, color: isCustom ? accent : currentShot.color }}>
+              {isCustom ? (customValue.trim() || currentValue || '自定义景别') : currentShot.name}
             </div>
+            {!isCustom && <div style={shotEnStyle}>{currentShot.en}</div>}
+            {isCustom ? (
+              <div style={shotDescStyle}>复合景别用于一镜到底等拍摄手法，例如「全景→特写」表示镜头从全景持续推进到特写。</div>
+            ) : (
+              <>
+                <div style={shotDescStyle}>{currentShot.desc}</div>
 
-            <div style={usageSectionStyle}>
-              <div style={usageTitleStyle}>{t('storyboard.framingRange')}</div>
-              <div style={usageTagsWrapStyle}>
-                {currentShot.ranges.map((r) => (
-                  <span key={r} style={usageTagStyle}>{r}</span>
-                ))}
-              </div>
-            </div>
+                <div style={usageSectionStyle}>
+                  <div style={usageTitleStyle}>{t('storyboard.commonUsages')}</div>
+                  <div style={usageTagsWrapStyle}>
+                    {currentShot.usages.map((u) => (
+                      <span key={u} style={usageTagStyle}>{u}</span>
+                    ))}
+                  </div>
+                </div>
 
-            {/* 焦点提示 */}
-            <div style={usageSectionStyle}>
-              <div style={usageTitleStyle}>{t('storyboard.focusArea')}</div>
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 12px',
-                borderRadius: 8,
-                background: currentShot.light,
-                border: `1px solid ${currentShot.color}40`,
-                fontSize: 13,
-                fontWeight: 600,
-                color: currentShot.color,
-              }}>
-                <span>{currentShot.focusPoint}</span>
-              </div>
-            </div>
+                <div style={usageSectionStyle}>
+                  <div style={usageTitleStyle}>{t('storyboard.framingRange')}</div>
+                  <div style={usageTagsWrapStyle}>
+                    {currentShot.ranges.map((r) => (
+                      <span key={r} style={usageTagStyle}>{r}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 焦点提示 */}
+                <div style={usageSectionStyle}>
+                  <div style={usageTitleStyle}>{t('storyboard.focusArea')}</div>
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    background: currentShot.light,
+                    border: `1px solid ${currentShot.color}40`,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: currentShot.color,
+                  }}>
+                    <span>{currentShot.focusPoint}</span>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div style={statusBarStyle}>
-              <div style={statusDotStyle} />
-              <div style={statusTextStyle}>
-                {t('storyboard.selectedShot', { name: currentShot.name, en: currentShot.en.split('\u00B7')[1]?.trim() || '' })}
-              </div>
+              {isCustom ? (
+                <div style={statusTextStyle}>自定义景别</div>
+              ) : (
+                <>
+                  <div style={statusDotStyle} />
+                  <div style={statusTextStyle}>
+                    {t('storyboard.selectedShot', { name: currentShot.name, en: currentShot.en.split('\u00B7')[1]?.trim() || '' })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -789,40 +879,74 @@ export function ShotSizePickerModal({
         {/* ─── 底部选项栏 ─── */}
         <div style={shotListSectionStyle}>
           <div style={shotListLabelStyle}>{t('storyboard.shotListLabel')}</div>
-          <div style={shotOptionsStyle}>
-            {SHOTS.map((s, idx) => {
-              const isActive = idx === currentIdx;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  style={isActive
-                    ? { ...shotOptionActive, borderColor: s.color, background: isDark ? `${s.color}22` : `${s.color}15` }
-                    : shotOptionNormal
-                  }
-                  onClick={() => setCurrentIdx(idx)}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
-                      e.currentTarget.style.color = isDark ? '#ccc' : '#57534e';
-                      e.currentTarget.style.borderColor = isDark ? '#444' : '#b8b4ac';
+          {/* 2026-08-22 自定义景别(同运镜策略): 打开时显示输入行, 关闭时显示预设卡片 + 自定义入口 */}
+          {customOpen ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '4px 0' }}>
+              <input
+                autoFocus
+                value={customValue}
+                onChange={(e) => setCustomValue(e.target.value)}
+                onKeyDown={handleCustomKeyDown}
+                placeholder="输入复合景别，如：全景→特写"
+                style={customInputStyle}
+              />
+              <button type="button" style={customOkBtnStyle} onClick={handleConfirmClick}>确定</button>
+              <button type="button" style={customCancelBtnStyle} onClick={() => setCustomOpen(false)}>取消</button>
+            </div>
+          ) : (
+            <div style={shotOptionsStyle}>
+              {SHOTS.map((s, idx) => {
+                const isActive = idx === currentIdx;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    style={isActive
+                      ? { ...shotOptionActive, borderColor: s.color, background: isDark ? `${s.color}22` : `${s.color}15` }
+                      : shotOptionNormal
                     }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.background = isDark ? '#1f1f1f' : '#f0ece4';
-                      e.currentTarget.style.color = isDark ? '#888' : '#78716c';
-                      e.currentTarget.style.borderColor = isDark ? '#2e2e2e' : '#d0ccc4';
-                    }
-                  }}
-                >
-                  <div style={optDotStyle(s.color)} />
-                  <div style={optNameStyle}>{s.name}</div>
-                  <div style={optEnStyle}>{getShortEn(s.en)}</div>
-                </button>
-              );
-            })}
-          </div>
+                    onClick={() => setCurrentIdx(idx)}
+                    onMouseEnter={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+                        e.currentTarget.style.color = isDark ? '#ccc' : '#57534e';
+                        e.currentTarget.style.borderColor = isDark ? '#444' : '#b8b4ac';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = isDark ? '#1f1f1f' : '#f0ece4';
+                        e.currentTarget.style.color = isDark ? '#888' : '#78716c';
+                        e.currentTarget.style.borderColor = isDark ? '#2e2e2e' : '#d0ccc4';
+                      }
+                    }}
+                  >
+                    <div style={optDotStyle(s.color)} />
+                    <div style={optNameStyle}>{s.name}</div>
+                    <div style={optEnStyle}>{getShortEn(s.en)}</div>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                style={customShotBtnStyle}
+                onClick={() => setCustomOpen(true)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+                  e.currentTarget.style.borderColor = isDark ? '#555' : '#b8b4ac';
+                  e.currentTarget.style.color = isDark ? '#ccc' : '#57534e';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = isDark ? '#3a3a3a' : '#c8c4bc';
+                  e.currentTarget.style.color = isDark ? '#aaa' : '#78716c';
+                }}
+              >
+                <PenLine size={12} />
+                <span>自定义景别</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ─── Footer ─── */}

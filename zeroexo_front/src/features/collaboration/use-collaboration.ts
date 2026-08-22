@@ -19,7 +19,7 @@ import { useCollaborationStore } from './use-collaboration-store.js';
 import { connectCollaborationEvents, closeAllCollaborationConnections } from './collaboration-socket.js';
 import type { AwarenessState, DeviceType, CollaborationMessage } from './collaboration-types.js';
 import {
-  autoJoinRoom,
+  joinRoom,
   leaveRoom,
   kickMember,
   banMember,
@@ -119,8 +119,9 @@ export function useCollaboration(
     } catch { /* ignore */ }
 
     // 建立实时事件连接（SSE），收到成员/消息/房间事件时自动刷新 store
-    connectCollaborationEvents(id);
-  }, [store]);
+    // 传入 userId 用于检测自己被踢出（必须依赖 user?.id，避免闭包捕获过时值）
+    connectCollaborationEvents(id, user?.id);
+  }, [store, user?.id]);
 
   // 组件挂载时自动加入
   useEffect(() => {
@@ -308,17 +309,13 @@ export function useCollaboration(
   // 加入房间（通过邀请码）
   const joinWithInvite = useCallback(async (id: string, inviteCode: string, nickname?: string) => {
     const deviceType = deviceTypeFromUA();
-    const result = await autoJoinRoom(id, deviceType);
-    // 实际上这里应该用 joinRoom，但 autoJoin 已经处理了创建逻辑
+    const result = await joinRoom(id, inviteCode, nickname, deviceType);
     store.getState().setRoom(result);
 
     try {
       const members = await listMembers(id);
       store.getState().setMembers(members);
     } catch { /* ignore */ }
-    // inviteCode 和 nickname 在后端 joinRoom 接口中使用
-    void inviteCode;
-    void nickname;
   }, [store]);
 
   // 离开

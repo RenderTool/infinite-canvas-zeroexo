@@ -2,7 +2,7 @@
  * AssetLibraryModal - 资产库 Modal（画布中使用）
  *
  * 将 AssetLibraryPage 包裹在 antd Modal 中，新增"发送到画布"功能。
- * 素材支持发送到画布，提示词/主体预留接口暂不启用。
+ * 素材支持发送到画布，提示词预留接口暂不启用。
  */
 
 import { useCallback } from 'react';
@@ -13,7 +13,7 @@ interface AssetLibraryModalProps {
   open: boolean;
   onClose: () => void;
   onSendToCanvas: (item: {
-    type: 'asset' | 'prompt' | 'subject' | 'script';
+    type: 'asset' | 'prompt' | 'script';
     id: string;
     data: any;
   }) => void;
@@ -26,7 +26,7 @@ export function AssetLibraryModal({
 }: AssetLibraryModalProps): React.ReactElement {
 
   const handleSendToCanvas = useCallback(
-    (item: { type: 'asset' | 'prompt' | 'subject' | 'script'; id: string; data: any }) => {
+    (item: { type: 'asset' | 'prompt' | 'script'; id: string; data: any }) => {
       onSendToCanvas(item);
       onClose();
     },
@@ -50,8 +50,6 @@ export function AssetLibraryModal({
       style={{ maxWidth: 'calc(100vw - 32px)' }}
     >
       <AssetLibraryPage
-        onOpenSubject={() => {}}
-        onNewSubject={() => {}}
         onSendToCanvas={handleSendToCanvas}
         sidebarRadius={12}
       />

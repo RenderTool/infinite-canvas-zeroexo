@@ -142,11 +142,12 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
   }
 
   /**
-   * 白名单 IP 跳过限流(内网 + 配置的 THROTTLE_WHITELIST)
+   * 白名单 IP 跳过限流(配置的 THROTTLE_WHITELIST)
    */
   protected async shouldSkip(context: ExecutionContext): Promise<boolean> {
     const { req } = this.getRequestResponse(context);
-    const ip = this.extractClientIp(req as AuthenticatedRequest);
+    const request = req as AuthenticatedRequest;
+    const ip = this.extractClientIp(request);
     if (this.isWhitelisted(ip)) {
       return true;
     }

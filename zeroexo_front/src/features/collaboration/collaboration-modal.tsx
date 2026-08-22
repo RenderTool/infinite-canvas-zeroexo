@@ -10,7 +10,7 @@
  * - 关闭协作房间按钮
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { App, Modal, Button, Select, Checkbox, Tabs, Input } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
@@ -18,13 +18,18 @@ import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { CollaborationRoom, CollaborationMember } from './collaboration-types';
 import {
+  createRoom,
   getRoomByCanvas,
   updateRoom,
   regenerateInvite,
   closeRoom,
   listMembers,
   kickMember,
+  banMember,
+  muteMember,
+  unmuteMember,
   joinRoom,
+  verifyInvite,
 } from './collaboration-api';
 import { useCollaborationStore } from './use-collaboration-store';
 import { useAuth } from '@/features/auth/auth-store';
@@ -36,6 +41,8 @@ export interface CollaborationModalProps {
   pendingInviteCode?: string;
   onClose: () => void;
   theme: ThemeConfig;
+  /** 加入非同画布房间时，跳转到目标画布编辑器 */
+  onNavigateToCanvas?: (canvasId: string, inviteCode?: string) => void;
 }
 
 const EXPIRY_OPTIONS = [
@@ -52,16 +59,15 @@ export function CollaborationModal({
   pendingInviteCode,
   onClose,
   theme,
+  onNavigateToCanvas,
 }: CollaborationModalProps): React.ReactElement {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const { message } = App.useApp();
-  const store = useCollaborationStore();
+  const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [room, setRoom] = useState<CollaborationRoom | null>(null);
   const [members, setMembers] = useState<CollaborationMember[]>([]);
   const [inviteCode, setInviteCode] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
   const [expiresInHours, setExpiresInHours] = useState<number>(0);
   const [allowChat, setAllowChat] = useState(true);
   const [allowAgentChat, setAllowAgentChat] = useState(true);
@@ -88,14 +94,40 @@ export function CollaborationModal({
     }
   }, [open, room, isOwner, amMember]);
 
+  // 重置所有本地状态（弹窗关闭后重新打开时触发）
+  const resetState = useCallback(() => {
+    setRoom(null);
+    setInviteCode('');
+    setMembers([]);
+    setJoinCode('');
+    setActiveTab('create');
+    setExpiresInHours(0);
+    setAllowChat(true);
+    setAllowAgentChat(true);
+    setAllowEdit(true);
+    setAllowDownload(false);
+  }, []);
+
   // 加载房间信息
-  const loadRoom = async () => {
+  const loadRoom = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getRoomByCanvas(canvasId);
+      let data = await getRoomByCanvas(canvasId);
+      if (!data) {
+        // 房间不存在（已关闭或从未创建）→ 自动创建新房间
+        try {
+          data = await createRoom({ canvasId, mode: 'invite-only' });
+        } catch (createErr) {
+          console.error('[CollaborationModal] auto-create room failed:', createErr);
+          setRoom(null);
+          setInviteCode('');
+          setMembers([]);
+          useCollaborationStore.getState().setMembers([]);
+          return;
+        }
+      }
       setRoom(data);
       setInviteCode(data.inviteCode);
-      setInviteLink(data.inviteLink);
       setAllowChat(data.allowChat);
       setAllowAgentChat(data.allowAgentChat);
       setAllowEdit(data.allowEdit);
@@ -104,20 +136,25 @@ export function CollaborationModal({
       // 加载成员列表
       const memberList = await listMembers(canvasId);
       setMembers(memberList);
-      store.setMembers(memberList);
+      useCollaborationStore.getState().setMembers(memberList);
     } catch (err) {
       console.error('[CollaborationModal] load room failed:', err);
       message.error(t('collab.loadFailed'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [canvasId, message, t]);
 
   useEffect(() => {
     if (open) {
+      // 先重置状态，再加载新鲜数据（避免旧状态残留）
+      resetState();
       void loadRoom();
     }
-  }, [open, canvasId]);
+  }, [open, resetState, loadRoom]);
+
+  // 动态构造邀请链接，不依赖后端存储的静态域名
+  const dynamicInviteLink = inviteCode ? `${window.location.origin}/c/${inviteCode}` : '';
 
   // 复制文本到剪贴板
   const handleCopy = async (text: string) => {
@@ -135,7 +172,6 @@ export function CollaborationModal({
     try {
       const data = await regenerateInvite(canvasId, expiresInHours > 0 ? expiresInHours : undefined);
       setInviteCode(data.inviteCode);
-      setInviteLink(data.inviteLink);
       message.success(t('collab.inviteRegenerated'));
     } catch (err) {
       console.error('[CollaborationModal] regenerate invite failed:', err);
@@ -143,23 +179,41 @@ export function CollaborationModal({
     }
   };
 
+  /** 从完整邀请链接中提取 6 位邀请码 */
+  const extractInviteCode = (raw: string): string => {
+    const match = raw.match(/\/c\/([A-Za-z0-9]{6})$/);
+    return match ? match[1]! : raw.trim();
+  };
+
   // 通过邀请码加入协作(核心逻辑,供手动申请与邀请链接自动申请共用)
-  const doJoin = async (code: string) => {
+  const doJoin = async (raw: string) => {
+    const code = extractInviteCode(raw);
     if (!code) return;
     setJoinLoading(true);
     try {
-      await joinRoom(canvasId, code);
+      // 先验证邀请码，获取正确的 canvasId（避免手动输入时 canvasId 不匹配）
+      const roomInfo = await verifyInvite(code);
+      if (!roomInfo) {
+        message.error(t('collab.inviteCodeInvalid'));
+        return;
+      }
+      const targetCanvasId = roomInfo.canvasId;
+      await joinRoom(targetCanvasId, code);
       // 加入成功后重新加载房间与成员
-      const roomData = await getRoomByCanvas(canvasId);
+      const roomData = await getRoomByCanvas(targetCanvasId);
       setRoom(roomData);
       setInviteCode(roomData.inviteCode);
-      setInviteLink(roomData.inviteLink);
-      const memberList = await listMembers(canvasId);
+      const memberList = await listMembers(targetCanvasId);
       setMembers(memberList);
-      store.setRoom(roomData);
-      store.setMembers(memberList);
-      store.setActive(true);
+      useCollaborationStore.getState().setRoom(roomData);
+      useCollaborationStore.getState().setMembers(memberList);
+      useCollaborationStore.getState().setActive(true);
       message.success(t('collab.applyJoinSuccess'));
+      // 如果加入的是非同画布房间，跳转到目标画布编辑器
+      if (targetCanvasId !== canvasId) {
+        onClose();
+        onNavigateToCanvas?.(targetCanvasId, code);
+      }
     } catch (err) {
       console.error('[CollaborationModal] apply join failed:', err);
       message.error(t('collab.inviteCodeInvalid'));
@@ -205,25 +259,67 @@ export function CollaborationModal({
     }
   };
 
-  // 踢除成员
-  const handleKickMember = async (userId: string) => {
+  // 踢除成员（可选封禁）
+  const handleKickMember = (userId: string) => {
+    if (!isOwner) return;
+    modal.confirm({
+      title: t('collab.kickConfirmTitle'),
+      content: (
+        <div>
+          <p style={{ marginBottom: 8, color: theme.toolbar.text }}>
+            {t('collab.kickConfirmContent')}
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: theme.toolbar.text }}>
+            <input type="checkbox" id="kick-ban-check" />
+            <span style={{ fontSize: 13 }}>{t('collab.kickAndBan')}</span>
+          </label>
+        </div>
+      ),
+      okText: t('collab.kick'),
+      okType: 'danger',
+      centered: true,
+      onOk: async () => {
+        const banChecked = (document.getElementById('kick-ban-check') as HTMLInputElement)?.checked;
+        try {
+          if (banChecked) {
+            await banMember(canvasId, userId);
+          }
+          await kickMember(canvasId, userId);
+          const updated = await listMembers(canvasId);
+          setMembers(updated);
+          useCollaborationStore.getState().setMembers(updated);
+          message.success(t('collab.memberKicked'));
+        } catch (err) {
+          console.error('[CollaborationModal] kick member failed:', err);
+          message.error(t('collab.kickFailed'));
+        }
+      },
+    });
+  };
+
+  // 禁言/解禁成员
+  const handleMuteMember = async (userId: string, currentlyMuted: boolean) => {
     if (!isOwner) return;
     try {
-      await kickMember(canvasId, userId);
+      if (currentlyMuted) {
+        await unmuteMember(canvasId, userId);
+      } else {
+        await muteMember(canvasId, userId);
+      }
       const updated = await listMembers(canvasId);
       setMembers(updated);
-      store.setMembers(updated);
-      message.success(t('collab.memberKicked'));
+      useCollaborationStore.getState().setMembers(updated);
+      message.success(currentlyMuted ? t('collab.memberUnmuted') : t('collab.memberMuted'));
     } catch (err) {
-      console.error('[CollaborationModal] kick member failed:', err);
-      message.error(t('collab.kickFailed'));
+      console.error('[CollaborationModal] mute/unmute member failed:', err);
+      message.error(t('collab.operationFailed'));
     }
   };
 
   // 关闭协作房间
   const handleCloseRoom = async () => {
     if (!isOwner) return;
-    Modal.confirm({
+    modal.confirm({
       title: t('collab.closeRoomConfirmTitle'),
       content: t('collab.closeRoomConfirmContent'),
       okType: 'danger',
@@ -231,7 +327,7 @@ export function CollaborationModal({
       onOk: async () => {
         try {
           await closeRoom(canvasId);
-          store.setRoom(null);
+          useCollaborationStore.getState().setRoom(null);
           message.success(t('collab.roomClosed'));
           onClose();
         } catch (err) {
@@ -373,13 +469,13 @@ export function CollaborationModal({
                     <span style={labelStyle}>{t('collab.inviteLink')}</span>
                     <div style={valueContainerStyle}>
                       <span style={{ ...codeTextStyle, textAlign: 'left', flex: 1 }}>
-                        {inviteLink || '-'}
+                        {dynamicInviteLink || '-'}
                       </span>
                       <Button
                         size="small"
                         icon={<Copy size={14} />}
-                        onClick={() => inviteLink && handleCopy(inviteLink)}
-                        disabled={!inviteLink}
+                        onClick={() => dynamicInviteLink && handleCopy(dynamicInviteLink)}
+                        disabled={!dynamicInviteLink}
                       >
                         {t('common.copy')}
                       </Button>
@@ -484,13 +580,21 @@ export function CollaborationModal({
                               </span>
                             </div>
                             {isOwner && !isSelf && (
-                              <Button
-                                size="small"
-                                danger
-                                onClick={() => handleKickMember(member.userId)}
-                              >
-                                {t('collab.kick')}
-                              </Button>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                <Button
+                                  size="small"
+                                  onClick={() => handleMuteMember(member.userId, member.sessions.some((s) => s.status === 'muted'))}
+                                >
+                                  {member.sessions.some((s) => s.status === 'muted') ? t('collab.unmute') : t('collab.mute')}
+                                </Button>
+                                <Button
+                                  size="small"
+                                  danger
+                                  onClick={() => handleKickMember(member.userId)}
+                                >
+                                  {t('collab.kick')}
+                                </Button>
+                              </div>
                             )}
                           </div>
                         );

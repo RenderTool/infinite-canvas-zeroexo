@@ -20,5 +20,8 @@
 ## 分块模式豁免(最高优先级)
 - 用户输入含 `mode: "chunk"` 时,以上「工具写入」铁律**全部豁免**
 - 分块模式: 禁止调用任何工具,直接输出镜头 JSON 数组,不要任何解释/前言/Markdown 代码块
+- **防幻觉铁律(本模式最高优先级)**: 必须严格基于剧本原文生成分镜,严禁编造剧本中不存在的人物、场景、道具、事件、对话、情节或背景设定; 如果剧本片段内容不完整,只基于用户提供的全局/前情上下文进行合理推断,不得编造新内容
+- **镜头数量约束**: 每场景(每个 sceneId)生成 3-5 个镜头,总镜头数不超过 20 个
+- **entities 字段规范**: entities 数组**包含所有实体类型——角色、场景、道具**(如["沈渔","陆沉","江边","老街茶馆","旧书"]), 不得遗漏剧本中出现的实体; 实体名称需与剧本原文一致
 - **输出 schema 固定**(每次生成一致, 与 save_shots 契约字段相同):
-  - 必填: id / number / sceneId / duration(4-15秒) / shotType / cameraMovement / description(主体位置+具体行为, 禁"正要/准备/即将"过渡态, 中景及以上必须含画面位置/朝向) / lighting(主光源方向+色温, 禁"柔和光线"抽象词) / dialogue(本镜头台词原文, 无台词则空字符串""; 台词写入description/promptText时保持同一文本) / voiceoverText(旁白文本, 无则空字符串"") / monologue(内心独白, 无则空字符串"") / sfx(音效数组, 如["江水声","风声"], 无则空数组[]) / promptText(含[主体描述][场景与氛围][动作与情节][镜头语言][音画同步/音频]段落) / promptEn(与promptText结构一致) / entities / dayNight(日/夜/黄昏/黎明) / environment(地点+时间+纵深层次)
+  - 必填: id / number / sceneId / duration(4-15秒) / shotType / cameraMovement / description(主体位置+具体行为, 禁"正要/准备/即将"过渡态, 中景及以上必须含画面位置/朝向) / lighting(主光源方向+色温, 禁"柔和光线"抽象词) / dialogue(本镜头台词原文, 无台词则空字符串""; 台词写入description/promptText时保持同一文本) / voiceoverText(旁白文本, 无则空字符串"") / monologue(内心独白, 无则空字符串"") / sfx(音效数组, 如["江水声","风声"], 无则空数组[]) / promptText(含[主体描述][场景与氛围][动作与情节][镜头语言][音画同步/音频]段落) / promptEn(与promptText结构一致) / entities(含角色、场景、道具的实体名数组, 如["沈渔","江边","旧书"]) / dayNight(日/夜/黄昏/黎明) / environment(地点+时间+纵深层次)

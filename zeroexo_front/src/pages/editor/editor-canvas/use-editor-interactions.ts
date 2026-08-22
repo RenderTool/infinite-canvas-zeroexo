@@ -7,10 +7,9 @@
 
 import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { App } from 'antd';
-import { Pencil, Trash2, Copy as CopyIcon, Download, FolderOpen, Palette, Maximize2, Crosshair, RefreshCw } from 'lucide-react';
 import { EDITOR_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
 import type {
   ImageNodeData,
@@ -37,7 +36,6 @@ import type { ImageDialogState } from '@/features/image-editor/image-dialog-rend
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
 import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
-import { CREATION_DEFAULT_SIZE } from '@/features/canvas-nodes/creation-node-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
 
@@ -412,7 +410,7 @@ export function useEditorInteractions({
       if (edgeId) {
         setNodeCreateMenuPos(null);
         setContextMenuItems([
-          { key: 'delete-edge', label: t('editor.deleteEdge'), icon: createElement(Trash2, { size: 14 }), danger: true, onClick: () => {
+          { key: 'delete-edge', label: t('editor.deleteEdge'), icon: createElement(EDITOR_ICONS.delete, { size: 14 }), danger: true, onClick: () => {
             refs.commandQueue?.execute(new RemoveEdgeCommand(edgeId));
           }},
         ]);
@@ -440,7 +438,7 @@ export function useEditorInteractions({
 
         const items: ContextMenuItem[] = [
           // ===== 聚焦置顶(测试画布验证最高频;组走 bounds 含空组回退) =====
-          { key: 'focus', label: t('editor.focusNode'), icon: createElement(Crosshair, { size: 14 }), onClick: () => {
+          { key: 'focus', label: t('editor.focusNode'), icon: createElement(EDITOR_ICONS.focus, { size: 14 }), onClick: () => {
             const store = refs.store;
             if (!store) return;
             const g = store.getGraph();
@@ -454,7 +452,7 @@ export function useEditorInteractions({
             store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
           }},
           // ===== 基础操作组 =====
-          { key: 'copy', label: t('editor.copy'), icon: createElement(CopyIcon, { size: 14 }), onClick: () => {
+          { key: 'copy', label: t('editor.copy'), icon: createElement(EDITOR_ICONS.copy, { size: 14 }), onClick: () => {
             // 组节点/多选(右键目标在选择集内)走子树复制(与 Ctrl+D 同逻辑):
             // 组复制不再产生坏组壳(childrenIds 悬空),多选复制与快捷键行为一致(Plan#21)
             const store = refs.store;
@@ -467,7 +465,7 @@ export function useEditorInteractions({
               refs.commandQueue.execute(new DuplicateNodeCommand(nodeId));
             }
           }},
-          { key: 'rename', label: t('editor.rename'), icon: createElement(Pencil, { size: 14 }), onClick: () => {
+          { key: 'rename', label: t('editor.rename'), icon: createElement(EDITOR_ICONS.edit, { size: 14 }), onClick: () => {
             const store = refs.store;
             if (!store) return;
             // 组节点:聚焦组 bounds(含空组回退) + 走 onRenameGroup 状态机
@@ -486,7 +484,7 @@ export function useEditorInteractions({
           }},
           // 替换媒体(image/video/audio):与胶囊 replace 工具同源(文件选择)
           ...(nodeType === 'image' || nodeType === 'video' || nodeType === 'audio'
-            ? [{ key: 'replace', label: t('contextMenu.replace'), icon: createElement(RefreshCw, { size: 14 }), onClick: () => {
+            ? [{ key: 'replace', label: t('contextMenu.replace'), icon: createElement(EDITOR_ICONS.replace, { size: 14 }), onClick: () => {
               setReplaceNodeId(nodeId);
               if (nodeType === 'video') setReplaceAccept('video/*');
               else if (nodeType === 'audio') setReplaceAccept('audio/*');
@@ -496,7 +494,7 @@ export function useEditorInteractions({
             : []),
           // 编辑内容(text 节点):与双击/胶囊 editText 同源(进节点内编辑态)
           ...(nodeType === 'text'
-            ? [{ key: 'edit-content', label: t('editor.editContent'), icon: createElement(Pencil, { size: 14 }), onClick: () => {
+            ? [{ key: 'edit-content', label: t('editor.editContent'), icon: createElement(EDITOR_ICONS.edit, { size: 14 }), onClick: () => {
               refs.store?.updateNodeData(nodeId, { __editing: true });
             }}]
             : []),
@@ -505,7 +503,7 @@ export function useEditorInteractions({
         // ===== 组专属操作(样式/解组;与胶囊组工具同源) =====
         // 预览组态下解组无意义(尚未成组),隐藏入口(用户拍板:多余菜单)
         if (node?.type === 'group' && !state.isGroupPreviewing) {
-          items.push({ key: 'group-style', label: t('groupTools.styleLabel'), icon: createElement(Palette, { size: 14 }), onClick: () => {
+          items.push({ key: 'group-style', label: t('groupTools.styleLabel'), icon: createElement(EDITOR_ICONS.style, { size: 14 }), onClick: () => {
             setGroupStyleDialog({ groupId: nodeId, currentBgColor: node.backgroundColor || undefined, currentOpacity: node.opacity, currentRadius: node.borderRadius });
           }});
           items.push({ key: 'ungroup', label: t('toolbar.ungroup'), icon: createElement(EDITOR_ICONS.ungroup, { size: 14 }), onClick: () => {
@@ -516,7 +514,7 @@ export function useEditorInteractions({
         // 基准尺寸恢复(非组节点):定向对右键目标节点生效,与胶囊菜单"基准尺寸"同源
         // 特化外观节点(气泡音频/资源浏览器)不参与尺寸计算,不提供该项
         if (node && node.type !== 'group' && !state.extensions.get(node.type)?.specialAppearance) {
-          items.push({ key: 'baseline-size', label: t('toolsDock.restoreBaseline'), icon: createElement(Maximize2, { size: 14 }), onClick: () => {
+          items.push({ key: 'baseline-size', label: t('toolsDock.restoreBaseline'), icon: createElement(EDITOR_ICONS.restoreBaseline, { size: 14 }), onClick: () => {
             refs.layoutController?.unifySelectionSizes([nodeId], 'baseline');
           }});
         }
@@ -525,7 +523,7 @@ export function useEditorInteractions({
         if (canSaveAsset) {
           items.push({ key: 'divider-asset', divider: true, label: '', onClick: () => {} });
           items.push({
-            key: 'saveAsset', label: t('editor.saveToAssets'), icon: createElement(FolderOpen, { size: 14 }), onClick: () => {
+            key: 'saveAsset', label: t('editor.saveToAssets'), icon: createElement(EDITOR_ICONS.saveAsset, { size: 14 }), onClick: () => {
               if (node) {
                 const input = assetInputFromNode(node);
                 if (input) {
@@ -545,7 +543,7 @@ export function useEditorInteractions({
             items.push({ key: 'divider-asset', divider: true, label: '', onClick: () => {} });
           }
           items.push({
-            key: 'download', label: t('common.download'), icon: createElement(Download, { size: 14 }), onClick: () => {
+            key: 'download', label: t('common.download'), icon: createElement(EDITOR_ICONS.download, { size: 14 }), onClick: () => {
               if (!node) return;
               void (async () => {
                 const data = node.data as Record<string, unknown> | undefined;
@@ -667,7 +665,7 @@ export function useEditorInteractions({
 
         // ===== 危险操作组(分割线分隔) =====
         items.push({ key: 'divider-delete', divider: true, label: '', onClick: () => {} });
-        items.push({ key: 'delete', label: t('editor.delete'), icon: createElement(Trash2, { size: 14 }), danger: true, onClick: () => {
+        items.push({ key: 'delete', label: t('editor.delete'), icon: createElement(EDITOR_ICONS.delete, { size: 14 }), danger: true, onClick: () => {
           // 与 std:delete 同逻辑:多选(右键目标在选择集内)删整个选择集;
           // 含组走 deleteNodes(解组保留子节点),否则 BatchCommand 一次撤销(Plan#21 一致性修复)
           const store = refs.store;
@@ -701,7 +699,7 @@ export function useEditorInteractions({
   }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
-  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject' | 'production-manager') => {
+  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager') => {
     setNodeCreateMenuPos(null);
     if (!nodeCreateMenuPos || !containerRef.current || !refs.store) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -712,7 +710,7 @@ export function useEditorInteractions({
     const offsetY = (Math.random() - 0.5) * 80;
     const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const sameTypeCount = refs.store?.getGraph().nodes.filter((n: any) => n.type === type).length ?? 0;
-    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench' || type === 'subject' || type === 'production-manager';
+    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench' || type === 'production-manager';
     const isGenerator = type === 'generator';
     const isStackedMedia = type === 'stacked-media';
     const baseNameKey = type === 'production-manager'
@@ -736,9 +734,7 @@ export function useEditorInteractions({
         data: isCreation
           ? type === 'script'
             ? { title: nodeTitle, status: 'idle', content: '' }
-            : type === 'subject'
-              ? { title: nodeTitle, name: '', kind: 'character', consistency: '', aliases: [], coverKey: null, states: [{ id: 'state-default', name: '默认', images: [], note: '' }], activeStateId: 'state-default', audio: [], episodeIds: [], assetSubjectId: null, status: 'idle' }
-              : type === 'production-manager'
+            : type === 'production-manager'
                 ? { title: nodeTitle, items: [] }
                 : { title: nodeTitle, status: 'idle' }
           : isStackedMedia
@@ -1031,46 +1027,75 @@ export function useEditorInteractions({
     });
     // ==== AI 生成分镜(真实剧本)的复用逻辑:支持进度条与按集生成,供初次生成/重试/切换集共用 ====
     // Plan#9: 直连 provider 改为后端 storyboard_generate 任务(后端 storyboard_assistant 分块编排 + SSE)
-    // Plan#29 T6: 确保剧本关联的统筹节点存在(剧级资产管理器,首次生成自动建 + 剧本→统筹连线)
-    const ensureProductionManager = (store: any, q: any, scriptNode: any): string => {
+    // Plan#29 T6 + 2026-08-21 架构修正: 剧管 = 分镜后置工序(剧本→分镜→剧管)
+    // 剧管节点锚定分镜节点(右侧 + storyboard→pm 连线 + 双向关联), 一个分镜节点对应一个剧管,
+    // 生成新分镜节点 → 新建对应剧管, 不再按 scriptId 复用导致旧分镜引用被覆盖(幂等)
+    const ensureProductionManager = (store: any, q: any, storyboardNode: any): string => {
       const graph = store.getGraph();
-      const existing = graph.nodes.find((n: any) => n.type === 'production-manager' && n.data?.scriptId === scriptNode.id);
+      const storyboardId = storyboardNode.id;
+      // 已关联本分镜节点的剧管直接复用
+      const existing = graph.nodes.find((n: any) => n.type === 'production-manager' && n.data?.storyboardId === storyboardId);
       if (existing) return existing.id;
       const pmId = `node-pm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const sbData = (storyboardNode.data ?? {}) as Record<string, unknown>;
+      // 2026-08-22: 剧管=分镜后置, 位置走布局契约(右侧 + 垂直整理避让)
+      const pmPos = resolvePlacement({
+        anchor: storyboardNode,
+        ext: state.extensions.get('production-manager'),
+        existingNodes: graph.nodes,
+      });
       q.execute(new BatchCommand([
         new AddNodeCommand({
           id: pmId,
           type: 'production-manager',
-          position: { x: scriptNode.position.x + (scriptNode.size?.width ?? 400) + 96, y: scriptNode.position.y + 420 },
+          position: pmPos,
           title: i18n.t('productionManager.editorTitle'),
-          data: { title: ((scriptNode.data?.title as string) || i18n.t('productionManager.editorTitle')), scriptId: scriptNode.id, items: [] },
+          data: {
+            title: (sbData.title as string) || i18n.t('productionManager.editorTitle'),
+            storyboardId,
+            scriptId: (sbData.sourceScriptId as string) ?? undefined,
+            items: [],
+          },
         }),
         new AddEdgeCommand({
           id: `edge-pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          source: { nodeId: scriptNode.id, pinId: 'output' },
+          source: { nodeId: storyboardId, pinId: 'output' },
           target: { nodeId: pmId, pinId: 'input' },
         }),
       ], 'create-production-manager'));
+      // 分镜节点记录关联剧管(双向关联)
+      q.execute(new UpdateNodeDataCommand(storyboardId, { productionManagerId: pmId }));
       return pmId;
     };
 
-    // Plan#29 T5: AI 识别主体幂等登记进统筹条目(名字/别名命中 → 合并别名+出场集;新名字 → 新建条目)
-    const registerAiSubjectsToProduction = (store: any, q: any, scriptNode: any, aiSubjects: Array<{ name: string; kind: string; aliases: string[]; description: string }>, episodeId?: string) => {
+    // Plan#29 T5 + 2026-08-21: AI 识别主体幂等登记进剧管条目(名字/别名命中 → 合并别名+出场集;新名字 → 新建条目)
+    // 锚定分镜节点(剧管=分镜后置); 跳过用户已删除的 deletedNames(已删条目不复活); 手动重建同名条目时清除删除标记
+    const registerAiSubjectsToProduction = (store: any, q: any, storyboardNode: any, aiSubjects: Array<{ name: string; kind: string; aliases: string[]; description: string }>, episodeId?: string) => {
       if (!aiSubjects || aiSubjects.length === 0) return;
-      const pmId = ensureProductionManager(store, q, scriptNode);
+      const pmId = ensureProductionManager(store, q, storyboardNode);
       const pm = store.getGraph().nodes.find((n: any) => n.id === pmId);
-      const items: ProductionItem[] = Array.isArray(pm?.data?.items)
-        ? (pm.data.items as ProductionItem[]).map((it) => ({ ...it }))
+      const data = (pm?.data ?? {}) as { items?: ProductionItem[]; deletedNames?: string[] };
+      const items: ProductionItem[] = Array.isArray(data.items)
+        ? (data.items as ProductionItem[]).map((it) => ({ ...it }))
         : [];
+      const deletedNames = Array.isArray(data.deletedNames) ? [...data.deletedNames] : [];
+      const removedDeleted = new Set<string>();
       let added = 0;
       for (const subj of aiSubjects) {
         if (!subj.name) continue;
         const subjKeys = productionItemKeys({ name: subj.name, aliases: Array.isArray(subj.aliases) ? subj.aliases : [] });
         const hit = items.find((it) => [...productionItemKeys(it)].some((k) => subjKeys.has(k)));
         if (hit) {
+          // 用户手动重建同名条目 → 从删除记录中移除该名(允许后续 AI 识别再次合并)
+          if (deletedNames.includes(subj.name)) {
+            removedDeleted.add(subj.name);
+          }
           hit.aliases = [...new Set([...hit.aliases, ...(Array.isArray(subj.aliases) ? subj.aliases : [])])];
           if (episodeId && !hit.episodeIds.includes(episodeId)) hit.episodeIds = [...hit.episodeIds, episodeId];
-        } else {
+          // 2026-08-22 BUG 修复: 历史条目 kind 可能为旧版误判(场景色吞噬角色/道具), AI 语义识别更可靠, 命中时以 AI kind 收敛
+          const aiKind = subj.kind === 'scene' || subj.kind === 'prop' ? subj.kind : 'character';
+          if (hit.kind !== aiKind) hit.kind = aiKind;
+        } else if (!deletedNames.includes(subj.name)) {
           const kind = (subj.kind === 'scene' || subj.kind === 'prop' ? subj.kind : 'character') as ProductionItemKind;
           items.push({
             ...createProductionItem(kind, subj.name),
@@ -1081,16 +1106,21 @@ export function useEditorInteractions({
           added += 1;
         }
       }
-      q.execute(new UpdateNodeDataCommand(pmId, { items }));
+      const nextDeleted = deletedNames.filter((n) => !removedDeleted.has(n));
+      q.execute(new UpdateNodeDataCommand(pmId, nextDeleted.length !== deletedNames.length ? { items, deletedNames: nextDeleted } : { items }));
       if (added > 0) message.success(i18n.t('productionManager.registered', { count: added }));
     };
 
     const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, _createSubjects?: boolean) => {
       const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string }>; activeEpisodeId?: string };
       const episodes = scriptData.episodes ?? [];
-      const targetEp = episodes.find((e) => e.id === episodeId) ?? episodes.find((e) => e.id === scriptData.activeEpisodeId) ?? episodes[0];
+      // 2026-08-21 BUG 修复: episodeId 未传入时,优先读取 storyboard 节点自身的 activeEpisodeId
+      const sbData = q.getState().nodes.find((n: any) => n.id === storyboardId)?.data as Record<string, unknown> | undefined;
+      const sbActiveEpisodeId = (sbData?.activeEpisodeId as string) ?? '';
+      const resolvedEpisodeId = episodeId || sbActiveEpisodeId || undefined;
+      const targetEp = episodes.find((e) => e.id === resolvedEpisodeId) ?? episodes.find((e) => e.id === scriptData.activeEpisodeId) ?? episodes[0];
       const scriptText = htmlToPlainText(targetEp?.content ?? '');
-      const epKey = episodeId ?? targetEp?.id ?? '_legacy';
+      const epKey = resolvedEpisodeId ?? targetEp?.id ?? '_legacy';
 
       // 读-改-写:UpdateNodeDataCommand 是浅合并,必须合并指定集到每集映射,否则会整体覆盖 shotsByEpisode/statusByEpisode/progressByEpisode
       const setEpData = (patch: { shotsByEpisode?: unknown; statusByEpisode?: unknown; progressByEpisode?: unknown }) => {
@@ -1166,9 +1196,10 @@ export function useEditorInteractions({
                 status: 'ready',
                 aiSubjects,
               }));
-              // Plan#29 T5/T6: AI 主体幂等登记进统筹条目(替代散落主体卡)
+              // Plan#29 T5/T6 + 2026-08-21: AI 主体幂等登记进剧管条目(剧管=分镜后置,锚定分镜节点)
               if (aiSubjects && aiSubjects.length > 0) {
-                registerAiSubjectsToProduction(_store, q, scriptNode, aiSubjects, epKey);
+                const sbNode = _store.getGraph().nodes.find((n: any) => n.id === storyboardId);
+                if (sbNode) registerAiSubjectsToProduction(_store, q, sbNode, aiSubjects, epKey);
               }
               if (Array.isArray(failed) && failed.length > 0) {
                 message.warning(i18n.t('editor.storyboardPartialFailed', { failed: failed.length, total: result?.blocks?.total ?? 0 }));
@@ -1207,14 +1238,19 @@ export function useEditorInteractions({
       const scriptNode = graph.nodes.find((n: any) => n.id === event.nodeId);
       if (!scriptNode) return;
 
-      // 新建分镜节点 + 连线(放置到剧本右侧)
+      // 新建分镜节点 + 连线(2026-08-22: 走布局契约 resolvePlacement, 默认右侧 + 垂直整理避让)
       const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
       const title = `分镜${sameTypeCount + 1}`;
+      const sbPos = resolvePlacement({
+        anchor: scriptNode,
+        ext: state.extensions.get('storyboard'),
+        existingNodes: graph.nodes,
+      });
       q.execute(new AddNodeCommand({
         id,
         type: 'storyboard',
-        position: { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: scriptNode.position.y },
+        position: sbPos,
         title,
         data: { title, status: 'idle' },
       }));
@@ -1256,7 +1292,13 @@ export function useEditorInteractions({
         return;
       }
       const epIds = Array.isArray(event.episodeIds) ? event.episodeIds : [];
-      const batchPosY = (i: number) => scriptNode.position.y + i * 24;
+      // 2026-08-22: 批量位置走布局契约(同列垂直错开 + 避让, 修复 batchPosY 24px 重叠问题)
+      const batchPosY = (i: number) => resolvePlacement({
+        anchor: scriptNode,
+        ext: state.extensions.get('storyboard'),
+        existingNodes: graph.nodes,
+        index: i,
+      });
 
       if (event.targetNodeId) {
         // 已有分镜节点:断开旧的剧本连线 → 建立新连线 + 写 sourceScriptId
@@ -1314,15 +1356,16 @@ export function useEditorInteractions({
         return;
       }
 
-      // 新建分镜节点(剧本侧批量):每个选集一个节点
+      // 新建分镜节点(剧本侧批量):每个选集一个节点, 位置走布局契约(同列垂直错开)
       epIds.forEach((epId: string, i: number) => {
         const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`;
         const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
         const title = `分镜${sameTypeCount + i + 1}`;
+        const pos = batchPosY(i);
         q.execute(new AddNodeCommand({
           id,
           type: 'storyboard',
-          position: { x: scriptNode.position.x + (scriptNode.size?.width ?? CREATION_DEFAULT_SIZE.script.width) + 96, y: batchPosY(i) },
+          position: pos,
           title,
           data: { title, status: 'idle', sourceScriptId: event.scriptNodeId, activeEpisodeId: epId },
         }));
@@ -1431,6 +1474,24 @@ export function useEditorInteractions({
       }
     });
 
+    // 2026-08-21 架构修正: 分镜胶囊菜单「剧管」入口——仅分镜时主动生成/关联剧管(分镜后置工序)
+    // 从分镜节点 aiSubjects 幂等登记进关联剧管, 无识别主体时给出提示
+    const unsubManageProduction = nodeActionBus.on('storyboard:manageProduction', (event: { nodeId: string }) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const sbNode = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
+      if (!sbNode) return;
+      const aiSubjects = Array.isArray((sbNode.data as any)?.aiSubjects) ? (sbNode.data as any).aiSubjects : [];
+      if (aiSubjects.length === 0) {
+        message.info(i18n.t('storyboard.noSubjectsToManage'));
+        return;
+      }
+      const pmId = ensureProductionManager(store, q, sbNode);
+      registerAiSubjectsToProduction(store, q, sbNode, aiSubjects);
+      store.setSelection({ selectedNodeIds: new Set([pmId]), selectedEdgeIds: new Set() });
+    });
+
     // Plan#20 T9: 删集级联清理——主体卡 episodeIds 过滤 + 分镜按集映射(shots/status/progress)删除 + activeEpisodeId 回退
     const unsubEpisodesDeleted = nodeActionBus.on('script:episodesDeleted', (event: any) => {
       const store = refs.store;
@@ -1442,13 +1503,7 @@ export function useEditorInteractions({
       const cmds: Command[] = [];
       const deletedSet = new Set(deleted);
       for (const n of graph.nodes) {
-        if (n.type === 'subject') {
-          const d = (n.data ?? {}) as { episodeIds?: string[] };
-          const epIds = Array.isArray(d.episodeIds) ? d.episodeIds.filter((id) => !deletedSet.has(id)) : [];
-          if (epIds.length !== (Array.isArray(d.episodeIds) ? d.episodeIds.length : 0)) {
-            cmds.push(new UpdateNodeDataCommand(n.id, { episodeIds: epIds }));
-          }
-        } else if (n.type === 'storyboard') {
+        if (n.type === 'storyboard') {
           const d = (n.data ?? {}) as { shotsByEpisode?: Record<string, unknown>; statusByEpisode?: Record<string, unknown>; progressByEpisode?: Record<string, unknown>; activeEpisodeId?: string };
           const patch: Record<string, unknown> = {};
           const drop = <T,>(map: Record<string, T> | undefined): Record<string, T> => {
@@ -1479,6 +1534,7 @@ export function useEditorInteractions({
       unsubRegenEp();
       unsubLinkStory();
       unsubAbandonStory();
+      unsubManageProduction();
       unsubEpisodesDeleted();
       unsubStopGen();
     };
@@ -1503,12 +1559,17 @@ export function useEditorInteractions({
     const content = (node.data as { content?: string } | null)?.content ?? '';
     if (!content) return;
 
-    // 创建文本节点(loading 状态),位置在图片节点右侧
+    // 创建文本节点(loading 状态),位置走布局契约(右侧 + 避让)
     const textNodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const textPos = resolvePlacement({
+      anchor: node,
+      size: { width: 280, height: 120 },
+      existingNodes: refs.store.getGraph().nodes,
+    });
     const textNode: NodeRecord = {
       id: textNodeId,
       type: 'text',
-      position: { x: node.position.x + (node.size?.width ?? 340) + 96, y: node.position.y },
+      position: textPos,
       size: { width: 280, height: 120 },
       data: { text: t('imageEditor.reversePromptLoading'), status: 'loading' },
     };
@@ -1898,7 +1959,7 @@ export function useEditorInteractions({
           id: 'rename',
           label: t('groupTools.renameLabel'),
           title: t('groupTools.renameTitle'),
-          icon: createElement(Pencil, { size: 14 }),
+          icon: createElement(EDITOR_ICONS.edit, { size: 14 }),
           group: '组操作',
           run: (n: any) => {
             // 重命名前聚焦组 bounds(含空组回退,用户能看到正在重命名的组对象)
@@ -1922,7 +1983,7 @@ export function useEditorInteractions({
           id: 'style',
           label: t('groupTools.styleLabel'),
           title: t('groupTools.styleTitle'),
-          icon: createElement(Palette, { size: 14 }),
+          icon: createElement(EDITOR_ICONS.style, { size: 14 }),
           group: '组操作',
           run: (n: any) => {
             setGroupStyleDialog({ groupId: n.id, currentBgColor: bgColor || undefined, currentOpacity: opacity, currentRadius: radius });

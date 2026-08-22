@@ -12,7 +12,6 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { PromptsModule } from './modules/prompts/prompts.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { FoldersModule } from './modules/folders/folders.module';
-import { SubjectsModule } from './modules/subjects/subjects.module';
 import { AiGenerateModule } from './modules/ai-generate/ai-generate.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { UserAiPreferenceModule } from './modules/user-ai-preference/user-ai-preference.module';
@@ -34,6 +33,7 @@ import { HealthModule } from './modules/health/health.module';
 import { ResourceClassificationModule } from './modules/resources/resource-classification.module';
 import { SourceMaterialModule } from './modules/source-material/source-material.module';
 import { StoryboardModule } from './modules/storyboard/storyboard.module';
+import { VideoPromptModule } from './modules/video-prompt/video-prompt.module';
 import { ScriptsModule } from './modules/scripts/scripts.module';
 import { PublicPromptsModule } from './modules/public-prompts/public-prompts.module';
 import { PromptFavoritesModule } from './modules/prompt-favorites/prompt-favorites.module';
@@ -81,7 +81,6 @@ import { throttlerConfig } from './common/throttler/throttler.config';
     PromptsModule,
     AssetsModule,
     FoldersModule,
-    SubjectsModule,
     AiGenerateModule,
     // Yjs 实时同步（Hocuspocus 挂载到现有 HTTP server）
     SyncModule,
@@ -113,6 +112,8 @@ import { throttlerConfig } from './common/throttler/throttler.config';
     SourceMaterialModule,
     // 分镜模块 — 按集分镜生成(Phase 4)
     StoryboardModule,
+    // 视频提示词生成模块 — 从分镜字段生成 imagePrompt/videoPrompt
+    VideoPromptModule,
     // 剧本模块 — 格式化章节、缓存、重试
     ScriptsModule,
     PublicPromptsModule,

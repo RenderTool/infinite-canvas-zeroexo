@@ -17,9 +17,8 @@ import { onAssetCreated } from '@/services/sync/sync-service.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
 import { useAuth } from '@/features/auth/auth-store.js';
-import { deleteSubject, updateSubject, type Subject } from './subjects-api.js';
 import { deletePrompt, updatePrompt, createPrompt, type Prompt } from './prompts-api.js';
-import { useSharedSubjects, useSharedPrompts, updatePromptFavoriteLocal, updateSubjectFavoriteLocal } from './shared-data-store.js';
+import { useSharedPrompts, updatePromptFavoriteLocal } from './shared-data-store.js';
 import { notifyPromptCopied } from './prompt-copy-feedback.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { apiPost, getToken } from '@/services/api-client.js';
@@ -28,7 +27,6 @@ import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js
 import type { AssetCategory, ViewMode } from '@/shared/components/index.js';
 import type {
   ContentType,
-  SubjectTypeFilter,
   AssetKindFilter,
   PageItem,
   ConfirmDeleteState,
@@ -48,13 +46,10 @@ export interface UseAssetLibraryReturn {
   theme: ReturnType<typeof useTheme>['theme'];
 
   // 数据
-  subjects: Subject[];
   prompts: Prompt[];
   assets: ReturnType<typeof useAssets>['assets'];
-  loadingSubjects: boolean;
   loadingPrompts: boolean;
   loadingAssets: boolean;
-  refreshSubjects: () => Promise<void>;
   refreshPrompts: () => Promise<void>;
   refreshAssets: () => Promise<void>;
 
@@ -101,8 +96,6 @@ export interface UseAssetLibraryReturn {
   scanningMessage: string;
   promptViewId: string | null;
   assetDetail: any;
-  subjectCreateOpen: boolean;
-  subjectCreateId: string | undefined;
   promptCreateOpen: boolean;
   promptCreateId: string | undefined;
 
@@ -121,11 +114,11 @@ export interface UseAssetLibraryReturn {
   handleConfirmDelete: () => Promise<void>;
   handleToggleSelect: (id: string) => void;
   handleToggleSelectAll: () => void;
-  handleToggleFavorite: (item: { type: 'subject' | 'prompt' | 'asset'; id: string; data: any }) => Promise<void>;
+  handleToggleFavorite: (item: { type: 'prompt' | 'asset'; id: string; data: any }) => Promise<void>;
   handleClonePrompt: (prompt: Prompt) => Promise<void>;
   handleBatchDelete: () => void;
   handleSendToCanvas: (item: SendToCanvasItem) => void;
-  handleDownloadItem: (item: { type: 'subject' | 'prompt' | 'asset'; data: any }) => void;
+  handleDownloadItem: (item: { type: 'prompt' | 'asset'; data: any }) => void;
   handleRenameItem: () => Promise<void>;
   handleOpenItem: (item: PageItem) => void;
 
@@ -151,8 +144,6 @@ export interface UseAssetLibraryReturn {
   setScanningMessage: (msg: string) => void;
   setPromptViewId: (id: string | null) => void;
   setAssetDetail: (detail: any) => void;
-  setSubjectCreateOpen: (open: boolean) => void;
-  setSubjectCreateId: (id: string | undefined) => void;
   setPromptCreateOpen: (open: boolean) => void;
   setPromptCreateId: (id: string | undefined) => void;
 }
@@ -195,8 +186,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const { message: antdMessage, modal } = AntdApp.useApp();
   const { isAuthenticated } = useAuth();
 
-  // ── 数据状态（subjects/prompts 来自共享缓存层，多实例共用，减少重复 API 请求） ──
-  const { subjects, loading: loadingSubjects, refreshSubjects } = useSharedSubjects();
+  // ── 数据状态（prompts 来自共享缓存层，多实例共用，减少重复 API 请求） ──
   const { prompts, loading: loadingPrompts, refreshPrompts } = useSharedPrompts();
   const [prevDefaultAssetKind, setPrevDefaultAssetKind] = useState<AssetKindFilter | undefined>(props.defaultAssetKind);
 
@@ -204,8 +194,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
 
   // ── 弹窗状态 ──
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null);
-  const [subjectCreateOpen, setSubjectCreateOpen] = useState(false);
-  const [subjectCreateId, setSubjectCreateId] = useState<string | undefined>(undefined);
   const [promptCreateOpen, setPromptCreateOpen] = useState(false);
   const [promptCreateId, setPromptCreateId] = useState<string | undefined>(undefined);
   const [promptViewId, setPromptViewId] = useState<string | null>(null);
@@ -310,68 +298,41 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       count: assets.filter((a) => (a.kind as string) === 'script').length,
       children: [],
     },
-  ], [subjects, prompts, assets, t]);
+  ], [prompts, assets, t]);
 
   // ── 分类筛选逻辑（子分类值做合法性校验，非法残留值回退 all） ──
   const filteredByGroup = useMemo(() => {
     if (!activeGroup) {
-      return { contentType: 'all' as ContentType, subjectType: 'all' as SubjectTypeFilter, assetKind: 'all' as AssetKindFilter };
+      return { contentType: 'all' as ContentType, assetKind: 'all' as AssetKindFilter };
     }
     switch (activeGroup) {
-      case 'subject': {
-        const validSubjects: SubjectTypeFilter[] = ['all', 'favorite', 'character', 'scene', 'prop'];
-        const child = validSubjects.includes(activeChild as SubjectTypeFilter) ? (activeChild as SubjectTypeFilter) : 'all';
-        return { contentType: 'subject' as ContentType, subjectType: child, assetKind: 'all' as AssetKindFilter };
-      }
       case 'prompt':
-        return { contentType: 'prompt' as ContentType, subjectType: 'all' as SubjectTypeFilter, assetKind: 'all' as AssetKindFilter };
+        return { contentType: 'prompt' as ContentType, assetKind: 'all' as AssetKindFilter };
       case 'material': {
         const validKinds: AssetKindFilter[] = ['all', 'favorite', 'image', 'video', 'audio', 'text'];
         const child = validKinds.includes(activeChild as AssetKindFilter) ? (activeChild as AssetKindFilter) : 'all';
-        return { contentType: 'asset' as ContentType, subjectType: 'all' as SubjectTypeFilter, assetKind: child };
+        return { contentType: 'asset' as ContentType, assetKind: child };
       }
       case 'script':
-        return { contentType: 'script' as ContentType, subjectType: 'all' as SubjectTypeFilter, assetKind: 'all' as AssetKindFilter };
+        return { contentType: 'script' as ContentType, assetKind: 'all' as AssetKindFilter };
       default:
-        return { contentType: 'all' as ContentType, subjectType: 'all' as SubjectTypeFilter, assetKind: 'all' as AssetKindFilter };
+        return { contentType: 'all' as ContentType, assetKind: 'all' as AssetKindFilter };
     }
   }, [activeGroup, activeChild]);
 
   // 筛选维度全部从 filteredByGroup 派生（不再用 effect 同步 state，切换分类单次渲染生效）
   const contentType = filteredByGroup.contentType;
-  const subjectTypeFilter = filteredByGroup.subjectType;
   const assetKindFilter = filteredByGroup.assetKind;
 
   useEffect(() => {
     if (isAuthenticated) {
       // force=false：走共享缓存 TTL，30s 内重复挂载不发请求
-      void refreshSubjects(false);
       void refreshPrompts(false);
     }
-  }, [isAuthenticated, refreshSubjects, refreshPrompts]);
+  }, [isAuthenticated, refreshPrompts]);
 
   // ── 数据筛选 ──
-  const safeSubjects = Array.isArray(subjects) ? subjects : [];
   const safePrompts = Array.isArray(prompts) ? prompts : [];
-
-  const filteredSubjects = useMemo(() => {
-    let result = safeSubjects;
-    if (subjectTypeFilter === 'favorite') {
-      result = result.filter((s) => s.favorite);
-    } else if (subjectTypeFilter !== 'all') {
-      result = result.filter((s) => s.type === subjectTypeFilter);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q) ||
-          s.tags.some((tag) => tag.toLowerCase().includes(q)),
-      );
-    }
-    return result;
-  }, [safeSubjects, subjectTypeFilter, search]);
 
   const filteredPrompts = useMemo(() => {
     let result = safePrompts;
@@ -411,7 +372,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     return result;
   }, [assets, assetKindFilter, search, activeGroup]);
 
-  const showSubjects = filteredByGroup.contentType === 'all' || filteredByGroup.contentType === 'subject';
   const showPrompts = filteredByGroup.contentType === 'all' || filteredByGroup.contentType === 'prompt';
   const showAssets = filteredByGroup.contentType === 'all' || filteredByGroup.contentType === 'asset';
   const showScripts = filteredByGroup.contentType === 'script';
@@ -422,7 +382,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
 
   const allItems = useMemo((): PageItem[] => {
     const items: PageItem[] = [];
-    if (showSubjects) filteredSubjects.forEach((s) => items.push({ type: 'subject', data: s }));
     if (showPrompts) filteredPrompts.forEach((p) => items.push({ type: 'prompt', data: p }));
     if (showAssets) {
       filteredAssets
@@ -433,7 +392,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       filteredScripts.forEach((a) => items.push({ type: 'asset', data: a }));
     }
     return items;
-  }, [showSubjects, filteredSubjects, showPrompts, filteredPrompts, showAssets, filteredAssets, showScripts, filteredScripts]);
+  }, [showPrompts, filteredPrompts, showAssets, filteredAssets, showScripts, filteredScripts]);
 
   const pageItems = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -689,10 +648,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const handleConfirmDelete = useCallback(async () => {
     if (!confirmDelete) return;
     try {
-      if (confirmDelete.type === 'subject') {
-        await deleteSubject(confirmDelete.id);
-        await refreshSubjects();
-      } else if (confirmDelete.type === 'prompt') {
+      if (confirmDelete.type === 'prompt') {
         await deletePrompt(confirmDelete.id);
         await refreshPrompts();
       } else if (confirmDelete.type === 'asset') {
@@ -704,7 +660,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       antdMessage.error(err instanceof Error ? err.message : t('assetLibrary.saveFailed'));
     }
     setConfirmDelete(null);
-  }, [confirmDelete, refreshSubjects, refreshPrompts, refreshAssets, removeAssets, antdMessage, t]);
+  }, [confirmDelete, refreshPrompts, refreshAssets, removeAssets, antdMessage, t]);
 
   // ── 多选 ──
   const handleToggleSelect = useCallback((id: string) => {
@@ -729,7 +685,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   }, [allItems]);
 
   // ── 收藏 ──
-  const handleToggleFavorite = useCallback(async (item: { type: 'subject' | 'prompt' | 'asset'; id: string; data: any }) => {
+  const handleToggleFavorite = useCallback(async (item: { type: 'prompt' | 'asset'; id: string; data: any }) => {
     if (!isAuthenticated) {
       antdMessage.warning(t('assetLibrary.loginRequired'));
       if (typeof window !== 'undefined') window.location.hash = '#/auth';
@@ -742,9 +698,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
         // 乐观更新本地数据，避免刷新后列表重新排列
         updatePromptFavoriteLocal(item.id, newFavState);
         await updatePrompt(item.id, { favorite: newFavState });
-      } else if (item.type === 'subject') {
-        updateSubjectFavoriteLocal(item.id, newFavState);
-        await updateSubject(item.id, { favorite: newFavState });
       } else if (item.type === 'asset') {
         // 素材暂不支持乐观更新，走原有刷新逻辑
         await updateAsset(item.id, { favorite: newFavState });
@@ -787,17 +740,14 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       centered: true,
       onOk: async () => {
         try {
-          const subjectIds = allItems.filter((item) => item.type === 'subject' && selectedIds.has(item.data.id)).map((item) => item.data.id);
           const promptIds = allItems.filter((item) => item.type === 'prompt' && selectedIds.has(item.data.id)).map((item) => item.data.id);
           const assetIds = allItems.filter((item) => item.type === 'asset' && selectedIds.has(item.data.id)).map((item) => item.data.id);
           await Promise.all([
-            ...subjectIds.map((id) => deleteSubject(id)),
             ...promptIds.map((id) => deletePrompt(id)),
           ]);
           if (assetIds.length > 0) {
             await removeAssets(assetIds);
           }
-          await refreshSubjects();
           await refreshPrompts();
           await refreshAssets();
           setSelectedIds(new Set());
@@ -808,7 +758,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
         }
       },
     });
-  }, [selectedIds, allItems, removeAssets, refreshSubjects, refreshPrompts, refreshAssets, antdMessage, t]);
+  }, [selectedIds, allItems, removeAssets, refreshPrompts, refreshAssets, antdMessage, t]);
 
   useEffect(() => {
     if (!multiSelectEnabled) {
@@ -823,7 +773,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
 
   // ── 下载 ──
   // 私有资源依赖 JWT 鉴权,a.href 无法携带 Authorization header,统一经 fetch + blob 下载
-  const handleDownloadItem = useCallback(async (item: { type: 'subject' | 'prompt' | 'asset'; data: any }): Promise<void> => {
+  const handleDownloadItem = useCallback(async (item: { type: 'prompt' | 'asset'; data: any }): Promise<void> => {
     const download = async (url: string, filename: string): Promise<void> => {
       const token = getToken();
       const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -867,10 +817,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
           finalName = finalName.substring(0, lastDot);
         }
       }
-      if (renameItemTarget.type === 'subject') {
-        await updateSubject(renameItemTarget.id, { name: finalName });
-        await refreshSubjects();
-      } else if (renameItemTarget.type === 'prompt') {
+      if (renameItemTarget.type === 'prompt') {
         await updatePrompt(renameItemTarget.id, { title: finalName });
         await refreshPrompts();
       } else if (renameItemTarget.type === 'asset') {
@@ -884,21 +831,15 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     } catch (err) {
       antdMessage.error(err instanceof Error ? err.message : t('assetLibrary.saveFailed'));
     }
-  }, [renameItemTarget, renameItemName, refreshSubjects, refreshPrompts, refreshAssets, updateAsset, antdMessage, t]);
+  }, [renameItemTarget, renameItemName, refreshPrompts, refreshAssets, updateAsset, antdMessage, t]);
 
   // ── 打开项目 ──
   const handleOpenItem = useCallback((item: PageItem) => {
-    if (item.type === 'subject') {
-      setSubjectCreateId(item.data.id);
-      setSubjectCreateOpen(true);
-    } else if (item.type === 'prompt') {
+    if (item.type === 'prompt') {
       setPromptViewId(item.data.id);
     } else if (item.type === 'asset') {
       if (item.data.kind === 'script') {
         handleOpenScriptAsset(item.data);
-      } else if (item.data.kind === 'zeroexo-entity') {
-        setSubjectCreateId(item.data.id);
-        setSubjectCreateOpen(true);
       } else {
         setAssetDetail(item.data);
       }
@@ -915,13 +856,10 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     isAuthenticated,
     isMobile,
     theme,
-    subjects,
     prompts,
     assets,
-    loadingSubjects,
     loadingPrompts,
     loadingAssets,
-    refreshSubjects,
     refreshPrompts,
     refreshAssets,
     categories,
@@ -955,8 +893,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     scanningMessage,
     promptViewId,
     assetDetail,
-    subjectCreateOpen,
-    subjectCreateId,
     promptCreateOpen,
     promptCreateId,
     handleUpload,
@@ -1001,8 +937,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     setScanningMessage,
     setPromptViewId,
     setAssetDetail,
-    setSubjectCreateOpen,
-    setSubjectCreateId,
     setPromptCreateOpen,
     setPromptCreateId,
   };

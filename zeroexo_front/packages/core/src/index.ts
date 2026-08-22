@@ -61,6 +61,14 @@ export {
   resolveMinHeight,
 } from './extensions/size-contract.js';
 
+// ===== 布局契约统一解析(2026-08-22: 创建节点默认排序/垂直整理作为契约参数) =====
+export {
+  PLACEMENT_DEFAULT_GAP,
+  PLACEMENT_OVERLAP_STEP,
+  resolvePlacement,
+} from './extensions/placement-contract.js';
+export type { PlacementOptions } from './extensions/placement-contract.js';
+
 // ===== 节点视图契约(MVVM) =====
 export type { NodeViewContract } from './node-view-contract.js';
 export type {

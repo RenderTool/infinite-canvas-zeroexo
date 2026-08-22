@@ -40,9 +40,11 @@ export const COLUMN_CONFIG = {
   ],
 };
 
-export const NODE_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'entities', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement'];
-export const NODE_GRID_TEMPLATE = '6.0% 5.5% 6.0% 19.5% 13.0% 8.0% 10.5% 15.0% 8.0% 8.5%';
-export const EDIT_COLUMN_KEYS = [...NODE_COLUMN_KEYS, 'actions'];
+// 2026-08-22 主体列折叠契约(用户拍板): 节点内(readOnly)折叠主体列——描述列已用契约色高亮主体, 不重复占宽;
+// 全屏编辑展开主体列(EDIT_COLUMN_KEYS/EDIT_GRID_TEMPLATE 保留, 不可从 NODE 派生)。折叠后宽度补给描述/对白等阅读主体列。
+export const NODE_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement'];
+export const NODE_GRID_TEMPLATE = '6.0% 5.5% 6.0% 24.5% 10.0% 12.5% 19.0% 8.0% 8.5%';
+export const EDIT_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'entities', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement', 'actions'];
 export const EDIT_GRID_TEMPLATE = '5.6% 5.1% 5.6% 18.2% 12.1% 7.5% 9.8% 14.0% 7.5% 8.0% 6.6%';
 
 // ===== 网格样式函数 =====
@@ -85,6 +87,8 @@ export interface StoryboardTableProps {
   aiSubjects?: AiSubject[];
   /** Plan#20 T9c: 实体名/别名 → 画布主体卡状态列表(shot entities 的 stateId 选择选项源) */
   subjectStatesByEntity?: Record<string, Array<{ id: string; name: string }>>;
+  /** 2026-08-21: 实体名/别名 → 剧管条目列表(主体列点击实体可映射到剧管条目, 剧管=分镜后置) */
+  pmItemsByEntity?: Record<string, Array<{ id: string; name: string; kind: string }>>;
   mentionOpen: boolean;
   mentionShotId: string | null;
   onMentionSelect: (entity: StoryboardEntity) => void;
@@ -118,6 +122,7 @@ export const StoryboardTable = memo(function StoryboardTable({
   entities,
   aiSubjects,
   subjectStatesByEntity,
+  pmItemsByEntity,
   mentionOpen,
   mentionShotId,
   onMentionSelect,
@@ -173,7 +178,8 @@ export const StoryboardTable = memo(function StoryboardTable({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', cursor: 'default' }}>
       {renderHeader()}
-      {shots.length === 0 && status === 'generating' ? (
+      {status === 'generating' ? (
+        // 2026-08-21 BUG 修复: 无论是否有已有分镜,生成中统一显示 StoryboardGeneratingLoader(骨架动画+进度)
         <StoryboardGeneratingLoader
           status="generating"
           progress={progress}
@@ -246,6 +252,7 @@ export const StoryboardTable = memo(function StoryboardTable({
               entities={entities}
               aiSubjects={aiSubjects}
               subjectStatesByEntity={subjectStatesByEntity}
+              pmItemsByEntity={pmItemsByEntity}
               mentionOpen={mentionOpen}
               mentionShotId={mentionShotId}
               onMentionSelect={onMentionSelect}

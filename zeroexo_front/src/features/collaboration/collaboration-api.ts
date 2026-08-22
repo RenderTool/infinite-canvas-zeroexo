@@ -79,7 +79,7 @@ export function verifyInvite(inviteCode: string): Promise<{
   status: string;
   ownerId: string;
 }> {
-  return apiGet(`${COLLAB}/rooms/invite/${inviteCode}`);
+  return apiGet(`${COLLAB}/invite/${inviteCode}`);
 }
 
 // ==================== 加入/离开 ====================

@@ -56,7 +56,6 @@ type Route =
   | { name: 'editor'; canvasId: string; inviteCode?: string }
   | { name: 'canvasV2' }
   | { name: 'assets'; defaultGroup?: string; defaultChild?: string; focusId?: string }
-  | { name: 'subjectCreate'; subjectId?: string }
   | { name: 'publicPrompts' }
   | { name: 'auth'; mode: AuthMode }
   | { name: 'legal'; page: 'policies'; policyKey?: string }
@@ -71,8 +70,6 @@ type Route =
  *   #/canvas/<canvasId>         → canvas
  *   #/editor/<canvasId>         → editor
  *   #/assets                    → assets
- *   #/assets/subject/new      → subjectCreate (新建主体)
- *   #/assets/subject/<id>     → subjectCreate (编辑主体)
  *   #/assets/prompt           → assets (资产库)
  *   #/auth/<mode>               → auth
  *   #/legal/policies           → legal (policies)
@@ -95,13 +92,7 @@ function parseHash(hash: string): Route {
     case 'canvas-v2':
       return { name: 'canvasV2' };
     case 'assets':
-      // /assets/subject/new | /assets/subject/:id
-      if (parts[1] === 'subject' && parts[2]) {
-        return {
-          name: 'subjectCreate',
-          subjectId: parts[2] === 'new' ? undefined : decodeURIComponent(parts[2]),
-        };
-      }
+      // Plan#29 V3: 主体入口已移除, /assets/subject/* 统一回落 assets(不再路由到主体创建页)
       // 支持查询参数 ?group=prompt&child=favorite&focus=<id>
       return {
         name: 'assets',
@@ -139,8 +130,6 @@ function serializeRoute(route: Route): string {
       if (route.defaultChild) qp.push(`child=${encodeURIComponent(route.defaultChild)}`);
       if (route.focusId) qp.push(`focus=${encodeURIComponent(route.focusId)}`);
       return qp.length > 0 ? `#/assets?${qp.join('&')}` : '#/assets';
-    case 'subjectCreate':
-      return `#/assets/subject/${route.subjectId ? encodeURIComponent(route.subjectId) : 'new'}`;
     case 'publicPrompts':
       return '#/public-prompts';
     case 'auth':
@@ -305,7 +294,7 @@ export function App(): React.ReactElement {
   const showHeaderAndSidebar = route.name !== 'editor' && route.name !== 'canvasV2' && route.name !== 'auth' && route.name !== 'legal' && route.name !== 'invite' && !(route.name === 'canvas' && !!route.canvasId);
 
   // 当前活跃路由名（用于侧边栏高亮）
-  const activeRoute = route.name === 'canvas' ? 'canvas' : route.name === 'home' ? 'home' : route.name === 'assets' || route.name === 'subjectCreate' ? 'assets' : route.name === 'publicPrompts' ? 'publicPrompts' : route.name === 'legal' && route.page === 'policies' ? 'policies' : '';
+  const activeRoute = route.name === 'canvas' ? 'canvas' : route.name === 'home' ? 'home' : route.name === 'assets' ? 'assets' : route.name === 'publicPrompts' ? 'publicPrompts' : route.name === 'legal' && route.page === 'policies' ? 'policies' : '';
 
   /** 侧边栏导航回调 */
   const handleNavigate = (target: 'home' | 'canvas' | 'assets' | 'publicPrompts' | 'policies' | { name: 'auth'; mode: 'login' }): void => {
@@ -455,16 +444,11 @@ export function App(): React.ReactElement {
             ) : route.name === 'invite' ? (
               // 邀请码解析中(InviteResolver 完成后自动跳转 editor)
               <FullScreenLoading />
-            ) : route.name === 'subjectCreate' ? (
-              // Plan#29 V3: 主体入口已移除,subjectCreate 路由回退到资产页
-              <AssetLibraryPage onOpenSubject={() => {}} onNewSubject={() => {}} />
             ) : route.name === 'assets' ? (
               <AssetLibraryPage
                 defaultGroup={route.defaultGroup}
                 defaultChild={route.defaultChild}
                 focusId={route.focusId}
-                onOpenSubject={(id) => setRoute({ name: 'subjectCreate', subjectId: id })}
-                onNewSubject={() => setRoute({ name: 'subjectCreate' })}
                 onNavigateHome={() => setRoute({ name: 'home' })}
               />
             ) : route.name === 'publicPrompts' ? (

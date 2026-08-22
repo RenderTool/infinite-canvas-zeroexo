@@ -113,18 +113,6 @@ export function cardMetaStyle(_theme: ThemeConfig): CSSProperties {
   };
 }
 
-export function subjectIconStyle(_theme: ThemeConfig, color: string): CSSProperties {
-  return {
-    width: '100%',
-    aspectRatio: '239.2 / 135.4',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: `${color}08`,
-    borderBottom: `1px solid ${color}20`,
-  };
-}
-
 export function cardBodyStyle(): CSSProperties {
   return {
     padding: '10px 12px',

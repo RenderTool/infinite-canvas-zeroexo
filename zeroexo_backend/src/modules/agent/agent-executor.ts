@@ -83,13 +83,15 @@ export class AgentExecutor {
         { role: 'user', content: input },
       ];
 
-      // 转换工具定义为 LLM 格式
+      // 转换工具定义为 LLM 格式（使用工具实际定义的参数 schema，而非硬编码空对象）
       const llmTools = this.tools.map((t) => ({
         type: 'function' as const,
         function: {
           name: t.name,
           description: t.description,
-          parameters: { type: 'object', properties: {} as Record<string, unknown> },
+          parameters: (t.parameters && Object.keys(t.parameters).length > 0)
+            ? t.parameters
+            : { type: 'object', properties: {} as Record<string, unknown> },
         },
       }));
 

@@ -39,7 +39,7 @@ import type { GraphModel } from '@zeroexo/core';
 export type InteractionMode = 'select' | 'pan';
 
 /** 画布支持的节点类型(资产节点 + 剧创节点 + 堆叠节点) */
-export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'subject' | 'production-manager';
+export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager';
 
 /**
  * 收集节点列表中的视频/音频 storageKey(用于删除时清理本地媒体文件与视频缩略图)。

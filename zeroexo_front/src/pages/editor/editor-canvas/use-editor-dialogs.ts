@@ -234,7 +234,7 @@ export function useEditorDialogs({
 
   // 素材插入画布
   const handleAssetInsert = useCallback(
-    (item: { type: 'asset' | 'prompt' | 'subject'; id: string; data: any }): void => {
+    (item: { type: 'asset'; id: string; data: any }): void => {
       if (!refs.commandQueue || !refs.store) return;
       if (item.type !== 'asset') return;
       const asset = item.data as Asset;

@@ -49,6 +49,23 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     return graph.nodes.find((n) => n.id === preferred.source?.nodeId && n.type === 'script');
   }, [graph, nodeId, data]);
   const scriptNodes = useMemo(() => graph.nodes.filter((n) => n.type === 'script'), [graph]);
+
+  // 2026-08-21: 分镜→剧管主体映射——关联剧管条目按实体名/别名索引(剧管=分镜后置工序, 主体列点击实体可映射)
+  const pmItemsByEntity = useMemo(() => {
+    const map: Record<string, Array<{ id: string; name: string; kind: string }>> = {};
+    const pmId = (data as StoryboardNodeData).productionManagerId;
+    if (!pmId) return map;
+    const pmNode = graph.nodes.find((n) => n.id === pmId && n.type === 'production-manager');
+    const items = (pmNode?.data as { items?: Array<{ id: string; name: string; kind: string; aliases?: string[] }> } | undefined)?.items ?? [];
+    for (const it of items) {
+      const keys = new Set([it.name, ...(it.aliases ?? [])].filter((k): k is string => !!k));
+      for (const k of keys) {
+        if (!map[k]) map[k] = [];
+        map[k].push({ id: it.id, name: it.name, kind: it.kind });
+      }
+    }
+    return map;
+  }, [graph, data]);
   const scriptOptionLabel = useCallback((n: { id: string; title?: string }) => {
     const scriptDefault = t('storyboard.script');
     const title = n.title || scriptDefault;
@@ -212,10 +229,20 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   // 事件订阅(使用 ref 稳定回调引用,避免因 data 变化导致 useEffect 反复重订阅)
   const handleAddShotRef = useRef(handleAddShot);
   handleAddShotRef.current = handleAddShot;
+  const scriptEpisodesRef = useRef(scriptEpisodes);
+  scriptEpisodesRef.current = scriptEpisodes;
   useEffect(() => {
     const unsubs = [
       nodeActionBus.on('storyboard:addShot', (e) => { if (e.nodeId === nodeId) handleAddShotRef.current(); }),
       nodeActionBus.on('storyboard:fullscreen', (e) => { if (e.nodeId === nodeId) setFullscreenOpen(true); }),
+      // 2026-08-21 BUG 修复: capsule 菜单"重新生成"有分镜内容时弹出确认弹窗
+      nodeActionBus.on('storyboard:requestRegenerate', (e: { nodeId: string; episodeId?: string }) => {
+        if (e.nodeId !== nodeId) return;
+        const ep = (scriptEpisodesRef.current as Array<{ id: string; title?: string }>).find((ep) => ep.id === e.episodeId);
+        setRegenMeta({ episodeId: e.episodeId ?? '', episodeTitle: ep?.title });
+        setRegenStep(0);
+        setRegenOption('overwrite');
+      }),
     ];
     return () => unsubs.forEach((u) => u?.());
   }, [nodeId, message, t]);
@@ -276,7 +303,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
             </div>
           </>
         ) : (
-          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} pmItemsByEntity={pmItemsByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
         )}
       </div>
 

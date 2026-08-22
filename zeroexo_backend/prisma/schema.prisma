@@ -39,7 +39,6 @@ model User {
   aiPreference      UserAiPreference?
   verificationCodes VerificationCode[]
   folders           AssetFolder[]
-  subjects          Subject[]
   userCredit        UserCredit?
   creditTransactions CreditTransaction[]
   consumptionLogs   ConsumptionLog[]
@@ -246,7 +245,6 @@ model AssetFolder {
 
   assets    Asset[]
   prompts   Prompt[]
-  subjects  Subject[]
 
   @@unique([ownerId, parentId, name])
   @@index([ownerId, parentId])
@@ -335,53 +333,6 @@ model PromptImage {
   createdAt  DateTime @default(now())
 
   @@index([promptId])
-}
-
-/// 主体(角色/场景/道具) - 独立模块,可被画布/创作等模块引用
-model Subject {
-  id          String   @id @default(uuid())
-  ownerId     String
-  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  /// 主体类型: character | scene | prop
-  type        String
-  /// 主体名
-  name        String
-  /// 别名(逗号分隔存储)
-  aliases     String   @default("")
-  /// 一句话简介
-  description String   @default("")
-  /// 头像(Asset.storageKey)
-  avatarKey   String?
-  /// Emoji 头像(优先于 avatarKey 显示)
-  avatarEmoji String?
-  /// 状态: ok | warn | err
-  status      String   @default("ok")
-  /// 主体一致性描述(用于跨镜头保持形象一致)
-  consistency String   @default("")
-  /// 自由扩展字段(JSON 序列化,如配音关联、属性等)
-  fields      Json     @default("{}")
-  /// 标签
-  tags        String[] @default([])
-  /// 关联的形象图集 Asset.storageKey 列表
-  imageKeys   String[] @default([])
-  /// 状态集合(Plan#20 T1): [{id,name,imageKeys[],generatePrompt,note}] 状态剧照+切换后提示词
-  states      Json     @default("[]")
-  /// 封面立绘 Asset.storageKey(Plan#20 T1,画布封面简历式卡片用)
-  coverKey    String?
-  /// 音效素材补充(Plan#20 T1,非角色独有): [{key,name,kind:voice|ambient|sfx,note}] 配音/环境音/音效
-  audio       Json     @default("[]")
-  /// 所属文件夹
-  folderId    String?
-  folder      AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  /// 同步元数据
-  version     Int      @default(0)
-  lastSyncedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([ownerId])
-  @@index([type])
-  @@index([folderId])
 }
 
 // ===== P3 AI 对接 =====
