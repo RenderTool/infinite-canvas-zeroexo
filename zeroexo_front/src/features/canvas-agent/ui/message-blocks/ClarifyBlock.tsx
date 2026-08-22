@@ -9,7 +9,7 @@
 
 import { useState, useMemo } from 'react';
 import type { CanvasAgentMessage, ClarifyAnswer } from '../types.js';
-import { getSimulationResume } from '../store.js';
+import { sendAnswer } from '../session/agent-session.js';
 
 export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
@@ -70,24 +70,19 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
 
   const handleSubmit = () => {
     setSubmitting(true);
-    const resume = getSimulationResume();
-    if (resume) {
-      const answerList: ClarifyAnswer[] = items.map((item) => {
-        const a = answers[item.itemId];
-        if (!a || a.skipped) return { itemId: item.itemId, value: [] };
-        if (item.kind === 'text') return { itemId: item.itemId, value: a.text ?? '' };
-        return { itemId: item.itemId, value: a.values ?? [] };
-      });
-      resume(answerList);
-    }
+    const answerList: ClarifyAnswer[] = items.map((item) => {
+      const a = answers[item.itemId];
+      if (!a || a.skipped) return { itemId: item.itemId, value: [] };
+      if (item.kind === 'text') return { itemId: item.itemId, value: a.text ?? '' };
+      return { itemId: item.itemId, value: a.values ?? [] };
+    });
+    // 真连层(Plan#33 D2 修复断链): 通过 sendAnswer 提交回执,恢复挂起的 Agent
+    void sendAnswer(JSON.stringify(answerList));
   };
 
   const handleSkipAll = () => {
     setSubmitting(true);
-    const resume = getSimulationResume();
-    if (resume) {
-      resume(items.map((item) => ({ itemId: item.itemId, value: [] })));
-    }
+    void sendAnswer(JSON.stringify(items.map((item) => ({ itemId: item.itemId, value: [] }))));
   };
 
   if (items.length === 0) return <></>;

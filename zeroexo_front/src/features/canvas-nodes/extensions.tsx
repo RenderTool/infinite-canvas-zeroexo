@@ -191,6 +191,8 @@ function createCreationExtension(
           if (!store) return;
           const graph = store.getGraph();
           const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
+          // [DEPRECATED] 'generator' 为旧生成器节点兼容(2026-08-22 tA5),生成器节点已废弃,
+          // 生成语义由「空 media 节点三态」承担;仅保留旧项目数据中 generator→storyboard 连线兼容。
           if (sourceNode && !['script', 'generator'].includes(sourceNode.type)) {
             return { valid: false, reason: '分镜节点支持关联剧本或生成器节点' };
           }

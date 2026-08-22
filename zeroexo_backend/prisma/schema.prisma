@@ -1180,3 +1180,20 @@ model AgentSessionMessage {
   @@index([sessionId])
   @@index([createdAt])
 }
+
+/// Agent 技能升级提案（Plan#33 D6 自我升级审批流）
+model AgentSkillProposal {
+  id           String    @id @default(cuid())
+  skillKey     String // 技能目录,如 canvas_agent
+  fileName     String // 文件白名单: SKILL.md / SYSTEM_PROMPT.md
+  reason       String?
+  content      String // 提案的新内容
+  status       String    @default("pending") // pending | approved | rejected
+  createdById  String
+  reviewedById String?
+  createdAt    DateTime  @default(now())
+  reviewedAt   DateTime?
+
+  @@index([status])
+  @@index([skillKey])
+}

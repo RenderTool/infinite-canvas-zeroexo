@@ -13,7 +13,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
 import { replaceNodeAudio, stripFileExtension } from '../utils/media-replace-model.js';
 import { useHydratedContent } from '../utils/hydrate.js';
 
@@ -92,6 +92,9 @@ export function AudioNodeView({
 
   const hydratedContent = useHydratedContent(data.storageKey, data.content ?? '');
   const hasContent = !!hydratedContent;
+  // 生成器态判定:空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)
+  const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
+  const isGeneratorState = !hasContent && hasIncoming;
 
   const updateData = (patch: Partial<AudioNodeData>): void => {
     updateNode({ data: { ...data, ...patch } });
@@ -368,6 +371,7 @@ export function AudioNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
+        showReplaceButton={isSelected && !isGeneratorState}
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"

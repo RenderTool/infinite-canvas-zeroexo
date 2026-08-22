@@ -52,6 +52,19 @@ export { useHydratedContent, useProgressiveImage, buildBackendUrl, resolveAnyThu
 
 // 资产节点工厂 — 拖拽/上传/粘贴时创建节点实例
 export { createAssetNode } from './asset-node-factory.js';
+export type { AssetNodePayload } from './asset-node-factory.js';
+
+// 生成器提示词编辑器(@ 引用素材) — NodeGenerateDock 等外部消费方复用
+export { default as GeneratorPromptEditor } from './nodes/generator-prompt-editor.js';
+export type { GeneratorPromptEditorHandle, ReferenceItem } from './nodes/generator-prompt-editor.js';
+// 生成器模型派生函数/类型 — NodeGenerateDock 复用连入参考素材计算
+export {
+  deriveIncomingReferences,
+  referencesChanged,
+  computeReferenceCompatibility,
+  NODE_TYPE_TO_INPUT_TYPE,
+} from './nodes/generator-model.js';
+export type { IncomingReference, RawIncomingNode, CompatibilityOptions } from './nodes/generator-model.js';
 
 // 图片替换 — 上传文件 → 替换节点图片(支持撤销/重做)
 export { replaceNodeImage } from './utils/replace-node-image.js';
@@ -211,6 +224,9 @@ function createTextExtension(controller: ConnectionController | null, store: Rea
   };
 }
 
+// [DEPRECATED] 生成器节点扩展(2026-08-22 tA5):生成器节点已废弃(画布冗余),
+// 生成语义由「空 media 节点三态」承担(NodeGenerateDock 吸附面板)。
+// 注册保留仅用于旧项目数据中的 generator 节点渲染兼容,禁止再新建。
 function createGeneratorExtension(controller: ConnectionController | null, store: ReactGraphStore | null): NodeTypeExtension {
   return {
     type: NODE_TYPES.generator,

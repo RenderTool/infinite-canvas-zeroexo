@@ -16,6 +16,8 @@ import { AssetsModule } from '../assets/assets.module';
 import { AiGenerateModule } from '../ai-generate/ai-generate.module';
 import { AgentTaskController } from './agent-task.controller';
 import { AgentConversationController } from './agent-conversation.controller';
+import { AgentSkillAdminController } from './agent-skill.admin.controller';
+import { AgentSkillService } from './agent-skill.service';
 import { AgentFactory, LLM_SERVICE_TOKEN } from './agent-factory';
 import { AgentOrchestrator } from './orchestrator';
 import { AgentLlmService } from './agent-llm.service';
@@ -36,6 +38,7 @@ import { MemoryCompactorService } from './memory-compactor.service';
   controllers: [
     AgentTaskController,
     AgentConversationController,
+    AgentSkillAdminController,
   ],
   providers: [
     AgentFactory,
@@ -47,6 +50,7 @@ import { MemoryCompactorService } from './memory-compactor.service';
     CanvasOpExecutorService,
     AgentConversationService,
     MemoryCompactorService,
+    AgentSkillService,
     { provide: LLM_SERVICE_TOKEN, useClass: AgentLlmService },
   ],
   exports: [
@@ -57,6 +61,7 @@ import { MemoryCompactorService } from './memory-compactor.service';
     AgentWorkerService,
     CanvasOpExecutorService,
     AgentConversationService,
+    AgentSkillService,
   ],
 })
 export class AgentModule {}

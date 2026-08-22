@@ -14,7 +14,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ImageNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
 import { replaceNodeImage } from '../utils/replace-node-image.js';
 
 // ===== 引脚定义 =====
@@ -74,6 +74,9 @@ export function ImageNodeView({
   const hydratedContent = useProgressiveImage(data.storageKey, data.content ?? '', invK ?? 1);
   // 使用 hydratedContent 判断是否有内容,避免异步解析期间渲染 <img src=""> 导致浏览器跳转
   const hasContent = !!hydratedContent;
+  // 生成器态判定:空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)
+  const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
+  const isGeneratorState = !hasContent && hasIncoming;
   // 后端缩略图 URL 404 时降级到 content(blob URL 或原图)
   const [imgSrc, setImgSrc] = useState(hydratedContent);
   useEffect(() => { setImgSrc(hydratedContent); }, [hydratedContent]);
@@ -211,6 +214,7 @@ export function ImageNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
+        showReplaceButton={isSelected && !isGeneratorState}
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}

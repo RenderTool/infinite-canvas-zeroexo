@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import type { CanvasAgentMessage } from '../types.js';
+import { sendAnswer } from '../session/agent-session.js';
 
 export interface QuestionBlockProps {
   message: CanvasAgentMessage;
@@ -19,6 +20,7 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
   const [selected, setSelected] = useState<string | null>(null);
   const [customText, setCustomText] = useState('');
   const [showCustom, setShowCustom] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const data = message.question;
   if (!data) return <></>;
@@ -28,7 +30,23 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
   const total = data.items.length;
   const answered = isMulti ? multiSelected.size : selected ? 1 : 0;
 
+  /**
+   * 提交选择(Plan#33 D2 接通真连层):
+   * 优先使用外部 onSelect(兼容旧用法),否则通过 sendAnswer 提交到后端,
+   * 恢复挂起的 Agent 执行循环。提交后锁定防重复。
+   */
+  const submitAnswer = (value: string) => {
+    if (submitted) return;
+    setSubmitted(true);
+    if (onSelect) {
+      onSelect(value);
+    } else {
+      void sendAnswer(value);
+    }
+  };
+
   const handleSelect = (value: string) => {
+    if (submitted) return;
     if (isMulti) {
       setMultiSelected((prev) => {
         const next = new Set(prev);
@@ -38,13 +56,17 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
       });
     } else {
       setSelected(value);
-      onSelect?.(value);
+      submitAnswer(value);
     }
   };
 
   const handleSubmit = () => {
+    if (submitted) return;
     if (isMulti) {
-      onSelect?.(Array.from(multiSelected).join(','));
+      submitAnswer(Array.from(multiSelected).join(','));
+    } else {
+      // 自定义输入优先,其次选项
+      submitAnswer(customText.trim() || selected || '');
     }
   };
 
@@ -147,28 +169,53 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
 
       {/* 其他想法输入 */}
       {showCustom && (
-        <input
-          type="text"
-          value={customText}
-          onChange={(e) => setCustomText(e.target.value)}
-          placeholder="输入其他想法…"
-          className="agent-form-input"
-          style={{
-            width: '100%',
-            marginTop: 8,
-            padding: '8px 11px',
-            borderRadius: 7,
-            background: '#0d1220',
-            border: '1.5px solid #1e293b',
-            color: '#e2e8f0',
-            fontSize: 12.5,
-            fontFamily: 'inherit',
-            outline: 'none',
-            boxSizing: 'border-box',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = '#1e293b'; }}
-        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <input
+            type="text"
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            placeholder="输入其他想法…"
+            className="agent-form-input"
+            style={{
+              flex: 1,
+              padding: '8px 11px',
+              borderRadius: 7,
+              background: '#0d1220',
+              border: '1.5px solid #1e293b',
+              color: '#e2e8f0',
+              fontSize: 12.5,
+              fontFamily: 'inherit',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = '#1e293b'; }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && customText.trim()) handleSubmit();
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!customText.trim() || submitted}
+            className="agent-btn-primary"
+            style={{
+              padding: '4px 14px',
+              border: 'none',
+              borderRadius: 7,
+              background: customText.trim() && !submitted
+                ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+                : '#334155',
+              color: customText.trim() && !submitted ? '#fff' : '#64748b',
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: 'inherit',
+              cursor: customText.trim() && !submitted ? 'pointer' : 'default',
+            }}
+          >
+            提交
+          </button>
+        </div>
       )}
       {!showCustom && (
         <button

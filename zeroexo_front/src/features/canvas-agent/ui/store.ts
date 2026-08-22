@@ -81,6 +81,10 @@ export interface CanvasAgentState {
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
 
+  // ---- 当前任务（真连层使用: 协议事件回执需要 taskId） ----
+  currentTaskId: string | null;
+  setCurrentTaskId: (id: string | null) => void;
+
   // ---- 重置 ----
   reset: () => void;
 }
@@ -154,6 +158,10 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   activeConversationId: null,
   setActiveConversationId: (id) => set({ activeConversationId: id }),
 
+  // 当前任务
+  currentTaskId: null,
+  setCurrentTaskId: (id) => set({ currentTaskId: id }),
+
   // 重置
   reset: () =>
     set({
@@ -166,5 +174,6 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
       strategy: 'confirm_each',
       references: [],
       selectedNodeId: null,
+      currentTaskId: null,
     }),
 }));

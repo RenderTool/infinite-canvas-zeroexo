@@ -21,6 +21,7 @@
 import { agentClient, type AgentClientCallbacks } from '@/features/agent-panel/AgentClient.js';
 import { getToken } from '@/services/api-client.js';
 import { useCanvasAgentStore } from '../store.js';
+import { executeCanvasOp } from '../canvas-op-bridge.js';
 import type { ProgressData, ProgressStep } from '../types.js';
 
 // ===== 会话级状态 =====
@@ -241,6 +242,8 @@ export async function sendMessage(
       conversationId,
       projectId: opts?.projectId ?? currentProjectId ?? undefined,
     });
+    // 记录当前任务 ID：协议事件(step/question)回执需要
+    store.setCurrentTaskId(taskId);
 
     // 3. 订阅 SSE 事件流 → store
     const callbacks: AgentClientCallbacks = {
@@ -266,15 +269,66 @@ export async function sendMessage(
         // 最终输出由 agent:done 统一写入，避免重复消息
       },
       onCanvasOp: (op, args) => {
-        useCanvasAgentStore.getState().addMessage({
-          id: `msg_canvas_${Date.now()}`,
-          role: 'agent',
-          type: 'text',
-          text: `画布操作：${op}${args && JSON.stringify(args) !== '{}' ? ` ${JSON.stringify(args).slice(0, 120)}` : ''}`,
-          timestamp: Date.now(),
+        // Plan#33 D4:优先桥接真执行(workflow_chain 展开/选中/聚焦/命令),
+        // 桥接层未注入(非画布页)时回退文本展示
+        void executeCanvasOp({ op, args: (args ?? {}) as Record<string, unknown> }).then((executed) => {
+          if (!executed) {
+            useCanvasAgentStore.getState().addMessage({
+              id: `msg_canvas_${Date.now()}`,
+              role: 'agent',
+              type: 'text',
+              text: `画布操作：${op}${args && JSON.stringify(args) !== '{}' ? ` ${JSON.stringify(args).slice(0, 120)}` : ''}`,
+              timestamp: Date.now(),
+            });
+          }
         });
       },
       onProgress: (pct, msg) => upsertProgress(pct, msg),
+      // ---- 契约交互事件(Plan#33 D1/D2) ----
+      onStepRequest: (step) => {
+        const s = useCanvasAgentStore.getState();
+        // 协议交互期间暂停思考展示,聚焦步骤确认
+        s.setThinking({ active: false });
+        s.addMessage({
+          id: `msg_step_${Date.now()}`,
+          role: 'agent',
+          type: 'step',
+          text: step.title,
+          step,
+          timestamp: Date.now(),
+        });
+      },
+      onQuestionRequest: (question) => {
+        const s = useCanvasAgentStore.getState();
+        s.setThinking({ active: false });
+        s.addMessage({
+          id: `msg_question_${Date.now()}`,
+          role: 'agent',
+          type: 'question',
+          text: question.guideText,
+          question: {
+            guideText: question.guideText,
+            multi: question.multi,
+            items: (question.items ?? []).map((it) => ({
+              value: it.value,
+              label: it.label,
+              desc: it.desc,
+              ai: it.ai,
+              checked: it.checked,
+            })),
+          },
+          timestamp: Date.now(),
+        });
+      },
+      onMd: (md) => {
+        useCanvasAgentStore.getState().addMessage({
+          id: `msg_md_${Date.now()}`,
+          role: 'agent',
+          type: 'md',
+          text: md,
+          timestamp: Date.now(),
+        });
+      },
       onError: (error) => {
         const s = useCanvasAgentStore.getState();
         s.addMessage({
@@ -289,6 +343,7 @@ export async function sendMessage(
       },
       onDone: (output) => {
         const s = useCanvasAgentStore.getState();
+        s.setCurrentTaskId(null);
         const outputText = typeof output === 'string'
           ? output
           : output && typeof output === 'object'
@@ -334,6 +389,30 @@ export function stopGenerating(): void {
   agentClient.unsubscribe();
   const s = useCanvasAgentStore.getState();
   finishProgress();
+  s.setCurrentTaskId(null);
   s.setIsGenerating(false);
   s.setThinking({ active: false });
+}
+
+/**
+ * 协议事件回执(Plan#33 D1/D2): 将用户对 step/question 的回答提交到后端,
+ * 恢复挂起的 Agent 执行循环。taskId 取自 store 当前任务。
+ * 任务已结束或 taskId 缺失时静默失败(不中断 UI)。
+ */
+export async function sendAnswer(answer: string): Promise<boolean> {
+  const taskId = useCanvasAgentStore.getState().currentTaskId;
+  if (!taskId) return false;
+  try {
+    return await agentClient.answer(taskId, answer);
+  } catch (err) {
+    const s = useCanvasAgentStore.getState();
+    s.addMessage({
+      id: `msg_error_${Date.now()}`,
+      role: 'agent',
+      type: 'text',
+      text: `⚠️ 回执提交失败：${err instanceof Error ? err.message : '未知错误'}`,
+      timestamp: Date.now(),
+    });
+    return false;
+  }
 }

@@ -47,9 +47,13 @@ import { SyncConflictDialog } from '@/features/sync-conflict-dialog/sync-conflic
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { CollaborationPanel } from '@/features/collaboration/collaboration-panel.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
-import { PromptPanel } from '@/features/prompt-panel/index.js';
+import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
 import { AssetLibraryModal } from '@/features/asset-library/index.js';
 import { AgentDock } from '@/features/canvas-agent/ui/index.js';
+import { setCanvasOpBridge, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
+import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
+import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js';
+import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-agent-prompt.js';
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
@@ -157,6 +161,39 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
 
   // 空白右键「重置视图」:全图适配(fit-content)。左栏缩放菜单 fitScreen 仅是 100% 复位,
   // 此处才是真正「看到全部内容」;空图回退世界原点 (0,0) k=1(Plan#21 候选 B)
+  // Plan#33 D4: Agent 画布操作桥接层注入。访问器经 ref 读取最新状态,避免闭包过期;
+  // 卸载时清理,非画布页(AgentDock 在首页等处的复用)保持未注入 → agent-session 回退文本展示
+  const bridgeStateRef = useRef(state);
+  bridgeStateRef.current = state;
+  useEffect(() => {
+    setCanvasOpBridge({
+      getCommandQueue: () => bridgeStateRef.current.editor?.core.commandQueue ?? null,
+      getStore: () => (bridgeStateRef.current.editor?.store as unknown as CanvasOpStore | null) ?? null,
+      getContainerSize: () => bridgeStateRef.current.containerSize,
+      getExtensions: () => bridgeStateRef.current.extensions,
+    });
+    return () => setCanvasOpBridge(null);
+  }, []);
+
+  // Plan#33 D5: 主页智能体工作流 - 消费待注入提示词
+  // 流程: 主页点生成 → 先建画布项目 → 跳转本页 → 打开 Agent 面板 + 提示词完整占位到输入框 + 自动发送(面板内思考)
+  useEffect(() => {
+    if (state.loading || !canvasId) return;
+    const prompt = consumePendingAgentPrompt();
+    if (prompt == null) return;
+    const s = useCanvasAgentStore.getState();
+    s.setDockOpen(true);
+    s.setInputText(prompt);
+    s.addMessage({
+      id: `msg_user_${Date.now()}`,
+      role: 'user',
+      type: 'text',
+      text: prompt,
+      timestamp: Date.now(),
+    });
+    void sendMessage(prompt, { projectId: canvasId });
+  }, [state.loading, canvasId]);
+
   const handleResetView = useCallback(() => {
     const store = state.editor?.store;
     if (!store) return;
@@ -234,6 +271,13 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
   // 选中节点数据
   const selectedNodeData = state.selectedNodeData;
   const isPromptRunning = selectedNodeData?.status === 'loading';
+  // 节点生成面板三态判定(Plan#33 延伸):
+  // - media 节点有实质内容(content/storageKey)= 资源态 → 隐藏生成面板(上传替换/拖入资产自动降级)
+  // - media 节点无内容 = 空节点/生成器态 → 显示生成面板;生成中(loading)强制保持面板(停止按钮)
+  // - text/generator 等非 media 类型恒显示面板(节点自身语义即生成器)
+  const selectedNodeIsMedia = state.selectedNodeType === 'image' || state.selectedNodeType === 'video' || state.selectedNodeType === 'audio';
+  const selectedNodeHasContent = !!selectedNodeData?.content || !!selectedNodeData?.storageKey;
+  const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning;
   const handlers = useCanvasHandlers(refs, containerRef);
 
   // 双击节点缩放
@@ -784,38 +828,39 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           </div>
         ) : null}
 
-        {/* 节点提示词面板(选中单个文本/图片/视频/音频节点时显示;剧创节点无提示词面板) */}
-        {!state.loading && state.selectedNodeId && state.selectedNodeType && state.selectedNodeType !== 'script' && state.selectedNodeType !== 'storyboard' && state.selectedNodeType !== 'workbench' ? (
-          <div style={isMobile ? mobilePromptPanelWrapStyle : promptPanelWrapStyle}>
-            <PromptPanel
-              nodeId={state.selectedNodeId}
-              nodeType={state.selectedNodeType as 'text' | 'image' | 'video' | 'audio' | 'generator'}
-              isRunning={isPromptRunning}
-              initialPrompt={(selectedNodeData?.prompt as string) ?? ''}
-              onPromptChange={interactions.handlePromptChange}
-              onGenerate={interactions.handlePromptGenerate}
-              onStop={interactions.handlePromptStop}
-              configMode={interactions.selectedConfigMode}
-              composerDescription={interactions.selectedComposerDescription}
-              references={interactions.selectedReferences}
-              model={(selectedNodeData?.model as string) ?? ''}
-              onConfigChange={interactions.handleNodeConfigChange}
-              onOpenAiConfig={() => { dialogs.setSettingsOpen(true); }}
-              imageQuality={(selectedNodeData?.quality as string) ?? undefined}
-              imageSize={(selectedNodeData?.size as string) ?? undefined}
-              imageCount={typeof selectedNodeData?.count === 'number' ? (selectedNodeData.count as number) : undefined}
-              videoVquality={(selectedNodeData?.vquality as string) ?? undefined}
-              videoSize={(selectedNodeData?.size as string) ?? undefined}
-              videoSeconds={typeof selectedNodeData?.seconds === 'number' ? (selectedNodeData.seconds as number) : undefined}
-              videoGenerateAudio={typeof selectedNodeData?.generateAudio === 'boolean' ? (selectedNodeData.generateAudio as boolean) : undefined}
-              videoWatermark={typeof selectedNodeData?.watermark === 'boolean' ? (selectedNodeData.watermark as boolean) : undefined}
-              videoMode={(selectedNodeData?.videoMode as string) ?? undefined}
-              audioVoice={(selectedNodeData?.voice as string) ?? undefined}
-              audioFormat={(selectedNodeData?.audioFormat as string) ?? undefined}
-              audioSpeed={typeof selectedNodeData?.audioSpeed === 'number' ? (selectedNodeData.audioSpeed as number) : undefined}
-              audioInstructions={(selectedNodeData?.audioInstructions as string) ?? undefined}
-            />
-          </div>
+        {/* 节点生成面板(吸附在选中节点正下方,生成器同款 UI)
+            三态:media 资源态(有内容)隐藏,空节点/生成器态/生成中显示 */}
+        {!state.loading && state.editor && state.selectedNodeId && state.selectedNodeType && state.selectedNodeType !== 'script' && state.selectedNodeType !== 'storyboard' && state.selectedNodeType !== 'workbench' && nodeDockVisible ? (
+          <NodeGenerateDock
+            nodeId={state.selectedNodeId}
+            nodeType={state.selectedNodeType as 'text' | 'image' | 'video' | 'audio' | 'generator'}
+            store={state.editor.store}
+            getAnchorBounds={interactions.getAnchorBounds}
+            node={state.selectedNodeData}
+            isMobile={isMobile}
+            isRunning={isPromptRunning}
+            initialPrompt={(selectedNodeData?.prompt as string) ?? ''}
+            onPromptChange={interactions.handlePromptChange}
+            onGenerate={interactions.handlePromptGenerate}
+            onStop={interactions.handlePromptStop}
+            configMode={interactions.selectedConfigMode}
+            model={(selectedNodeData?.model as string) ?? ''}
+            onConfigChange={interactions.handleNodeConfigChange}
+            onOpenAiConfig={() => { dialogs.setSettingsOpen(true); }}
+            imageQuality={(selectedNodeData?.quality as string) ?? undefined}
+            imageSize={(selectedNodeData?.size as string) ?? undefined}
+            imageCount={typeof selectedNodeData?.count === 'number' ? (selectedNodeData.count as number) : undefined}
+            videoVquality={(selectedNodeData?.vquality as string) ?? undefined}
+            videoSize={(selectedNodeData?.size as string) ?? undefined}
+            videoSeconds={typeof selectedNodeData?.seconds === 'number' ? (selectedNodeData.seconds as number) : undefined}
+            videoGenerateAudio={typeof selectedNodeData?.generateAudio === 'boolean' ? (selectedNodeData.generateAudio as boolean) : undefined}
+            videoWatermark={typeof selectedNodeData?.watermark === 'boolean' ? (selectedNodeData.watermark as boolean) : undefined}
+            videoMode={(selectedNodeData?.videoMode as string) ?? undefined}
+            audioVoice={(selectedNodeData?.voice as string) ?? undefined}
+            audioFormat={(selectedNodeData?.audioFormat as string) ?? undefined}
+            audioSpeed={typeof selectedNodeData?.audioSpeed === 'number' ? (selectedNodeData.audioSpeed as number) : undefined}
+            audioInstructions={(selectedNodeData?.audioInstructions as string) ?? undefined}
+          />
         ) : null}
 
         <AssetLibraryModal
@@ -1110,13 +1155,4 @@ const mobileMinimapWrapStyle: CSSProperties = {
   borderRadius: 12, overflow: 'hidden',
   border: `1px solid rgba(255,255,255,0.1)`,
   boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-};
-const promptPanelWrapStyle: CSSProperties = {
-  position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
-  zIndex: 40, width: 480, maxWidth: 'calc(100% - 32px)',
-};
-// 移动端:上移避开底部 LeftSideToolBar(底部安全区 + 工具栏高度)
-const mobilePromptPanelWrapStyle: CSSProperties = {
-  position: 'absolute', bottom: 'calc(max(12px, env(safe-area-inset-bottom)) + 60px)', left: 12, right: 12,
-  transform: 'none', zIndex: 40, width: 'auto', maxWidth: 'none',
 };

@@ -86,6 +86,13 @@ export class TaskListQueryDto {
   offset?: number;
 }
 
+/** 协议事件回执 DTO(Plan#33 D1) */
+export class AnswerTaskDto {
+  /** 用户对 step/question 的回答(选项值/自定义文本/空串=跳过) */
+  @IsString()
+  answer!: string;
+}
+
 /** SSE MessageEvent 结构 */
 interface SseMessageEvent {
   data: AgentSSEEvent;
@@ -226,5 +233,28 @@ export class AgentTaskController {
     }
 
     return this.taskService.cancelTask(id);
+  }
+
+  /**
+   * 协议事件回执(Plan#33 D1)
+   * POST /api/agents/tasks/:id/answer
+   *
+   * 前端对 step/question 契约事件的回答(选择/跳过/自定义输入)提交到此处,
+   * 恢复挂起的 Agent 执行循环。taskId 由前端从 SSE 事件中获取。
+   */
+  @Post('tasks/:id/answer')
+  async answerTask(
+    @Param('id') id: string,
+    @Body() dto: AnswerTaskDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ ok: boolean }> {
+    const task = await this.taskService.getTask(id);
+    // 权限校验：只能回执自己的任务
+    if (task.userId !== user.id && user.role !== 'admin') {
+      throw new Error('无权回执此任务');
+    }
+
+    const resumed = this.workerService.resumeExecutor(id, dto.answer);
+    return { ok: resumed };
   }
 }

@@ -18,6 +18,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AssetsService } from '../assets/assets.service';
 import { AiGenerateService } from '../ai-generate/ai-generate.service';
 import { GenerateRequestDto } from '../ai-generate/dto/generate-request.dto';
+import { AgentSkillService } from './agent-skill.service';
 
 /** 工具接口 - LLM 可调用的最小单元 */
 export interface Tool {
@@ -1465,8 +1466,30 @@ function commonTools(ctx: ToolContext): Tool[] {
  * 这些工具不直接写 DB(数据层仍走 save_* 工具),只负责把已保存的数据在画布上呈现。
  */
 export interface CanvasOp {
-  op: 'add_node' | 'add_edge' | 'update_node' | 'remove_node' | 'set_selection' | 'focus';
+  op: 'add_node' | 'add_edge' | 'update_node' | 'remove_node' | 'set_selection' | 'focus' | 'workflow_chain';
   args: Record<string, unknown>;
+}
+
+/**
+ * 工作链素材源引用(workflow_generate 工具输入)
+ * - id/type: 画布已有节点(前端按 id 读取源节点数据创建副本)
+ * - title: 供 Agent 语义引用与生成器标题命名
+ */
+export interface WorkflowChainSource {
+  id: string;
+  type: string;
+  title?: string;
+}
+
+/** 工作链定义(workflow_chain canvasOp 的 args,前端展开执行) */
+export interface WorkflowChainDefinition {
+  sources: WorkflowChainSource[];
+  targetType: string;
+  prompt: string;
+  generatorTitle?: string;
+  generatorParams?: Record<string, unknown>;
+  productTitle?: string;
+  productId?: string;
 }
 
 function canvasGetState(ctx: ToolContext): Tool {
@@ -1641,7 +1664,226 @@ function canvasTools(ctx: ToolContext): Tool[] {
     canvasRemoveNode(),
     canvasSetSelection(),
     canvasFocus(),
+    workflowGenerate(),
   ];
+}
+
+// ============================================================================
+// 工作执行链工具(Plan#33 D4)
+// ============================================================================
+
+/**
+ * workflow_generate - 生成「素材源副本 + 生成器 + 产物」三段式工作执行链
+ *
+ * 用途: 用户 @ 引用画布素材并表达生成意图时,Agent 语义分析素材后,
+ * 产出完整工作链 canvasOps(单条 workflow_chain)由前端展开执行:
+ *   1. 素材源副本列(过滤 @ 生成器: 生成器不作为副本源,其内容已并入生成器自身)
+ *   2. 生成器节点(含最终提示词/参数, generationMode=targetType)
+ *   3. 产物节点(连入生成器 output)
+ * 落点由前端 resolveWorkflowChainPosition 计算(视口中心基准 + 避让 + 聚焦)。
+ */
+function workflowGenerate(): Tool {
+  const TARGET_TYPES = ['image', 'video', 'audio', 'text', 'script', 'storyboard'];
+  const SOURCE_TYPES = ['text', 'image', 'video', 'audio', 'script', 'storyboard'];
+
+  return {
+    name: 'workflow_generate',
+    description:
+      '生成画布工作执行链(素材源副本 + 生成器 + 产物三段式)。用户 @ 引用画布素材并请求生成/创作时调用本工具: ' +
+      'Agent 先语义分析素材(sources),产出最终提示词(prompt)与生成器参数(generatorParams),' +
+      '前端自动在画布空白处落位并连线。sources 仅填非生成器素材源(文本/图片/视频/音频/剧本/分镜),' +
+      '若用户 @ 引用了生成器节点,请改引其上游素材而非生成器本身。' +
+      `targetType ∈ ${TARGET_TYPES.join('/')}(与生成器类型一致)。`,
+    parameters: {
+      type: 'object',
+      properties: {
+        sources: {
+          type: 'array',
+          description: `素材源引用(画布已有节点; 仅非生成器类型,type ∈ ${SOURCE_TYPES.join('/')})`,
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: '画布节点 id' },
+              type: { type: 'string', description: '节点类型' },
+              title: { type: 'string', description: '节点标题(可选,供命名)' },
+            },
+            required: ['id', 'type'],
+          },
+        },
+        targetType: {
+          type: 'string',
+          description: '生成目标类型(与生成器类型一致,决定产物节点类型)',
+          enum: TARGET_TYPES,
+        },
+        prompt: { type: 'string', description: '最终提示词(结合用户输入与素材语义组装,生成器将直接使用)' },
+        generatorTitle: { type: 'string', description: '生成器节点标题(可选,缺省用「AI 生成 <targetType>」)' },
+        generatorParams: {
+          type: 'object',
+          description: '生成器参数(可选; 如 image: {model,size,count}; storyboard: {episodes:[..],autoExtractProductionManager:true})',
+        },
+        productTitle: { type: 'string', description: '产物节点标题(可选)' },
+        productId: { type: 'string', description: '产物节点 id(可选,缺省由前端生成)' },
+      },
+      required: ['sources', 'targetType', 'prompt'],
+    },
+    execute: async (args: any) => {
+      const rawSources = Array.isArray(args.sources) ? args.sources : [];
+      const sources: WorkflowChainSource[] = rawSources
+        .filter((s: any) => s && typeof s.id === 'string' && typeof s.type === 'string')
+        .map((s: any) => ({ id: s.id, type: s.type, title: s.title ? String(s.title) : undefined }));
+      const targetType = String(args.targetType ?? 'image');
+
+      if (sources.length === 0) {
+        return { ok: false, errorMessage: 'workflow_generate 需要至少一个素材源(sources)' };
+      }
+      if (!TARGET_TYPES.includes(targetType)) {
+        return { ok: false, errorMessage: `targetType 不合法: ${targetType}` };
+      }
+      // 过滤 @ 生成器: 生成器节点不作为副本源(其能力/内容已由生成器自身承载)
+      const filtered = sources.filter((s) => s.type !== 'generator');
+      if (filtered.length === 0) {
+        return { ok: false, errorMessage: '素材源仅含生成器节点,请引用其上游素材(文本/图片/视频/音频/剧本/分镜)' };
+      }
+
+      const chain: WorkflowChainDefinition = {
+        sources: filtered,
+        targetType,
+        prompt: String(args.prompt ?? '').trim(),
+        generatorTitle: args.generatorTitle ? String(args.generatorTitle) : undefined,
+        generatorParams: args.generatorParams && typeof args.generatorParams === 'object' ? args.generatorParams : undefined,
+        productTitle: args.productTitle ? String(args.productTitle) : undefined,
+        productId: args.productId ? String(args.productId) : undefined,
+      };
+
+      return {
+        ok: true,
+        message: `已生成工作执行链: ${filtered.length} 个素材源副本 → ${targetType} 生成器 → ${targetType} 产物`,
+        summary: {
+          sourceCount: filtered.length,
+          targetType,
+          generatorTitle: chain.generatorTitle,
+          productTitle: chain.productTitle,
+        },
+        canvasOps: [{ op: 'workflow_chain', args: chain }] as unknown as CanvasOp[],
+      };
+    },
+  };
+}
+
+// ============================================================================
+// Agent 自我升级工具(Plan#33 D6)
+// ============================================================================
+
+/**
+ * agent_self_upgrade - Agent 技能自我升级(管理员专属写权限,普通用户走提案审批流)
+ *
+ * 动作:
+ * - list:    列出技能目录树(目录 + 白名单文件),不返回内容
+ * - read:    读取指定技能文件内容({ skillKey, fileName })
+ * - propose: 提交升级提案(不直接生效),等待管理员在管理后台批准后写盘
+ * - apply:   直接修改技能文件(仅管理员 admin/super_admin;普通用户会被拒绝并引导提案)
+ *
+ * 使用时机: Agent 在对话中发现自身技能缺陷/规则过时/需要补充新能力时,
+ * 先 read 当前内容,再 propose(非管理员)或 apply(管理员)发起升级。
+ */
+function agentSelfUpgrade(ctx: ToolContext, skillService: AgentSkillService): Tool {
+  const ACTIONS = ['list', 'read', 'propose', 'apply'];
+
+  return {
+    name: 'agent_self_upgrade',
+    description:
+      'Agent 技能自我升级工具。发现自身技能缺陷/规则过时/需补充能力时使用: ' +
+      'list 列出技能与文件; read 读取文件内容; propose 提交升级提案(管理员审批后生效,适用于普通用户); ' +
+      'apply 直接修改技能文件(仅管理员可用,非管理员会被拒绝)。' +
+      '升级理由必须具体(缺陷描述/改进点),禁止无理由修改。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: '操作类型', enum: ACTIONS },
+        skillKey: { type: 'string', description: '技能目录名(如 canvas_agent / storyboard_assistant)' },
+        fileName: { type: 'string', description: '技能文件名(仅 SKILL.md / SYSTEM_PROMPT.md)' },
+        content: { type: 'string', description: '新文件内容(propose/apply 必填)' },
+        reason: { type: 'string', description: '升级理由(propose 必填)' },
+      },
+      required: ['action'],
+    },
+    execute: async (args: any) => {
+      const action = String(args.action ?? '');
+      if (!ACTIONS.includes(action)) {
+        return { ok: false, errorMessage: `action 不合法: ${action},可选 ${ACTIONS.join('/')}` };
+      }
+
+      if (action === 'list') {
+        return { ok: true, skills: skillService.listSkills() };
+      }
+
+      const skillKey = String(args.skillKey ?? '');
+      const fileName = String(args.fileName ?? '');
+
+      if (action === 'read') {
+        try {
+          const file = skillService.readSkill(skillKey, fileName);
+          return { ok: true, skillKey, fileName, content: file.content };
+        } catch (err) {
+          return { ok: false, errorMessage: (err as Error).message };
+        }
+      }
+
+      if (action === 'propose') {
+        const content = String(args.content ?? '');
+        if (!content.trim()) return { ok: false, errorMessage: '提案内容(content)不能为空' };
+        try {
+          const { proposal, merged } = await skillService.createProposal(ctx.userId, {
+            skillKey,
+            fileName,
+            content,
+            reason: args.reason ? String(args.reason) : undefined,
+          });
+          return {
+            ok: true,
+            message: merged
+              ? '升级提案已更新(覆盖同技能同文件的待审批提案)'
+              : '升级提案已提交,等待管理员在管理后台审批后写入生效',
+            proposalId: proposal.id,
+            status: proposal.status,
+          };
+        } catch (err) {
+          return { ok: false, errorMessage: (err as Error).message };
+        }
+      }
+
+      // action === 'apply': 仅管理员
+      if (action === 'apply') {
+        let role = '';
+        try {
+          const user = await ctx.prisma.user.findUnique({
+            where: { id: ctx.userId },
+            select: { role: true },
+          });
+          role = user?.role ?? '';
+        } catch {
+          return { ok: false, errorMessage: '用户信息校验失败' };
+        }
+        if (role !== 'admin' && role !== 'super_admin') {
+          return {
+            ok: false,
+            errorMessage:
+              'agent_self_upgrade 的 apply 仅管理员可用。请改用 propose 提交升级提案,由管理员审批后写入。',
+          };
+        }
+        const content = String(args.content ?? '');
+        if (!content.trim()) return { ok: false, errorMessage: '内容(content)不能为空' };
+        try {
+          const result = skillService.writeSkill(skillKey, fileName, content);
+          return { ok: true, message: '技能文件已直接更新生效', ...result };
+        } catch (err) {
+          return { ok: false, errorMessage: (err as Error).message };
+        }
+      }
+
+      return { ok: false, errorMessage: `未处理的动作: ${action}` };
+    },
+  };
 }
 
 function storyboardAssistantTools(ctx: ToolContext): Tool[] {
@@ -1703,6 +1945,7 @@ export function createToolsForAgentType(
   prisma: PrismaService,
   assetsService?: AssetsService,
   aiGenerateService?: AiGenerateService,
+  skillService?: AgentSkillService,
 ): Tool[] {
   const ctx: ToolContext = {
     projectId,
@@ -1721,9 +1964,13 @@ export function createToolsForAgentType(
     return storyboardAssistantTools(ctx);
   }
 
-  // canvas_agent: 画布编排助手,使用 canvasTools + commonTools
+  // canvas_agent: 画布编排助手,使用 canvasTools + commonTools + 自我升级工具
   if (agentType === 'canvas_agent') {
-    return [...canvasTools(ctx), ...commonTools(ctx)];
+    if (!skillService) {
+      toolLogger.warn(`canvas_agent 缺少 AgentSkillService 注入,agent_self_upgrade 工具将不可用`);
+    }
+    const upgradeTools = skillService ? [agentSelfUpgrade(ctx, skillService)] : [];
+    return [...canvasTools(ctx), ...commonTools(ctx), ...upgradeTools];
   }
 
   const legacy = legacyToolFactories[agentType];

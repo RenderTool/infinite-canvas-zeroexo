@@ -52,14 +52,16 @@ export const BACKEND_TO_CANVAS_EVENT: Record<BackendSSEEventType, CanvasAgentEve
   'agent:done': 'done',
 };
 
-// ===== 消息块类型（5 种原生） =====
+// ===== 消息块类型（5 种原生 + step/md 契约块） =====
 
 export type CanvasAgentMessageType =
   | 'text'
   | 'question'
   | 'clarify'
   | 'plan'
-  | 'progress';
+  | 'progress'
+  | 'step'
+  | 'md';
 
 /** 消息角色 */
 export type MessageRole = 'agent' | 'user';
@@ -78,11 +80,27 @@ export interface CanvasAgentMessage {
   plan?: PlanData;
   /** 进度数据 */
   progress?: ProgressData;
+  /** step 接口数据 */
+  step?: StepData;
   /** 关联步骤 */
   stepKey?: string;
   timestamp: number;
   /** 业务扩展字段 */
   meta?: Record<string, unknown>;
+}
+
+// ===== step 接口（StepBlock 契约 UI, Plan#33 D1/D2） =====
+
+export interface StepData {
+  key: string;
+  title: string;
+  description?: string;
+  /** 是否必选（false = 资料足够可跳过） */
+  required?: boolean;
+  /** 引导提示：资料不足时引导上传/引用画布节点收敛目标 */
+  prompts?: string[];
+  /** 快捷选项（如"直接生成 N 集"） */
+  suggestions?: Array<{ value: string; label: string }>;
 }
 
 // ===== 问题/选项 =====

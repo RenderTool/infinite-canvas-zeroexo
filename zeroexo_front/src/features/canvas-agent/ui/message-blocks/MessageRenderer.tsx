@@ -13,6 +13,8 @@ import { QuestionBlock } from './QuestionBlock.js';
 import { ClarifyBlock } from './ClarifyBlock.js';
 import { PlanBlock } from './PlanBlock.js';
 import { ProgressBlock } from './ProgressBlock.js';
+import { StepBlock } from './StepBlock.js';
+import { MarkdownBlock } from './MarkdownBlock.js';
 
 /** 注册表：消息类型 → 渲染组件 */
 const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: CanvasAgentMessage }>>> = {
@@ -21,6 +23,8 @@ const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: 
   clarify: ClarifyBlock,
   plan: PlanBlock,
   progress: ProgressBlock,
+  step: StepBlock,
+  md: MarkdownBlock,
 };
 
 export interface MessageRendererProps {

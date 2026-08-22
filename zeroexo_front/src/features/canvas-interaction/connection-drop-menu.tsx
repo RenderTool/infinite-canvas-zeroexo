@@ -7,7 +7,7 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Type, Image as ImageIcon, Sparkles, FileText, Aperture, Film } from 'lucide-react';
+import { Type, Image as ImageIcon, FileText, Aperture, Film } from 'lucide-react';
 import { CREATE_MENU_ICONS } from '@/shared/components/icons.js';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand } from '@zeroexo/core';
@@ -42,7 +42,8 @@ const CATEGORY_ORDER: Array<'generate' | 'media' | 'creation'> = ['generate', 'm
 /** 节点类型定义列表 */
 function createNodeTypeDefs(): NodeTypeDef[] {
   return [
-    { type: 'generator', icon: <Sparkles size={14} />, labelKey: 'toolbar.generator', category: 'generate' },
+    // [DEPRECATED] 生成器节点已废弃(画布冗余,2026-08-22 tA5):
+    // 生成语义由「空 media 节点三态」承担(NodeGenerateDock 吸附面板),连线端点不再提供生成器创建项。
     { type: 'text', icon: <Type size={14} />, labelKey: 'toolbar.text', category: 'media' },
     { type: 'image', icon: <ImageIcon size={14} />, labelKey: 'toolbar.image', category: 'media' },
     { type: 'video', icon: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M7 21h10"/><rect width="20" height="14" x="2" y="3" rx="2"/></svg>, labelKey: 'toolbar.video', category: 'media' },
@@ -135,78 +136,12 @@ export const ConnectionDropMenu = memo(function ConnectionDropMenu({
     };
   }, [handleClose]);
 
-  /** Plan#33 A3: 可生成类型(与 use-editor-interactions 三件套收敛保持一致) */
-  const GENERATABLE_TYPES = new Set(['image', 'video', 'audio', 'text', 'script', 'storyboard']);
-
+  /** 节点语义重构(Plan#33 延伸):引用该节点生成简化为原逻辑——拖拽出空节点 + 单边直连。
+   *  空节点默认即为生成器态(显示生成面板),无需再创建独立生成器节点。 */
   const createAndConnect = useCallback(
     (type: AddNodeType) => {
-      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const nodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const isCreation = type === 'script' || type === 'storyboard';
       const data = { label: t(`toolbar.${type}`) };
-
-      // ===== Plan#33 A3: 三件套收敛(生成类型 → 目标节点 + 生成器 + 连线) =====
-      if (GENERATABLE_TYPES.has(type)) {
-        const genPos = { x: worldX, y: worldY };
-        // 生成器默认宽度约 224 + 间距 96 → 目标节点放右侧
-        const targetPos = { x: worldX + 320, y: worldY };
-        const targetData = isCreation
-          ? type === 'script'
-            ? { title: data.label, status: 'idle', content: '' }
-            : { title: data.label, status: 'idle' }
-          : type === 'text'
-            ? { content: '', prompt: '', status: 'idle', title: data.label }
-            : { prompt: '', content: '', status: 'idle', title: data.label };
-        const genNode: NodeRecord = {
-          id: genId,
-          type: 'generator',
-          position: genPos,
-          data: { prompt: '', status: 'idle', generationMode: type, referenceImages: [], channelId: '', model: '', title: data.label },
-        };
-        const targetNode: NodeRecord = {
-          id: nodeId,
-          type,
-          position: targetPos,
-          data: targetData,
-        };
-        commandQueue.execute(new AddNodeCommand(genNode));
-        commandQueue.execute(new AddNodeCommand(targetNode));
-        if (source.direction === 'output') {
-          // 源节点.output → 生成器.input; 生成器.output → 目标.input
-          commandQueue.execute(
-            new AddEdgeCommand({
-              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              source: { nodeId: source.nodeId, pinId: source.pinId },
-              target: { nodeId: genId, pinId: 'input' },
-            }),
-          );
-          commandQueue.execute(
-            new AddEdgeCommand({
-              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              source: { nodeId: genId, pinId: 'output' },
-              target: { nodeId: nodeId, pinId: 'input' },
-            }),
-          );
-        } else {
-          // 生成器.output → 目标.input; 目标.output → 源.input
-          commandQueue.execute(
-            new AddEdgeCommand({
-              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              source: { nodeId: genId, pinId: 'output' },
-              target: { nodeId: nodeId, pinId: 'input' },
-            }),
-          );
-          commandQueue.execute(
-            new AddEdgeCommand({
-              id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              source: { nodeId: nodeId, pinId: 'output' },
-              target: { nodeId: source.nodeId, pinId: source.pinId },
-            }),
-          );
-        }
-        handleClose();
-        return;
-      }
 
       const node: NodeRecord = {
         id: nodeId,

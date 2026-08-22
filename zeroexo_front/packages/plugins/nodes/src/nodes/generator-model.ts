@@ -1,6 +1,12 @@
 /**
  * GeneratorNode Model - 纯数据操作层(第二批 MVVM 试点,参照 stacked-media-model.ts)
  *
+ * ⚠️ [DEPRECATED] 生成器节点 Model 随节点废弃(2026-08-22 tA5):
+ * 生成器节点不再新建,本文件保留用于旧项目数据兼容。
+ * 其中「连入参考素材计算」工具函数(deriveIncomingReferences / referencesChanged /
+ * computeReferenceCompatibility / NODE_TYPE_TO_INPUT_TYPE)由 NodeGenerateDock 吸附面板
+ * 继续复用,不受节点废弃影响。
+ *
  * 视图层消费本模块构造命令/派生数据,数据变换规则集中于此,无 React 依赖。
  * 每个写操作返回「正向命令」(BatchCommand 打包),撤销由 commandQueue 的 undo 栈负责。
  */

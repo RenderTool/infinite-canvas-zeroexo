@@ -18,7 +18,10 @@ export type AgentSSEEventType =
   | 'agent:canvas_op'
   | 'agent:error'
   | 'agent:done'
-  | 'agent:progress';
+  | 'agent:progress'
+  | 'agent:step_request'
+  | 'agent:question_request'
+  | 'agent:md';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -27,12 +30,38 @@ export interface AgentSSEEvent {
   timestamp: number;
 }
 
+/** step 接口数据(与后端 StepRequestData 对齐, Plan#33 D1) */
+export interface StepRequestData {
+  key: string;
+  title: string;
+  description?: string;
+  required?: boolean;
+  prompts?: string[];
+  suggestions?: Array<{ value: string; label: string }>;
+}
+
+/** 提问接口数据(与后端 QuestionRequestData 对齐, Plan#33 D1) */
+export interface QuestionRequestData {
+  guideText?: string;
+  multi?: boolean;
+  items: Array<{
+    value: string;
+    label: string;
+    desc?: string;
+    ai?: boolean;
+    checked?: boolean;
+  }>;
+}
+
 export interface AgentClientCallbacks {
   onThinking?: (message: string) => void;
   onToolCall?: (toolName: string, args: unknown) => void;
   onResult?: (result: unknown) => void;
   onCanvasOp?: (op: string, args: unknown) => void;
   onProgress?: (progress: number, message?: string) => void;
+  onStepRequest?: (step: StepRequestData) => void;
+  onQuestionRequest?: (question: QuestionRequestData) => void;
+  onMd?: (md: string) => void;
   onError?: (error: string) => void;
   onDone?: (output: unknown) => void;
   onClose?: () => void;
@@ -117,6 +146,34 @@ export class AgentClient {
       const errText = await res.text().catch(() => '');
       throw new Error(`取消任务失败 [${res.status}]: ${errText.slice(0, 200)}`);
     }
+  }
+
+  /**
+   * 协议事件回执(Plan#33 D1)
+   * POST /api/agents/tasks/:id/answer
+   *
+   * 将用户对 step/question 的回答(选项值/自定义文本/空串=跳过)提交到后端,
+   * 恢复挂起的 Agent 执行循环。
+   */
+  async answer(taskId: string, answer: string): Promise<boolean> {
+    const token = getToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`/api/agents/tasks/${taskId}/answer`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ answer }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`回执失败 [${res.status}]: ${errText.slice(0, 200)}`);
+    }
+    const json = (await res.json()) as { data?: { ok?: boolean } };
+    return json?.data?.ok ?? false;
   }
 
   /**
@@ -212,6 +269,21 @@ export class AgentClient {
       case 'agent:progress': {
         const d = event.data as { progress?: number; message?: string } | null;
         callbacks.onProgress?.(d?.progress ?? 0, d?.message);
+        break;
+      }
+      case 'agent:step_request': {
+        const d = event.data as { step?: StepRequestData } | null;
+        if (d?.step) callbacks.onStepRequest?.(d.step);
+        break;
+      }
+      case 'agent:question_request': {
+        const d = event.data as { question?: QuestionRequestData } | null;
+        if (d?.question) callbacks.onQuestionRequest?.(d.question);
+        break;
+      }
+      case 'agent:md': {
+        const d = event.data as { md?: string } | null;
+        if (d?.md) callbacks.onMd?.(d.md);
         break;
       }
       case 'agent:error': {

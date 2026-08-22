@@ -62,6 +62,35 @@ export interface PinHandlers {
   onPinPointerLeave: (e: React.PointerEvent) => void;
 }
 
+/**
+ * 订阅图是否有指向该节点的入边 —— 媒体节点「生成器态」判定依据:
+ * 空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)。
+ * 订阅 graph 变化,连线上线/下线即时响应。
+ * active=false 时不订阅(未选中节点上传按钮本就隐藏,避免大量节点全局监听 graph 的性能开销)。
+ */
+export function useHasIncomingEdges(
+  store: ReactGraphStore | null | undefined,
+  nodeId: string,
+  active = true,
+): boolean {
+  const [hasIncoming, setHasIncoming] = React.useState(() => {
+    if (!store) return false;
+    return store.getGraph().edges.some((e) => e.target.nodeId === nodeId);
+  });
+  React.useEffect(() => {
+    if (!store || !active) {
+      setHasIncoming(false);
+      return;
+    }
+    const update = (): void => {
+      setHasIncoming(store.getGraph().edges.some((e) => e.target.nodeId === nodeId));
+    };
+    update();
+    return store.subscribeGraph(update);
+  }, [store, nodeId, active]);
+  return hasIncoming;
+}
+
 /** 从 ConnectionController + node.id 构造引脚回调(每次渲染创建,与 demo 模式一致) */
 export function createPinHandlers(
   controller: ConnectionController | null,
@@ -199,6 +228,8 @@ export interface AIStateViewProps {
   hasContent: boolean;
   /** 节点激活态(选中):替换按钮仅激活显示(空节点亦然,与胶囊工具栏一致) */
   isSelected?: boolean;
+  /** 替换按钮显隐覆写:生成器态(空节点连入上游)传 false 隐藏上传按钮,避免"既是生成器又是资源器"二义态;缺省回退 isSelected */
+  showReplaceButton?: boolean;
   /** Bug3: 空状态点击触发替换内容(打开文件选择器) */
   onReplace: () => void;
   /** 替换按钮位置: top-right(右上角) / left(帧左侧并排),默认 top-right */
@@ -268,6 +299,7 @@ export function AIStateView({
   emptyIcon,
   hasContent,
   isSelected = false,
+  showReplaceButton,
   onReplace,
   replaceBtnPosition,
   backgroundColor,
@@ -421,7 +453,7 @@ export function AIStateView({
             </button>
           ) : null}
         </div>
-        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
       </div>
     );
   }
@@ -506,7 +538,7 @@ export function AIStateView({
     return (
       <div className="ze-node-content-wrap" style={{ position: 'relative', width: '100%', height: '100%' }}>
         {children}
-        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
+        <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
       </div>
     );
   }
@@ -521,7 +553,7 @@ export function AIStateView({
       }}
     >
       {emptyIcon}
-      <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={isSelected} />
+      <ReplaceButton onClick={onReplace} position={replaceBtnPosition} visible={showReplaceButton ?? isSelected} />
     </div>
   );
 }

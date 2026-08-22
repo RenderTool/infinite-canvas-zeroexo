@@ -23,6 +23,9 @@ const ALL_NODE_TYPES: AddNodeType[] = [
  * key = 源节点类型, value = 允许连接的目标节点类型列表
  */
 const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
+  // [DEPRECATED] generator 相关连线规则(2026-08-22 tA5):生成器节点已废弃(画布冗余),
+  // 生成语义由「空 media 节点三态」承担(NodeGenerateDock)。以下规则仅保留旧项目数据中
+  // 已存在的 generator 节点连线兼容,新建生成器入口已移除。
   // 生成:可输出到所有节点(含自身,支持链式生成)
   generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench', 'production-manager'],
   // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成/堆叠

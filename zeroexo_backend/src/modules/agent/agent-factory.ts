@@ -14,6 +14,7 @@ import { AssetsService } from '../assets/assets.service';
 import { AiGenerateService } from '../ai-generate/ai-generate.service';
 import { AgentExecutor, LlmService } from './agent-executor';
 import { createToolsForAgentType } from './tool-registry';
+import { AgentSkillService } from './agent-skill.service';
 
 /**
  * LLM 服务注入令牌 - 供外部模块提供具体的 LLM 实现
@@ -29,6 +30,7 @@ export class AgentFactory {
     private readonly eventsService: AiEventsService,
     private readonly assetsService: AssetsService,
     private readonly aiGenerateService: AiGenerateService,
+    private readonly skillService: AgentSkillService,
     @Inject(LLM_SERVICE_TOKEN) private readonly llmService: LlmService,
   ) {}
 
@@ -110,7 +112,7 @@ export class AgentFactory {
     instructions +=
       '\n\n## 语言要求\n必须全程使用用户输入的语言进行回复（用户用什么语言输入，就用什么语言输出）。';
 
-    // 8. 创建工具列表(注入完整上下文:prisma + assets + ai-generate + userId)
+    // 8. 创建工具列表(注入完整上下文:prisma + assets + ai-generate + userId + 技能服务)
     const tools = createToolsForAgentType(
       agentType,
       projectId,
@@ -118,6 +120,7 @@ export class AgentFactory {
       this.prisma,
       this.assetsService,
       this.aiGenerateService,
+      this.skillService,
     );
 
     this.logger.log(

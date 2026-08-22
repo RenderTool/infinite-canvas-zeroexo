@@ -3,11 +3,13 @@
  *
  * 为每个 taskId 管理一个独立的 SSE 连接（RxJS Subject）。
  * 支持事件类型: agent:thinking / agent:tool_call / agent:result / agent:canvas_op / agent:error / agent:done
+ * 契约交互事件(Plan#33 D1): agent:step_request / agent:question_request / agent:md
  * 前端通过 EventSource 连接 /api/agents/stream/:taskId 消费事件流。
  */
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Observable, ReplaySubject } from 'rxjs';
+import { StepRequestData, QuestionRequestData } from './dto/agent.dto';
 
 export type AgentSSEEventType =
   | 'agent:thinking'
@@ -16,7 +18,10 @@ export type AgentSSEEventType =
   | 'agent:canvas_op'
   | 'agent:error'
   | 'agent:done'
-  | 'agent:progress';
+  | 'agent:progress'
+  | 'agent:step_request'
+  | 'agent:question_request'
+  | 'agent:md';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -116,6 +121,27 @@ export class AgentSSEService {
    */
   emitProgress(taskId: string, progress: number, message?: string): void {
     this.emit(taskId, { type: 'agent:progress', data: { progress, message } });
+  }
+
+  /**
+   * 便捷方法：推送 step_request 事件（StepBlock 契约 UI，Plan#33 D1）
+   */
+  emitStepRequest(taskId: string, step: StepRequestData): void {
+    this.emit(taskId, { type: 'agent:step_request', data: { step } });
+  }
+
+  /**
+   * 便捷方法：推送 question_request 事件（QuestionBlock 契约 UI，Plan#33 D1）
+   */
+  emitQuestionRequest(taskId: string, question: QuestionRequestData): void {
+    this.emit(taskId, { type: 'agent:question_request', data: { question } });
+  }
+
+  /**
+   * 便捷方法：推送 md 事件（MarkdownBlock 契约 UI，Plan#33 D1）
+   */
+  emitMd(taskId: string, md: string): void {
+    this.emit(taskId, { type: 'agent:md', data: { md } });
   }
 
   /**

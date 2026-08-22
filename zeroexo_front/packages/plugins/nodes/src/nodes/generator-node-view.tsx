@@ -1,6 +1,12 @@
 /**
  * 生成器节点视图 - 统一生成节点(图片/视频/音频)
  *
+ * ⚠️ [DEPRECATED] 生成器节点已废弃(2026-08-22 tA5,画布冗余):
+ * 生成语义由「空 media 节点三态」承担——NodeGenerateDock 吸附面板(选中空 media/text 节点
+ * 时渲染,复用本视图同款参考素材/提示词/底栏 UI)。本文件仅保留用于旧项目数据中的
+ * generator 节点渲染兼容,禁止再新建生成器节点(创建入口已从右键菜单/连线端点菜单移除)。
+ * 参考素材计算工具函数(deriveIncomingReferences 等)由 NodeGenerateDock 继续复用,不受影响。
+ *
  * MVVM 迁移(Plan#10 第二批试点):数据变换/兼容性计算/命令构造已移至 generator-model.ts,
  * 视图只消费模型派生数据并经 commandQueue 提交命令(回退 updateNode)。布局与配色对齐 StackNode。
  *
@@ -36,8 +42,8 @@ import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import type { ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
-import { DynamicParamForm } from '@/features/prompt-panel/components/dynamic-param-form.js';
-import { SettingsPopoverShell, SettingGroup, OptionPill, SwitchRow } from '@/features/prompt-panel/components/settings-popover-shell.js';
+import { DynamicParamForm } from '@/features/generator-settings/dynamic-param-form.js';
+import { SettingsPopoverShell, SettingGroup, OptionPill, SwitchRow } from '@/features/generator-settings/settings-popover-shell.js';
 import GeneratorPromptEditor, { type GeneratorPromptEditorHandle, type ReferenceItem } from './generator-prompt-editor.js';
 import { useHydratedContent, resolveContentUrl, resolveAnyThumbUrl } from '../utils/hydrate.js';
 import { resolveVideoThumbUrl } from '../utils/video-thumb.js';

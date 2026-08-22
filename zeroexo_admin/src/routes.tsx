@@ -16,6 +16,7 @@ import {
   DollarOutlined,
   FundOutlined,
   AppstoreOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import Analytics from './pages/analytics';
 import Logs from './pages/logs';
@@ -24,6 +25,7 @@ import AiTest from './pages/ai-test';
 import SiteContent from './pages/site-content';
 import PublicPrompts from './pages/public-prompts';
 import PricingSettings from './pages/pricing-settings';
+import AgentSkillUpgrade from './pages/agent-skill-upgrade';
 
 export interface RouteConfig {
   path: string;
@@ -128,6 +130,13 @@ export const routes: RouteConfig[] = [
     nameKey: 'nav.aiTest',
     icon: <MessageOutlined />,
     element: <AiTest />,
+  },
+  {
+    path: '/agent-skills',
+    name: 'Agent 技能',
+    nameKey: 'nav.agentSkill',
+    icon: <ToolOutlined />,
+    element: <AgentSkillUpgrade />,
   },
 ];
 

@@ -267,7 +267,7 @@ export const tvcAdFlow: SimFlow = {
       skillName: 'cinematographer',
       dur: 500,
       thinkText: '正在规划媒体生成参数：模型选择、尺寸、数量…',
-      canvasOp: 'add_node(generator) × 3 → 镜头关键帧',
+      canvasOp: 'add_node(media) × 3 → 镜头关键帧',
       progress: 95,
       progressLabel: '规划媒体生成…',
     },

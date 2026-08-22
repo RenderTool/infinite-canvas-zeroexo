@@ -19,7 +19,7 @@ import {
 import {
   useAiConfigStore,
   getModelSpecs,
-} from '../../ai-config/use-ai-config-store.js';
+} from '../ai-config/use-ai-config-store.js';
 
 export interface ImageSettingsPopoverProps {
   /** Bug6: 当前模型值("channelId::model" 编码),用于获取后端 specs */

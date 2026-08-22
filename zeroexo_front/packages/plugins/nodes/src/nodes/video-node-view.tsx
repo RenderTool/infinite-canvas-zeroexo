@@ -19,7 +19,7 @@ import { resolveAnyThumbUrl } from '../utils/hydrate.js';
 import { replaceNodeVideo, stripFileExtension } from '../utils/media-replace-model.js';
 import { VIDEO_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
 
 // ===== requestVideoFrameCallback 元数据类型(TS DOM lib 未内置) =====
 interface VideoFrameMetadata {
@@ -93,6 +93,9 @@ export function VideoNodeView({
   const hydratedContent = useHydratedContent(data.storageKey, data.content ?? '');
   // 使用 hydratedContent 判断是否有内容,避免异步解析期间渲染 <video src=""> 导致浏览器跳转
   const hasContent = !!hydratedContent;
+  // 生成器态判定:空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)
+  const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
+  const isGeneratorState = !hasContent && hasIncoming;
 
   // === 帧控制状态(仅用于显示帧计数) ===
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -590,6 +593,7 @@ export function VideoNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
+        showReplaceButton={isSelected && !isGeneratorState}
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}

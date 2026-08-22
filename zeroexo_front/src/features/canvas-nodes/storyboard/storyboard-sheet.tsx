@@ -5,7 +5,7 @@
  * 数据处理逻辑已抽离至 storyboard-utils。
  */
 import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement } from 'react';
-import { Link2, ListVideo, Columns3, Table, Aperture } from 'lucide-react';
+import { Link2, ListVideo, Columns3, Table } from 'lucide-react';
 import { Button, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -19,7 +19,6 @@ import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDro
 import { StoryboardTable } from './components/StoryboardTable';
 import { StepView } from './components/StepView';
 import { StepNavigator } from './components/StepNavigator';
-import { StoryboardShotView } from './storyboard-shot-view';
 import { StoryboardFullscreenEditor } from './storyboard-fullscreen-editor';
 import {
   DeleteConfirmModal,
@@ -164,8 +163,8 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const [regenStep, setRegenStep] = useState(0);
   const [regenOption, setRegenOption] = useState<'overwrite' | 'compare'>('overwrite');
 
-  // Step 视图
-  const [viewMode, setViewMode] = useState<'shot' | 'table' | 'step'>('shot');
+  // 视图(tA9 移除单镜):步骤视图 = 升级版单镜视图,节点内仅保留 表格 ↔ 步骤 两态
+  const [viewMode, setViewMode] = useState<'table' | 'step'>('table');
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const stepRecords = useMemo(() => buildStepRecords(shots, entities, data.conflicts ?? []), [shots, entities, data.conflicts]);
 
@@ -307,14 +306,14 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
         )}
         <div style={{ flex: 1 }} />
         {data.isSample && <span style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 1, color: isDark ? '#fbbf24' : '#b45309', background: isDark ? 'rgba(251,191,36,0.14)' : 'rgba(180,83,9,0.12)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.35)' : 'rgba(180,83,9,0.3)'}`, userSelect: 'none', pointerEvents: 'none' }}>{t('storyboard.sampleBadge')}</span>}
-        {/* 切换视图按钮(移到「共N个镜头」前面): 单镜 → 表格 → 分镜三态循环 */}
-        <Tooltip title={viewMode === 'shot' ? t('storyboard.switchToTableView') : viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToShotView')}>
+        {/* 切换视图按钮(移到「共N个镜头」前面): 表格 ↔ 步骤 两态(tA9 移除单镜) */}
+        <Tooltip title={viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToTableView')}>
           <Button
             size="small"
             type="text"
-            icon={viewMode === 'shot' ? <Aperture size={14} /> : viewMode === 'table' ? <Table size={14} /> : <Columns3 size={14} />}
+            icon={viewMode === 'table' ? <Table size={14} /> : <Columns3 size={14} />}
             style={{ color: textColor, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}
-            onClick={() => { setViewMode(viewMode === 'shot' ? 'table' : viewMode === 'table' ? 'step' : 'shot'); setCurrentStepIndex(0); }}
+            onClick={() => { setViewMode(viewMode === 'table' ? 'step' : 'table'); setCurrentStepIndex(0); }}
           />
         </Tooltip>
         <span style={{ fontSize: 11, color: mutedColor }}>{t('storyboard.shotCountSummary', { count: shots.length })}</span>
@@ -322,16 +321,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
 
       {/* 内容区域 */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {viewMode === 'shot' ? (
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-            <StoryboardShotView
-              shots={shots}
-              status={status}
-              progress={progress}
-              readOnly
-            />
-          </div>
-        ) : viewMode === 'step' && stepRecords.length > 0 ? (
+        {viewMode === 'step' && stepRecords.length > 0 ? (
           <>
             <StepNavigator currentIndex={currentStepIndex} totalSteps={stepRecords.length} onPrev={() => setCurrentStepIndex(Math.max(0, currentStepIndex - 1))} onNext={() => setCurrentStepIndex(Math.min(stepRecords.length - 1, currentStepIndex + 1))} onBackToList={() => setViewMode('table')} />
             <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
@@ -364,7 +354,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
       />
       */}
 
-      {/* 全屏编辑（Plan#33 C2 剧管同款三栏：单镜图册/图库 + 单图详情 + 分镜行表单） */}
+      {/* 全屏编辑（Req5b：表格为基础壳 + 步骤视图承载图册/提示词/镜头信息） */}
       {fullscreenOpen && (
         <StoryboardFullscreenEditor
           open={fullscreenOpen}
@@ -377,6 +367,15 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           activeEpisodeId={activeEpisodeId}
           onEpisodeChange={handleEpisodeChange}
           pmItems={linkedPmItems}
+          entities={entities}
+          aiSubjects={aiSubjects}
+          subjectStatesByEntity={subjectStatesByEntity}
+          pmItemsByEntity={pmItemsByEntity}
+          status={status}
+          progress={progress}
+          nodeId={nodeId}
+          linkedScript={linkedScript}
+          activeEpisode={activeEpisode}
         />
       )}
 

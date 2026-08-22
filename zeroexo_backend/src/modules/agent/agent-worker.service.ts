@@ -12,11 +12,15 @@ import { AgentTaskService } from './agent-task.service';
 import { AgentSSEService } from './agent-sse.service';
 import { AgentConversationService } from './agent-conversation.service';
 import { AgentOrchestrator } from './orchestrator';
+import { AgentExecutor } from './agent-executor';
 
 @Injectable()
 export class AgentWorkerService {
   private readonly logger = new Logger(AgentWorkerService.name);
   private runningTasks = new Map<string, boolean>();
+
+  /** 活跃 AgentExecutor 实例(taskId → executor),用于协议事件(step/question)的前端回执恢复(Plan#33 D1) */
+  private activeExecutors = new Map<string, AgentExecutor>();
 
   /** 任务级并发上限: 与 standalone worker(MAX_CONCURRENT_TASKS=3)对齐, 防多任务×分块并发打爆渠道 QPS(Plan#9 T7 评估落地) */
   private static readonly MAX_CONCURRENT_TASKS = 3;
@@ -77,6 +81,8 @@ export class AgentWorkerService {
         task.projectId || '__no_project__',
         task.userId,
       );
+      // 注册活跃 executor: 供协议事件(step/question)回执恢复
+      this.activeExecutors.set(taskId, agent);
 
       // 4. 执行 Agent
       const inputStr = typeof task.input === 'string'
@@ -116,14 +122,33 @@ export class AgentWorkerService {
               });
             }
             break;
-          case 'agent:tool_result':
+          case 'agent:tool_result': {
+            const resultData = (event.data as any)?.result;
+            // 死路径修复(Plan#33 D4): 工具返回的 canvasOps 逐个 emit,前端 onCanvasOp 真执行
+            // 此前 agent-executor 只 yield tool_result,worker 从不消费 canvasOps → 前端画布操作从未生效
+            const canvasOps = Array.isArray(resultData?.canvasOps) ? resultData.canvasOps : [];
+            for (const cop of canvasOps) {
+              if (cop && typeof cop.op === 'string') {
+                this.sseService.emitCanvasOp(taskId, cop.op, cop.args ?? {});
+              }
+            }
             this.sseService.emitResult(taskId, event.data);
             break;
+          }
           case 'agent:progress':
             this.sseService.emitProgress(
               taskId,
               Math.min(90, ((event.data as any)?.iteration ?? 5) * 10),
             );
+            break;
+          case 'agent:step_request':
+            this.sseService.emitStepRequest(taskId, (event.data as any)?.step ?? event.data);
+            break;
+          case 'agent:question_request':
+            this.sseService.emitQuestionRequest(taskId, (event.data as any)?.question ?? event.data);
+            break;
+          case 'agent:md':
+            this.sseService.emitMd(taskId, (event.data as any)?.md ?? '');
             break;
           case 'agent:complete': {
             const completeData = event.data as any;
@@ -194,9 +219,21 @@ export class AgentWorkerService {
       await this.conversationService.maybeCompact(task.conversationId);
     } finally {
       this.runningTasks.delete(taskId);
+      this.activeExecutors.delete(taskId);
       this.sseService.close(taskId);
       AgentWorkerService.releaseSlot();
     }
+  }
+
+  /**
+   * 协议事件回执恢复(Plan#33 D1): 前端对 step/question 的回答通过
+   * POST /api/agents/tasks/:id/answer 提交,此处注入到挂起的 executor。
+   * 返回 false 表示任务已结束或不存在(前端无需特殊处理)。
+   */
+  resumeExecutor(taskId: string, answer: string): boolean {
+    const executor = this.activeExecutors.get(taskId);
+    if (!executor) return false;
+    return executor.resumeWithAnswer(answer);
   }
 
   /** 获取并发槽位: 未满直接占用, 已满入队等待 */

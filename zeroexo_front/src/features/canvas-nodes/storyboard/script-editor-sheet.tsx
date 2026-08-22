@@ -143,13 +143,14 @@ export function ScriptEditorSheet({
     return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim().length;
   }, [episodes.length, activeEpisode]);
 
-  // 生成分镜:范文态走"模板分镜"(标注范文示例);真实剧本收敛为生成器链路(Plan#33 B1: 不再弹选集 step 弹窗)
+  // 生成分镜:范文态走"模板分镜"(标注范文示例);真实剧本走原逻辑——直接新建分镜节点 + 连线 + AI 生成
+  // 节点语义重构(Plan#33 延伸):不再创建独立生成器节点,分镜节点自身即为生成宿主(空节点+直连剧本)
   const handleGenerateStoryboard = useCallback(() => {
     if (isSample) {
       nodeActionBus.emit('script:generateStoryboard', { nodeId, mode: 'template' });
       return;
     }
-    nodeActionBus.emit('script:createStoryboardGenerator', { nodeId });
+    nodeActionBus.emit('script:generateStoryboard', { nodeId, mode: 'ai' });
   }, [nodeId, isSample]);
 
   // ========== 内容变更 ==========

@@ -18,15 +18,15 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
+import type { AssetNodePayload } from '@zeroexo/plugin-nodes';
 import { duplicateSubtree } from '@zeroexo/preset-default';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
 import { configToPinDefaults, configToNodeDefaults, configToGroupDefaults } from '@/features/top-bar/index.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
-import { buildResourceReferences } from '@/features/prompt-panel/resource-references.js';
-import type { GenerationMode } from '@/features/prompt-panel/components/prompt-panel';
+import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { assetInputFromNode, serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
@@ -46,6 +46,10 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 1. 只输出提示词正文，不要解释。
 2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
 3. 尽量写成可直接用于生图模型的完整提示词。`;
+
+// 节点类型 → 输入/输出引脚 id(NodeGenerateDock 参考素材连线用;image/video/audio 的输入引脚是 prompt,输出引脚按类型命名)
+const NODE_INPUT_PIN: Record<string, string> = { text: 'input', image: 'prompt', video: 'prompt', audio: 'prompt' };
+const NODE_OUTPUT_PIN: Record<string, string> = { text: 'output', image: 'image', video: 'video', audio: 'audio' };
 
 /** 将 content(blob:/data:/http URL)转为 dataUrl(base64),供 AI referenceImages 使用 */
 async function contentToDataUrl(content: string): Promise<string> {
@@ -293,41 +297,6 @@ export function useEditorInteractions({
     if (m === 'text' || m === 'image' || m === 'video' || m === 'audio') return m;
     return 'image';
   }, [state.selectedNodeType, selectedNodeData]);
-
-  const selectedComposerDescription = useMemo<string>(() => {
-    if (state.selectedNodeType !== 'generator' || !state.selectedNodeId || !refs.store) return '';
-    const graph = refs.store.getGraph();
-    // 找到所有连接到此 config 节点 input 引脚的边
-    const sourceNodeIds = graph.edges
-      .filter((e: any) => e.target.nodeId === state.selectedNodeId)
-      .map((e: any) => e.source.nodeId);
-    if (sourceNodeIds.length === 0) return '';
-    // 按类型分组统计(提示词/参考图/参考视频/参考音频)
-    const counts = { text: 0, image: 0, video: 0, audio: 0, other: 0 };
-    for (const sid of sourceNodeIds) {
-      const src = graph.nodes.find((n: NodeRecord) => n.id === sid);
-      if (!src) continue;
-      if (src.type === 'text') counts.text += 1;
-      else if (src.type === 'image') counts.image += 1;
-      else if (src.type === 'video') counts.video += 1;
-      else if (src.type === 'audio') counts.audio += 1;
-      else counts.other += 1;
-    }
-    const parts: string[] = [];
-    if (counts.text > 0) parts.push(t('prompt.composerText', { count: counts.text }));
-    if (counts.image > 0) parts.push(t('prompt.composerImage', { count: counts.image }));
-    if (counts.video > 0) parts.push(t('prompt.composerVideo', { count: counts.video }));
-    if (counts.audio > 0) parts.push(t('prompt.composerAudio', { count: counts.audio }));
-    if (counts.other > 0) parts.push(t('prompt.composerOther', { count: counts.other }));
-    return parts.join(t('prompt.composerSeparator'));
-  }, [state.selectedNodeType, state.selectedNodeId, refs.store, selectedNodeData, t]);
-
-  // 配置节点 @ 弹出引用面板候选列表
-  const selectedReferences = useMemo(() => {
-    if (state.selectedNodeType !== 'generator' || !state.selectedNodeId || !refs.store) return [];
-    const graph = refs.store.getGraph();
-    return buildResourceReferences(graph.nodes, graph.edges, state.selectedNodeId, t);
-  }, [state.selectedNodeType, state.selectedNodeId, refs.store, selectedNodeData, t]);
 
   // 节点尺寸访问器(统一走 resolveNodeSize: node.size > 扩展契约 > 兜底)
   const getNodeSize = useMemo(
@@ -699,8 +668,8 @@ export function useEditorInteractions({
   }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
-  // Plan#33 A3: image/video/audio/text/script/storyboard 收敛为「三件套」(目标节点 + 生成器 + 连线)
-  const GENERATABLE_TYPES = useMemo(() => new Set(['image', 'video', 'audio', 'text', 'script', 'storyboard']), []);
+  // 节点语义重构(Plan#33 延伸):创建逻辑恢复原逻辑——直接创建空节点。
+  // 空节点默认即为生成器态(选中后显示生成面板),无需再创建独立生成器节点。
   const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager') => {
     setNodeCreateMenuPos(null);
     if (!nodeCreateMenuPos || !containerRef.current || !refs.store) return;
@@ -728,58 +697,6 @@ export function useEditorInteractions({
                   : 'nodes.generatorTitle';
     const nodeTitle = `${t(baseNameKey)}${sameTypeCount + 1}`;
 
-    // ===== Plan#33 A3: 三件套收敛(生成类型) =====
-    if (GENERATABLE_TYPES.has(type)) {
-      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const targetId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const genSize = resolveNodeSize({}, state.extensions.get('generator'));
-      const targetSize = resolveNodeSize({}, state.extensions.get(type));
-      const genCount = refs.store.getGraph().nodes.filter((n: any) => n.type === 'generator').length ?? 0;
-      const genPos = { x: worldX + offsetX, y: worldY + offsetY };
-      const targetPos = { x: genPos.x + genSize.width + 96, y: genPos.y };
-      const targetData = isCreation
-        ? type === 'script'
-          ? { title: nodeTitle, status: 'idle', content: '' }
-          : { title: nodeTitle, status: 'idle' }
-        : type === 'text'
-          ? { content: t('editor.newTextNode'), prompt: '', status: 'idle', title: nodeTitle }
-          : { prompt: '', content: '', status: 'idle', title: nodeTitle };
-      refs.commandQueue?.execute(
-        new BatchCommand([
-          new AddNodeCommand({
-            id: genId,
-            type: 'generator',
-            position: genPos,
-            size: { ...genSize },
-            title: `${t('nodes.generatorTitle')}${genCount + 1}`,
-            data: {
-              prompt: '',
-              status: 'idle',
-              generationMode: type,
-              referenceImages: [],
-              channelId: '',
-              model: '',
-              title: `${t('nodes.generatorTitle')}${genCount + 1}`,
-            },
-          }),
-          new AddNodeCommand({
-            id: targetId,
-            type,
-            position: targetPos,
-            size: { ...targetSize },
-            title: nodeTitle,
-            data: targetData,
-          }),
-          new AddEdgeCommand({
-            id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            source: { nodeId: genId, pinId: 'output' },
-            target: { nodeId: targetId, pinId: 'input' },
-          }),
-        ], 'create-generator-chain'),
-      );
-      return;
-    }
-
     refs.commandQueue?.execute(
       new AddNodeCommand({
         id,
@@ -801,7 +718,7 @@ export function useEditorInteractions({
                 : { prompt: '', content: '', status: 'idle', title: nodeTitle },
       }),
     );
-  }, [refs, containerRef, nodeCreateMenuPos, t, state.extensions, GENERATABLE_TYPES]);
+  }, [refs, containerRef, nodeCreateMenuPos, t, state.extensions]);
 
   const handlePromptChange = useCallback(
     (nodeId: string, prompt: string): void => {
@@ -1332,60 +1249,6 @@ export function useEditorInteractions({
       runAiStoryboard(store, q, scriptNode, id, undefined, true); // Plan#20 BUG修复: 直接生成默认创建主体(与选集 Modal 开关默认一致)
     });
 
-    // Plan#33 B1: 剧本侧「生成分镜」→ 生成器链路(生成器 + 分镜节点 + 双连线),不再弹 step 弹窗
-    const unsubCreateSbGen = nodeActionBus.on('script:createStoryboardGenerator', (event: { nodeId: string }) => {
-      const store = refs.store;
-      const q = refs.commandQueue;
-      if (!store || !q) return;
-      const graph = store.getGraph();
-      const scriptNode = graph.nodes.find((n: any) => n.id === event.nodeId);
-      if (!scriptNode) return;
-
-      const genId = `generator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const targetId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const genSize = resolveNodeSize({}, state.extensions.get('generator'));
-      const targetSize = resolveNodeSize({}, state.extensions.get('storyboard'));
-      const genPos = resolvePlacement({
-        anchor: scriptNode,
-        ext: state.extensions.get('generator'),
-        existingNodes: graph.nodes,
-      });
-      const targetPos = { x: genPos.x + genSize.width + 96, y: genPos.y };
-      const genCount = graph.nodes.filter((n: any) => n.type === 'generator').length;
-      const sbCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
-      const genTitle = `${t('nodes.generatorTitle')}${genCount + 1}`;
-      const sbTitle = `分镜${sbCount + 1}`;
-      q.execute(new BatchCommand([
-        new AddNodeCommand({
-          id: genId,
-          type: 'generator',
-          position: genPos,
-          size: { ...genSize },
-          title: genTitle,
-          data: { prompt: '', status: 'idle', generationMode: 'storyboard', referenceImages: [], channelId: '', model: '', title: genTitle },
-        }),
-        new AddNodeCommand({
-          id: targetId,
-          type: 'storyboard',
-          position: targetPos,
-          size: { ...targetSize },
-          title: sbTitle,
-          data: { title: sbTitle, status: 'idle' },
-        }),
-        new AddEdgeCommand({
-          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          source: { nodeId: scriptNode.id, pinId: 'output' },
-          target: { nodeId: genId, pinId: 'input' },
-        }),
-        new AddEdgeCommand({
-          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          source: { nodeId: genId, pinId: 'output' },
-          target: { nodeId: targetId, pinId: 'input' },
-        }),
-      ], 'create-storyboard-generator-chain'));
-      store.setSelection({ selectedNodeIds: new Set([genId]), selectedEdgeIds: new Set() });
-    });
-
     // Plan#33 B3/A4: 生成器(分镜模式)生成 → 复用 runAiStoryboard 链路
     // 参数: params.episodes(集数多选,默认全选) / autoExtractProductionManager(剧管提取,默认开) / useSubjectDictionary(主体字典,默认开)
     const unsubGenSb = nodeActionBus.on('generator:generateStoryboard', (event: { nodeId: string; params?: Record<string, unknown>; scriptEpisodes?: Array<{ id: string }> }) => {
@@ -1690,11 +1553,47 @@ export function useEditorInteractions({
       if (cmds.length > 0) q.execute(new BatchCommand(cmds, 'cascade-episode-delete'));
     });
 
+    // ==== NodeGenerateDock 参考素材落地(吸附面板上传/断线 → 画布节点连线) ====
+    // nodeDock:addReferenceNode: 面板上传素材 → 创建资源节点(宿主左侧) + 资源.output → 宿主.input 连线
+    const unsubAddRef = nodeActionBus.on('nodeDock:addReferenceNode', (event: any) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const host = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
+      if (!host) return;
+      const payload: AssetNodePayload = event.kind === 'text'
+        ? { kind: 'text', content: event.content ?? '', title: event.title }
+        : event.kind === 'image'
+          ? { kind: 'image', dataUrl: event.content ?? '', title: event.title, storageKey: event.storageKey }
+          : event.kind === 'video'
+            ? { kind: 'video', url: event.content ?? '', title: event.title, storageKey: event.storageKey }
+            : { kind: 'audio', url: event.content ?? '', title: event.title, storageKey: event.storageKey };
+      void createAssetNode(payload, { x: host.position.x - 100, y: host.position.y }).then((node) => {
+        if (!node) return;
+        q.execute(new AddNodeCommand(node));
+        const sourcePin = NODE_OUTPUT_PIN[node.type] ?? 'output';
+        const targetPin = NODE_INPUT_PIN[host.type] ?? 'input';
+        q.execute(new AddEdgeCommand({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          source: { nodeId: node.id, pinId: sourcePin },
+          target: { nodeId: event.nodeId, pinId: targetPin },
+        }));
+      });
+    });
+
+    // nodeDock:removeConnection: 面板删除参考素材 → 移除对应连线
+    const unsubRemoveRef = nodeActionBus.on('nodeDock:removeConnection', (event: any) => {
+      const store = refs.store;
+      const q = refs.commandQueue;
+      if (!store || !q) return;
+      const edge = store.getGraph().edges.find((e: any) => e.target?.nodeId === event.nodeId && e.source?.nodeId === event.sourceNodeId);
+      if (edge) q.execute(new RemoveEdgeCommand(edge.id));
+    });
+
     return () => {
       unsubRetry();
       unsubCancel();
       unsubGenStory();
-      unsubCreateSbGen();
       unsubGenSb();
       unsubAssociate();
       unsubRealized();
@@ -1705,6 +1604,8 @@ export function useEditorInteractions({
       unsubManageProduction();
       unsubEpisodesDeleted();
       unsubStopGen();
+      unsubAddRef();
+      unsubRemoveRef();
     };
   }, [refs.store, handlePromptGenerate, handlePromptStop, message]);
 
@@ -2223,8 +2124,6 @@ export function useEditorInteractions({
     groupDefaultsValue,
     nodeDefaultsValue,
     selectedConfigMode,
-    selectedComposerDescription,
-    selectedReferences,
     isPromptRunning,
     forceShowPins,
     connectionHoverNodeId,

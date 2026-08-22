@@ -10,8 +10,7 @@
 
 import { useState, useMemo } from 'react';
 import { AlertTriangle, DollarSign, FileText } from 'lucide-react';
-import { getSimulationResume } from '../store.js';
-import { stopGenerating } from '../session/agent-session.js';
+import { stopGenerating, sendAnswer } from '../session/agent-session.js';
 import type { CanvasAgentMessage, PlanStep } from '../types.js';
 
 export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
@@ -35,11 +34,13 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
 
   const handleExecute = () => {
     setExecuting(true);
-    getSimulationResume()?.([]);
+    // 真连层(Plan#33 D2 修复断链): 提交选中步骤回执
+    const stepKeys = plan.steps.filter((_, i) => selected.has(i)).map((s) => s.skillName ?? s.label);
+    void sendAnswer(`执行:${JSON.stringify(stepKeys)}`);
   };
 
   const handlePlanOnly = () => {
-    getSimulationResume()?.([]);
+    void sendAnswer('仅规划');
   };
 
   const handleCancel = () => {

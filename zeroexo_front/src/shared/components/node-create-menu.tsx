@@ -13,7 +13,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Type, Image as ImageIcon, Sparkles, FileText, Aperture, Film } from 'lucide-react';
+import { Type, Image as ImageIcon, FileText, Aperture, Film } from 'lucide-react';
 import { CREATE_MENU_ICONS } from './icons.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 
@@ -53,7 +53,9 @@ const CATEGORY_ORDER: Array<'generate' | 'media' | 'creation'> = ['generate', 'm
 
 function createNodeTypeDefs(_t: (key: string) => string): NodeTypeDef[] {
   return [
-    { type: 'generator', icon: <Sparkles size={14} />, labelKey: 'toolbar.generator', category: 'generate' },
+    // [DEPRECATED] 生成器节点已废弃(画布冗余,2026-08-22 tA5):
+    // 生成语义由「空 media 节点三态」承担(NodeGenerateDock 吸附面板),不再提供创建入口。
+    // 旧项目数据中的 generator 节点仍可渲染(generator-node-view 保留兼容),仅禁止新建。
     { type: 'stacked-media', icon: <CREATE_MENU_ICONS.stack size={14} />, labelKey: 'toolbar.stackedMedia', category: 'generate' },
     { type: 'text', icon: <Type size={14} />, labelKey: 'toolbar.text', category: 'media' },
     { type: 'image', icon: <ImageIcon size={14} />, labelKey: 'toolbar.image', category: 'media' },

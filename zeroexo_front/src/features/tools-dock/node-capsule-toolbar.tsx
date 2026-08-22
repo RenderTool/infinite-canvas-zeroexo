@@ -197,12 +197,15 @@ export function NodeCapsuleToolbar({
   const navBtnRef = useRef<HTMLButtonElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
 
-  // 拖拽期间跟随节点:拖动走 P0-2 瞬态通道(node.position 不更新,仅 dragOffsets 变化),
-  // 必须订阅偏移表强制重算锚点,否则胶囊工具栏在节点移动时停留在原地
-  const [, setDragTick] = useState(0);
+  // 拖拽期间隐藏(tA9):移动节点时每帧跟随重算锚点消耗大,改为拖动期间整体隐藏,
+  // 移动结束(setDragOffsets 清空)再显示 —— 直接剔除移动时的大量计算消耗
+  const [isDragging, setIsDragging] = useState(false);
   useEffect(() => {
     if (!store.subscribeDragOffsets) return;
-    return store.subscribeDragOffsets(() => setDragTick((v) => v + 1));
+    return store.subscribeDragOffsets(() => {
+      const offsets = store.getDragOffsets();
+      setIsDragging(!!offsets && offsets.size > 0);
+    });
   }, [store]);
 
   // 点击外部关闭菜单
@@ -233,6 +236,8 @@ export function NodeCapsuleToolbar({
   }, [isMultiSelect, onStackSelected, store, getExtension]);
 
   if (!hasNodeTools && !isMultiSelect) return null;
+  // 拖动中隐藏(移动结束恢复):剔除移动时每帧跟随计算消耗
+  if (isDragging) return null;
 
   // 胶囊工具栏全量纯图标模式(含分组/聚合按钮):label 隐藏,语义保留在 title 悬浮提示。
   // 保留 usePureIcon prop 作为回退开关(传 false 可恢复 icon+文案)。

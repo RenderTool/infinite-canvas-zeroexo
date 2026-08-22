@@ -12,15 +12,28 @@ import type { ImageNodeData, VideoNodeData, AudioNodeData } from '@zeroexo/plugi
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import type { GenerationMode } from '@/features/prompt-panel/components/prompt-panel';
+import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
 import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources } from './ai-generation-utils.js';
 import { CanvasOpExecutor } from './canvas-op-executor.js';
-import type { ResourceReference } from '@/features/prompt-panel/resource-references.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
 import type { EditorRefs } from '../use-editor-state.js';
+
+// ===== 类型本地化(原 prompt-panel 依赖;旧 PromptPanel 清理后迁移至此) =====
+export type ResourceKind = 'image' | 'video' | 'audio' | 'text';
+
+export interface ResourceReference {
+  id: string;
+  nodeId: string;
+  kind: ResourceKind;
+  label: string;
+  title: string;
+  previewUrl?: string;
+  text?: string;
+  active: boolean;
+}
 
 // ===== G11: 提示词拼接函数 =====
 
@@ -530,6 +543,9 @@ export function useAiGeneration({
     });
 
     // ==== 生成器节点:统一生成事件(generator:generate) ====
+    // [DEPRECATED] 生成器节点已废弃(2026-08-22 tA5):本监听仅用于旧项目数据中
+    // 已存在的 generator 节点兼容,新建生成器入口已移除;新生成链路走 NodeGenerateDock
+    // 三态语义(handlePromptGenerate → nodeDock 生成事件)。
     // 通过 AgentClient 提交任务，替代直接调用 AI provider
     const unsubGeneratorGenerate = nodeActionBus.on('generator:generate', (event: any) => {
       const store = refs.store;
@@ -738,6 +754,7 @@ export function useAiGeneration({
     });
 
     // ==== 生成器节点:类型切换(generator:modeChanged, Plan#33 D2) ====
+    // [DEPRECATED] 生成器节点已废弃(2026-08-22 tA5):仅保留旧项目数据兼容。
     // 切换生成类型后,若下游产物节点类型不匹配 → 自动转换为新目标类型(stacked-media/生成中占位跳过)
     const unsubGeneratorModeChanged = nodeActionBus.on('generator:modeChanged', (event: any) => {
       const store = refs.store;

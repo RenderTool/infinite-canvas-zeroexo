@@ -24,7 +24,7 @@ import {
   isSeedanceModelValue,
   getVideoSupportedModes,
   getModelSpecs,
-} from '../../ai-config/use-ai-config-store.js';
+} from '../ai-config/use-ai-config-store.js';
 
 export interface VideoSettingsPopoverProps {
   /** 当前模型值("channelId::model" 编码),用于判断 Seedance/OpenAI 分支 */
