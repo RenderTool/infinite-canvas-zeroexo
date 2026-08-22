@@ -914,6 +914,7 @@
     "audioEmpty": "Empty audio",
     "audioDefault": "Audio",
     "generatorTitle": "Generator",
+    "generatorNoTextSource": "No text input source? Enter text or link a script",
     "configMode": "Mode",
     "configModel": "Model",
     "configSize": "Size",
@@ -1619,6 +1620,8 @@
     "associateScript": "Link script",
     "switchToTableView": "Switch to table view",
     "switchToStepView": "Switch to step view",
+    "switchToShotView": "Switch to single-shot view",
+    "generatingEpisode": "Generating storyboard",
     "addShot": "Add shot",
     "deselectAll": "Deselect all",
     "selectAll": "Select all",
@@ -2072,12 +2075,43 @@
     "currentEpisode": "Current episode",
     "generateCurrentEpisode": "Generate storyboard for current episode"
   },
+  "storyboardShotView": {
+    "shot": "Shot",
+    "emptyShot": "No visual description for the current shot",
+    "noShots": "No shots yet. Create one in fullscreen edit",
+    "hasPrompt": "Has prompt"
+  },
+  "storyboardFullscreenEditor": {
+    "prevShot": "Previous shot",
+    "nextShot": "Next shot",
+    "shotCount": "Shot {{current}} / {{total}}",
+    "addShot": "Add shot",
+    "deleteShot": "Delete shot",
+    "confirmDeleteShot": "Delete shot #{{number}}? This cannot be undone",
+    "noShots": "No shots yet. Create one in the canvas table",
+    "sectionShot": "Shot Info",
+    "sectionPicture": "Visual",
+    "sectionSound": "Sound",
+    "sectionPrompt": "Prompt",
+    "refTitle": "@ Reference PM",
+    "refAdd": "@ Reference",
+    "refSearchPlaceholder": "Search production items…",
+    "refEmpty": "No matching items",
+    "refNoPm": "No production manager node linked. Connect one on the canvas first",
+    "refLinked": "Linked",
+    "refRemove": "Remove reference"
+  },
   "storyboardRow": {
     "placeholderDescription": "Description...",
     "placeholderLighting": "Lighting · Mood",
     "placeholderDialogue": "Dialogue",
     "placeholderSfx": "Sound Effects",
-    "deleteShot": "Delete shot"
+    "deleteShot": "Delete shot",
+    "environment": "Environment",
+    "emotion": "Emotion",
+    "voiceoverText": "Voice-over",
+    "monologue": "Monologue",
+    "prompt": "Shot prompt"
   },
   "productionManager": {
     "detail": "Edit asset list",

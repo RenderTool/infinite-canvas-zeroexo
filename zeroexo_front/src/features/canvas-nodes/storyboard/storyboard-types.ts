@@ -69,6 +69,18 @@ export interface EnvironmentDesign {
 
 // ===== 镜头 =====
 
+/** 镜头剧照（一镜对多图，一图一提示词——Plan#33 C2 全屏编辑复用剧管图册结构） */
+export interface ShotImage {
+  /** 图片资源 storageKey */
+  storageKey: string;
+  /** 该图的独立生成提示词 */
+  prompt?: string;
+  /** 备注 */
+  note?: string;
+  /** 自由标签 */
+  tags: string[];
+}
+
 export interface Shot {
   id: string;
   number: number;
@@ -93,6 +105,8 @@ export interface Shot {
   /** Plan#20 T2: 后端分块契约提示词字段(prompt 列映射 promptText) */
   promptText?: string;
   promptEn?: string;
+  /** Plan#33 C2: 镜头剧照集（一镜对多图，一图一提示词；旧数据无此字段兼容空） */
+  images?: ShotImage[];
 }
 
 // ===== 实体关联 =====

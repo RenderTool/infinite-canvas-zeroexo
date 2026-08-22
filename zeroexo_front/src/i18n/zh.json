@@ -913,6 +913,7 @@
     "audioEmpty": "空音频",
     "audioDefault": "音频",
     "generatorTitle": "生成器",
+    "generatorNoTextSource": "没有文本输入源？输入文本或剧本",
     "configMode": "模式",
     "configModel": "模型",
     "configSize": "尺寸",
@@ -1618,6 +1619,8 @@
     "associateScript": "关联剧本",
     "switchToTableView": "切换到表格视图",
     "switchToStepView": "切换到步骤视图",
+    "switchToShotView": "切换到单镜视图",
+    "generatingEpisode": "正在生成分镜",
     "addShot": "添加镜头",
     "deselectAll": "取消全选",
     "selectAll": "全选",
@@ -2071,12 +2074,43 @@
     "currentEpisode": "当前集",
     "generateCurrentEpisode": "生成当前集分镜"
   },
+  "storyboardShotView": {
+    "shot": "镜头",
+    "emptyShot": "当前镜头暂无画面描述",
+    "noShots": "暂无镜头，可在全屏编辑中新建",
+    "hasPrompt": "含提示词"
+  },
+  "storyboardFullscreenEditor": {
+    "prevShot": "上一个镜头",
+    "nextShot": "下一个镜头",
+    "shotCount": "镜头 {{current}} / {{total}}",
+    "addShot": "新增镜头",
+    "deleteShot": "删除镜头",
+    "confirmDeleteShot": "确定删除镜头「{{number}}」吗？删除后不可恢复",
+    "noShots": "暂无镜头，可在画布表格中新建",
+    "sectionShot": "镜头信息",
+    "sectionPicture": "画面",
+    "sectionSound": "声音",
+    "sectionPrompt": "提示词",
+    "refTitle": "@ 引用剧管",
+    "refAdd": "@ 引用",
+    "refSearchPlaceholder": "搜索剧管条目…",
+    "refEmpty": "无匹配条目",
+    "refNoPm": "尚未连入剧管节点，可先在画布连接剧管",
+    "refLinked": "已引用",
+    "refRemove": "移出引用"
+  },
   "storyboardRow": {
     "placeholderDescription": "画面描述…",
     "placeholderLighting": "光影 · 氛围",
     "placeholderDialogue": "对白",
     "placeholderSfx": "音效",
-    "deleteShot": "删除镜头"
+    "deleteShot": "删除镜头",
+    "environment": "环境",
+    "emotion": "情绪",
+    "voiceoverText": "旁白",
+    "monologue": "独白",
+    "prompt": "镜头提示词"
   },
   "productionManager": {
     "detail": "编辑资产清单",

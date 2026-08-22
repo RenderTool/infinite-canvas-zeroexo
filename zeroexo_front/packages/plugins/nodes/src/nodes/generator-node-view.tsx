@@ -1056,6 +1056,14 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
           {incomingNodes.length === 0 && isSelected && (
             <span style={{ fontSize: 11, color: mutedColor }}>拖入节点连入参考,或点击上传素材</span>
           )}
+          {/* Plan#33 C4: 输入源提醒——text/script/storyboard 需要文本输入源,缺文本源时非阻断提示 */}
+          {(generationMode === 'text' || generationMode === 'script' || generationMode === 'storyboard')
+            && !incomingNodes.some((n) => n.type === 'text' || n.type === 'script' || n.type === 'generator')
+            && isSelected && (
+              <span style={{ fontSize: 11, color: '#d97706', fontStyle: 'normal', flexShrink: 0 }}>
+                {t('nodes.generatorNoTextSource')}
+              </span>
+            )}
         </div>
 
         {/* 提示词输入框 - 使用 contentEditable 实现支持 @ 引用 */}

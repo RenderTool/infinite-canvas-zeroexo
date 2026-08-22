@@ -31,7 +31,6 @@ import { serializeScriptLines, buildSampleLines } from '@/features/canvas-nodes/
 import { getEpisodePageCount, splitContentIntoPages } from './hooks/use-episode-manager.js';
 import { ScriptReader, type ReaderPage } from './components/ScriptReader.js';
 import { ScriptImportFlow } from './components/script-import-flow.js';
-import { StoryboardAssociateModal } from './storyboard-associate-modal.js';
 import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown.js';
 import { ScriptFullscreenEditor } from './script-fullscreen-editor.js';
 import { addAssets } from '@/features/asset-picker/asset-store.js';
@@ -131,9 +130,6 @@ export function ScriptEditorSheet({
 
   // 剧本导入流程弹窗（SourceTextListModal 源文本列表）
   const [importFlowOpen, setImportFlowOpen] = useState(false);
-
-  // 生成分镜选集弹窗（非范文态：弹出共享选集 Modal，统一走 storyboard:associate）
-  const [associateOpen, setAssociateOpen] = useState(false);
 
   // 主题
   const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
@@ -460,16 +456,6 @@ export function ScriptEditorSheet({
       </div>
       */}
 
-      {/* 生成分镜选集弹窗(真实剧本;范文态走模板不弹) */}
-      <StoryboardAssociateModal
-        open={associateOpen}
-        onClose={() => setAssociateOpen(false)}
-        scriptNodeId={nodeId}
-        scriptTitle={title}
-        episodes={normalizedEpisodes.map((ep) => ({ id: ep.id, number: ep.number, title: ep.title }))}
-        defaultGenerate
-        targetNodeId={undefined}
-      />
     </div>
   );
 

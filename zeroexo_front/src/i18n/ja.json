@@ -897,6 +897,7 @@
     "audioEmpty": "空の音声ノード",
     "audioDefault": "音声",
     "generatorTitle": "生成器",
+    "generatorNoTextSource": "テキスト入力源がありません。テキストまたは脚本を入力",
     "configMode": "モード",
     "configModel": "モデル",
     "configSize": "サイズ",
@@ -1561,6 +1562,8 @@
     "associateScript": "スクリプトを関連付け",
     "switchToTableView": "テーブルビューに切り替え",
     "switchToStepView": "ステップビューに切り替え",
+    "switchToShotView": "単鏡ビューに切り替え",
+    "generatingEpisode": "絵コンテを生成中",
     "addShot": "カットを追加",
     "deselectAll": "すべて選択解除",
     "selectAll": "すべて選択",
@@ -2052,12 +2055,43 @@
     "currentEpisode": "現在のエピソード",
     "generateCurrentEpisode": "現在のエピソードの絵コンテを生成"
   },
+  "storyboardShotView": {
+    "shot": "カット",
+    "emptyShot": "現在のカットに画面説明はありません",
+    "noShots": "カットがありません。全画面編集で新規作成できます",
+    "hasPrompt": "プロンプトあり"
+  },
+  "storyboardFullscreenEditor": {
+    "prevShot": "前のカット",
+    "nextShot": "次のカット",
+    "shotCount": "カット {{current}} / {{total}}",
+    "addShot": "カットを追加",
+    "deleteShot": "カットを削除",
+    "confirmDeleteShot": "カット「{{number}}」を削除しますか？元に戻せません",
+    "noShots": "カットがありません。キャンバス表で新規作成できます",
+    "sectionShot": "カット情報",
+    "sectionPicture": "映像",
+    "sectionSound": "音声",
+    "sectionPrompt": "プロンプト",
+    "refTitle": "@ 参照（劇管）",
+    "refAdd": "@ 参照",
+    "refSearchPlaceholder": "劇管項目を検索…",
+    "refEmpty": "一致する項目なし",
+    "refNoPm": "劇管ノードが未接続です。キャンバスで接続してください",
+    "refLinked": "参照済み",
+    "refRemove": "参照を外す"
+  },
   "storyboardRow": {
     "placeholderDescription": "画面説明…",
     "placeholderLighting": "光 · 雰囲気",
     "placeholderDialogue": "セリフ",
     "placeholderSfx": "効果音",
-    "deleteShot": "ショットを削除"
+    "deleteShot": "ショットを削除",
+    "environment": "環境",
+    "emotion": "感情",
+    "voiceoverText": "ナレーション",
+    "monologue": "モノローグ",
+    "prompt": "カットのプロンプト"
   },
   "productionManager": {
     "detail": "資産リストを編集",

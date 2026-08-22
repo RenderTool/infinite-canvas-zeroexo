@@ -4,8 +4,8 @@
  * 布局：状态栏 → 分镜表格 → 底部工具栏；全屏沉浸式编辑覆盖层。
  * 数据处理逻辑已抽离至 storyboard-utils。
  */
-import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement } from 'react';import { createPortal } from 'react-dom';
-import { Link2, ListVideo, Columns3, Table } from 'lucide-react';
+import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement } from 'react';
+import { Link2, ListVideo, Columns3, Table, Aperture } from 'lucide-react';
 import { Button, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -19,11 +19,11 @@ import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDro
 import { StoryboardTable } from './components/StoryboardTable';
 import { StepView } from './components/StepView';
 import { StepNavigator } from './components/StepNavigator';
+import { StoryboardShotView } from './storyboard-shot-view';
+import { StoryboardFullscreenEditor } from './storyboard-fullscreen-editor';
 import {
-  FullscreenToolbar,
   DeleteConfirmModal,
   RegenModal,
-  fullscreenOverlayStyle,
 } from './components/StoryboardToolbar';
 
 export interface StoryboardSheetProps {
@@ -66,6 +66,31 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     }
     return map;
   }, [graph, data]);
+  // Plan#33 C3: @ 引用连入剧管——收集画布剧管条目(优先连入的剧管, 兜底全部剧管并集)
+  const linkedPmItems = useMemo<Array<{ id: string; name: string; kind: 'character' | 'scene' | 'prop'; aliases?: string[] }>>(() => {
+    const pmNodes = graph.nodes.filter((n: any) => n.type === 'production-manager');
+    if (pmNodes.length === 0) return [];
+    const linkedIds = new Set<string>();
+    const pmId = (data as StoryboardNodeData).productionManagerId;
+    if (pmId) linkedIds.add(pmId);
+    for (const e of graph.edges) {
+      if (e.target?.nodeId === nodeId && e.source?.pinId === 'output' && e.source?.nodeId
+        && pmNodes.some((n) => n.id === e.source?.nodeId)) {
+        linkedIds.add(e.source.nodeId);
+      }
+    }
+    const pool = linkedIds.size > 0 ? pmNodes.filter((n) => linkedIds.has(n.id)) : pmNodes;
+    return pool.flatMap((n: any) =>
+      (Array.isArray(n.data?.items) ? n.data.items : [])
+        .map((it: any) => ({
+          id: it.id ?? '',
+          name: it.name ?? '',
+          kind: (it.kind ?? 'character') as 'character' | 'scene' | 'prop',
+          aliases: Array.isArray(it.aliases) ? it.aliases : [],
+        }))
+        .filter((it: any) => it.id && it.name.trim()),
+    );
+  }, [graph, nodeId, data]);
   const scriptOptionLabel = useCallback((n: { id: string; title?: string }) => {
     const scriptDefault = t('storyboard.script');
     const title = n.title || scriptDefault;
@@ -140,7 +165,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const [regenOption, setRegenOption] = useState<'overwrite' | 'compare'>('overwrite');
 
   // Step 视图
-  const [viewMode, setViewMode] = useState<'table' | 'step'>('table');
+  const [viewMode, setViewMode] = useState<'shot' | 'table' | 'step'>('shot');
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const stepRecords = useMemo(() => buildStepRecords(shots, entities, data.conflicts ?? []), [shots, entities, data.conflicts]);
 
@@ -154,9 +179,6 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const textColor = theme.toolbar.text;
   const mutedColor = theme.toolbar.textMuted;
   const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-  const bgPage = isDark ? '#0e0e0e' : '#f8f8f8';
-  const bgCanvas = isDark ? '#171717' : '#ffffff';
-  const borderMuted = isDark ? '#2e2e2e' : '#e5e5e5';
 
   // 数据变更
   const updateData = useCallback((updater: (prev: StoryboardNodeData) => StoryboardNodeData) => {
@@ -186,7 +208,15 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     setCurrentPage(Math.ceil((shots.length + 1) / PAGE_SIZE));
   }, [updateData, shots.length]);
   const handleDeleteShot = useCallback((shotId: string) => setDeleteConfirm({ type: 'single', shotId }), []);
-  const handleBatchDelete = useCallback(() => { if (selectedShotIds.size > 0) setDeleteConfirm({ type: 'batch' }); }, [selectedShotIds.size]);
+  /** 全屏编辑器内删除（内部已确认，直接删除 + 重排镜号） */
+  const handleDeleteShotDirect = useCallback((shotId: string) => {
+    updateData((prev) => {
+      const filtered = prev.shots.filter((s) => s.id !== shotId);
+      return { ...prev, shots: filtered.map((s, i) => ({ ...s, number: i + 1 })) };
+    });
+    setSelectedShotIds((prev) => { const n = new Set(prev); n.delete(shotId); return n; });
+    message.success(t('storyboardRow.deleteShotSuccess'));
+  }, [updateData, message, t]);
   const confirmDelete = useCallback(() => {
     if (deleteConfirm?.type === 'single') {
       const shotId = deleteConfirm.shotId;
@@ -207,9 +237,6 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     }
     setDeleteConfirm(null);
   }, [deleteConfirm, selectedShotIds, updateData, message, t]);
-  const handleToggleSelectAll = useCallback(() => {
-    setSelectedShotIds((prev) => prev.size === shots.length ? new Set() : new Set(shots.map((s) => s.id)));
-  }, [shots]);
   const handleToggleSelect = useCallback((shotId: string) => {
     setSelectedShotIds((prev) => { const n = new Set(prev); n.has(shotId) ? n.delete(shotId) : n.add(shotId); return n; });
   }, []);
@@ -280,14 +307,14 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
         )}
         <div style={{ flex: 1 }} />
         {data.isSample && <span style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 1, color: isDark ? '#fbbf24' : '#b45309', background: isDark ? 'rgba(251,191,36,0.14)' : 'rgba(180,83,9,0.12)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.35)' : 'rgba(180,83,9,0.3)'}`, userSelect: 'none', pointerEvents: 'none' }}>{t('storyboard.sampleBadge')}</span>}
-        {/* 切换视图按钮(移到「共N个镜头」前面) */}
-        <Tooltip title={viewMode === 'step' ? t('storyboard.switchToTableView') : t('storyboard.switchToStepView')}>
+        {/* 切换视图按钮(移到「共N个镜头」前面): 单镜 → 表格 → 分镜三态循环 */}
+        <Tooltip title={viewMode === 'shot' ? t('storyboard.switchToTableView') : viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToShotView')}>
           <Button
             size="small"
             type="text"
-            icon={viewMode === 'step' ? <Table size={14} /> : <Columns3 size={14} />}
+            icon={viewMode === 'shot' ? <Aperture size={14} /> : viewMode === 'table' ? <Table size={14} /> : <Columns3 size={14} />}
             style={{ color: textColor, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}
-            onClick={() => { setViewMode(viewMode === 'table' ? 'step' : 'table'); setCurrentStepIndex(0); }}
+            onClick={() => { setViewMode(viewMode === 'shot' ? 'table' : viewMode === 'table' ? 'step' : 'shot'); setCurrentStepIndex(0); }}
           />
         </Tooltip>
         <span style={{ fontSize: 11, color: mutedColor }}>{t('storyboard.shotCountSummary', { count: shots.length })}</span>
@@ -295,7 +322,16 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
 
       {/* 内容区域 */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {viewMode === 'step' && stepRecords.length > 0 ? (
+        {viewMode === 'shot' ? (
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+            <StoryboardShotView
+              shots={shots}
+              status={status}
+              progress={progress}
+              readOnly
+            />
+          </div>
+        ) : viewMode === 'step' && stepRecords.length > 0 ? (
           <>
             <StepNavigator currentIndex={currentStepIndex} totalSteps={stepRecords.length} onPrev={() => setCurrentStepIndex(Math.max(0, currentStepIndex - 1))} onNext={() => setCurrentStepIndex(Math.min(stepRecords.length - 1, currentStepIndex + 1))} onBackToList={() => setViewMode('table')} />
             <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
@@ -328,26 +364,20 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
       />
       */}
 
-      {/* 全屏覆盖层 */}
-      {fullscreenOpen && createPortal(
-        <div style={fullscreenOverlayStyle(bgPage)}>
-          <FullscreenToolbar linkedScript={linkedScript} scriptNodes={scriptNodes} scriptOptionLabel={scriptOptionLabel} scriptEpisodes={scriptEpisodes} activeEpisodeId={activeEpisodeId} activeEpisodeIndex={activeEpisodeIndex} episodeLabel={episodeLabel} handleEpisodeChange={handleEpisodeChange} openAssociateModal={openAssociateModal} handleAddShot={handleAddShot} handleToggleSelectAll={handleToggleSelectAll} selectedShotIds={selectedShotIds} shotCount={shots.length} handleBatchDelete={handleBatchDelete} isSample={data.isSample} currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} onCloseFullscreen={() => setFullscreenOpen(false)} viewMode={viewMode} onViewModeChange={(mode) => { setViewMode(mode); setCurrentStepIndex(0); }} />
-          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', padding: '0.5rem 1.5rem 1rem', background: bgPage }}>
-            <div style={{ width: '100%', height: '100%', border: `1px solid ${borderMuted}`, borderRadius: 8, background: bgCanvas, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {viewMode === 'step' && stepRecords.length > 0 ? (
-                <>
-                  <StepNavigator currentIndex={currentStepIndex} totalSteps={stepRecords.length} onPrev={() => setCurrentStepIndex(Math.max(0, currentStepIndex - 1))} onNext={() => setCurrentStepIndex(Math.min(stepRecords.length - 1, currentStepIndex + 1))} onBackToList={() => setViewMode('table')} />
-                  <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
-                    <StepView step={stepRecords[currentStepIndex]!} entities={entities} conflicts={data.conflicts ?? []} allShots={shots} />
-                  </div>
-                </>
-              ) : (
-                <StoryboardTable readOnly={false} shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body,
+      {/* 全屏编辑（Plan#33 C2 剧管同款三栏：单镜图册/图库 + 单图详情 + 分镜行表单） */}
+      {fullscreenOpen && (
+        <StoryboardFullscreenEditor
+          open={fullscreenOpen}
+          onClose={() => setFullscreenOpen(false)}
+          shots={shots}
+          onUpdateShot={updateShot}
+          onAddShot={handleAddShot}
+          onDeleteShot={handleDeleteShotDirect}
+          episodes={scriptEpisodes}
+          activeEpisodeId={activeEpisodeId}
+          onEpisodeChange={handleEpisodeChange}
+          pmItems={linkedPmItems}
+        />
       )}
 
       {/* 弹窗 */}

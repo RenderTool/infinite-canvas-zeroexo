@@ -62,8 +62,8 @@ export interface StoryboardToolbarProps {
   /** 当前集生成状态(用于内联加载指示) */
   episodeStatus?: 'idle' | 'generating' | 'ready' | 'error';
   /** 视图模式切换 */
-  viewMode: 'table' | 'step';
-  onViewModeChange: (mode: 'table' | 'step') => void;
+  viewMode: 'shot' | 'table' | 'step';
+  onViewModeChange: (mode: 'shot' | 'table' | 'step') => void;
 }
 
 export function StoryboardToolbar({
@@ -204,8 +204,8 @@ export interface FullscreenToolbarProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   onCloseFullscreen: () => void;
-  viewMode: 'table' | 'step';
-  onViewModeChange: (mode: 'table' | 'step') => void;
+  viewMode: 'shot' | 'table' | 'step';
+  onViewModeChange: (mode: 'shot' | 'table' | 'step') => void;
 }
 
 export function FullscreenToolbar({
