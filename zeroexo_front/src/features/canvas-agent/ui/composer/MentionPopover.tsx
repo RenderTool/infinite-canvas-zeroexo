@@ -3,13 +3,25 @@
  *
  * 输入 @ 时弹出节点选择浮层，搜索/过滤画布节点。
  * 选择后插入 @标签 + 同步到引用列表。
- * 使用 useCanvasContext 获取画布节点列表。
+ * - 节点数据通过 useCanvasContext 实时读取（打开期间轻量轮询，节点增删/改名即时生效）
+ * - 列表图标使用 Lucide 按类型映射（无缩略图场景）
+ * - 浮层背景不透明（--agent-bg 纯色），避免透出下层内容
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, FileText, Image as ImageIcon, Film, AudioLines, Wand2, Folder, File, type LucideIcon } from 'lucide-react';
 import { useCanvasContext } from '../context/canvas-context.js';
 import { useAgentTheme } from '../context/theme-context.js';
+
+/** 节点类型 → Lucide 图标（与全局图标规范一致，无色、随主题文字色） */
+const TYPE_ICONS: Record<string, LucideIcon> = {
+  text: FileText,
+  image: ImageIcon,
+  video: Film,
+  audio: AudioLines,
+  generator: Wand2,
+  group: Folder,
+};
 
 export interface MentionPopoverProps {
   /** 搜索关键词 */
@@ -30,9 +42,28 @@ export function MentionPopover({
 }: MentionPopoverProps): React.ReactElement {
   const t = useAgentTheme();
   const ctx = useCanvasContext();
-  const [nodes] = useState(() => ctx.getNodes());
+  const [nodes, setNodes] = useState(() => ctx.getNodes());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // 实时读取:画布节点可能在浮层打开期间变化（新增/删除/重命名）
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNodes((prev) => {
+        const next = ctx.getNodes();
+        const changed =
+          next.length !== prev.length ||
+          next.some(
+            (n, i) =>
+              n.id !== prev[i]?.id ||
+              n.title !== prev[i]?.title ||
+              n.type !== prev[i]?.type,
+          );
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [ctx]);
 
   const filtered = !search
     ? nodes
@@ -74,7 +105,8 @@ export function MentionPopover({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [onClose]);
 
-  const bgColor = t.isDark ? '#1e293b' : '#ffffff';
+  // 背景不透明:纯色面板,不透出画布
+  const bgColor = 'var(--agent-bg)';
 
   return (
     <div
@@ -88,7 +120,7 @@ export function MentionPopover({
         borderRadius: 12,
         background: bgColor,
         border: `1px solid ${t.border}`,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        boxShadow: 'var(--agent-shadow)',
         zIndex: 1000,
         overflow: 'hidden',
         display: 'flex',
@@ -102,7 +134,7 @@ export function MentionPopover({
           alignItems: 'center',
           gap: 8,
           padding: '8px 10px',
-          borderBottom: `1px solid ${t.isDark ? '#334155' : '#e2e8f0'}`,
+          borderBottom: '1px solid var(--agent-border)',
         }}
       >
         <Search size={13} color={t.textMuted} />
@@ -125,64 +157,66 @@ export function MentionPopover({
             未找到节点
           </div>
         ) : (
-          filtered.map((node, i) => (
-            <button
-              key={node.id}
-              type="button"
-              onClick={() => onSelect(node)}
-              onMouseEnter={() => setSelectedIndex(i)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                background: i === selectedIndex
-                  ? (t.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)')
-                  : 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                textAlign: 'left',
-                fontFamily: 'inherit',
-                transition: 'background 0.1s',
-              }}
-            >
-              <span
+          filtered.map((node, i) => {
+            const Icon = TYPE_ICONS[node.type] ?? File;
+            return (
+              <button
+                key={node.id}
+                type="button"
+                onClick={() => onSelect(node)}
+                onMouseEnter={() => setSelectedIndex(i)}
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 6,
-                  background: t.isDark ? '#0f172a' : '#f1f5f9',
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: i === selectedIndex
+                    ? 'var(--agent-surface-2)'
+                    : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  color: t.textMuted,
-                  flexShrink: 0,
-                  border: `1px solid ${t.isDark ? '#334155' : '#e2e8f0'}`,
+                  gap: 8,
+                  textAlign: 'left',
+                  fontFamily: 'inherit',
+                  transition: 'background 0.1s',
                 }}
               >
-                {node.type.slice(0, 2).toUpperCase()}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <div
+                <span
                   style={{
-                    fontSize: 12,
-                    fontWeight: 500,
-                    color: t.text,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    background: 'var(--agent-surface)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: t.textMuted,
+                    flexShrink: 0,
+                    border: '1px solid var(--agent-border)',
                   }}
                 >
-                  {node.title || '未命名节点'}
+                  <Icon size={12} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: t.text,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {node.title || '未命名节点'}
+                  </div>
+                  <div style={{ fontSize: 10, color: t.textMuted }}>
+                    {node.type}
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: t.textMuted }}>
-                  {node.type}
-                </div>
-              </div>
-            </button>
-          ))
+              </button>
+            );
+          })
         )}
       </div>
     </div>

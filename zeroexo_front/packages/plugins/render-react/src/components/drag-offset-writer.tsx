@@ -34,8 +34,12 @@ export function DragOffsetWriter({ store, extensions }: DragOffsetWriterProps): 
   useEffect(() => {
     return store.subscribeDragOffsets(() => {
       const offsets = store.getDragOffsets();
+      // 拖动状态 CSS 变量:拖动中置 none(隐藏标题栏/PIN 铬件),结束清空恢复。
+      // NodeShell 的标题栏/PIN 容器 inline display 引用 var(--zx-dragging, flex),
+      // 拖动期间零 React 重渲染(样式系统级传播,与 Dock/胶囊隐藏同源同步)。
+      const layer = document.querySelector('[data-canvas-node-layer]') as HTMLElement | null;
+      if (layer) layer.style.setProperty('--zx-dragging', offsets.size > 0 ? 'none' : '');
       if (offsets.size === 0) return;
-      const layer = document.querySelector('[data-canvas-node-layer]');
       if (!layer) return;
       // 一次遍历构建 nodeId → 元素 索引(O(V)),避免对每个拖动节点单独 querySelector
       const elByNodeId = new Map<string, HTMLElement>();

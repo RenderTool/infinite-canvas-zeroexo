@@ -89,6 +89,36 @@ export const PROTOCOL_TOOLS: Tool[] = [
     },
     execute: async () => ({ ok: true }),
   },
+  {
+    name: 'todo_write',
+    description:
+      '写入任务清单快照（Plan#36 P0-3）：执行多步骤任务（分镜/剧管/工作链）时同步进度，前端固定在输入框上方显示任务卡（已完成/总数）。可多次调用覆盖更新。不暂停。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '任务标题' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: '任务项唯一标识' },
+              label: { type: 'string', description: '任务项文案' },
+              status: {
+                type: 'string',
+                enum: ['queued', 'running', 'completed', 'failed'],
+                description: '状态: queued 待执行 / running 执行中 / completed 完成 / failed 失败',
+              },
+            },
+            required: ['id', 'label'],
+          },
+          description: '任务项列表（全量覆盖）',
+        },
+      },
+      required: ['items'],
+    },
+    execute: async () => ({ ok: true }),
+  },
 ];
 
 /** LLM 服务的最小接口定义 */
@@ -114,6 +144,35 @@ export interface LlmService {
       }>;
     };
   }>;
+  /**
+   * 可选：流式聊天（Plan#36 P0-1 增量渲染）。
+   * 实现方支持时走流式，逐块回调 onDelta（正文增量）/ onThinkingDelta（思考增量），
+   * 最终返回与 chat() 相同的完整消息结构（用于 tool_calls 判断）。
+   * 未实现该方法时 executor 回退到 chat()（工具调用链完整优先）。
+   */
+  chatStream?(params: {
+    messages: ChatMessage[];
+    tools?: Array<{
+      type: string;
+      function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      };
+    }>;
+    onDelta?: (delta: string) => void;
+    onThinkingDelta?: (delta: string) => void;
+  }): Promise<{
+    message: {
+      role: string;
+      content: string | null;
+      tool_calls?: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }>;
+    };
+  }>;
 }
 
 /** 对话消息(OpenAI 兼容: tool 消息必须携带 tool_call_id, assistant 消息需回传 tool_calls) */
@@ -126,6 +185,17 @@ export interface ChatMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
+}
+
+/** LLM 单轮响应消息（chat / chatStream 统一结构） */
+export interface LlmMessage {
+  role: string;
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type: string;
+    function: { name: string; arguments: string };
+  }>;
 }
 
 export class AgentExecutor {
@@ -219,6 +289,89 @@ export class AgentExecutor {
     return [...realTools, ...protocolTools];
   }
 
+  /**
+   * 调用 LLM 并流式消费（Plan#36 P0-1 增量渲染）。
+   *
+   * 优先使用 LlmService.chatStream()（若实现）：LLM 文本/思考逐块产生时，
+   * 本生成器将其转为 agent:message_delta / agent:thinking_delta 事件逐块 yield，
+   * 最后 return 完整 LlmMessage（含 tool_calls，供主循环工具分发）。
+   * 未实现 chatStream 时回退到 chat()（一次返回，不产生增量事件，兼容旧渠道）。
+   */
+  private async *consumeLlm(
+    messages: ChatMessage[],
+    llmTools: NonNullable<Parameters<LlmService['chat']>[0]['tools']>,
+  ): AsyncGenerator<AgentEvent, LlmMessage, unknown> {
+    const chatParams = {
+      messages,
+      tools: llmTools.length > 0 ? llmTools : undefined,
+    };
+
+    if (!this.llmService.chatStream) {
+      const response = await this.llmService.chat(chatParams);
+      return response.message as LlmMessage;
+    }
+
+    // 增量缓冲：LLM 回调(同步)推入，本生成器异步消费并 yield
+    const queue: Array<{ kind: 'text' | 'thinking'; delta: string }> = [];
+    let wake: (() => void) | null = null;
+    let settled = false;
+    let llmMessage: LlmMessage | null = null;
+    let llmError: Error | null = null;
+
+    const notify = () => {
+      const fn = wake;
+      wake = null;
+      fn?.();
+    };
+
+    void this.llmService
+      .chatStream({
+        ...chatParams,
+        onDelta: (delta) => {
+          if (delta) {
+            queue.push({ kind: 'text', delta });
+            notify();
+          }
+        },
+        onThinkingDelta: (delta) => {
+          if (delta) {
+            queue.push({ kind: 'thinking', delta });
+            notify();
+          }
+        },
+      })
+      .then((response) => {
+        llmMessage = response.message as LlmMessage;
+        settled = true;
+        notify();
+      })
+      .catch((err) => {
+        llmError = err instanceof Error ? err : new Error(String(err));
+        settled = true;
+        notify();
+      });
+
+    // 消费循环：优先吐缓冲增量；缓冲空时等待回调唤醒或完成
+    while (!settled || queue.length > 0) {
+      while (queue.length > 0) {
+        const item = queue.shift()!;
+        yield {
+          type: item.kind === 'thinking' ? 'agent:thinking_delta' : 'agent:message_delta',
+          data: { delta: item.delta },
+          timestamp: Date.now(),
+        };
+      }
+      if (settled) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+
+    if (llmError) throw llmError;
+    if (!llmMessage) throw new Error('LLM 流式响应为空');
+    return llmMessage;
+  }
+
   async* execute(
     input: string,
     artifactId: string,
@@ -249,11 +402,18 @@ export class AgentExecutor {
       while (iteration < this.maxIterations) {
         iteration++;
 
-        // 2. 调用 LLM
-        const response = await this.llmService.chat({
-          messages,
-          tools: llmTools.length > 0 ? llmTools : undefined,
-        });
+        // 2. 调用 LLM（Plan#36 P0-1: 优先流式，增量文本/思考逐块 yield，保证对话体感）
+        const llmGen = this.consumeLlm(messages, llmTools);
+        let llmResponse: LlmMessage | null = null;
+        for (;;) {
+          const { value, done } = await llmGen.next();
+          if (done) {
+            llmResponse = value as LlmMessage;
+            break;
+          }
+          yield value;
+        }
+        const response = { message: llmResponse! };
 
         const responseMessage = response.message;
 
@@ -313,6 +473,19 @@ export class AgentExecutor {
                 case 'emit_md': {
                   const md = String(args.content ?? '');
                   yield { type: 'agent:md', data: { md }, timestamp: Date.now() };
+                  break;
+                }
+                case 'todo_write': {
+                  // P0-3: 任务清单快照以 tool_call 事件下发给前端(前端剥离为任务卡),不暂停
+                  yield {
+                    type: 'agent:tool_call',
+                    data: {
+                      toolCallId: toolCall.id,
+                      toolName: 'todo_write',
+                      arguments: toolCall.function.arguments,
+                    },
+                    timestamp: Date.now(),
+                  };
                   break;
                 }
               }

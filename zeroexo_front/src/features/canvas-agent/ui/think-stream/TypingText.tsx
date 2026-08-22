@@ -108,7 +108,7 @@ export function TypingText({
   const containerStyle: CSSProperties = {
     fontSize: 13,
     lineHeight: 1.7,
-    color: t.isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
+    color: 'var(--agent-text)',
     minHeight: 24,
     position: 'relative',
   };
@@ -139,7 +139,7 @@ export function TypingText({
           <span
             style={{
               fontSize: 11,
-              color: t.isDark ? '#475569' : '#94a3b8',
+              color: 'var(--agent-muted)',
               fontVariantNumeric: 'tabular-nums',
             }}
           >

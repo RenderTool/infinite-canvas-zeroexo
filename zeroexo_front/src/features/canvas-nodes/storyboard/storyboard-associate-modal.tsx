@@ -34,6 +34,8 @@ export interface StoryboardAssociateModalProps {
   defaultGenerate?: boolean;
   /** 目标分镜节点 id（分镜侧关联现有节点时传入；剧本侧新建节点传 undefined） */
   targetNodeId?: string;
+  /** z-index（全屏编辑内打开时需高于全屏覆盖层，避免被遮挡） */
+  zIndex?: number;
 }
 
 export function StoryboardAssociateModal({
@@ -44,6 +46,7 @@ export function StoryboardAssociateModal({
   episodes,
   defaultGenerate = true,
   targetNodeId,
+  zIndex,
 }: StoryboardAssociateModalProps): ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -150,6 +153,7 @@ export function StoryboardAssociateModal({
       footer={null}
       destroyOnHidden
       closeIcon={null}
+      zIndex={zIndex}
       styles={{ container: contentStyle, body: modalBodyStyle, mask: maskStyle }}
     >
       {/* Header */}

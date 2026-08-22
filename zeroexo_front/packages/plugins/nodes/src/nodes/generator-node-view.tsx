@@ -1093,13 +1093,10 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             readOnly={!isEditing}
             placeholder={isEditing ? '输入提示词... (输入 @ 引用素材)' : '双击进入编辑模式...'}
             textColor={textColor}
-            backgroundColor={theme.toolbar.panel}
             accentColor={theme.toolbar.accent}
             fontSize={12}
             lineHeight={1.6}
             minHeight={44}
-            borderColor={cardBorder}
-            borderHoverColor={theme.toolbar.accent}
             onLengthChange={() => {}}
           />
           {isEditing && (

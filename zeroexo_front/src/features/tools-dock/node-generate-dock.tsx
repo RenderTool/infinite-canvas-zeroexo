@@ -19,8 +19,8 @@ import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Text, Image, Music, Film, Sparkles, LoaderCircle, Square,
-  ChevronDown, ChevronUp, Cpu, Trash2, Upload, FileText, Check, X,
+  Text, Image, Music, Film, Sparkles, LoaderCircle,
+  ChevronDown, ChevronUp, Cpu, Trash2, Upload, FileText, Check, X, Layers,
 } from 'lucide-react';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -36,6 +36,8 @@ import {
   referencesChanged,
   computeReferenceCompatibility,
   resolveAnyThumbUrl,
+  GENERATOR_TYPE_META,
+  NODE_TYPE_TO_INPUT_TYPE,
 } from '@zeroexo/plugin-nodes';
 import { apiGet } from '@/services/api-client.js';
 import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-config-store.js';
@@ -51,19 +53,17 @@ export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
 
 export interface NodeGenerateDockProps {
   nodeId: string;
-  nodeType: 'text' | 'image' | 'video' | 'audio' | 'generator';
+  nodeType: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media';
   initialPrompt?: string;
   isRunning: boolean;
   onPromptChange: (nodeId: string, prompt: string) => void;
-  onGenerate: (nodeId: string, mode: GenerationMode, prompt: string) => void;
+  onGenerate: (nodeId: string, mode: GenerationMode, prompt: string, refs?: ReferenceItem[]) => void;
   onStop: (nodeId: string) => void;
   /** 生成器节点专用:当前生成模式(从 node.data.generationMode 推导) */
   configMode?: GenerationMode;
   /** 当前节点选用的模型值("channelId::model" 编码) */
   model?: string;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
-  /** 打开 AI 渠道设置 */
-  onOpenAiConfig?: () => void;
   imageQuality?: string;
   imageSize?: string;
   imageCount?: number;
@@ -94,10 +94,13 @@ const TYPE_META: Record<string, { icon: React.ReactNode; label: string }> = {
   video: { icon: <Film size={14} />, label: '视频' },
   audio: { icon: <Music size={14} />, label: '音频' },
   generator: { icon: <Sparkles size={14} />, label: '生成器' },
+  'stacked-media': { icon: <Layers size={14} />, label: '堆叠' },
 };
 
+// 堆叠节点可切换的生成类型已移除(用户拍板:堆叠不作为生成目标,下方不显示提示词面板)
+
 function defaultMode(nodeType: NodeGenerateDockProps['nodeType'], configMode?: GenerationMode): GenerationMode {
-  if (nodeType === 'generator') return configMode ?? 'image';
+  if (nodeType === 'generator' || nodeType === 'stacked-media') return configMode ?? 'image';
   if (nodeType === 'text') return 'text';
   if (nodeType === 'video') return 'video';
   if (nodeType === 'audio') return 'audio';
@@ -254,6 +257,17 @@ function StyledSelect({
 // ===== 卡片外观 tokens(主页创意简报 AiInputBar variant="elevated" 同款:无边框+圆角卡片) =====
 const DOCK_CARD_RADIUS = 24;
 
+/** NodeGenerateDock 展开态屏幕高度(供聚焦补偿 focusOnNode 使用) */
+export const NODE_DOCK_SCREEN_HEIGHT = 240;
+
+// ===== 呼吸动画关键帧(主页 AiInputBar zeroexo-ripple 同款) =====
+const dockRippleKeyframes = `
+@keyframes zeroexo-ripple {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+`;
+
 // ===== 参考素材区(memo 隔离:提示词输入/视口变化时不重渲染) =====
 const DockReferencesSection = memo(function DockReferencesSection({
   nodeId,
@@ -396,13 +410,19 @@ const DockInputSection = memo(function DockInputSection({
   onChange,
   references,
   placeholder,
+  mentionTypeFilter,
 }: {
   value: string;
   onChange: (value: string) => void;
   references: ReferenceItem[];
   placeholder: string;
+  mentionTypeFilter?: (ref: ReferenceItem) => boolean;
 }) {
   const { theme } = useTheme();
+  // @ 弹窗主题色:亮色白底/暗色 toolbar.panel(不依赖 textColor 亮度推断,暗色主题下 textColor 是亮色会误判)
+  const isDark = theme.mode === 'dark';
+  const popupBg = isDark ? (theme.toolbar.panel ?? '#26262b') : '#ffffff';
+  const popupBorder = isDark ? (theme.toolbar.border ?? 'rgba(255,255,255,0.14)') : '#e7e5e4';
   return (
     <>
       <GeneratorPromptEditor
@@ -412,13 +432,13 @@ const DockInputSection = memo(function DockInputSection({
         readOnly={false}
         placeholder={placeholder}
         textColor={theme.toolbar.text}
-        backgroundColor="transparent"
         accentColor={theme.toolbar.accent}
-        fontSize={12}
-        lineHeight={1.6}
-        minHeight={44}
-        borderColor={theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.1)'}
-        borderHoverColor={theme.toolbar.accent}
+        fontSize={13}
+        lineHeight={1.7}
+        minHeight={96}
+        mentionTypeFilter={mentionTypeFilter}
+        popupBackground={popupBg}
+        popupBorderColor={popupBorder}
       />
       <div style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', pointerEvents: 'none', textAlign: 'right', lineHeight: 1 }}>
         {value.length} 字
@@ -437,7 +457,6 @@ const DockFooterBar = memo(function DockFooterBar({
   hasText,
   onAction,
   onConfigChange,
-  onOpenAiConfig,
   imageQuality,
   imageSize,
   imageCount,
@@ -460,7 +479,6 @@ const DockFooterBar = memo(function DockFooterBar({
   hasText: boolean;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
-  onOpenAiConfig?: () => void;
   imageQuality?: string;
   imageSize?: string;
   imageCount?: number;
@@ -478,7 +496,6 @@ const DockFooterBar = memo(function DockFooterBar({
   const { theme } = useTheme();
   const { t } = useTranslation();
   const isDark = theme.mode === 'dark';
-  const navBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
   const spinRef = useRef<HTMLSpanElement>(null);
   const actionDisabled = !isRunning && !hasText;
 
@@ -540,56 +557,43 @@ const DockFooterBar = memo(function DockFooterBar({
           onChange={(patch) => onConfigChange(nodeId, patch)}
         />
       ) : null}
-      {modelOptions.length === 0 && onOpenAiConfig ? (
-        <button
-          type="button"
-          onClick={onOpenAiConfig}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 11, padding: '4px 8px', borderRadius: 8,
-            border: `1px solid ${navBorder}`, background: 'transparent',
-            color: theme.toolbar.textMuted ?? '', cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          <Cpu size={12} />
-          <span>{t('nodeDock.noModel', '未配置模型,前往设置')}</span>
-        </button>
-      ) : null}
+      {/* 未配置模型:直接不显示(用户拍板:不展示跳转入口,避免误导) */}
 
       <div style={{ flex: 1 }} />
 
-      {/* 生成按钮(accent 胶囊,与生成器一致) */}
+      {/* 生成按钮(主页 AiInputBar 同款:圆形 accent + zeroexo-ripple 呼吸动画) */}
+      <style>{dockRippleKeyframes}</style>
       <button
         type="button"
         onClick={onAction}
         disabled={actionDisabled}
+        aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
+        title={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-          fontSize: 12, padding: '5px 14px', borderRadius: 9999,
-          border: 'none', cursor: actionDisabled ? 'not-allowed' : 'pointer',
+          width: 36, height: 36, flexShrink: 0,
+          borderRadius: '50%',
+          border: '2px solid transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 0,
           background: actionDisabled
-            ? (isDark ? '#333' : '#e5e5e5')
+            ? (isDark ? '#262626' : '#e5e5e5')
             : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent,
           color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff',
-          fontFamily: 'inherit', fontWeight: 500,
-          transition: 'opacity 0.15s',
-          opacity: actionDisabled ? 0.5 : 1,
+          cursor: actionDisabled ? 'not-allowed' : 'pointer',
+          boxShadow: actionDisabled
+            ? 'none'
+            : `0 4px 12px ${(isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent)}40`,
+          transition: 'all .2s',
+          animation: actionDisabled ? 'none' : 'zeroexo-ripple 3s ease-in-out infinite',
+          fontFamily: 'inherit',
         }}
       >
         {isRunning ? (
-          <>
-            <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <LoaderCircle size={14} />
-            </span>
-            <Square size={12} fill="currentColor" />
-            <span>{t('prompt.stop', '停止')}</span>
-          </>
+          <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <LoaderCircle size={16} />
+          </span>
         ) : (
-          <>
-            <Sparkles size={14} />
-            <span>{t('prompt.generate', '生成')}</span>
-          </>
+          <Sparkles size={16} />
         )}
       </button>
     </>
@@ -609,7 +613,6 @@ export function NodeGenerateDock({
   configMode,
   model,
   onConfigChange,
-  onOpenAiConfig,
   imageQuality,
   imageSize,
   imageCount,
@@ -630,8 +633,9 @@ export function NodeGenerateDock({
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
-  const mode = defaultMode(nodeType, configMode);
-  const [prompt, setPrompt] = useState(initialPrompt);
+  // 生成类型由宿主节点类型推导(堆叠不作为生成目标,见下方 return null)
+  const mode: GenerationMode = defaultMode(nodeType, configMode);
+  const [prompt, setPrompt] = useState(initialPrompt.trim());
   const [collapsed, setCollapsed] = useState(false);
 
   // 订阅视口(锚点换算依赖 viewport scale/offset;图变化由 getAnchorBounds 回调驱动)
@@ -701,19 +705,30 @@ export function NodeGenerateDock({
     const graph = store.getGraph();
     const incoming = graph.edges
       .filter((e) => e.target.nodeId === nodeId)
-      .map((e) => {
+      .flatMap((e) => {
         const srcNode = graph.nodes.find((n) => n.id === e.source.nodeId);
-        if (!srcNode) return null;
+        if (!srcNode) return [];
         const d = (srcNode.data ?? {}) as Record<string, unknown>;
-        return {
+        // 堆叠节点保持整体条目(不展开成卡片:展开会导致 @ 列表 20+ 条目截断选不到;
+        // 整体语义 = 堆叠所有卡片作为整体参考素材,与 stacked-media 输出契约一致)
+        if (srcNode.type === 'stacked-media') {
+          const cards = (d.cards as Array<{ id: string; sourceType: string; title?: string; data?: Record<string, unknown> }> | undefined) ?? [];
+          return [{
+            id: srcNode.id,
+            type: 'stacked-media',
+            content: undefined,
+            storageKey: undefined,
+            title: `${srcNode.title || srcNode.id.slice(0, 8)}(${cards.length})`,
+          }];
+        }
+        return [{
           id: srcNode.id,
           type: srcNode.type,
           content: typeof d.content === 'string' ? d.content : undefined,
           storageKey: typeof d.storageKey === 'string' ? d.storageKey : undefined,
           title: (srcNode.title || (typeof d.title === 'string' ? d.title : undefined) || srcNode.type) as string,
-        };
-      })
-      .filter((n): n is NonNullable<typeof n> => n !== null);
+        }];
+      });
     return deriveIncomingReferences(incoming);
   }, [store, nodeId, graphVersion]);
 
@@ -744,6 +759,7 @@ export function NodeGenerateDock({
   }, [incomingNodes, supportedInputTypes, currentModelValue, mode]);
 
   // 连入参考素材缩略图(异步解析 storageKey → thumb 级 URL,与生成器 refUrlMap 同链)
+  // 堆叠整体条目无图;展开卡片(id 为 `${nodeId}::${cardId}`)也在此解析,供 @ 列表展示
   const [refUrlMap, setRefUrlMap] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -755,32 +771,85 @@ export function NodeGenerateDock({
             const u = await resolveAnyThumbUrl(n.storageKey);
             if (u) next[n.id] = u;
           } catch { /* 无缩略图回退内容直链 */ }
+        } else if (n.type === 'stacked-media') {
+          // 堆叠:展开解析各卡片缩略图(@ 列表与参考区展示用)
+          const graph = store.getGraph();
+          const src = graph.nodes.find((g) => g.id === n.id);
+          const cards = ((src?.data as { cards?: Array<{ id: string; sourceType: string; data?: Record<string, unknown> }> } | undefined)?.cards) ?? [];
+          for (const card of cards) {
+            const key = `${n.id}::${card.id}`;
+            const st = typeof card.data?.storageKey === 'string' ? card.data.storageKey : undefined;
+            if (st) {
+              try {
+                const u = await resolveAnyThumbUrl(st);
+                if (u) { next[key] = u; continue; }
+              } catch { /* 回退 content 直链 */ }
+            }
+            const ct = typeof card.data?.content === 'string' ? card.data.content : undefined;
+            if (ct && (card.sourceType === 'image' || card.sourceType === 'video')) next[key] = ct;
+          }
         }
       }));
       if (!cancelled) setRefUrlMap(next);
     })();
     return () => { cancelled = true; };
-  }, [incomingNodes]);
+  }, [incomingNodes, store]);
 
   // @ 引用列表(与生成器 GeneratorPromptEditor 的 references 契约一致)
+  // 堆叠在此展开为具体卡片条目:只有明确 @ 到支持类型的卡片才会作为 API 资产源输入;
+  // 参考列表区(DockReferencesSection)仍显示堆叠整体图标,两者分离
   const references: ReferenceItem[] = useMemo(() => {
-    return incomingNodes.map((n) => ({
-      id: n.id,
-      type: (n.type as ReferenceItem['type']) ?? 'text',
-      name: n.title || n.id.slice(0, 8),
-      url: refUrlMap[n.id] || (n.type === 'image' ? n.content : undefined) || undefined,
-    }));
-  }, [incomingNodes, refUrlMap]);
+    const graph = store.getGraph();
+    const out: ReferenceItem[] = [];
+    for (const n of incomingNodes) {
+      if (n.type === 'stacked-media') {
+        const src = graph.nodes.find((g) => g.id === n.id);
+        const cards = ((src?.data as { cards?: Array<{ id: string; sourceType: string; title?: string; data?: Record<string, unknown> }> } | undefined)?.cards) ?? [];
+        for (const card of cards) {
+          out.push({
+            id: `${n.id}::${card.id}`,
+            type: (card.sourceType as ReferenceItem['type']) ?? 'text',
+            name: card.title || card.sourceType || src?.title || n.id.slice(0, 8),
+            url: refUrlMap[`${n.id}::${card.id}`] || (typeof card.data?.content === 'string' ? card.data.content : undefined),
+            asset: {
+              content: typeof card.data?.content === 'string' ? card.data.content : undefined,
+              storageKey: typeof card.data?.storageKey === 'string' ? card.data.storageKey : undefined,
+            },
+          });
+        }
+      } else {
+        out.push({
+          id: n.id,
+          type: (n.type as ReferenceItem['type']) ?? 'text',
+          name: n.title || n.id.slice(0, 8),
+          url: refUrlMap[n.id] || (n.type === 'image' ? n.content : undefined) || undefined,
+          asset: { content: n.content, storageKey: n.storageKey },
+        });
+      }
+    }
+    return out;
+  }, [incomingNodes, refUrlMap, store]);
 
   // 断开连入节点连线(移除参考素材)
   const handleRemoveIncoming = useCallback((sourceNodeId: string) => {
     nodeActionBus.emit('nodeDock:removeConnection', { nodeId, sourceNodeId });
   }, [nodeId]);
 
-  // initialPrompt 变化时同步(nodeId 切换)
+  // @ 引用类型过滤:按当前生成类型过滤支持媒体;文本/剧本等恒可作为提示参考
+  const mentionTypeFilter = useCallback((r: ReferenceItem): boolean => {
+    const inputType = NODE_TYPE_TO_INPUT_TYPE[r.type] ?? 'text';
+    if (inputType === 'text') return true;
+    return (GENERATOR_TYPE_META[mode]?.supportedInputs ?? []).includes(inputType);
+  }, [mode]);
+
+  // nodeId 切换时以该节点已保存的 prompt 为初始值;
+  // 不依赖 initialPrompt 变化:编辑期间的父级回写(存储/云同步)不得重置正在编辑的输入,
+  // 否则 value 被旧纯文本覆盖 → GeneratorPromptEditor 初始化会重写 innerText 摧毁 @badge
   useEffect(() => {
-    setPrompt(initialPrompt);
-  }, [initialPrompt, nodeId]);
+    // 重置为节点已保存的 prompt(trim 掉边界空白,避免未生成仅编辑时残留尾部换行产生空行)
+    setPrompt(initialPrompt.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId]);
 
   // prompt 最新值 ref(保证 submit 闭包稳定,不随逐字输入重建 → 底栏 memo 生效)
   const promptRef = useRef(prompt);
@@ -797,10 +866,13 @@ export function NodeGenerateDock({
   const submit = useCallback(() => {
     const text = promptRef.current.trim();
     if (!text || isRunning) return;
-    onGenerate(nodeId, mode, text);
+    // 解析 @ 选中引用:badge 文本化为 "@名称",按名称匹配 references;
+    // 明确 @ 到的引用(含堆叠展开卡片)作为 API 资产源输入传给生成
+    const mentioned = references.filter((r) => text.includes(`@${r.name}`));
+    onGenerate(nodeId, mode, text, mentioned);
     setPrompt('');
     promptRef.current = '';
-  }, [isRunning, onGenerate, nodeId, mode]);
+  }, [isRunning, onGenerate, nodeId, mode, references]);
 
   const handleAction = useCallback(() => {
     if (isRunning) onStop(nodeId);
@@ -808,6 +880,10 @@ export function NodeGenerateDock({
   }, [isRunning, onStop, nodeId, submit]);
 
   const typeMeta = TYPE_META[nodeType] ?? TYPE_META.generator!;
+
+  // 堆叠节点:资源浏览器语义,不作为生成目标(用户拍板:下方不显示提示词面板,
+  // 堆叠只作为上游参考输入,具体卡片经 @ 在生成节点面板中引用)
+  if (nodeType === 'stacked-media') return null;
 
   // ===== 吸附定位(世界坐标 → 屏幕坐标,对齐 NodeCapsuleToolbar) =====
   const liveBounds = getAnchorBounds ? getAnchorBounds() : null;
@@ -820,15 +896,13 @@ export function NodeGenerateDock({
   const centerX = boundsX * viewport.k + viewport.x + (boundsW * viewport.k) / 2;
   const bottomY = (boundsY + boundsH) * viewport.k + viewport.y + 8;
 
-  // ===== 卡片配色(主页创意简报 AiInputBar variant="elevated" 同款;tA9 去磨砂/去内部边线,
-  //      改剧本节点同款分层颜色区分区块) =====
+  // ===== 卡片配色(主页创意简报 AiInputBar variant="elevated" 同款;
+  //      用户反馈:去除分区分层色块,整体单色自然融合) =====
   const isDark = theme.mode === 'dark';
   const accent = theme.toolbar.accent;
-  const bgHover = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)';
-  // 分区分层色(代替原 sectionDivider 边线):与剧本节点 triggerBackground 分层一致
-  const sectionBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)';
   const cardStyle: CSSProperties = {
     width: '100%',
+    position: 'relative',
     borderRadius: DOCK_CARD_RADIUS,
     background: theme.toolbar.panel ?? (isDark ? '#1e1e20' : '#fafaf7'),
     boxShadow: prompt.trim()
@@ -837,11 +911,10 @@ export function NodeGenerateDock({
     transition: 'all .25s',
     color: theme.toolbar.text,
   };
+  // 内部分区:不加色块背景(整体单色),仅用间距自然分隔
   const sectionStyle: CSSProperties = {
-    margin: '0 8px 6px',
-    padding: '8px 12px',
-    background: sectionBg,
-    borderRadius: 10,
+    margin: '0 10px',
+    padding: '10px 14px',
   };
   const hasText = prompt.trim().length > 0;
 
@@ -891,37 +964,28 @@ export function NodeGenerateDock({
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      {/* 无边框圆角卡片(主页创意简报 elevated 同款:半透明分层背景 + blur + 柔和阴影) */}
+      {/* 无边框圆角卡片(主页创意简报 elevated 同款:整体单色 + 柔和阴影) */}
       <div style={cardStyle}>
-      {/* 卡片头(无边框卡片内轻量标题行) */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '10px 14px',
-        color: theme.toolbar.text, fontSize: 12, fontWeight: 500,
-        userSelect: 'none',
-      }}>
-        <span style={{ display: 'inline-flex', flexShrink: 0, color: accent }}>{typeMeta.icon}</span>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-          {typeMeta.label} · {t('nodeDock.generate', '生成')}
-        </span>
-        <button
-          type="button"
-          title={t('nodeDock.collapse', '收起')}
-          onClick={(e) => { e.stopPropagation(); setCollapsed(true); }}
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 22, height: 22, border: 'none', borderRadius: 8,
-            background: 'transparent', color: theme.toolbar.text, cursor: 'pointer',
-            padding: 0, transition: 'background 0.12s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          <ChevronDown size={14} />
-        </button>
-      </div>
+      {/* 收起按钮(右上角小图标,替代原标题行折叠入口,节省空间) */}
+      <button
+        type="button"
+        title={t('nodeDock.collapse', '收起')}
+        onClick={(e) => { e.stopPropagation(); setCollapsed(true); }}
+        style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 2,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 20, height: 20, border: 'none', borderRadius: 8,
+          background: 'transparent', color: theme.toolbar.text, cursor: 'pointer',
+          padding: 0, transition: 'opacity 0.12s',
+          opacity: 0.45,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.45'; }}
+      >
+        <ChevronDown size={13} />
+      </button>
 
-      {/* 参考素材区(卡片内分层色块;memo 隔离) */}
+      {/* 参考素材区(单色融入;memo 隔离) */}
       <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DockReferencesSection
           nodeId={nodeId}
@@ -939,11 +1003,12 @@ export function NodeGenerateDock({
           onChange={updatePrompt}
           references={references}
           placeholder={t('nodeDock.placeholder', '输入提示词... (输入 @ 引用素材)')}
+          mentionTypeFilter={mentionTypeFilter}
         />
       </div>
 
       {/* 底栏(卡片内操作行;memo 隔离 + hasText 布尔化) */}
-      <div style={{ ...sectionStyle, margin: '0 8px 8px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ ...sectionStyle, margin: '0 10px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DockFooterBar
           nodeId={nodeId}
           mode={mode}
@@ -953,7 +1018,6 @@ export function NodeGenerateDock({
           hasText={hasText}
           onAction={handleAction}
           onConfigChange={onConfigChange}
-          onOpenAiConfig={onOpenAiConfig}
           imageQuality={imageQuality}
           imageSize={imageSize}
           imageCount={imageCount}

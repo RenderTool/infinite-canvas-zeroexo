@@ -8,12 +8,15 @@
  * 步骤视图 = 升级版单镜视图（节点与全屏均不再出现单镜），header 分镜切换器驱动当前镜头
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Modal, Tooltip, App as AntdApp, Select, Empty, Button } from 'antd';
+import { createPortal } from 'react-dom';
+import { Tooltip, App as AntdApp, ConfigProvider, Select, Empty, Button } from 'antd';
 import {
-  ChevronLeft, ChevronRight, Plus, Trash2, X, ListVideo, Loader2, LayoutGrid, Image as ImageIcon, AtSign, Table, Columns3, CheckSquare,
+  ChevronLeft, ChevronRight, Plus, Trash2, X, ListVideo, Loader2, LayoutGrid, Image as ImageIcon, AtSign, Table, Columns3, CheckSquare, Link2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { Z_INDEX } from '@/shared/constants/z-index.js';
+import { FullscreenDropdown } from './components/FullscreenDropdown';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { useImagePanZoom } from '@/shared/components/image-viewer.js';
@@ -63,6 +66,11 @@ export interface StoryboardFullscreenEditorProps {
   nodeId: string;
   linkedScript: { id: string; title?: string } | undefined;
   activeEpisode: { id: string; title?: string } | undefined;
+  /** 剧本节点列表（关联剧本/切换关联下拉数据源，全屏内可直接关联） */
+  scriptNodes?: Array<{ id: string; title?: string }>;
+  scriptOptionLabel?: (n: { id: string; title?: string }) => string;
+  /** 打开关联剧本向导弹窗 */
+  onAssociateScript?: (scriptId: string) => void;
 }
 
 /** 全屏表格分页尺寸（编辑态行高较大，略小于节点内 8） */
@@ -71,6 +79,7 @@ const PAGE_SIZE = 10;
 export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEditor({
   open, onClose, shots, onUpdateShot, onAddShot, onDeleteShot, episodes, activeEpisodeId, onEpisodeChange, pmItems,
   entities, aiSubjects, subjectStatesByEntity, pmItemsByEntity, status, progress, nodeId, linkedScript, activeEpisode,
+  scriptNodes = [], scriptOptionLabel, onAssociateScript,
 }: StoryboardFullscreenEditorProps): ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -146,6 +155,7 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
     antdModal.confirm({
       centered: true,
       okType: 'danger',
+      zIndex: Z_INDEX.FULLSCREEN_MODAL,
       title: t('storyboardFullscreenEditor.deleteShot'),
       content: t('storyboardFullscreenEditor.confirmDeleteShot', { number: num }),
       okText: t('common.delete'),
@@ -159,6 +169,7 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
     antdModal.confirm({
       centered: true,
       okType: 'danger',
+      zIndex: Z_INDEX.FULLSCREEN_MODAL,
       title: t('storyboard.batchDeleteShots'),
       content: t('storyboard.confirmDeleteShots', { count }),
       okText: t('common.delete'),
@@ -267,6 +278,7 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
     antdModal.confirm({
       centered: true,
       okType: 'danger',
+      zIndex: Z_INDEX.FULLSCREEN_MODAL,
       title: t('storyboardFullscreenEditor.deleteShot'),
       content: t('storyboardFullscreenEditor.confirmDeleteShot', { number: shot.number }),
       okText: t('common.delete'),
@@ -315,17 +327,14 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
     <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: accent, marginTop: 4 }}>{text}</span>
   );
 
-  return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width="calc(100vw - 32px)"
-      centered
-      destroyOnHidden
-      styles={{ body: { padding: 0, height: 'calc(100vh - 130px)', overflow: 'hidden', background: pageBg }, mask: { background: 'transparent' } }}
-    >
-      {/* 事件阻断：Modal 挂载在节点视图内，不阻断则事件冒泡至画布平移/缩放 */}
+  if (!open) return null;
+
+  return createPortal(
+    // 真全屏覆盖层:自制 fixed overlay(Z_INDEX.FULLSCREEN=30000),antd 弹层(Dropdown/Tooltip/Modal)
+    // 由 ConfigProvider 提升到 40000,保证景别取景器等弹层显示在全屏之上
+    <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
+    <div style={overlayStyle(pageBg)}>
+      {/* 事件阻断：全屏挂载于 body，不阻断则事件冒泡至画布平移/缩放 */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
         onPointerMove={(e) => e.stopPropagation()}
@@ -365,6 +374,24 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
               }))}
             />
           )}
+          {/* 关联剧本/切换关联（全屏内直接可关联，无需退出全屏） */}
+          <FullscreenDropdown
+            onSelect={(key) => {
+              if (key === '__none') return;
+              onAssociateScript?.(key);
+            }}
+            options={linkedScript
+              ? (scriptNodes.filter((n) => n.id !== linkedScript.id).length > 0
+                ? scriptNodes.filter((n) => n.id !== linkedScript.id).map((n) => ({ key: n.id, label: scriptOptionLabel ? scriptOptionLabel(n) : (n.title ?? n.id) }))
+                : [{ key: '__none', label: t('storyboard.noOtherScriptNodes'), disabled: true }])
+              : (scriptNodes.length > 0
+                ? scriptNodes.map((n) => ({ key: n.id, label: scriptOptionLabel ? scriptOptionLabel(n) : (n.title ?? n.id) }))
+                : [{ key: '__none', label: t('storyboard.noScriptNodesHint'), disabled: true }])}
+          >
+            <Button size="small" type="text" icon={<Link2 size={14} />} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, flexShrink: 0, color: textPrimary }}>
+              {linkedScript ? (scriptOptionLabel ? scriptOptionLabel(linkedScript) : (linkedScript.title ?? '')) : t('storyboard.associateScript')}
+            </Button>
+          </FullscreenDropdown>
           {/* 视图切换：表格 ↔ 步骤（步骤视图 = 升级版单镜） */}
           <Tooltip title={viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToTableView')}>
             <button type="button" onClick={handleSwitchView}
@@ -733,6 +760,18 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
         onClose={() => { setPickerOpen(false); setPickerShotId(null); }}
         onConfirm={(value) => { if (pickerShotId) onUpdateShot(pickerShotId, { shotType: value as any }); setPickerOpen(false); setPickerShotId(null); }}
       />
-    </Modal>
+    </div>
+    </ConfigProvider>,
+    document.body,
   );
+});
+
+/** 全屏覆盖层样式:铺满视口 + 顶部层级 */
+const overlayStyle = (background: string): React.CSSProperties => ({
+  position: 'fixed',
+  inset: 0,
+  zIndex: Z_INDEX.FULLSCREEN,
+  display: 'flex',
+  flexDirection: 'column',
+  background,
 });

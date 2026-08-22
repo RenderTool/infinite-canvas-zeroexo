@@ -5,21 +5,21 @@
  * 数据处理逻辑已抽离至 storyboard-utils。
  */
 import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement } from 'react';
-import { Link2, ListVideo, Columns3, Table } from 'lucide-react';
+import { Link2, ListVideo, Aperture, Table } from 'lucide-react';
 import { Button, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useReactGraphStore, useGraph } from '@zeroexo/plugin-render-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { StoryboardNodeData, Shot, StoryboardEntity } from './storyboard-types';
-import { createNewShot, normalizeUpdate, buildStepRecords, SAMPLE_SUBJECTS } from './storyboard-utils';
+import { createNewShot, normalizeUpdate, SAMPLE_SUBJECTS } from './storyboard-utils';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import { StoryboardAssociateModal } from './storyboard-associate-modal';
 import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown';
 import { StoryboardTable } from './components/StoryboardTable';
-import { StepView } from './components/StepView';
-import { StepNavigator } from './components/StepNavigator';
+import { StoryboardShotView } from './storyboard-shot-view';
 import { StoryboardFullscreenEditor } from './storyboard-fullscreen-editor';
+import { Z_INDEX } from '@/shared/constants/z-index.js';
 import {
   DeleteConfirmModal,
   RegenModal,
@@ -163,10 +163,8 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const [regenStep, setRegenStep] = useState(0);
   const [regenOption, setRegenOption] = useState<'overwrite' | 'compare'>('overwrite');
 
-  // 视图(tA9 移除单镜):步骤视图 = 升级版单镜视图,节点内仅保留 表格 ↔ 步骤 两态
-  const [viewMode, setViewMode] = useState<'table' | 'step'>('table');
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const stepRecords = useMemo(() => buildStepRecords(shots, entities, data.conflicts ?? []), [shots, entities, data.conflicts]);
+  // 视图(修正 tA9 误删):剧管风格 Step 卡(默认,代替旧单镜卡) ↔ 表格 两态
+  const [viewMode, setViewMode] = useState<'shot' | 'table'>('shot');
 
   const associateScript = useMemo(() => scriptNodes.find((n) => n.id === associateScriptId) ?? null, [scriptNodes, associateScriptId]);
   const associateEpisodes = useMemo(() => {
@@ -306,14 +304,14 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
         )}
         <div style={{ flex: 1 }} />
         {data.isSample && <span style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 1, color: isDark ? '#fbbf24' : '#b45309', background: isDark ? 'rgba(251,191,36,0.14)' : 'rgba(180,83,9,0.12)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.35)' : 'rgba(180,83,9,0.3)'}`, userSelect: 'none', pointerEvents: 'none' }}>{t('storyboard.sampleBadge')}</span>}
-        {/* 切换视图按钮(移到「共N个镜头」前面): 表格 ↔ 步骤 两态(tA9 移除单镜) */}
+        {/* 切换视图按钮: Step卡(剧管风格) ↔ 表格 两态 */}
         <Tooltip title={viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToTableView')}>
           <Button
             size="small"
             type="text"
-            icon={viewMode === 'table' ? <Table size={14} /> : <Columns3 size={14} />}
+            icon={viewMode === 'table' ? <Table size={14} /> : <Aperture size={14} />}
             style={{ color: textColor, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}
-            onClick={() => { setViewMode(viewMode === 'table' ? 'step' : 'table'); setCurrentStepIndex(0); }}
+            onClick={() => { setViewMode(viewMode === 'table' ? 'shot' : 'table'); }}
           />
         </Tooltip>
         <span style={{ fontSize: 11, color: mutedColor }}>{t('storyboard.shotCountSummary', { count: shots.length })}</span>
@@ -321,13 +319,15 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
 
       {/* 内容区域 */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {viewMode === 'step' && stepRecords.length > 0 ? (
-          <>
-            <StepNavigator currentIndex={currentStepIndex} totalSteps={stepRecords.length} onPrev={() => setCurrentStepIndex(Math.max(0, currentStepIndex - 1))} onNext={() => setCurrentStepIndex(Math.min(stepRecords.length - 1, currentStepIndex + 1))} onBackToList={() => setViewMode('table')} />
-            <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
-              <StepView step={stepRecords[currentStepIndex]!} entities={entities} conflicts={data.conflicts ?? []} allShots={shots} />
-            </div>
-          </>
+        {viewMode === 'shot' ? (
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+            <StoryboardShotView
+              shots={shots}
+              status={status}
+              progress={progress}
+              readOnly
+            />
+          </div>
         ) : (
           <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} pmItemsByEntity={pmItemsByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
         )}
@@ -376,12 +376,15 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           nodeId={nodeId}
           linkedScript={linkedScript}
           activeEpisode={activeEpisode}
+          scriptNodes={scriptNodes}
+          scriptOptionLabel={scriptOptionLabel}
+          onAssociateScript={openAssociateModal}
         />
       )}
 
       {/* 弹窗 */}
       <ShotSizePickerModal open={pickerOpen} currentValue={pickerShotId ? shots.find((s) => s.id === pickerShotId)?.shotType ?? '中景' : '中景'} onClose={() => { setPickerOpen(false); setPickerShotId(null); }} onConfirm={(value) => { if (pickerShotId) updateShot(pickerShotId, { shotType: value as any }); setPickerOpen(false); setPickerShotId(null); }} />
-      {associateScript && <StoryboardAssociateModal open={associateOpen} onClose={() => { setAssociateOpen(false); setAssociateScriptId(null); }} scriptNodeId={associateScript.id} scriptTitle={associateScript.title} episodes={associateEpisodes.map((ep, idx) => ({ id: ep.id, number: idx + 1, title: ep.title }))} defaultGenerate={false} targetNodeId={nodeId} />}
+      {associateScript && <StoryboardAssociateModal open={associateOpen} onClose={() => { setAssociateOpen(false); setAssociateScriptId(null); }} scriptNodeId={associateScript.id} scriptTitle={associateScript.title} episodes={associateEpisodes.map((ep, idx) => ({ id: ep.id, number: idx + 1, title: ep.title }))} defaultGenerate={false} targetNodeId={nodeId} zIndex={Z_INDEX.FULLSCREEN_MODAL} />}
       <DeleteConfirmModal deleteConfirm={deleteConfirm} onCancel={() => setDeleteConfirm(null)} onOk={confirmDelete} shots={shots} selectedShotIds={selectedShotIds} />
       <RegenModal regenMeta={regenMeta} regenStep={regenStep} regenOption={regenOption} onStepChange={setRegenStep} onOptionChange={setRegenOption} onCancel={() => setRegenMeta(null)} onOverwriteRegen={handleOverwriteRegen} onNewCompareRegen={handleNewCompareRegen} linkedScript={linkedScript} />
     </div>

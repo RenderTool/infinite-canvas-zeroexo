@@ -43,7 +43,7 @@ export function ReferenceChip({ references, onRemove, onClick }: ReferenceChipPr
           <div
             key={ref.nodeId}
             onClick={() => onClick?.(ref)}
-            style={chipStyle(t)}
+            style={chipStyle}
             title={ref.label}
           >
             <span style={{ fontSize: 12, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
@@ -81,26 +81,26 @@ export function ReferenceChip({ references, onRemove, onClick }: ReferenceChipPr
   );
 }
 
-const chipStyle = (t: ReturnType<typeof useAgentTheme>): CSSProperties => ({
+const chipStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
   padding: '3px 8px',
   borderRadius: 6,
-  border: `1px solid ${t.isDark ? '#334155' : '#e2e8f0'}`,
-  background: t.isDark ? '#0f172a' : '#f8fafc',
+  border: '1px solid var(--agent-border)',
+  background: 'var(--agent-surface)',
   cursor: 'pointer',
   userSelect: 'none',
   transition: 'all 0.12s',
-});
+};
 
 const removeBtnStyle: CSSProperties = {
   width: 16,
   height: 16,
   borderRadius: '50%',
   border: 'none',
-  background: 'rgba(128,128,128,0.15)',
-  color: '#94a3b8',
+  background: 'var(--agent-surface-2)',
+  color: 'var(--agent-muted)',
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',

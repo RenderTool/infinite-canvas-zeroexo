@@ -6,6 +6,7 @@ import { MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize as re
 import { MoveGroupCommand, getChildren, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
+import { NODE_DOCK_SCREEN_HEIGHT } from '@/features/tools-dock/node-generate-dock.js';
 
 export interface LayoutContext {
   store: any;
@@ -68,7 +69,9 @@ export function triggerAutoLayoutAndFocus(newIds: string[], ctx: LayoutContext, 
   }
 
   // 3. 延迟一帧后聚焦(使用节点当前实际尺寸,避免用户修改尺寸后仍以基准缩放)
-  //    胶囊菜单高度 34px + 间隙 17px = 51px,计入总高度使缩放更准确
+  //    胶囊菜单高度 34px + 间隙 17px = 51px 计入总高度;
+  //    普通节点选中下方还会显示 NodeGenerateDock(生成面板),需额外计入其高度,
+  //    否则聚焦缩放把 Dock 挤到视口外(用户反馈)。
   requestAnimationFrame(() => {
     if (!store.focusOnNode) return;
     const targetId = newIds[0];
@@ -76,7 +79,10 @@ export function triggerAutoLayoutAndFocus(newIds: string[], ctx: LayoutContext, 
     const node = store.getNode(targetId);
     if (!node) return;
     const actualSize = node.size ?? extensions.get(node.type)?.defaultSize ?? getNodeSize(node);
-    const capsuleTotalHeight = 34 + 17; // CAPSULE_TOOLBAR_SCREEN_HEIGHT + CAPSULE_TOOLBAR_GAP
+    // storyboard 节点不显示 NodeGenerateDock(editor-page 排除),仅计入胶囊菜单
+    const capsuleTotalHeight = isStoryboard
+      ? 34 + 17
+      : 34 + 17 + NODE_DOCK_SCREEN_HEIGHT;
     store.focusOnNode(targetId, containerSize, actualSize.width, actualSize.height, 400, capsuleTotalHeight);
   });
 }

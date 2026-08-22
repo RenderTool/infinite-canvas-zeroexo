@@ -15,6 +15,7 @@ import { PlanBlock } from './PlanBlock.js';
 import { ProgressBlock } from './ProgressBlock.js';
 import { StepBlock } from './StepBlock.js';
 import { MarkdownBlock } from './MarkdownBlock.js';
+import { TimelineBlock } from './TimelineBlock.js';
 
 /** 注册表：消息类型 → 渲染组件 */
 const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: CanvasAgentMessage }>>> = {
@@ -25,6 +26,7 @@ const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: 
   progress: ProgressBlock,
   step: StepBlock,
   md: MarkdownBlock,
+  timeline: TimelineBlock,
 };
 
 export interface MessageRendererProps {

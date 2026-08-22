@@ -530,6 +530,11 @@ export class ConnectionController {
     if (exists) {
       return { valid: false, reason: '连线已存在' };
     }
+    // 4.5 循环连线校验:target 沿现有出边可达 source → 新边将形成环(A→B→A 互相引用),
+    //    布局/参考素材语义均不允许,拒绝创建
+    if (this.wouldCreateCycle(src.nodeId, tgt.nodeId)) {
+      return { valid: false, reason: '不能创建循环连线(会形成互相引用)' };
+    }
     // 5. 统一节点类型兼容性校验(中央矩阵,由 app 注入)
     //    与 ConnectionDropMenu 菜单过滤共用同一套规则
     if (this.compatibilityChecker) {
@@ -595,6 +600,31 @@ export class ConnectionController {
         target: edgeTarget,
       }),
     );
+  }
+
+  /**
+   * 环检测:若 target 沿现有出边(DFS)可达 source,则新边 source→target 将形成环。
+   * 用于阻止 A→B 后又 B→A 的循环连线(参考素材互相引用,树状布局/语义均不允许)。
+   */
+  private wouldCreateCycle(sourceNodeId: string, targetNodeId: string): boolean {
+    const graph = this.store.getGraph();
+    const adj = new Map<string, string[]>();
+    for (const e of graph.edges) {
+      const from = e.source.nodeId;
+      let list = adj.get(from);
+      if (!list) { list = []; adj.set(from, list); }
+      list.push(e.target.nodeId);
+    }
+    const visited = new Set<string>();
+    const stack: string[] = [targetNodeId];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (cur === sourceNodeId) return true;
+      if (visited.has(cur)) continue;
+      visited.add(cur);
+      for (const next of adj.get(cur) ?? []) stack.push(next);
+    }
+    return false;
   }
 
   /**
@@ -686,6 +716,8 @@ export class ConnectionController {
             e.target.pinId === inp.pinId,
         );
         if (exists) continue;
+        // 跳过会形成环的连线(inp 沿出边可达 out → 互相引用)
+        if (this.wouldCreateCycle(out.nodeId, inp.nodeId)) continue;
         const edgeId = `edge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${commands.length}`;
         commands.push(
           new AddEdgeCommand({

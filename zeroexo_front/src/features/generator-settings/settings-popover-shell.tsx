@@ -10,10 +10,13 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import { Tooltip } from 'antd';
-import { Settings2 } from 'lucide-react';
+import { Settings2, ChevronDown } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/plugin-theme';
 
 export type PopoverPlacement = 'topLeft' | 'top' | 'topRight' | 'bottomLeft' | 'bottom' | 'bottomRight';
+
+/** 触发器外观:pill=胶囊边框按钮(默认),dropdown=透明无边框下拉同款(与 StyledSelect 一致) */
+export type TriggerVariant = 'pill' | 'dropdown';
 
 export interface SettingsPopoverShellProps {
   /** 按钮显示的摘要文字(如 "auto·1:1·3张") */
@@ -24,6 +27,8 @@ export interface SettingsPopoverShellProps {
   placement?: PopoverPlacement;
   /** 面板宽度 */
   panelWidth?: number;
+  /** 触发器外观变体 */
+  triggerVariant?: TriggerVariant;
 }
 
 export function SettingsPopoverShell({
@@ -32,6 +37,7 @@ export function SettingsPopoverShell({
   theme,
   placement = 'topLeft',
   panelWidth = 320,
+  triggerVariant = 'pill',
 }: SettingsPopoverShellProps): React.ReactElement {
   const buttonRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -70,12 +76,31 @@ export function SettingsPopoverShell({
             }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
-            style={buttonStyle(theme)}
+            onMouseEnter={(event) => {
+              if (triggerVariant === 'dropdown') {
+                const isDark = theme.mode === 'dark';
+                event.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+              }
+            }}
+            onMouseLeave={(event) => {
+              if (triggerVariant === 'dropdown') event.currentTarget.style.background = 'transparent';
+            }}
+            style={buttonStyle(theme, triggerVariant)}
           >
-            <Settings2 size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
-            <span style={summaryStyle}>{summary}</span>
+            {triggerVariant === 'dropdown' ? (
+              <>
+                <Settings2 size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+                <span style={summaryStyle}>{summary}</span>
+                <ChevronDown size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+              </>
+            ) : (
+              <>
+                <Settings2 size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
+                <span style={summaryStyle}>{summary}</span>
+              </>
+            )}
           </button>
-          </Tooltip>
+        </Tooltip>
       </span>
       {open && buttonRect ? (
         <SettingsPortal
@@ -328,20 +353,43 @@ export function TextInput({
 
 // ===== 样式 =====
 
-const buttonStyle = (theme: ThemeConfig): CSSProperties => ({
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  height: 32,
-  maxWidth: 180,
-  padding: '0 10px',
-  borderRadius: 9999,
-  border: `1px solid ${theme.toolbar.border}`,
-  background: 'transparent',
-  color: theme.toolbar.text,
-  cursor: 'pointer',
-  fontSize: 12,
-});
+const buttonStyle = (theme: ThemeConfig, variant: TriggerVariant): CSSProperties => {
+  if (variant === 'dropdown') {
+    // 与生成器 StyledSelect 同款:无边框透明、hover 灰底、等宽高度
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      height: 26,
+      maxWidth: 180,
+      padding: '0 6px',
+      border: 'none',
+      borderRadius: 4,
+      background: 'transparent',
+      color: theme.toolbar.text,
+      cursor: 'pointer',
+      fontSize: 12,
+      fontFamily: 'inherit',
+      transition: 'background 0.12s',
+      boxSizing: 'border-box',
+      userSelect: 'none',
+    };
+  }
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    height: 32,
+    maxWidth: 180,
+    padding: '0 10px',
+    borderRadius: 9999,
+    border: `1px solid ${theme.toolbar.border}`,
+    background: 'transparent',
+    color: theme.toolbar.text,
+    cursor: 'pointer',
+    fontSize: 12,
+  };
+};
 
 const summaryStyle: CSSProperties = {
   overflow: 'hidden',

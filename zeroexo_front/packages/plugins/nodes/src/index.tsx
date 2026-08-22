@@ -63,6 +63,7 @@ export {
   referencesChanged,
   computeReferenceCompatibility,
   NODE_TYPE_TO_INPUT_TYPE,
+  GENERATOR_TYPE_META,
 } from './nodes/generator-model.js';
 export type { IncomingReference, RawIncomingNode, CompatibilityOptions } from './nodes/generator-model.js';
 
@@ -71,7 +72,8 @@ export { replaceNodeImage } from './utils/replace-node-image.js';
 // 媒体替换模型 — video/audio 替换命令化(视图只消费命令,支持撤销/重做)
 export { replaceNodeVideo, replaceNodeAudio, stripFileExtension, computeVideoReplaceSize, buildReplacePatches } from './utils/media-replace-model.js';
 export { convertToStack, createStackNode, resolveStackSpawnPosition } from './node-tools.js';
-export { stackSelectedNodes } from './nodes/stacked-media-model.js';
+export { stackSelectedNodes, appendCards } from './nodes/stacked-media-model.js';
+export type { StackCard } from './nodes/stacked-media-types.js';
 export { ThumbNav, useThumbTier, THUMB_COUNT_MAX } from './nodes/thumb-nav.js';
 export type { ThumbNavItem, ThumbNavProps } from './nodes/thumb-nav.js';
 export { StackDetailsModal } from './nodes/stack-details-modal.js';
@@ -433,6 +435,7 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
         };
         for (const t of sourceTools) {
           if (t.id === 'createStackNode') continue; // 排除"堆叠"自身
+          if (t.id === 'detail') continue; // 排除源详情:堆叠下方已有统一详情按钮(避免胶囊出现两个"信息"按钮)
           tools.push({ ...t, targetNode: () => activeTarget });
         }
       }

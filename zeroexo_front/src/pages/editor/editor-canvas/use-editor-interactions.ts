@@ -19,7 +19,7 @@ import type {
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
-import type { AssetNodePayload } from '@zeroexo/plugin-nodes';
+import type { AssetNodePayload, ReferenceItem } from '@zeroexo/plugin-nodes';
 import { duplicateSubtree } from '@zeroexo/preset-default';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
@@ -30,6 +30,7 @@ import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { assetInputFromNode, serializeScriptContent } from '@/features/asset-picker/services/upload-asset.js';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
+import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import type { EditorRefs } from './use-editor-state.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
@@ -290,7 +291,7 @@ export function useEditorInteractions({
 
   const isPromptRunning = selectedNodeData?.status === 'loading';
 
-  // 配置节点专用 — 当前生成模式
+  // 配置节点专用 — 当前生成模式(仅 generator 节点:堆叠节点不再作为生成目标)
   const selectedConfigMode = useMemo<GenerationMode | undefined>(() => {
     if (state.selectedNodeType !== 'generator') return undefined;
     const m = selectedNodeData?.generationMode as string | undefined;
@@ -738,7 +739,7 @@ export function useEditorInteractions({
   );
 
   const handlePromptGenerate = useCallback(
-    async (nodeId: string, mode: GenerationMode, prompt: string): Promise<void> => {
+    async (nodeId: string, mode: GenerationMode, prompt: string, mentionedRefs?: ReferenceItem[]): Promise<void> => {
       const provider = refs.aiProvider;
       if (!provider || !refs.commandQueue || !refs.store) return;
       // 取消该节点上正在进行的请求(若有)
@@ -749,6 +750,37 @@ export function useEditorInteractions({
       // 从 graph 读取节点自身配置(支持重试非选中节点,避免依赖 selectedNodeData)
       const nodeRec = refs.store.getGraph().nodes.find((n: any) => n.id === nodeId);
       const nodeData = (nodeRec?.data ?? {}) as Partial<ImageNodeData> & Partial<VideoNodeData> & Partial<AudioNodeData>;
+      // 生成结果落盘:写宿主 data(可选尺寸调整)
+      const applyResult = (
+        patch: Record<string, unknown>,
+        mediaSize?: { width: number; height: number; fallbackWidth: number; fallbackHeight: number },
+      ): void => {
+        // 闭包内重新收窄(TS 不跨闭包推断开头守卫的 narrowing)
+        const cq = refs.commandQueue;
+        const storeNow = refs.store;
+        if (!cq || !storeNow) return;
+        cq.execute(new UpdateNodeDataCommand(nodeId, patch));
+        if (!mediaSize) return;
+        const { width, height, fallbackWidth, fallbackHeight } = mediaSize;
+        if (!width || !height) return;
+        // AI 生成媒体:同步调整节点尺寸为媒体比例(完全无边框)
+        const graph = storeNow.getGraph();
+        const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
+        if (!node) return;
+        const currentWidth = node.size?.width ?? fallbackWidth;
+        const ratio = height / width;
+        const newHeight = Math.round(currentWidth * ratio);
+        const oldRect = {
+          x: node.position.x,
+          y: node.position.y,
+          width: node.size?.width ?? fallbackWidth,
+          height: node.size?.height ?? fallbackHeight,
+        };
+        cq.execute(new ResizeNodeCommand(nodeId, oldRect, {
+          ...oldRect,
+          height: newHeight,
+        }));
+      };
       const modelValue = (nodeData?.model as string) ?? '';
       const taskLabel = modelValue ? modelOptionLabel(aiConfig, modelValue) : undefined;
       // 设置 loading + 写入 prompt + 清除旧错误 + 记录任务信息
@@ -762,60 +794,66 @@ export function useEditorInteractions({
         } as Record<string, unknown>),
       );
       try {
+        // @ 引用 → API 资产源输入(仅明确 @ 到的引用;堆叠整体条目不发送,展开卡片按支持类型过滤)
+        const refImages: string[] = [];
+        const refVideos: Array<{ dataUrl?: string; durationMs?: number }> = [];
+        const refAudios: Array<{ dataUrl?: string; durationMs?: number }> = [];
+        for (const r of mentionedRefs ?? []) {
+          const raw = r.asset?.content ?? (r.asset?.storageKey ? getResourceUrl(r.asset.storageKey, 'full') : undefined);
+          if (!raw) continue;
+          const src = await contentToDataUrl(raw);
+          if (r.type === 'image') refImages.push(src);
+          else if (r.type === 'video') refVideos.push({ dataUrl: src });
+          else if (r.type === 'audio') refAudios.push({ dataUrl: src });
+        }
         if (mode === 'image') {
           const data = nodeData;
-          const results = await provider.generateImage({
-            prompt,
-            model: (data?.model as string) ?? 'gpt-4o',
-            size: (data?.size as string) ?? '1024x1024',
-            quality: (data?.quality as string) ?? 'standard',
-            count: (data?.count as number) ?? 1,
-            signal: ctl.signal,
-          });
+          // 有 @ 参考图 → 图生图(editImage);否则文生图
+          const results = refImages.length > 0
+            ? await provider.editImage({
+                prompt,
+                model: (data?.model as string) ?? 'gpt-4o',
+                size: (data?.size as string) ?? '1024x1024',
+                quality: (data?.quality as string) ?? 'standard',
+                count: (data?.count as number) ?? 1,
+                referenceImages: refImages,
+                signal: ctl.signal,
+              })
+            : await provider.generateImage({
+                prompt,
+                model: (data?.model as string) ?? 'gpt-4o',
+                size: (data?.size as string) ?? '1024x1024',
+                quality: (data?.quality as string) ?? 'standard',
+                count: (data?.count as number) ?? 1,
+                signal: ctl.signal,
+              });
           const first = results[0];
           if (!first) throw new Error(t('nodes.noImageReturned'));
-          refs.commandQueue.execute(
-            new UpdateNodeDataCommand(nodeId, {
-              content: first.dataUrl,
-              status: 'success',
-              naturalWidth: first.width,
-              naturalHeight: first.height,
-              mimeType: first.mimeType,
-              bytes: first.bytes,
-              errorDetails: undefined,
-              errorType: undefined,
-            } as Record<string, unknown>),
-          );
-          // AI 生成图片:同步调整节点尺寸为图片比例(完全无边框)
-          if (first.width && first.height) {
-            const graph = refs.store.getGraph();
-            const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
-            if (node) {
-              const currentWidth = node.size?.width ?? 340;
-              const ratio = first.height / first.width;
-              const newHeight = Math.round(currentWidth * ratio);
-              const oldRect = {
-                x: node.position.x,
-                y: node.position.y,
-                width: node.size?.width ?? 340,
-                height: node.size?.height ?? 240,
-              };
-              refs.commandQueue.execute(new ResizeNodeCommand(nodeId, oldRect, {
-                ...oldRect,
-                height: newHeight,
-              }));
-            }
-          }
+          applyResult({
+            content: first.dataUrl,
+            status: 'success',
+            naturalWidth: first.width,
+            naturalHeight: first.height,
+            mimeType: first.mimeType,
+            bytes: first.bytes,
+            errorDetails: undefined,
+            errorType: undefined,
+          } as Record<string, unknown>, { width: first.width, height: first.height, fallbackWidth: 340, fallbackHeight: 240 });
         } else if (mode === 'text') {
-          const text = await provider.generateText({ prompt, model: 'gpt-4o', signal: ctl.signal });
-          refs.commandQueue.execute(
-            new UpdateNodeDataCommand(nodeId, {
-              content: text,
-              status: 'success',
-              errorDetails: undefined,
-              errorType: undefined,
-            } as Record<string, unknown>),
-          );
+          const data = nodeData;
+          const text = await provider.generateText({
+            prompt,
+            // 用户从下拉选择的 LLM(编码值 channelId::modelName,provider 内部解析渠道配置)
+            model: (data?.model as string) ?? 'gpt-4o',
+            referenceImages: refImages.length > 0 ? refImages : undefined,
+            signal: ctl.signal,
+          });
+          applyResult({
+            content: text,
+            status: 'success',
+            errorDetails: undefined,
+            errorType: undefined,
+          } as Record<string, unknown>);
         } else if (mode === 'video') {
           const data = nodeData;
           const result = await provider.generateVideo({
@@ -826,42 +864,23 @@ export function useEditorInteractions({
             vquality: (data?.vquality as string) ?? 'medium',
             generateAudio: data?.generateAudio ?? true,
             watermark: data?.watermark ?? false,
+            referenceImages: refImages.length > 0 ? refImages : undefined,
+            referenceVideos: refVideos.length > 0 ? refVideos : undefined,
+            referenceAudios: refAudios.length > 0 ? refAudios : undefined,
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
-          refs.commandQueue.execute(
-            new UpdateNodeDataCommand(nodeId, {
-              content: url,
-              status: 'success',
-              naturalWidth: result.width,
-              naturalHeight: result.height,
-              durationMs: result.durationMs,
-              mimeType: result.mimeType,
-              bytes: result.bytes,
-              errorDetails: undefined,
-              errorType: undefined,
-            } as Record<string, unknown>),
-          );
-          // AI 生成视频:同步调整节点尺寸为视频比例(完全无边框)
-          if (result.width && result.height) {
-            const graph = refs.store.getGraph();
-            const node = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
-            if (node) {
-              const currentWidth = node.size?.width ?? 420;
-              const ratio = result.height / result.width;
-              const newHeight = Math.round(currentWidth * ratio);
-              const oldRect = {
-                x: node.position.x,
-                y: node.position.y,
-                width: node.size?.width ?? 420,
-                height: node.size?.height ?? 236,
-              };
-              refs.commandQueue.execute(new ResizeNodeCommand(nodeId, oldRect, {
-                ...oldRect,
-                height: newHeight,
-              }));
-            }
-          }
+          applyResult({
+            content: url,
+            status: 'success',
+            naturalWidth: result.width,
+            naturalHeight: result.height,
+            durationMs: result.durationMs,
+            mimeType: result.mimeType,
+            bytes: result.bytes,
+            errorDetails: undefined,
+            errorType: undefined,
+          } as Record<string, unknown>, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
         } else if (mode === 'audio') {
           const data = nodeData;
           const result = await provider.generateAudio({
@@ -873,17 +892,15 @@ export function useEditorInteractions({
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
-          refs.commandQueue.execute(
-            new UpdateNodeDataCommand(nodeId, {
-              content: url,
-              status: 'success',
-              durationMs: result.durationMs,
-              mimeType: result.mimeType,
-              bytes: result.bytes,
-              errorDetails: undefined,
-              errorType: undefined,
-            } as Record<string, unknown>),
-          );
+          applyResult({
+            content: url,
+            status: 'success',
+            durationMs: result.durationMs,
+            mimeType: result.mimeType,
+            bytes: result.bytes,
+            errorDetails: undefined,
+            errorType: undefined,
+          } as Record<string, unknown>);
         }
         // 成功:清空失败计数
         nodeFailureCountRef.current.delete(nodeId);

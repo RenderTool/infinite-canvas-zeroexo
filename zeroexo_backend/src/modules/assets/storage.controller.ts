@@ -32,7 +32,7 @@ const PUBLIC_READ_PREFIXES = ['resources/public/'];
  * - GET  /api/storage/get?key=xxx[&size=thumb|preview]  客户端下载文件
  *
  * 图片变体(sharp 管道):
- *   PUT 接收图片时自动生成 __thumb(48px) 和 __preview(768px) 两个变体,
+ *   PUT 接收图片时自动生成 __sm(160px)、__thumb(48px) 和 __preview(768px) 三个变体,
  *   GET 通过 ?size= 参数返回对应尺寸,实现前端 LOD 渐进式加载。
  *
  * 客户端调用流程(与 MinIO 预签名直传完全一致):
@@ -97,12 +97,12 @@ export class StorageController {
   }
 
   /**
-   * 生成并存储图片的 thumb (48px) 和 preview (768px) 变体
+   * 生成并存储图片的 sm (160px)、thumb (48px) 和 preview (768px) 变体
    */
   private async generateVariants(key: string, buffer: Buffer): Promise<void> {
     const variants = await this.imageProcessor.generateAllVariants(buffer);
     for (const [size, variantBuffer] of Object.entries(variants)) {
-      const variantKey = this.imageProcessor.variantKey(key, size as 'thumb' | 'preview');
+      const variantKey = this.imageProcessor.variantKey(key, size as 'sm' | 'thumb' | 'preview');
       await this.minio.putBuffer(variantKey, variantBuffer, 'image/jpeg');
       this.logger.log(
         `   ${size}: ${variantKey} (${variantBuffer.length} bytes)`,
@@ -157,10 +157,10 @@ export class StorageController {
       }
     }
 
-    // 支持 size 参数: thumb / preview / full(或空)
+    // 支持 size 参数: sm / thumb / preview / full(或空)
     const resolvedKey =
       size !== 'full' && this.imageProcessor.isImageExt(decodedKey)
-        ? this.imageProcessor.variantKey(decodedKey, size as 'thumb' | 'preview')
+        ? this.imageProcessor.variantKey(decodedKey, size as 'sm' | 'thumb' | 'preview')
         : decodedKey;
 
     const buffer = await this.minio.readFile(resolvedKey);

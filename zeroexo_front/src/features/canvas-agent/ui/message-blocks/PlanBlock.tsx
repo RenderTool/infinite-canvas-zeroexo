@@ -59,9 +59,9 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
         margin: '6px 0',
         borderRadius: 12,
         overflow: 'hidden',
-        border: `1px solid ${isHighRisk ? '#6366f1' : '#1e293b'}`,
-        boxShadow: isHighRisk ? '0 0 0 1px rgba(99,102,241,0.2)' : 'none',
-        background: 'rgba(15,20,35,0.6)',
+        border: `1px solid ${isHighRisk ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
+        boxShadow: isHighRisk ? '0 0 0 1px var(--agent-accent-soft)' : 'none',
+        background: 'var(--agent-panel)',
         animation: 'agentFadeUp 0.35s ease',
       }}
     >
@@ -72,16 +72,16 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
           alignItems: 'center',
           gap: 8,
           padding: '10px 14px',
-          background: isHighRisk ? 'rgba(233,69,96,0.08)' : 'rgba(99,102,241,0.03)',
-          borderBottom: '1px solid #1e293b',
+          background: isHighRisk ? 'var(--agent-accent-soft)' : 'var(--agent-surface-2)',
+          borderBottom: '1px solid var(--agent-border)',
         }}
       >
         {isHighRisk ? (
-          <AlertTriangle size={14} color="#6366f1" />
+          <AlertTriangle size={14} color="var(--agent-accent)" />
         ) : (
-          <FileText size={14} color="#64748b" />
+          <FileText size={14} color="var(--agent-muted)" />
         )}
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--agent-text)' }}>
           执行计划
         </span>
         {isHighRisk && (
@@ -90,7 +90,7 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
               fontSize: 10,
               padding: '2px 8px',
               borderRadius: 5,
-              background: '#6366f1',
+              background: 'var(--agent-accent)',
               color: '#fff',
               fontWeight: 700,
               marginLeft: 'auto',
@@ -121,14 +121,14 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '8px 14px',
-          borderTop: '1px solid #1e293b',
-          background: 'rgba(0,0,0,0.15)',
+          borderTop: '1px solid var(--agent-border)',
+          background: 'var(--agent-surface)',
         }}
       >
-        <span style={{ fontSize: 11, color: '#64748b' }}>
-          已选 <strong style={{ color: '#cbd5e1' }}>{selected.size}</strong>/{plan.steps.length} 步
+        <span style={{ fontSize: 11, color: 'var(--agent-muted)' }}>
+          已选 <strong style={{ color: 'var(--agent-text)' }}>{selected.size}</strong>/{plan.steps.length} 步
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--agent-muted)' }}>
           <DollarSign size={10} />
           估价 <strong style={{ color: '#4ade80' }}>{selectedCost}</strong> 积分
         </span>
@@ -152,7 +152,7 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
             padding: '6px 14px',
             border: 'none',
             borderRadius: 7,
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            background: 'var(--agent-accent)',
             color: '#fff',
             fontSize: 12,
             fontWeight: 700,
@@ -169,10 +169,10 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
           className="agent-btn-secondary"
           style={{
             padding: '6px 14px',
-            border: '1.5px solid #334155',
+            border: '1.5px solid var(--agent-border)',
             borderRadius: 7,
             background: 'transparent',
-            color: '#94a3b8',
+            color: 'var(--agent-muted)',
             fontSize: 12,
             fontWeight: 600,
             fontFamily: 'inherit',
@@ -187,10 +187,10 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
           className="agent-btn-secondary"
           style={{
             padding: '6px 14px',
-            border: '1.5px solid #334155',
+            border: '1.5px solid var(--agent-border)',
             borderRadius: 7,
             background: 'transparent',
-            color: '#94a3b8',
+            color: 'var(--agent-muted)',
             fontSize: 12,
             fontWeight: 600,
             fontFamily: 'inherit',
@@ -214,7 +214,7 @@ interface PlanStepRowProps {
 const RISK_COLORS: Record<string, string> = {
   low: '#4ade80',
   medium: '#fbbf24',
-  high: '#f87171',
+  high: 'var(--agent-danger)',
 };
 
 function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.ReactElement {
@@ -229,7 +229,7 @@ function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.React
         transition: 'background 0.1s',
       }}
       onClick={onToggle}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.03)'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--agent-surface-2)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
       {/* 勾选框 */}
@@ -238,8 +238,8 @@ function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.React
           width: 18,
           height: 18,
           borderRadius: 4,
-          border: `2px solid ${checked ? '#6366f1' : '#334155'}`,
-          background: checked ? '#6366f1' : 'transparent',
+          border: `2px solid ${checked ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
+          background: checked ? 'var(--agent-accent)' : 'transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -256,18 +256,18 @@ function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.React
 
       {/* 步骤信息 */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 500, color: '#cbd5e1' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--agent-text)' }}>
           {step.label}
         </div>
         {step.affectedNodes.length > 0 && (
-          <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+          <div style={{ fontSize: 10.5, color: 'var(--agent-muted)', marginTop: 2 }}>
             影响 {step.affectedNodes.length} 个节点
           </div>
         )}
       </div>
 
       {/* 估价 */}
-      <span style={{ fontSize: 11, color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 11, color: 'var(--agent-muted)', fontVariantNumeric: 'tabular-nums' }}>
         {step.estimatedCost}
       </span>
 
@@ -277,7 +277,7 @@ function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.React
           width: 7,
           height: 7,
           borderRadius: '50%',
-          background: RISK_COLORS[step.riskLevel] ?? '#64748b',
+          background: RISK_COLORS[step.riskLevel] ?? 'var(--agent-muted)',
           flexShrink: 0,
         }}
       />

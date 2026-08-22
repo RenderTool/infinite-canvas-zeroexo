@@ -129,7 +129,7 @@ export function AudioSettingsPopover({
   }, [safeVoice, safeFormat, safeSpeed]);
 
   return (
-    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <SettingGroup title={t('prompt.audioVoiceTitle')} color={theme.toolbar.textMuted}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>

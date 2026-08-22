@@ -78,9 +78,9 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: t.isDark ? '#0f172a' : '#f8fafc',
+          background: 'var(--agent-surface)',
           border: `1px solid ${isRunning ? t.accent : isDone ? t.border : t.border}`,
-          color: isRunning ? '#a5b4fc' : isDone ? '#4ade80' : t.textMuted,
+          color: isRunning ? 'var(--agent-accent)' : isDone ? '#4ade80' : t.textMuted,
           position: 'relative',
           zIndex: 1,
           transition: 'all 0.25s',
@@ -116,8 +116,8 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
               style={{
                 fontSize: 11,
                 fontFamily: 'SF Mono, Consolas, monospace',
-                color: '#a5b4fc',
-                background: '#312e81',
+                color: 'var(--agent-accent)',
+                background: 'var(--agent-accent-soft)',
                 padding: '2px 8px',
                 borderRadius: 5,
               }}
@@ -129,7 +129,7 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
             <span
               style={{
                 fontSize: 11,
-                color: t.isDark ? '#475569' : '#94a3b8',
+                color: 'var(--agent-muted)',
                 marginLeft: 'auto',
                 fontVariantNumeric: 'tabular-nums',
               }}
@@ -159,15 +159,15 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
         >
           <div style={{ overflow: 'hidden' }}>
             {step.input && (
-              <div style={detailBoxStyle(t)}>
+              <div style={detailBoxStyle}>
                 <div style={detailLabelStyle}>Input</div>
                 <pre style={detailPreStyle}>{step.input}</pre>
               </div>
             )}
             {step.result && (
-              <div style={{ ...detailBoxStyle(t), marginTop: 8 }}>
+              <div style={{ ...detailBoxStyle, marginTop: 8 }}>
                 <div style={detailLabelStyle}>Result</div>
-                <pre style={{ ...detailPreStyle, color: '#86efac' }}>{step.result}</pre>
+                <pre style={{ ...detailPreStyle, color: '#4ade80' }}>{step.result}</pre>
               </div>
             )}
           </div>
@@ -177,26 +177,26 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
   );
 }
 
-const detailBoxStyle = (t: ReturnType<typeof useAgentTheme>): CSSProperties => ({
-  background: t.isDark ? '#0f172a' : '#f8fafc',
-  border: `1px solid ${t.isDark ? '#1e293b' : '#e2e8f0'}`,
+const detailBoxStyle: CSSProperties = {
+  background: 'var(--agent-surface)',
+  border: '1px solid var(--agent-border)',
   borderRadius: 9,
   padding: '10px 12px',
-});
+};
 
 const detailLabelStyle: CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
   letterSpacing: '0.08em',
   textTransform: 'uppercase' as const,
-  color: '#475569',
+  color: 'var(--agent-muted)',
   marginBottom: 5,
 };
 
 const detailPreStyle: CSSProperties = {
   fontFamily: 'SF Mono, Consolas, monospace',
   fontSize: 11.5,
-  color: '#94a3b8',
+  color: 'var(--agent-muted)',
   lineHeight: 1.6,
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',

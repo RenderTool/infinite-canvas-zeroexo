@@ -1345,7 +1345,9 @@
     "stackRemoveCard": "Eject as standalone node",
     "stackPreviewThumbnail": "Double-click thumbnail to preview",
     "stackCollectHint": "Click collect to add to stack",
-    "stackableMediaHint": "Click the capsule toolbar collect button to make a stack"
+    "stackableMediaHint": "Click the capsule toolbar collect button to make a stack",
+    "collapsePanel": "Collapse shortcuts panel",
+    "expandPanel": "Expand shortcuts panel"
   },
   "errors": {
     "INTERNAL_SERVER_ERROR": "Internal server error, please try again later",

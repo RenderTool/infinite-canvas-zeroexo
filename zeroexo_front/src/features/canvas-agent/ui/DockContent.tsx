@@ -1,32 +1,44 @@
 /**
- * DockContent - Agent Dock 内容区（T5：对话 + 任务 + 多会话）
+ * DockContent - Agent Dock 内容区（T5：对话 + 协作聊天 + 成员 三页签）
  *
  * 布局：
- * - 头部：会话切换（下拉列表 + 新建）+ Tab（对话/任务）
- * - 对话 Tab：ThinkStream（思考态）+ 消息列表（MessageRenderer）+ ComposerInput
- * - 任务 Tab：最近任务列表（GET /api/agents/tasks，含状态/进度/摘要）
+ * - 头部：会话切换（下拉列表 + 新建）+ 页签（对话/聊天/成员）
+ * - 对话页签：ThinkStream（思考态）+ 消息列表（MessageRenderer）+ ComposerInput
+ * - 聊天页签：协作实时聊天（CollaborationChat，复用协作面板组件）
+ * - 成员页签：在线成员列表 + 房主可禁言/移出（由 CollaborationPanel 迁移）
  *
  * 挂载时自动恢复最近会话历史（刷新后历史恢复）。
+ * 页签状态提升到 canvas-agent store（dockTab），TopBar 协作聊天按钮可直接切到聊天页签。
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Bot, ChevronDown, MessageSquare, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX } from 'lucide-react';
+import { Button, message } from 'antd';
+import { useTranslation } from 'react-i18next';
+import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasAgentStore } from './store.js';
-import { useAgentTheme } from './context/theme-context.js';
 import { ThinkStream } from './think-stream/ThinkStream.js';
 import { MessageRenderer } from './message-blocks/MessageRenderer.js';
 import { ComposerInput } from './composer/ComposerInput.js';
+import { PinnedTodoSlot } from './PinnedTodoSlot.js';
 import {
   loadConversations,
   loadConversationMessages,
   createConversation,
   deleteConversation,
-  loadTasks,
   type ConversationSummary,
   type ConversationMessageDto,
-  type AgentTaskDto,
 } from './session/agent-session.js';
 import type { CanvasAgentMessage } from './types.js';
+import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
+import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
+import {
+  listMembers,
+  kickMember,
+  muteMember,
+  unmuteMember,
+} from '@/features/collaboration/collaboration-api.js';
+import type { CollaborationMember } from '@/features/collaboration/collaboration-types.js';
 
 /** 后端消息 → store 消息（跳过记忆压缩摘要等 system 消息） */
 function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | null {
@@ -53,45 +65,37 @@ function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | nu
   };
 }
 
-/** 任务输入摘要 */
-function taskInputText(input: unknown): string {
-  if (typeof input === 'string') return input.slice(0, 60);
-  try {
-    const s = JSON.stringify(input ?? {});
-    return s.slice(0, 60);
-  } catch {
-    return '';
-  }
-}
-
-/** 任务状态徽标色 */
-function taskStatusColor(status: AgentTaskDto['status']): string {
-  switch (status) {
-    case 'running': return '#6366f1';
-    case 'completed': return '#10b981';
-    case 'failed': return '#ef4444';
-    default: return '#64748b';
-  }
+/** 消息时间戳 → HH:MM */
+function formatMsgTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }
 
 export interface DockContentProps {
   projectId?: string;
 }
 
-type DockTab = 'chat' | 'tasks';
+type DockTab = 'chat' | 'collab' | 'members';
 
 export function DockContent({ projectId }: DockContentProps): React.ReactElement {
-  const t = useAgentTheme();
   const messages = useCanvasAgentStore((s) => s.messages);
   const isGenerating = useCanvasAgentStore((s) => s.isGenerating);
+  // 思考流文本:思考块随流增长时保持滚动到底部
+  const thinkingText = useCanvasAgentStore((s) => s.thinking.text);
   const activeConversationId = useCanvasAgentStore((s) => s.activeConversationId);
+  // 页签状态提升到 store:TopBar 协作聊天按钮可直接切到 collab
+  const tab = useCanvasAgentStore((s) => s.dockTab);
+  const setTab = useCanvasAgentStore((s) => s.setDockTab);
+  const collabStore = useCollaborationStore();
+  const { t } = useTranslation();
+  const themeCfg = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const [tab, setTab] = useState<DockTab>('chat');
   const [convs, setConvs] = useState<ConversationSummary[]>([]);
   const [convOpen, setConvOpen] = useState(false);
-  const [tasks, setTasks] = useState<AgentTaskDto[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   // 挂载：恢复最近会话历史 + 加载会话列表
   useEffect(() => {
@@ -125,32 +129,59 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     };
   }, [projectId]);
 
-  // 任务列表：Tab 激活时加载
-  useEffect(() => {
-    if (tab !== 'tasks') return;
-    let cancelled = false;
-    setTasksLoading(true);
-    loadTasks({ projectId })
-      .then((items) => {
-        if (!cancelled) setTasks(items);
-      })
-      .catch(() => {
-        if (!cancelled) setTasks([]);
-      })
-      .finally(() => {
-        if (!cancelled) setTasksLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, projectId]);
+  // ===== 成员管理(房主权限,由协作面板迁移) =====
+  const collabRoom = collabStore.room;
+  const collabMembers = collabStore.members;
+  const isRoomOwner = collabRoom?.isOwner ?? false;
+
+  const refreshMembers = async () => {
+    if (!collabRoom) return;
+    try {
+      const list = await listMembers(collabRoom.canvasId);
+      collabStore.setMembers(list);
+    } catch { /* 静默 */ }
+  };
+
+  const handleToggleMute = async (member: CollaborationMember) => {
+    if (!collabRoom) return;
+    setBusyUserId(member.userId);
+    try {
+      const muted = member.sessions.some((s) => s.status === 'muted');
+      if (muted) {
+        await unmuteMember(collabRoom.canvasId, member.userId);
+        message.success(t('collab.memberUnmutedSuccess'));
+      } else {
+        await muteMember(collabRoom.canvasId, member.userId);
+        message.success(t('collab.memberMutedSuccess'));
+      }
+      await refreshMembers();
+    } catch {
+      // 操作失败保持列表现状
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const handleKick = async (member: CollaborationMember) => {
+    if (!collabRoom) return;
+    setBusyUserId(member.userId);
+    try {
+      await kickMember(collabRoom.canvasId, member.userId);
+      await refreshMembers();
+      message.success(t('collab.memberKicked'));
+    } catch {
+      message.error(t('collab.kickFailed'));
+    } finally {
+      setBusyUserId(null);
+    }
+  };
 
   // 自动滚动到底部（仅对话 Tab）
   useEffect(() => {
     if (tab !== 'chat') return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, isGenerating, tab]);
+  }, [messages.length, isGenerating, thinkingText, tab]);
 
   /** 切换会话 */
   const handleSwitchConversation = async (id: string): Promise<void> => {
@@ -211,7 +242,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
-        background: '#0a0c14',
+        background: 'var(--agent-bg)',
       }}
     >
       {/* ===== 头部：会话 + Tab ===== */}
@@ -221,8 +252,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
           alignItems: 'center',
           gap: 6,
           padding: '8px 14px',
-          borderBottom: '1px solid #111a2e',
-          background: 'rgba(10,12,20,0.9)',
+          borderBottom: '1px solid var(--agent-border)',
+          background: 'var(--agent-panel)',
           position: 'relative',
           flexShrink: 0,
           zIndex: 20,
@@ -238,9 +269,9 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             gap: 6,
             padding: '5px 10px',
             borderRadius: 8,
-            border: `1.5px solid ${t.border}`,
-            background: '#0d1220',
-            color: '#e2e8f0',
+            border: '1.5px solid var(--agent-border)',
+            background: 'var(--agent-surface)',
+            color: 'var(--agent-text)',
             fontSize: 12,
             fontWeight: 600,
             cursor: 'pointer',
@@ -281,9 +312,9 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             width: 26,
             height: 26,
             borderRadius: 7,
-            border: `1.5px solid ${t.border}`,
-            background: '#0d1220',
-            color: '#94a3b8',
+            border: '1.5px solid var(--agent-border)',
+            background: 'var(--agent-surface)',
+            color: 'var(--agent-muted)',
             cursor: 'pointer',
             flexShrink: 0,
           }}
@@ -299,11 +330,11 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             marginLeft: 'auto',
             padding: 2,
             borderRadius: 8,
-            background: '#0d1220',
-            border: `1px solid ${t.border}`,
+            background: 'var(--agent-surface)',
+            border: '1px solid var(--agent-border)',
           }}
         >
-          {(['chat', 'tasks'] as DockTab[]).map((k) => (
+          {(['chat', 'collab', 'members'] as DockTab[]).map((k) => (
             <button
               key={k}
               type="button"
@@ -312,15 +343,15 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                 padding: '3px 10px',
                 borderRadius: 6,
                 border: 'none',
-                background: tab === k ? 'linear-gradient(135deg,#6366f1,#a855f7)' : 'transparent',
-                color: tab === k ? '#fff' : '#94a3b8',
+                background: tab === k ? 'var(--agent-accent)' : 'transparent',
+                color: tab === k ? '#fff' : 'var(--agent-muted)',
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
               }}
             >
-              {k === 'chat' ? '对话' : '任务'}
+              {k === 'chat' ? '对话' : k === 'collab' ? '聊天' : '成员'}
             </button>
           ))}
         </div>
@@ -334,10 +365,10 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               left: 14,
               right: 14,
               zIndex: 40,
-              background: '#0d1220',
-              border: `1px solid #1e293b`,
+              background: 'var(--agent-surface)',
+              border: '1px solid var(--agent-border)',
               borderRadius: 10,
-              boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+              boxShadow: 'var(--agent-shadow)',
               maxHeight: 280,
               overflowY: 'auto',
               padding: 6,
@@ -345,7 +376,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             }}
           >
             {convs.length === 0 && (
-              <div style={{ padding: '10px 8px', fontSize: 12, color: '#64748b' }}>
+              <div style={{ padding: '10px 8px', fontSize: 12, color: 'var(--agent-muted)' }}>
                 暂无历史会话，点击 + 新建
               </div>
             )}
@@ -360,8 +391,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                   padding: '8px 10px',
                   borderRadius: 8,
                   cursor: 'pointer',
-                  background: c.id === activeConversationId ? 'rgba(99,102,241,0.08)' : 'transparent',
-                  border: c.id === activeConversationId ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
+                  background: c.id === activeConversationId ? 'var(--agent-accent-soft)' : 'transparent',
+                  border: c.id === activeConversationId ? '1px solid var(--agent-accent)' : '1px solid transparent',
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -369,7 +400,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                     style={{
                       fontSize: 12.5,
                       fontWeight: 600,
-                      color: '#e2e8f0',
+                      color: 'var(--agent-text)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -381,7 +412,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                     <div
                       style={{
                         fontSize: 11,
-                        color: '#64748b',
+                        color: 'var(--agent-muted)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -393,7 +424,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                   )}
                 </div>
                 {c._count?.messages != null && (
-                  <span style={{ fontSize: 10.5, color: '#64748b', flexShrink: 0 }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--agent-muted)', flexShrink: 0 }}>
                     {c._count.messages} 条
                   </span>
                 )}
@@ -413,7 +444,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                     borderRadius: 6,
                     border: 'none',
                     background: 'transparent',
-                    color: '#64748b',
+                    color: 'var(--agent-muted)',
                     cursor: 'pointer',
                     flexShrink: 0,
                   }}
@@ -426,9 +457,6 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         )}
       </div>
 
-      {/* ===== 思考态（仅对话 Tab） ===== */}
-      {tab === 'chat' && <ThinkStream />}
-
       {/* ===== 内容区 ===== */}
       {tab === 'chat' ? (
         <div className="conversation" ref={scrollRef}>
@@ -437,10 +465,10 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               <div className="welcome-icon">
                 <Sparkles size={24} color="#fff" />
               </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--agent-text)', marginBottom: 4 }}>
                 VideoForge Agent
               </div>
-              <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: 'var(--agent-muted)', lineHeight: 1.6, marginBottom: 16 }}>
                 描述你的需求，Agent 会调用工具在画布上执行任务。
                 <br />
                 例如：「生成一段 15 秒的 TVC 广告」
@@ -448,106 +476,149 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             </div>
           ) : (
             messages.map((m) => (
-              <div key={m.id} className={`msg-row ${m.role === 'user' ? 'user-row' : 'ai-row'}`}>
-                {m.role === 'agent' && (
-                  <div
-                    className="avatar ai-avatar"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Bot size={16} color="#fff" />
-                  </div>
-                )}
+              <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : 'assistant'}`}>
+                <div className="role">
+                  <span>{m.role === 'user' ? '你' : 'Agent'}</span>
+                  <span className="msg-time">{formatMsgTime(m.timestamp)}</span>
+                </div>
                 {m.role === 'user' ? (
-                  <div className="user-bubble">{m.text}</div>
+                  <div className="user-text">{m.text}</div>
                 ) : (
-                  <div className="ai-body" style={{ color: t.isDark ? '#cbd5e1' : '#334155' }}>
+                  <div className="ai-body">
                     <MessageRenderer message={m} />
                   </div>
                 )}
               </div>
             ))
           )}
+          {/* 思考态融入消息流:作为最后一条消息之后的内容,随滚动呈现(非顶部固定) */}
+          <ThinkStream />
         </div>
-      ) : (
-        /* ===== 任务 Tab ===== */
-        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
-          {tasksLoading && tasks.length === 0 ? (
-            <div className="note">任务加载中…</div>
-          ) : tasks.length === 0 ? (
-            <div className="note" style={{ textAlign: 'center', paddingTop: 32 }}>
-              暂无任务，在对话中发送需求后自动生成
+      ) : tab === 'collab' ? (
+        /* ===== 协作聊天 Tab ===== */
+        <div style={{ flex: 1, minHeight: 0, padding: '8px 12px 12px', display: 'flex', flexDirection: 'column' }}>
+          {!collabRoom ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                color: 'var(--agent-muted)',
+                fontSize: 12,
+                textAlign: 'center',
+                padding: '24px 12px',
+                lineHeight: 1.7,
+              }}
+            >
+              <Users size={18} style={{ opacity: 0.6 }} />
+              <span>未加入协作房间，点击顶部「协作」按钮创建或加入后，即可与协作者实时聊天。</span>
             </div>
           ) : (
-            tasks.map((task) => (
-              <div
-                key={task.id}
-                style={{
-                  padding: '10px 12px',
-                  marginBottom: 8,
-                  borderRadius: 10,
-                  border: '1px solid #1e293b',
-                  background: 'rgba(15,20,35,0.6)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
-                      background: taskStatusColor(task.status),
-                      flexShrink: 0,
-                      ...(task.status === 'running'
-                        ? { animation: 'pulse-dot 1.2s ease-in-out infinite' }
-                        : {}),
-                    }}
-                  />
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: '#e2e8f0' }}>
-                    {task.taskType}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: '#64748b',
-                      marginLeft: 'auto',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {new Date(task.createdAt).toLocaleString('zh-CN', {
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
+            <CollaborationChat theme={themeCfg.theme} height="100%" />
+          )}
+        </div>
+      ) : (
+        /* ===== 成员 Tab ===== */
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px 12px' }}>
+          {!collabRoom ? (
+            <div style={{ textAlign: 'center', color: 'var(--agent-muted)', fontSize: 12, padding: '24px 12px', lineHeight: 1.7 }}>
+              未加入协作房间，暂无成员信息。
+            </div>
+          ) : collabMembers.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--agent-muted)', fontSize: 12, padding: '24px 12px' }}>
+              {t('collab.noMembers')}
+            </div>
+          ) : (
+            collabMembers.map((member) => {
+              const online = member.sessions.some((s) => s.status === 'online');
+              const muted = member.sessions.some((s) => s.status === 'muted');
+              const banned = member.sessions.some((s) => s.status === 'banned');
+              return (
                 <div
+                  key={member.userId}
                   style={{
-                    fontSize: 11.5,
-                    color: '#94a3b8',
-                    marginTop: 4,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 4px',
                   }}
                 >
-                  {taskInputText(task.input)}
-                </div>
-                {task.status === 'running' && (
-                  <div className="progress-track" style={{ marginTop: 8 }}>
-                    <div className="progress-fill" style={{ width: `${Math.max(task.progress, 4)}%` }} />
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'var(--agent-text)',
+                      background: 'var(--agent-surface-2)',
+                      border: `2px solid ${online ? '#52c41a' : 'var(--agent-border)'}`,
+                    }}
+                  >
+                    {member.isSelf ? (member.nickname || '我').charAt(0) : (member.nickname || '?').charAt(0)}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: 'var(--agent-text)',
+                          lineHeight: 1.2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {member.nickname || t('collab.unnamed')}
+                      </span>
+                      {member.isSelf && (
+                        <span style={{ fontSize: 10, color: 'var(--agent-muted)' }}>({t('collab.self')})</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--agent-muted)', lineHeight: 1.4 }}>
+                      {t(`collab.role.${member.role}`)}
+                      {banned ? ` · ${t('collab.memberBanned')}` : muted ? ` · ${t('collab.memberMuted')}` : online ? ` · ${t('collab.status.online')}` : ''}
+                    </div>
                   </div>
-                )}
-                {task.status === 'failed' && (
-                  <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{task.error}</div>
-                )}
-              </div>
-            ))
+                  {isRoomOwner && !member.isSelf && (
+                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                        onClick={() => void handleToggleMute(member)}
+                        loading={busyUserId === member.userId}
+                        title={muted ? t('collab.unmute') : t('collab.mute')}
+                        style={{ color: 'var(--agent-muted)' }}
+                      />
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<Shield size={13} />}
+                        onClick={() => void handleKick(member)}
+                        loading={busyUserId === member.userId}
+                        title={t('collab.kick')}
+                        style={{ color: 'var(--agent-muted)' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       )}
 
       {/* ===== 输入区（仅对话 Tab） ===== */}
+      {tab === 'chat' && <PinnedTodoSlot />}
       {tab === 'chat' && <ComposerInput />}
     </div>
   );

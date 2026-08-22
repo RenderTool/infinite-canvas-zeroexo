@@ -118,7 +118,7 @@ export function ImageSettingsPopover({
   }, [t, safeQuality, safeSize, safeCount]);
 
   return (
-    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <SettingGroup title={t('prompt.imageQualityTitle')} color={theme.toolbar.textMuted}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>

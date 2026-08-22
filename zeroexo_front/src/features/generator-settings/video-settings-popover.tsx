@@ -260,7 +260,7 @@ function SeedancePanel({
   const hasWatermark = specs ? specs.watermark !== undefined : true;
 
   return (
-    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* BUG8.5: 视频生成模式选择器(Bug6: 按后端 supportedModes 动态显示) */}
         {visibleModes.length > 1 ? (
@@ -397,7 +397,7 @@ function OpenaiPanel({
   const durationRange = getSpecNumberArray(specs, 'durationRange', [1, 20]);
 
   return (
-    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <SettingGroup title={t('prompt.videoClarityTitle')} color={theme.toolbar.textMuted}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>

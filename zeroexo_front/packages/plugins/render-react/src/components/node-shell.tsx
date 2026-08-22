@@ -335,7 +335,8 @@ export function NodeShell({
             transform: `scale(${1 / nodeScale.sx}, ${1 / nodeScale.sy})`,
             transformOrigin: 'top left',
             padding: '0 6px',
-            display: 'flex',
+            // 拖动中隐藏(var(--zx-dragging) 由 DragOffsetWriter 直写:拖动置 none,结束恢复)
+            display: 'var(--zx-dragging, flex)',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 4,
@@ -458,7 +459,8 @@ export function NodeShell({
           top: 0,
           bottom: 0,
           width: `calc(${32 / nodeScale.sx}px * ${invKVar})`,
-          display: 'flex',
+          // 拖动中隐藏(与标题栏同源 CSS 变量)
+          display: 'var(--zx-dragging, flex)',
           flexDirection: 'column',
           justifyContent: 'space-around',
           alignItems: 'flex-end',
@@ -527,7 +529,8 @@ export function NodeShell({
           top: 0,
           bottom: 0,
           width: `calc(${32 / nodeScale.sx}px * ${invKVar})`,
-          display: 'flex',
+          // 拖动中隐藏(与标题栏同源 CSS 变量)
+          display: 'var(--zx-dragging, flex)',
           flexDirection: 'column',
           justifyContent: 'space-around',
           alignItems: 'flex-start',

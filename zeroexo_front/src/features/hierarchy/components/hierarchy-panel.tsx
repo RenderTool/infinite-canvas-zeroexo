@@ -168,8 +168,8 @@ function HierarchyThumbnail({
       })();
       return () => { cancelled = true; };
     }
-    // 图片后端键: 同步构造 ?size=thumb URL(sharp 管道生成过该变体)
-    const backendUrl = buildBackendUrl(storageKey, 'thumb');
+    // 图片后端键: 同步构造 ?size=sm URL(sharp 管道生成过该变体;旧图无 __sm 时后端回退原图,仍清晰)
+    const backendUrl = buildBackendUrl(storageKey, 'sm');
     if (backendUrl) {
       setThumbSrc(backendUrl);
       return;

@@ -14,9 +14,9 @@ import type { CanvasAgentMessage, ProgressStep } from '../types.js';
 
 const STATUS_ICONS: Record<string, React.ReactElement> = {
   queued: <Clock size={12} />,
-  running: <Loader size={12} className="agent-spin" />,
+  running: <Loader size={12} className="spinner" />,
   completed: <CheckCircle size={12} color="#4ade80" />,
-  failed: <XCircle size={12} color="#f87171" />,
+  failed: <XCircle size={12} color="var(--agent-danger)" />,
 };
 
 export function ProgressBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
@@ -31,8 +31,8 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
       style={{
         width: '100%',
         margin: '6px 0',
-        background: '#0d1220',
-        border: '1px solid #1e293b',
+        background: 'var(--agent-surface)',
+        border: '1px solid var(--agent-border)',
         borderRadius: 10,
         overflow: 'hidden',
         animation: 'agentFadeUp 0.35s ease',
@@ -41,16 +41,16 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
       {/* 整体进度 */}
       <div style={{ padding: '12px 14px 8px' }}>
         {/* 进度条 */}
-        <div className="agent-progress-track">
+        <div className="progress-track">
           <div
-            className="agent-progress-fill"
+            className="progress-fill"
             style={{
               width: `${progress.totalProgress}%`,
               background: hasFailed
-                ? '#f87171'
+                ? 'var(--agent-danger)'
                 : allDone
                   ? '#4ade80'
-                  : 'linear-gradient(90deg, #6366f1, #a855f7)',
+                  : 'var(--agent-accent)',
             }}
           />
         </div>
@@ -64,7 +64,7 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
             marginTop: 6,
           }}
         >
-          <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 500 }}>
+          <span style={{ fontSize: 12, color: 'var(--agent-text)', fontWeight: 500 }}>
             {allDone
               ? '全部完成'
               : hasFailed
@@ -73,7 +73,7 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
                   ? progress.currentStep
                   : '准备中…'}
           </span>
-          <span style={{ fontSize: 11, color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontSize: 11, color: 'var(--agent-muted)', fontVariantNumeric: 'tabular-nums' }}>
             {progress.totalProgress}%
           </span>
         </div>
@@ -110,17 +110,17 @@ export function ProgressBlock(props: { message: CanvasAgentMessage }): React.Rea
               fontFamily: 'inherit',
               cursor: 'pointer',
               background: 'transparent',
-              border: '1.5px solid #334155',
-              color: '#94a3b8',
+              border: '1.5px solid var(--agent-border)',
+              color: 'var(--agent-muted)',
               transition: 'all 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#dc2626';
-              e.currentTarget.style.color = '#dc2626';
+              e.currentTarget.style.borderColor = 'var(--agent-danger)';
+              e.currentTarget.style.color = 'var(--agent-danger)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#334155';
-              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.borderColor = 'var(--agent-border)';
+              e.currentTarget.style.color = 'var(--agent-muted)';
             }}
           >
             停止
@@ -150,11 +150,11 @@ function ProgressStepRow({ step }: ProgressStepRowProps): React.ReactElement {
       <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
         {STATUS_ICONS[step.status] ?? <Clock size={12} />}
       </span>
-      <span style={{ flex: 1, fontSize: 12, color: '#cbd5e1' }}>
+      <span style={{ flex: 1, fontSize: 12, color: 'var(--agent-text)' }}>
         {step.label}
       </span>
       {step.status === 'running' && step.progress !== undefined && (
-        <span style={{ fontSize: 11, color: '#a5b4fc', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 11, color: 'var(--agent-accent)', fontVariantNumeric: 'tabular-nums' }}>
           {step.progress}%
         </span>
       )}
@@ -162,7 +162,7 @@ function ProgressStepRow({ step }: ProgressStepRowProps): React.ReactElement {
         <span style={{ fontSize: 10, color: '#4ade80' }}>✓</span>
       )}
       {step.status === 'failed' && (
-        <span style={{ fontSize: 10, color: '#f87171' }}>✗</span>
+        <span style={{ fontSize: 10, color: 'var(--agent-danger)' }}>✗</span>
       )}
     </div>
   );

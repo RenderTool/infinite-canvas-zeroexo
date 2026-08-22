@@ -88,116 +88,64 @@ export function ComposerInput(): React.ReactElement {
   );
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'end',
-        gap: 8,
-        padding: '10px 14px',
-        borderTop: '1px solid #111a2e',
-        background: 'rgba(10,12,20,0.9)',
-        backdropFilter: 'blur(8px)',
-        flexShrink: 0,
-      }}
-    >
-      {/* 引用徽标 */}
-      {references.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            gap: 4,
-            flexWrap: 'wrap',
-            marginBottom: 4,
-            width: '100%',
-          }}
-        >
-          <ReferenceChip references={references} />
-        </div>
-      )}
-
-      <div style={{ position: 'relative', flex: 1 }}>
-        <textarea
-          ref={textareaRef}
-          value={inputText}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder="Message VideoForge Agent…  (Enter to send)"
-          rows={1}
-          className="agent-composer-textarea"
-          style={{
-            width: '100%',
-            background: '#0d1220',
-            border: '1.5px solid #1e293b',
-            borderRadius: 11,
-            padding: '10px 13px',
-            color: '#f1f5f9',
-            fontSize: 13,
-            fontFamily: 'inherit',
-            outline: 'none',
-            resize: 'none',
-            minHeight: 42,
-            maxHeight: 120,
-            lineHeight: 1.5,
-            boxSizing: 'border-box',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = '#6366f1';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = '#1e293b';
-          }}
-        />
-
-        {/* @ 提及弹窗 */}
-        {mentionOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '100%',
-              left: mentionPos.left,
-              marginBottom: 4,
-            }}
-          >
-            <MentionPopover
-              search={mentionSearch}
-              position={mentionPos}
-              onSelect={() => {
-                setMentionOpen(false);
-                textareaRef.current?.focus();
-              }}
-              onClose={() => setMentionOpen(false)}
-            />
+    <div className="composer-bar">
+      <div className="composer-shell">
+        {/* 引用徽标 */}
+        {references.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <ReferenceChip references={references} />
           </div>
         )}
-      </div>
 
-      <button
-        type="button"
-        onClick={handleSend}
-        disabled={!inputText.trim() || isGenerating}
-        className="agent-composer-send"
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 11,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          border: 'none',
-          cursor: inputText.trim() && !isGenerating ? 'pointer' : 'not-allowed',
-          background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-          opacity: inputText.trim() && !isGenerating ? 1 : 0.4,
-          transition: 'opacity 0.15s',
-          flexShrink: 0,
-          padding: 0,
-        }}
-        title="Send"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-          <path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>
-        </svg>
-      </button>
+        <div style={{ position: 'relative' }}>
+          <textarea
+            ref={textareaRef}
+            value={inputText}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder="Message VideoForge Agent…  (Enter to send)"
+            rows={1}
+            className="composer-input"
+          />
+
+          {/* @ 提及弹窗 */}
+          {mentionOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: mentionPos.left,
+                marginBottom: 4,
+              }}
+            >
+              <MentionPopover
+                search={mentionSearch}
+                position={mentionPos}
+                onSelect={() => {
+                  setMentionOpen(false);
+                  textareaRef.current?.focus();
+                }}
+                onClose={() => setMentionOpen(false)}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="composer-row">
+          <div className="composer-spacer" />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!inputText.trim() || isGenerating}
+            className="composer-send"
+            title="Send"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

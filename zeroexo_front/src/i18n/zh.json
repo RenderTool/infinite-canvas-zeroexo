@@ -1344,7 +1344,9 @@
     "stackRemoveCard": "移出为独立节点",
     "stackPreviewThumbnail": "双击缩略图预览",
     "stackCollectHint": "点收纳按钮加进堆叠",
-    "stackableMediaHint": "点胶囊工具栏收纳按钮生成堆叠"
+    "stackableMediaHint": "点胶囊工具栏收纳按钮生成堆叠",
+    "collapsePanel": "收起快捷键面板",
+    "expandPanel": "展开快捷键面板"
   },
   "errors": {
     "INTERNAL_SERVER_ERROR": "服务器内部错误，请稍后重试",

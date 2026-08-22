@@ -3,7 +3,7 @@
  *
  * 从 storyboard-sheet.tsx 中抽离的辅助函数。
  */
-import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, EntityConflict, StepRecord, AiSubject } from './storyboard-types';
+import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, AiSubject } from './storyboard-types';
 
 /** 创建新空 shot */
 export function createNewShot(shots: Shot[]): Shot {
@@ -44,28 +44,6 @@ export function normalizeUpdate(
   const next = updater(normalizedPrev);
   const sbe = { ...(next.shotsByEpisode ?? {}), [activeEpisodeId]: next.shots };
   return { ...next, shotsByEpisode: sbe };
-}
-
-/** 构建 StepRecord 列表（从 shots + entities + conflicts 构建） */
-export function buildStepRecords(
-  shots: Shot[],
-  _entities: StoryboardEntity[],
-  conflicts: EntityConflict[],
-): StepRecord[] {
-  return shots.map((shot) => {
-    // Plan#20 T2: entities 双兼容(EntityRef|string), 字符串形态无 entityId 不参与冲突匹配
-    const shotEntityIds = shot.entities
-      .map((e) => (typeof e === 'string' ? '' : e.entityId))
-      .filter(Boolean);
-    const shotConflictIds = conflicts
-      .filter((c) => c.entities.some((e) => shotEntityIds.includes(e.id)))
-      .map((c) => c.groupId);
-    return {
-      shot,
-      entityIds: shotEntityIds,
-      conflictIds: shotConflictIds,
-    };
-  });
 }
 
 // ===== Plan#20 T2: 契约统一工具(后端字符串产出 / 旧数据对象双兼容) =====

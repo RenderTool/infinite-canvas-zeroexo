@@ -1290,7 +1290,9 @@
     "stackRemoveCard": "独立ノードとして取り出す",
     "stackPreviewThumbnail": "ダブルクリックでサムネイルをプレビュー",
     "stackCollectHint": "収納ボタンでスタックに追加",
-    "stackableMediaHint": "カプセルツールバーの収納ボタンでスタックを作成"
+    "stackableMediaHint": "カプセルツールバーの収納ボタンでスタックを作成",
+    "collapsePanel": "ショートカットパネルを折りたたむ",
+    "expandPanel": "ショートカットパネルを展開"
   },
   "errors": {
     "INTERNAL_SERVER_ERROR": "サーバー内部エラーです。後でもう一度お試しください",

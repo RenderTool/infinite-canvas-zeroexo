@@ -106,14 +106,6 @@ export function useEditorDialogs({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // ===== 协作聊天/成员面板(Dock) =====
-  const [collaborationDockOpen, setCollaborationDockOpen] = useState(false);
-
-  // 切换协作面板开关
-  const onOpenCollaborationDock = useCallback(() => {
-    setCollaborationDockOpen((v) => !v);
-  }, []);
-
   // ===== 组样式编辑 =====
   const [groupStyleDialog, setGroupStyleDialog] = useState<{
     groupId: string;
@@ -396,11 +388,6 @@ export function useEditorDialogs({
     setVersionHistoryOpen,
     onSaveVersion,
     onOpenVersionHistory,
-
-    // 协作聊天/成员面板(Dock)
-    collaborationDockOpen,
-    setCollaborationDockOpen,
-    onOpenCollaborationDock,
 
     // 组样式编辑
     groupStyleDialog,

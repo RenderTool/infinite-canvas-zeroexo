@@ -21,7 +21,9 @@ export type BackendSSEEventType =
   | 'agent:gen_progress'
   | 'agent:result'
   | 'agent:error'
-  | 'agent:done';
+  | 'agent:done'
+  | 'agent:message_delta'
+  | 'agent:thinking_delta';
 
 /** 方案定稿的 SSE 事件名（无前缀，AgentClient 内部做映射） */
 export type CanvasAgentEventType =
@@ -35,7 +37,9 @@ export type CanvasAgentEventType =
   | 'gen_progress'
   | 'result'
   | 'error'
-  | 'done';
+  | 'done'
+  | 'message_delta'
+  | 'thinking_delta';
 
 /** 后端到方案的映射表 */
 export const BACKEND_TO_CANVAS_EVENT: Record<BackendSSEEventType, CanvasAgentEventType> = {
@@ -50,6 +54,8 @@ export const BACKEND_TO_CANVAS_EVENT: Record<BackendSSEEventType, CanvasAgentEve
   'agent:result': 'result',
   'agent:error': 'error',
   'agent:done': 'done',
+  'agent:message_delta': 'message_delta',
+  'agent:thinking_delta': 'thinking_delta',
 };
 
 // ===== 消息块类型（5 种原生 + step/md 契约块） =====
@@ -61,7 +67,8 @@ export type CanvasAgentMessageType =
   | 'plan'
   | 'progress'
   | 'step'
-  | 'md';
+  | 'md'
+  | 'timeline';
 
 /** 消息角色 */
 export type MessageRole = 'agent' | 'user';
@@ -82,6 +89,8 @@ export interface CanvasAgentMessage {
   progress?: ProgressData;
   /** step 接口数据 */
   step?: StepData;
+  /** 执行时间线（P0-4 工具调用时间线） */
+  timeline?: TimelineData;
   /** 关联步骤 */
   stepKey?: string;
   timestamp: number;
@@ -154,6 +163,32 @@ export interface PlanStep {
   riskLevel: 'low' | 'medium' | 'high';
 }
 
+// ===== 执行时间线（P0-4 工具调用时间线） =====
+
+export interface TimelineStep {
+  id: string;
+  name: string;
+  kind: 'tool' | 'canvas';
+  status: 'running' | 'done' | 'failed';
+}
+
+export interface TimelineData {
+  steps: TimelineStep[];
+}
+
+// ===== 任务清单（P0-3 todo_write 快照，PinnedTodoSlot 消费） =====
+
+export interface TodoItem {
+  id: string;
+  label: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+}
+
+export interface TodoSnapshot {
+  title?: string;
+  items: TodoItem[];
+}
+
 // ===== 进度 =====
 
 export interface ProgressData {
@@ -223,6 +258,8 @@ export type AgentStrategy = 'confirm_each' | 'auto_low_risk' | 'plan_only';
 
 export interface CanvasAgentCallbacks {
   onThinking?: (message: string) => void;
+  onMessageDelta?: (delta: string) => void;
+  onThinkingDelta?: (delta: string) => void;
   onToolCall?: (toolName: string, args: unknown) => void;
   onClarifyRequest?: (items: ClarifyItem[]) => void;
   onCanvasRequest?: () => void;

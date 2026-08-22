@@ -6,7 +6,8 @@
  *
  * 命名约定(基于原始 storageKey):
  *   assets/{userId}/{hash}.{ext}         →  full(默认)
- *   assets/{userId}/{hash}__thumb.{ext}  →  48px 缩略图
+ *   assets/{userId}/{hash}__sm.{ext}     →  160px 小图(UI 缩略图槽位,高 DPI 清晰)
+ *   assets/{userId}/{hash}__thumb.{ext}  →  48px 极简缩略图(画布缩小 LOD)
  *   assets/{userId}/{hash}__preview.{ext} → 768px 预览图
  *
  * sharp 是 Node.js 生态中最成熟的高性能图片处理库,
@@ -16,10 +17,13 @@ import { Injectable } from '@nestjs/common';
 import * as path from 'node:path';
 import sharp from 'sharp';
 
-export type ImageSize = 'full' | 'preview' | 'thumb';
+export type ImageSize = 'full' | 'preview' | 'thumb' | 'sm';
 
 /** 各尺寸配置 */
 const SIZE_CONFIG: Record<Exclude<ImageSize, 'full'>, { maxEdge: number; quality: number }> = {
+  // sm: UI 小图槽位(层级面板/堆叠导航/参考区) — 48px 缩略图在高 DPI(2x/3x)屏上糊,
+  // 160px 覆盖 2x/3x 的 36-48px 槽位;旧图无 __sm 变体时 GET 回退原图(清晰,零迁移)
+  sm: { maxEdge: 160, quality: 72 },
   thumb: { maxEdge: 48, quality: 60 },
   preview: { maxEdge: 768, quality: 90 },
 };
@@ -76,16 +80,17 @@ export class ImageProcessorService {
   }
 
   /**
-   * 生成图片的所有变体(thumb + preview)
+   * 生成图片的所有变体(sm + thumb + preview)
    * 返回 { size → Buffer } 映射
    */
   async generateAllVariants(
     buffer: Buffer,
-  ): Promise<{ thumb: Buffer; preview: Buffer }> {
-    const [thumb, preview] = await Promise.all([
+  ): Promise<{ sm: Buffer; thumb: Buffer; preview: Buffer }> {
+    const [sm, thumb, preview] = await Promise.all([
+      this.generateVariant(buffer, 'sm'),
       this.generateVariant(buffer, 'thumb'),
       this.generateVariant(buffer, 'preview'),
     ]);
-    return { thumb, preview };
+    return { sm, thumb, preview };
   }
 }

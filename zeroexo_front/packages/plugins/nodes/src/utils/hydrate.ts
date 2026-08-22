@@ -103,7 +103,7 @@ const PREVIEW_THRESHOLD = 2;
  * 后端 key(resources/)直出 URL,本地 key 走 localforage
  */
 
-export function buildBackendUrl(storageKey?: string, size: 'thumb' | 'preview' | 'full' = 'full'): string | null {
+export function buildBackendUrl(storageKey?: string, size: 'sm' | 'thumb' | 'preview' | 'full' = 'full'): string | null {
   if (!storageKey) return null;
   // 后端键检测: 以 resources/ 开头(统一前缀)
   if (!storageKey.startsWith('resources/')) return null;
@@ -232,15 +232,16 @@ export async function resolveContentUrl(
 }
 
 /**
- * 解析缩略图级 URL(resources/ 走后端 size=thumb 认证链路,本地键走 persistence 缩略图)
- * 用于小尺寸场景(导航缩略图/参考槽位),避免拉取全量媒体
+ * 解析小图级 URL(resources/ 走后端 size=sm 认证链路,本地键走 persistence 缩略图)
+ * 用于小尺寸场景(导航缩略图/参考槽位),避免拉取全量媒体。
+ * 旧图无 __sm 变体时后端自动回退原图(清晰,零迁移)。
  */
 export async function resolveAnyThumbUrl(
   storageKey: string | undefined,
 ): Promise<string | null> {
   if (!storageKey) return null;
   if (storageKey.startsWith('resources/')) {
-    const thumbUrl = buildBackendUrl(storageKey, 'thumb');
+    const thumbUrl = buildBackendUrl(storageKey, 'sm');
     return thumbUrl ? authorizeMediaUrl(thumbUrl) : null;
   }
   try {

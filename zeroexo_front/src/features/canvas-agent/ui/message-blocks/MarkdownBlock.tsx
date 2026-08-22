@@ -12,12 +12,12 @@ const mdStyle: React.CSSProperties = {
   width: '100%',
   margin: '6px 0',
   padding: '10px 14px',
-  background: '#0d1220',
-  border: '1px solid #1e293b',
+  background: 'var(--agent-surface)',
+  border: '1px solid var(--agent-border)',
   borderRadius: 10,
   fontSize: 13,
   lineHeight: 1.7,
-  color: '#cbd5e1',
+  color: 'var(--agent-text)',
   animation: 'agentFadeUp 0.35s ease',
   wordBreak: 'break-word',
 };
@@ -31,20 +31,20 @@ export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.Rea
     <div style={mdStyle}>
       <ReactMarkdown
         components={{
-          h1: (p) => <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', margin: '8px 0 6px' }} {...p} />,
-          h2: (p) => <h2 style={{ fontSize: 14.5, fontWeight: 700, color: '#e2e8f0', margin: '8px 0 6px' }} {...p} />,
-          h3: (p) => <h3 style={{ fontSize: 13.5, fontWeight: 600, color: '#e2e8f0', margin: '6px 0 4px' }} {...p} />,
+          h1: (p) => <h1 style={{ fontSize: 16, fontWeight: 700, color: 'var(--agent-text)', margin: '8px 0 6px' }} {...p} />,
+          h2: (p) => <h2 style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--agent-text)', margin: '8px 0 6px' }} {...p} />,
+          h3: (p) => <h3 style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--agent-text)', margin: '6px 0 4px' }} {...p} />,
           p: (p) => <p style={{ margin: '6px 0' }} {...p} />,
           ul: (p) => <ul style={{ margin: '6px 0', paddingLeft: 18 }} {...p} />,
           ol: (p) => <ol style={{ margin: '6px 0', paddingLeft: 18 }} {...p} />,
           li: (p) => <li style={{ margin: '2px 0' }} {...p} />,
-          strong: (p) => <strong style={{ color: '#e2e8f0', fontWeight: 700 }} {...p} />,
-          em: (p) => <em style={{ color: '#94a3b8' }} {...p} />,
+          strong: (p) => <strong style={{ color: 'var(--agent-text)', fontWeight: 700 }} {...p} />,
+          em: (p) => <em style={{ color: 'var(--agent-muted)' }} {...p} />,
           code: (p) => (
             <code
               style={{
-                background: 'rgba(99,102,241,0.08)',
-                color: '#a5b4fc',
+                background: 'var(--agent-accent-soft)',
+                color: 'var(--agent-accent)',
                 padding: '1px 5px',
                 borderRadius: 4,
                 fontSize: 12,
@@ -56,8 +56,8 @@ export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.Rea
           pre: (p) => (
             <pre
               style={{
-                background: '#0b0f1a',
-                border: '1px solid #1e293b',
+                background: 'var(--agent-surface-2)',
+                border: '1px solid var(--agent-border)',
                 borderRadius: 8,
                 padding: 10,
                 overflowX: 'auto',
@@ -82,10 +82,10 @@ export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.Rea
           th: (p) => (
             <th
               style={{
-                border: '1px solid #1e293b',
+                border: '1px solid var(--agent-border)',
                 padding: '6px 10px',
-                background: 'rgba(99,102,241,0.06)',
-                color: '#e2e8f0',
+                background: 'var(--agent-accent-soft)',
+                color: 'var(--agent-text)',
                 fontWeight: 600,
                 textAlign: 'left',
               }}
@@ -94,7 +94,7 @@ export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.Rea
           ),
           td: (p) => (
             <td
-              style={{ border: '1px solid #1e293b', padding: '6px 10px', color: '#cbd5e1' }}
+              style={{ border: '1px solid var(--agent-border)', padding: '6px 10px', color: 'var(--agent-text)' }}
               {...p}
             />
           ),
@@ -103,15 +103,15 @@ export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.Rea
               style={{
                 margin: '6px 0',
                 padding: '4px 12px',
-                borderLeft: '3px solid #6366f1',
-                background: 'rgba(99,102,241,0.05)',
-                color: '#94a3b8',
+                borderLeft: '3px solid var(--agent-accent)',
+                background: 'var(--agent-accent-soft)',
+                color: 'var(--agent-muted)',
               }}
               {...p}
             />
           ),
-          a: (p) => <a style={{ color: '#818cf8' }} {...p} />,
-          hr: (p) => <hr style={{ border: 'none', borderTop: '1px solid #1e293b', margin: '8px 0' }} {...p} />,
+          a: (p) => <a style={{ color: 'var(--agent-accent)' }} {...p} />,
+          hr: (p) => <hr style={{ border: 'none', borderTop: '1px solid var(--agent-border)', margin: '8px 0' }} {...p} />,
         }}
       >
         {content}

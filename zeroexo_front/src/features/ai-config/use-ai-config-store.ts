@@ -426,7 +426,12 @@ export function filterChannelModelsByCapability(
     // 优先用 modelConfigs 的 capabilities 精确匹配
     if (channel.modelConfigs && channel.modelConfigs.length > 0) {
       for (const mc of channel.modelConfigs) {
-        if (mc.capabilities.includes(capability)) {
+        // llm → text 归一化(与 model-utils 保持一致):后端 LLM 模型 capabilities 为 'llm',
+        // 文本生成模式按 'text' 查询,若不归一化 LLM 模型会被全部过滤(文本节点下拉为空)
+        const matched = mc.capabilities.some(
+          (c) => c === capability || (capability === 'text' && c === 'llm'),
+        );
+        if (matched) {
           result.push(encodeChannelModel(channel.id, mc.name));
         }
       }

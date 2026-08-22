@@ -10,7 +10,10 @@ export interface AgentEvent {
     // 契约交互事件（Plan#33 D1: step/question/md 三大契约 UI）
     | 'agent:step_request'
     | 'agent:question_request'
-    | 'agent:md';
+    | 'agent:md'
+    // 增量渲染事件（Plan#36 P0-1: 流式对话）
+    | 'agent:message_delta'
+    | 'agent:thinking_delta';
   data: unknown;
   timestamp: number;
 }

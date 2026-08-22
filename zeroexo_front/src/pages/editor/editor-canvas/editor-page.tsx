@@ -45,11 +45,10 @@ import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-pa
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { SyncConflictDialog } from '@/features/sync-conflict-dialog/sync-conflict-dialog.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
-import { CollaborationPanel } from '@/features/collaboration/collaboration-panel.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
 import { AssetLibraryModal } from '@/features/asset-library/index.js';
-import { AgentDock } from '@/features/canvas-agent/ui/index.js';
+import { AgentDock, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
 import { setCanvasOpBridge, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js';
@@ -272,10 +271,10 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
   const selectedNodeData = state.selectedNodeData;
   const isPromptRunning = selectedNodeData?.status === 'loading';
   // 节点生成面板三态判定(Plan#33 延伸):
-  // - media 节点有实质内容(content/storageKey)= 资源态 → 隐藏生成面板(上传替换/拖入资产自动降级)
+  // - media 节点(text/image/video/audio)有实质内容(content/storageKey)= 资源态 → 隐藏生成面板(上传替换/拖入资产自动降级)
   // - media 节点无内容 = 空节点/生成器态 → 显示生成面板;生成中(loading)强制保持面板(停止按钮)
-  // - text/generator 等非 media 类型恒显示面板(节点自身语义即生成器)
-  const selectedNodeIsMedia = state.selectedNodeType === 'image' || state.selectedNodeType === 'video' || state.selectedNodeType === 'audio';
+  // - generator 等非 media 类型恒显示面板(节点自身语义即生成器)
+  const selectedNodeIsMedia = state.selectedNodeType === 'image' || state.selectedNodeType === 'video' || state.selectedNodeType === 'audio' || state.selectedNodeType === 'text';
   const selectedNodeHasContent = !!selectedNodeData?.content || !!selectedNodeData?.storageKey;
   const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning;
   const handlers = useCanvasHandlers(refs, containerRef);
@@ -553,7 +552,14 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
-          onOpenCollaborationDock={dialogs.onOpenCollaborationDock}
+          onOpenCollaborationDock={() => {
+            // 协作聊天并入 AgentDock:打开 Dock 并切到聊天页签(替代旧 CollaborationPanel)
+            import('@/features/canvas-agent/ui/store.js').then((m) => {
+              const st = m.useCanvasAgentStore.getState();
+              st.setDockOpen(true);
+              st.setDockTab('collab');
+            });
+          }}
           onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
           keyboardShortcuts={keyboardShortcuts}
@@ -833,7 +839,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         {!state.loading && state.editor && state.selectedNodeId && state.selectedNodeType && state.selectedNodeType !== 'script' && state.selectedNodeType !== 'storyboard' && state.selectedNodeType !== 'workbench' && nodeDockVisible ? (
           <NodeGenerateDock
             nodeId={state.selectedNodeId}
-            nodeType={state.selectedNodeType as 'text' | 'image' | 'video' | 'audio' | 'generator'}
+            nodeType={state.selectedNodeType as 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media'}
             store={state.editor.store}
             getAnchorBounds={interactions.getAnchorBounds}
             node={state.selectedNodeData}
@@ -846,7 +852,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             configMode={interactions.selectedConfigMode}
             model={(selectedNodeData?.model as string) ?? ''}
             onConfigChange={interactions.handleNodeConfigChange}
-            onOpenAiConfig={() => { dialogs.setSettingsOpen(true); }}
             imageQuality={(selectedNodeData?.quality as string) ?? undefined}
             imageSize={(selectedNodeData?.size as string) ?? undefined}
             imageCount={typeof selectedNodeData?.count === 'number' ? (selectedNodeData.count as number) : undefined}
@@ -877,9 +882,31 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
       </div>
       </Layout.Content>
       </div>
-      {/* Agent Dock（右侧可收起面板，推开整个 nav+content） */}
+      {/* Agent Dock（右侧可收起面板，推开整个 nav+content）
+          注入画布上下文:供 Agent @ 提及弹窗实时读取画布节点 */}
       {!state.loading && !isMobile && (
-        <AgentDock projectId={canvasId} />
+        <CanvasContextProvider
+          value={{
+            getNodes: () => {
+              const store = state.editor?.store;
+              if (!store) return [];
+              return store.getGraph().nodes.map((n) => {
+                const data = n.data as { title?: string } | null | undefined;
+                return {
+                  id: n.id,
+                  title: n.title || data?.title || n.type,
+                  type: n.type,
+                };
+              });
+            },
+            getSelectedNodeId: () => {
+              const ids = state.editor?.store.getSelection().selectedNodeIds;
+              return ids && ids.size > 0 ? ([...ids][0] ?? null) : null;
+            },
+          }}
+        >
+          <AgentDock projectId={canvasId} />
+        </CanvasContextProvider>
       )}
       </div>
 
@@ -1038,15 +1065,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           onClose={() => dialogs.setCollaborationOpen(false)}
           theme={theme}
           onNavigateToCanvas={onOpenProject}
-        />
-      )}
-
-      {/* 协作聊天/成员面板(Dock,由 TopBar 协作聊天按钮开关) */}
-      {!state.loading && (
-        <CollaborationPanel
-          open={dialogs.collaborationDockOpen}
-          onClose={() => dialogs.setCollaborationDockOpen(false)}
-          theme={theme}
         />
       )}
 

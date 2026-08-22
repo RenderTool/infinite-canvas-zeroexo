@@ -106,6 +106,12 @@ export class AgentWorkerService {
           case 'agent:step':
             this.sseService.emitThinking(taskId, (event.data as any)?.message ?? '');
             break;
+          case 'agent:message_delta':
+            this.sseService.emitMessageDelta(taskId, (event.data as any)?.delta ?? '');
+            break;
+          case 'agent:thinking_delta':
+            this.sseService.emitThinkingDelta(taskId, (event.data as any)?.delta ?? '');
+            break;
           case 'agent:tool_call':
             this.sseService.emitToolCall(
               taskId,
@@ -288,6 +294,12 @@ export class AgentWorkerService {
         switch (event.type) {
           case 'agent:step':
             this.sseService.emitThinking(taskId, (event.data as any)?.message ?? '');
+            break;
+          case 'agent:message_delta':
+            this.sseService.emitMessageDelta(taskId, (event.data as any)?.delta ?? '');
+            break;
+          case 'agent:thinking_delta':
+            this.sseService.emitThinkingDelta(taskId, (event.data as any)?.delta ?? '');
             break;
           case 'agent:progress':
             this.sseService.emitProgress(

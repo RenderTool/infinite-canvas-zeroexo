@@ -21,7 +21,9 @@ export type AgentSSEEventType =
   | 'agent:progress'
   | 'agent:step_request'
   | 'agent:question_request'
-  | 'agent:md';
+  | 'agent:md'
+  | 'agent:message_delta'
+  | 'agent:thinking_delta';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -55,6 +57,8 @@ export interface QuestionRequestData {
 
 export interface AgentClientCallbacks {
   onThinking?: (message: string) => void;
+  onMessageDelta?: (delta: string) => void;
+  onThinkingDelta?: (delta: string) => void;
   onToolCall?: (toolName: string, args: unknown) => void;
   onResult?: (result: unknown) => void;
   onCanvasOp?: (op: string, args: unknown) => void;
@@ -251,6 +255,16 @@ export class AgentClient {
       case 'agent:thinking': {
         const msg = (event.data as { message?: string } | null)?.message ?? '';
         callbacks.onThinking?.(msg);
+        break;
+      }
+      case 'agent:message_delta': {
+        const d = (event.data as { delta?: string } | null)?.delta ?? '';
+        if (d) callbacks.onMessageDelta?.(d);
+        break;
+      }
+      case 'agent:thinking_delta': {
+        const d = (event.data as { delta?: string } | null)?.delta ?? '';
+        if (d) callbacks.onThinkingDelta?.(d);
         break;
       }
       case 'agent:tool_call': {

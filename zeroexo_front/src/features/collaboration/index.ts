@@ -87,10 +87,6 @@ export type { UseCollaborationResult } from './use-collaboration.js';
 export { CollaborationChat, MentionInput } from './collaboration-chat.js';
 export type { CollaborationChatProps, MentionInputProps } from './collaboration-chat.js';
 
-// 协作面板(Dock)
-export { CollaborationPanel } from './collaboration-panel.js';
-export type { CollaborationPanelProps } from './collaboration-panel.js';
-
 // 协作管理弹窗(画布内)
 export { CollaborationModal } from './collaboration-modal.js';
 export type { CollaborationModalProps } from './collaboration-modal.js';

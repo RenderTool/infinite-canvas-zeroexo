@@ -21,7 +21,10 @@ export type AgentSSEEventType =
   | 'agent:progress'
   | 'agent:step_request'
   | 'agent:question_request'
-  | 'agent:md';
+  | 'agent:md'
+  // Plan#36 P0-1: 增量渲染事件
+  | 'agent:message_delta'
+  | 'agent:thinking_delta';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -142,6 +145,20 @@ export class AgentSSEService {
    */
   emitMd(taskId: string, md: string): void {
     this.emit(taskId, { type: 'agent:md', data: { md } });
+  }
+
+  /**
+   * 便捷方法：推送 message_delta 事件（正文增量，Plan#36 P0-1 流式渲染）
+   */
+  emitMessageDelta(taskId: string, delta: string): void {
+    this.emit(taskId, { type: 'agent:message_delta', data: { delta } });
+  }
+
+  /**
+   * 便捷方法：推送 thinking_delta 事件（思考增量，Plan#36 P0-1 流式渲染）
+   */
+  emitThinkingDelta(taskId: string, delta: string): void {
+    this.emit(taskId, { type: 'agent:thinking_delta', data: { delta } });
   }
 
   /**

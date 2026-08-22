@@ -1,48 +1,52 @@
 /**
- * QuestionBlock - 单问题快速选择壳
+ * FormBlock - 内联澄清表单（Plan#36 P0-2）
  *
- * 参考 tvc-agent (2).html 设计，100% 复刻样式：
- * - 选项卡片列表（poll-opt 风格）
- * - 进度条 + 百分比
- * - 自定义输入
+ * 渲染消息正文中 `<question-form>` artifact 解析出的表单：
+ * - 单选（默认）：点击选项立即提交
+ * - 多选（multi="true"）：勾选后点提交
+ * - 自定义输入兜底（"其他想法"）
+ *
+ * 提交流程：formatFormAnswers → 追加用户消息 → sendMessage 作为新轮次回流
+ * （答案作为下一条用户消息回到 Agent 会话，对齐 open-design question-form）。
  */
 
 import { useState } from 'react';
-import type { CanvasAgentMessage } from '../types.js';
-import { sendAnswer } from '../session/agent-session.js';
+import type { QuestionData } from '../types.js';
+import { formatFormAnswers } from './form-utils.js';
+import { sendMessage } from '../session/agent-session.js';
+import { useCanvasAgentStore } from '../store.js';
 
-export interface QuestionBlockProps {
-  message: CanvasAgentMessage;
-  onSelect?: (value: string) => void;
+export interface FormBlockProps {
+  form: QuestionData;
 }
 
-export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.ReactElement {
+export function FormBlock({ form }: FormBlockProps): React.ReactElement {
   const [selected, setSelected] = useState<string | null>(null);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
   const [customText, setCustomText] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const data = message.question;
-  if (!data) return <></>;
-
-  const isMulti = data.multi ?? false;
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
-  const total = data.items.length;
+  const isMulti = form.multi ?? false;
+  const total = form.items.length;
   const answered = isMulti ? multiSelected.size : selected ? 1 : 0;
 
-  /**
-   * 提交选择(Plan#33 D2 接通真连层):
-   * 优先使用外部 onSelect(兼容旧用法),否则通过 sendAnswer 提交到后端,
-   * 恢复挂起的 Agent 执行循环。提交后锁定防重复。
-   */
-  const submitAnswer = (value: string) => {
+  /** 提交答案：回流为新轮次用户消息（sendMessage 内部有 isGenerating 防重入） */
+  const submitAnswer = (answers: string[]) => {
     if (submitted) return;
+    const answerText = formatFormAnswers(form, answers);
+    if (!answerText) return;
     setSubmitted(true);
-    if (onSelect) {
-      onSelect(value);
-    } else {
-      void sendAnswer(value);
-    }
+
+    const s = useCanvasAgentStore.getState();
+    s.addMessage({
+      id: `msg_user_form_${Date.now()}`,
+      role: 'user',
+      type: 'text',
+      text: answerText,
+      timestamp: Date.now(),
+    });
+    void sendMessage(answerText);
   };
 
   const handleSelect = (value: string) => {
@@ -56,18 +60,21 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
       });
     } else {
       setSelected(value);
-      submitAnswer(value);
+      submitAnswer([value]);
     }
   };
 
   const handleSubmit = () => {
     if (submitted) return;
-    if (isMulti) {
-      submitAnswer(Array.from(multiSelected).join(','));
-    } else {
-      // 自定义输入优先,其次选项
-      submitAnswer(customText.trim() || selected || '');
-    }
+    const answers = isMulti
+      ? Array.from(multiSelected)
+      : customText.trim()
+        ? [customText.trim()]
+        : selected
+          ? [selected]
+          : [];
+    if (answers.length === 0) return;
+    submitAnswer(answers);
   };
 
   return (
@@ -80,18 +87,19 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         border: '1px solid var(--agent-border)',
         borderRadius: 10,
         animation: 'agentFadeUp 0.35s ease',
+        opacity: submitted ? 0.55 : 1,
+        pointerEvents: submitted ? 'none' : 'auto',
+        transition: 'opacity 0.2s',
       }}
     >
-      {/* 引导文案 */}
-      {data.guideText && (
+      {form.guideText && (
         <div className="agent-section-label" style={{ margin: '0 0 8px' }}>
-          {data.guideText}
+          {form.guideText}
         </div>
       )}
 
-      {/* 选项列表 */}
       <div>
-        {data.items.map((opt) => {
+        {form.items.map((opt) => {
           const isActive = isMulti ? multiSelected.has(opt.value) : selected === opt.value;
           return (
             <button
@@ -117,7 +125,6 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
                 transition: 'all 0.15s',
               }}
             >
-              {/* 选择指示器 */}
               <span
                 style={{
                   width: 18,
@@ -167,7 +174,6 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         })}
       </div>
 
-      {/* 其他想法输入 */}
       {showCustom && (
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <input
@@ -188,8 +194,12 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
               outline: 'none',
               boxSizing: 'border-box',
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--agent-accent)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--agent-border)'; }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'var(--agent-accent)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'var(--agent-border)';
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && customText.trim()) handleSubmit();
             }}
@@ -236,7 +246,6 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         </button>
       )}
 
-      {/* 底部 */}
       <div
         style={{
           display: 'flex',

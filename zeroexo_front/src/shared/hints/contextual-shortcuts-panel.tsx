@@ -12,6 +12,8 @@
  * 其他:
  * - 主题自适应(useTheme 派生明/暗配色,不硬编码单一主题)
  * - 全局开关(hints-settings,ConfigDialog 控制,关闭时整体隐藏)
+ * - 可收纳成小三角(用户手动收纳,右缘三角把手常驻可点,状态跨会话持久化;
+ *   三角为用户拍板形状,同下方鼠标手势图标先例,以 SVG 绘制不走 lucide 语义键)
  */
 
 import React, { useSyncExternalStore } from 'react';
@@ -20,7 +22,7 @@ import { HINT_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { toKeyCaps, type ShortcutEntry } from '@zeroexo/plugin-keyboard';
 import { HINT_ENTRIES, type HintEntry } from './hint-entries.js';
-import { useHintsEnabled } from './hints-settings.js';
+import { useHintsEnabled, useHintsPanelCollapsed, setHintsPanelCollapsed } from './hints-settings.js';
 
 /** 瞬态状态访问器(结构化类型,避免对插件包的硬依赖) */
 export interface TransientAccessor {
@@ -180,6 +182,8 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
   const { t } = useTranslation();
   const { theme } = useTheme();
   const hintsEnabled = useHintsEnabled();
+  const collapsed = useHintsPanelCollapsed();
+  const [tabHovered, setTabHovered] = React.useState(false);
 
   // 订阅瞬态状态(Space 按住 / Shift+框选);transient 未注入时用恒定快照
   const subscribe = React.useCallback(
@@ -289,21 +293,30 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
         right: 16,
         top: '50%',
         transform: 'translateY(-50%)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '10px 12px',
-        borderRadius: 12,
-        backgroundColor: panelBg,
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: `1px solid ${panelBorder}`,
-        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
         pointerEvents: 'none',
         zIndex: 40,
         userSelect: 'none',
       }}
     >
+      {/* 条目面板:收纳时淡出右移(屏幕空间覆盖层,非反缩放元素,transform 过渡安全) */}
+      <div
+        aria-hidden={collapsed}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          padding: '10px 12px',
+          borderRadius: 12,
+          backgroundColor: panelBg,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: `1px solid ${panelBorder}`,
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+          opacity: collapsed ? 0 : 1,
+          transform: collapsed ? 'translateX(14px)' : 'translateX(0)',
+          transition: 'opacity 160ms ease, transform 160ms ease',
+        }}
+      >
       {visible.map((entry) => (
         <div
           key={entry.id}
@@ -332,6 +345,52 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           </span>
         </div>
       ))}
+      </div>
+      {/* 收纳/展开三角把手:贴屏幕右缘常驻;收纳态 ◀(点击展开)/展开态 ▶(点击收纳),
+          旋转 180° 过渡;事件阻断冒泡,防止误触画布交互 */}
+      <div
+        role="button"
+        aria-label={collapsed ? t('hints.expandPanel') : t('hints.collapsePanel')}
+        title={collapsed ? t('hints.expandPanel') : t('hints.collapsePanel')}
+        onMouseEnter={() => setTabHovered(true)}
+        onMouseLeave={() => setTabHovered(false)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setHintsPanelCollapsed(!collapsed);
+        }}
+        onWheel={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          right: -16,
+          top: '50%',
+          transform: `translateY(-50%) scale(${tabHovered ? 1.2 : 1})`,
+          transition: 'transform 140ms ease',
+          pointerEvents: 'auto',
+          cursor: 'pointer',
+          padding: '10px 2px',
+          display: 'flex',
+          alignItems: 'center',
+        }}
+      >
+        <svg
+          width="11"
+          height="18"
+          viewBox="0 0 11 18"
+          aria-hidden
+          style={{
+            display: 'block',
+            transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
+            transition: 'transform 180ms ease',
+          }}
+        >
+          <polygon
+            points="10,1 10,17 1,9"
+            fill={tabHovered ? accent : iconStroke}
+            style={{ transition: 'fill 140ms ease' }}
+          />
+        </svg>
+      </div>
     </div>
   );
 });

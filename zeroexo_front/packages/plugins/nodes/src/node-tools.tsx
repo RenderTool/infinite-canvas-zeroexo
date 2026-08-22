@@ -241,6 +241,17 @@ export function getTextTools(): ToolDefinition[] {
 
 // ===== 图片节点工具 =====
 
+/**
+ * 媒体内容判定(统一供工具 visible 使用)
+ *
+ * 内容存在两种形态: content(blob/data URL)或 storageKey(持久化 key)。
+ * 后端上传通道(replace-node-image)content 可能为空字符串,仅 storageKey 有值,
+ * 故必须以两者并存判定,否则上传/替换后的节点会丢失信息/编辑等胶囊工具。
+ */
+function hasMediaContent(data: Record<string, unknown> | null | undefined): boolean {
+  return Boolean(data?.['content'] || data?.['storageKey']);
+}
+
 /** 图片节点编辑相关工具(归并为"更多"分组) */
 function buildImageEditTools(): ToolDefinition[] {
   return [
@@ -251,8 +262,7 @@ function buildImageEditTools(): ToolDefinition[] {
       icon: <Settings2 size={14} />,
       group: 'edit',
       visible: (node: NodeRecord) => {
-        const data = node.data as Record<string, unknown>;
-        return Boolean(data?.['content']);
+        return hasMediaContent(node.data as Record<string, unknown> | null | undefined);
       },
       menu: () => [
         {
@@ -294,8 +304,7 @@ function createDetailTool(): ToolDefinition {
     icon: <AlertCircle size={14} />,
     group: 'basic',
     visible: (node: NodeRecord) => {
-      const data = node.data as Record<string, unknown>;
-      return Boolean(data?.['content']);
+      return hasMediaContent(node.data as Record<string, unknown> | null | undefined);
     },
     run: (node: NodeRecord, ctx: ToolContext) => {
       ctx.eventBus.emit('node:detail', { node });
@@ -354,8 +363,7 @@ export function getVideoTools(): ToolDefinition[] {
       icon: <Camera size={14} />,
       group: 'edit',
       visible: (node: NodeRecord) => {
-        const data = node.data as Record<string, unknown>;
-        return Boolean(data?.['content']);
+        return hasMediaContent(node.data as Record<string, unknown> | null | undefined);
       },
       menu: () => [
         { key: 'first', label: '截首帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'first'); } },

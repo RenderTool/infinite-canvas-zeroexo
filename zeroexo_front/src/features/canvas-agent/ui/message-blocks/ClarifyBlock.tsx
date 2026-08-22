@@ -93,14 +93,14 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
         width: '100%',
         margin: '6px 0',
         padding: 12,
-        background: '#0d1220',
-        border: '1px solid #1e293b',
+        background: 'var(--agent-surface)',
+        border: '1px solid var(--agent-border)',
         borderRadius: 10,
         animation: 'agentFadeUp 0.35s ease',
       }}
     >
       {/* 引导文案 */}
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--agent-text)', marginBottom: 10 }}>
         {message.text || '开始前需要确认几件事'}
       </div>
 
@@ -111,9 +111,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
 
         return (
           <div key={item.itemId} style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6, fontWeight: 500 }}>
+            <div style={{ fontSize: 12, color: 'var(--agent-muted)', marginBottom: 6, fontWeight: 500 }}>
               {item.question}
-              {item.required && <span style={{ color: '#f87171', marginLeft: 4 }}>*</span>}
+              {item.required && <span style={{ color: 'var(--agent-danger)', marginLeft: 4 }}>*</span>}
             </div>
 
             {/* 文本输入 */}
@@ -128,9 +128,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                     width: '100%',
                     padding: '8px 11px',
                     borderRadius: 7,
-                    background: '#0d1220',
-                    border: '1.5px solid #1e293b',
-                    color: '#e2e8f0',
+                    background: 'var(--agent-surface)',
+                    border: '1.5px solid var(--agent-border)',
+                    color: 'var(--agent-text)',
                     fontSize: 12.5,
                     fontFamily: 'inherit',
                     outline: 'none',
@@ -139,8 +139,8 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                     lineHeight: 1.5,
                     boxSizing: 'border-box',
                   }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = '#6366f1'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = '#1e293b'; }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--agent-accent)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--agent-border)'; }}
                 />
               </div>
             )}
@@ -163,13 +163,13 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                         gap: 10,
                         padding: '9px 12px',
                         margin: '4px 0',
-                        background: '#0d1220',
-                        border: `1.5px solid ${isSelected ? '#6366f1' : '#1e293b'}`,
+                        background: 'var(--agent-surface)',
+                        border: `1.5px solid ${isSelected ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
                         borderRadius: 9,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
                         fontSize: 12.5,
-                        color: '#cbd5e1',
+                        color: 'var(--agent-text)',
                         textAlign: 'left',
                         transition: 'all 0.15s',
                       }}
@@ -180,8 +180,8 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                           width: 18,
                           height: 18,
                           borderRadius: item.kind === 'multi' ? 4 : '50%',
-                          border: `2px solid ${isSelected ? '#6366f1' : '#334155'}`,
-                          background: isSelected ? '#6366f1' : 'transparent',
+                          border: `2px solid ${isSelected ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
+                          background: isSelected ? 'var(--agent-accent)' : 'transparent',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -196,11 +196,11 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                         )}
                       </span>
                       <span style={{ flex: 1 }}>
-                        <span style={{ fontWeight: 500, color: isSelected ? '#a5b4fc' : '#e2e8f0' }}>
+                        <span style={{ fontWeight: 500, color: isSelected ? 'var(--agent-accent)' : 'var(--agent-text)' }}>
                           {opt.label}
                         </span>
                         {opt.desc && (
-                          <span style={{ display: 'block', fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                          <span style={{ display: 'block', fontSize: 10.5, color: 'var(--agent-muted)', marginTop: 2 }}>
                             {opt.desc}
                           </span>
                         )}
@@ -221,7 +221,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                   padding: '2px 8px',
                   background: 'none',
                   border: 'none',
-                  color: '#64748b',
+                  color: 'var(--agent-muted)',
                   fontSize: 11,
                   cursor: 'pointer',
                   fontFamily: 'inherit',
@@ -242,10 +242,10 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
           justifyContent: 'space-between',
           marginTop: 10,
           paddingTop: 8,
-          borderTop: '1px solid #1e293b',
+          borderTop: '1px solid var(--agent-border)',
         }}
       >
-        <span style={{ fontSize: 11, color: '#64748b' }}>
+        <span style={{ fontSize: 11, color: 'var(--agent-muted)' }}>
           {answered}/{total} 已填
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -255,10 +255,10 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
             className="agent-btn-secondary"
             style={{
               padding: '4px 12px',
-              border: '1.5px solid #334155',
+              border: '1.5px solid var(--agent-border)',
               borderRadius: 7,
               background: 'transparent',
-              color: '#94a3b8',
+              color: 'var(--agent-muted)',
               fontSize: 11,
               fontWeight: 600,
               fontFamily: 'inherit',
@@ -277,9 +277,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
               border: 'none',
               borderRadius: 7,
               background: answered > 0
-                ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
-                : '#334155',
-              color: answered > 0 ? '#fff' : '#64748b',
+                ? 'var(--agent-accent)'
+                : 'var(--agent-border)',
+              color: answered > 0 ? '#fff' : 'var(--agent-muted)',
               fontSize: 11,
               fontWeight: 700,
               fontFamily: 'inherit',

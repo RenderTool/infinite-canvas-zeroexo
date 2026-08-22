@@ -26,6 +26,8 @@ export interface ReferenceItem {
   name: string;
   url?: string; // 缩略图URL（图片/视频）
   title?: string;
+  /** 原始资产信息(生成时作为 API 资产源输入;缩略图 url 与原始内容分离) */
+  asset?: { content?: string; storageKey?: string };
 }
 
 /** 暴露给父组件的命令式 API */
@@ -59,57 +61,79 @@ export interface GeneratorPromptEditorProps {
   accentColor?: string;
   /** 文本颜色 */
   textColor?: string;
-  /** 背景颜色 */
-  backgroundColor?: string;
-  /** 边框颜色 */
-  borderColor?: string;
-  /** 边框悬停颜色 */
-  borderHoverColor?: string;
   /** 字体大小 */
   fontSize?: number;
   /** 行高 */
   lineHeight?: number;
   /** 最小高度 */
   minHeight?: number;
+  /** @ 弹窗类型过滤(先按类型过滤,再做名称匹配;参考区展示不受影响) */
+  mentionTypeFilter?: (ref: ReferenceItem) => boolean;
+  /** @ 弹窗背景色/边框色(不传时按 textColor 亮度自动推断;明暗主题下应由宿主传入主题色) */
+  popupBackground?: string;
+  popupBorderColor?: string;
+}
+
+/**
+ * 参考素材类型 → 类型文本色(与正文明显区分,加粗显示)
+ * 颜色用于 badge 内 "@名称" 文本,而非图标(图标保持主题文字色)
+ */
+export const REF_TYPE_COLOR: Record<string, string> = {
+  image: '#8b5cf6',
+  video: '#f59e0b',
+  audio: '#10b981',
+  text: '#3b82f6',
+  script: '#ec4899',
+  storyboard: '#06b6d4',
+  generator: '#f97316',
+};
+
+/**
+ * 参考素材类型 → lucide 图标内联 SVG(24 视口,描边风格,随 currentColor)
+ * 不用 emoji(项目规范禁止);有缩略图时优先缩略图,无缩略图时用此图标
+ */
+export const REF_TYPE_ICON_PATH: Record<string, string> = {
+  image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  video: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
+  text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  script: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  storyboard: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
+  generator: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
+};
+
+/** 生成 lucide 风格内联 SVG 图标 HTML */
+function refTypeIconSvg(type: string, size: number): string {
+  const path = REF_TYPE_ICON_PATH[type] ?? REF_TYPE_ICON_PATH.text!;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" ` +
+    `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ` +
+    `style="flex-shrink:0;display:inline-block;vertical-align:middle;opacity:0.75;">${path}</svg>`
+  );
 }
 
 /**
  * 生成参考素材 badge 的 HTML 字符串
+ *
+ * 视觉契约(用户反馈):
+ * - 无底色/无边框,透明自然融入正文
+ * - 有缩略图(图片/视频)用缩略图,无缩略图用 lucide 图标 —— 二者只取其一,不出现双图标
+ * - "@名称" 文本按类型着色 + 加粗,与正文明显区分
  */
 function buildBadgeHtml(ref: ReferenceItem): string {
-  const iconMap: Record<string, string> = {
-    image: '🖼️',
-    video: '🎬',
-    text: '📝',
-    audio: '🎵',
-    script: '📜',
-    storyboard: '🎨',
-    generator: '⚡',
-  };
-  const icon = iconMap[ref.type] || '📎';
-
-  if (ref.url && (ref.type === 'image' || ref.type === 'video')) {
-    // 带缩略图的 badge（图片/视频）
-    return (
-      `<span contenteditable="false" data-ref-id="${ref.id}" data-ref-type="${ref.type}" ` +
-      `style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px 1px 2px;border-radius:4px;border:1px solid #d9d9d9;background:#e6f4ff;font-size:12px;line-height:18px;vertical-align:middle;color:#1677ff;user-select:all;cursor:default;">` +
-      `<img src="${ref.url}" alt="" style="width:16px;height:16px;border-radius:2px;object-fit:cover;vertical-align:middle;" />` +
-      `<span style="font-size:11px;opacity:0.7;">${icon}</span>` +
-      `@${ref.name}` +
-      `<span class="badge-delete" style="cursor:pointer;color:#999;margin-left:2px;font-size:12px;line-height:1;user-select:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:rgba(0,0,0,0.1);transition:background 0.15s;" title="删除">×</span>` +
-      `</span> `
-    );
-  } else {
-    // 纯文本 badge（其他类型）
-    return (
-      `<span contenteditable="false" data-ref-id="${ref.id}" data-ref-type="${ref.type}" ` +
-      `style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:4px;border:1px solid #d9d9d9;background:#e6f4ff;font-size:12px;line-height:18px;vertical-align:middle;color:#1677ff;user-select:all;cursor:default;">` +
-      `<span style="font-size:12px;">${icon}</span>` +
-      `@${ref.name}` +
-      `<span class="badge-delete" style="cursor:pointer;color:#999;margin-left:2px;font-size:12px;line-height:1;user-select:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:rgba(0,0,0,0.1);transition:background 0.15s;" title="删除">×</span>` +
-      `</span> `
-    );
-  }
+  const hasThumb = !!ref.url && (ref.type === 'image' || ref.type === 'video');
+  const typeColor = REF_TYPE_COLOR[ref.type] ?? '#3b82f6';
+  const iconHtml = hasThumb
+    ? `<img src="${ref.url}" alt="" style="width:15px;height:15px;border-radius:3px;object-fit:cover;vertical-align:middle;flex-shrink:0;" />`
+    : refTypeIconSvg(ref.type, 13);
+  return (
+    `<span contenteditable="false" data-ref-id="${ref.id}" data-ref-type="${ref.type}" ` +
+    `style="display:inline-flex;align-items:center;gap:3px;margin:0 2px 0 1px;padding:0 2px;border-radius:4px;font-size:12px;line-height:18px;vertical-align:middle;color:inherit;user-select:all;cursor:default;background:transparent;">` +
+    iconHtml +
+    `<span style="font-weight:700;color:${typeColor};white-space:nowrap;">@${ref.name}</span>` +
+    `<span class="badge-delete" style="cursor:pointer;color:#999;margin-left:1px;user-select:none;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;transition:background 0.15s;background:transparent;" title="删除"><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>` +
+    `</span>`
+  );
 }
 
 /** 生成器提示词编辑器 */
@@ -125,11 +149,12 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       onLengthChange,
       accentColor = '#1677ff',
       textColor = '#333',
-      backgroundColor = 'transparent',
-      borderColor = '#d9d9d9',
       fontSize = 12,
       lineHeight: lh = 1.6,
       minHeight = 60,
+      mentionTypeFilter,
+      popupBackground,
+      popupBorderColor,
     },
     ref,
   ) {
@@ -229,11 +254,14 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       (refId: string) => {
         const target = referencesRef.current.find((r) => r.id === refId);
         if (!target) return;
+        // 先保存当前搜索词再清空:removeMentionText 需要整段删除 "@搜索词",
+        // 若清空后传入,只会删 "@" 导致搜索词残留进正文(复现:选完 @ 失焦重开面板出现乱字/空行)
+        const searchStr = mentionFilterRef.current;
         mentionOpenRef.current = false;
         if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
         mentionFilterRef.current = '';
         setMentionFilter('');
-        insertContent(buildBadgeHtml(target), mentionFilterRef.current);
+        insertContent(buildBadgeHtml(target), searchStr);
       },
       [insertContent],
     );
@@ -306,13 +334,17 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           const span = node as HTMLSpanElement;
           const refId = span.getAttribute('data-ref-id');
           if (refId) {
-            // badge span，提取内部文本（排除删除按钮）
-            const children = Array.from(span.childNodes);
-            for (const child of children) {
-              if (child.nodeType === Node.TEXT_NODE) {
-                text += child.textContent;
+            // badge span,递归收集文本(排除删除按钮 SVG/伪元素,保留 "@名称")
+            const walkBadge = (n: Node) => {
+              if (n.nodeType === Node.TEXT_NODE) {
+                text += n.textContent;
+              } else if (n.nodeType === Node.ELEMENT_NODE) {
+                const el = n as HTMLElement;
+                if (el.classList && el.classList.contains('badge-delete')) return;
+                n.childNodes.forEach(walkBadge);
               }
-            }
+            };
+            span.childNodes.forEach(walkBadge);
           } else {
             node.childNodes.forEach(walk);
           }
@@ -343,6 +375,27 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         }
       }
     }, [value, readOnly]);
+
+    // 挂载 / references 就绪后恢复 badge:重开面板时 value 仅以纯文本形态写入,
+    // 需将文本中匹配到的 @name 重建为 badge,避免"下次点开回退成普通文本"。
+    // 仅重建尚未以 badge(span[data-ref-id]) 存在的引用,编辑中 references 变化不干扰既有 badge。
+    useEffect(() => {
+      const el = promptInputRef.current;
+      if (!el || readOnly) return;
+      if (!references.length) return;
+      const plain = el.innerText || '';
+      if (!plain.includes('@')) return;
+      const missing = references.filter(
+        (r) =>
+          plain.includes(`@${r.name}`) &&
+          !el.querySelector(`span[data-ref-id="${r.id}"]`),
+      );
+      if (!missing.length) return;
+      syncDOM(
+        plain,
+        missing.map((r) => ({ id: r.id, name: r.name, url: r.url, type: r.type })),
+      );
+    }, [references, readOnly, syncDOM]);
 
     // ref 缓存
     const ceStateRef = useRef({
@@ -500,12 +553,28 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       [readOnly, fontSize, lh, textColor, minHeight, handleBadgeClick],
     );
 
+    // 主题亮度判定(textColor 深 → 浅色主题 → 弹窗实心白;反之深色实心)
+    // 宿主传入 popupBackground/popupBorderColor 时优先使用(暗色主题下 textColor 是亮色,
+    // 亮度推断会误判为浅色主题导致白色弹窗,必须由宿主传真实主题色)
+    const isLightTheme = useMemo(() => {
+      const m = String(textColor).match(/^#?([0-9a-f]{6})$/i);
+      if (!m) return true;
+      const n = parseInt(m[1]!, 16);
+      const r = (n >> 16) & 255;
+      const g = (n >> 8) & 255;
+      const b = n & 255;
+      return (r * 299 + g * 587 + b * 114) / 1000 > 140;
+    }, [textColor]);
+    const mentionBg = popupBackground ?? (isLightTheme ? '#ffffff' : '#26262b');
+    const mentionBorder = popupBorderColor ?? (isLightTheme ? '#e2e2e7' : 'rgba(255,255,255,0.14)');
+
     const filteredMentions = useMemo(() => {
       if (maxLength && value.length >= maxLength) return [];
       return references.filter((r) =>
+        (!mentionTypeFilter || mentionTypeFilter(r)) &&
         r.name.toLowerCase().includes(mentionFilter.toLowerCase()),
       );
-    }, [references, mentionFilter, value.length, maxLength]);
+    }, [references, mentionTypeFilter, mentionFilter, value.length, maxLength]);
 
     return (
       <div
@@ -536,7 +605,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         )}
         {contentEditableEl}
 
-        {/* @ 提及弹出菜单 */}
+        {/* @ 提及弹出菜单 — 实心背景 + 缩略图/lucide 二选一 + 类型彩色加粗名称 */}
         {!readOnly && references.length > 0 && (
           <div
             ref={mentionPopupRef}
@@ -546,14 +615,15 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               bottom: '100%',
               left: 0,
               right: 0,
-              background: backgroundColor || '#fff',
-              border: `1px solid ${borderColor || '#e0e0e0'}`,
-              borderRadius: 6,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-              maxHeight: 180,
+              background: mentionBg,
+              border: `1px solid ${mentionBorder}`,
+              borderRadius: 8,
+              boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
+              maxHeight: 200,
               overflowY: 'auto',
               zIndex: 1000,
-              marginBottom: 4,
+              marginBottom: 6,
+              color: textColor,
             }}
           >
             {filteredMentions.map((refItem) => (
@@ -564,13 +634,13 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  padding: '6px 10px',
+                  padding: '7px 10px',
                   cursor: 'pointer',
                   fontSize: 13,
                   transition: 'background 0.15s',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = accentColor ? `${accentColor}15` : '#f0f7ff';
+                  e.currentTarget.style.background = accentColor ? `${accentColor}18` : 'rgba(0,0,0,0.05)';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = 'transparent';
@@ -580,18 +650,28 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                   <img
                     src={refItem.url}
                     alt={refItem.name}
-                    style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }}
+                    style={{ width: 22, height: 22, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
                   />
                 ) : (
-                  <span style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: borderColor || '#f0f0f0', borderRadius: 4, fontSize: 12 }}>
-                    {refItem.type === 'image' ? '🖼️' :
-                     refItem.type === 'video' ? '🎬' :
-                     refItem.type === 'text' ? '📝' :
-                     refItem.type === 'audio' ? '🎵' : '📎'}
+                  <span style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'inherit' }}>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width={14}
+                      height={14}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ opacity: 0.8 }}
+                      dangerouslySetInnerHTML={{ __html: REF_TYPE_ICON_PATH[refItem.type] ?? REF_TYPE_ICON_PATH.text! }}
+                    />
                   </span>
                 )}
-                <span style={{ color: textColor || '#333' }}>{refItem.name}</span>
-                <span style={{ color: textColor ? `${textColor}99` : '#999', fontSize: 11 }}>
+                <span style={{ fontWeight: 700, color: REF_TYPE_COLOR[refItem.type] ?? '#3b82f6' }}>
+                  {refItem.name}
+                </span>
+                <span style={{ color: textColor ? `${textColor}99` : '#999', fontSize: 11, marginLeft: 'auto', flexShrink: 0 }}>
                   {refItem.type === 'image' ? '图片' :
                    refItem.type === 'video' ? '视频' :
                    refItem.type === 'text' ? '文本' :

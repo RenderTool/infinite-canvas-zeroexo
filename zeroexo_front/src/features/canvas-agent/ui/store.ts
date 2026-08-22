@@ -17,6 +17,7 @@ import type {
   ThinkingState,
   Reference,
   AgentStrategy,
+  TodoSnapshot,
 } from './types.js';
 
 /** 模拟器回调，由 simulator 注入 */
@@ -35,6 +36,9 @@ export interface CanvasAgentState {
   dockOpen: boolean;
   setDockOpen: (open: boolean) => void;
   toggleDock: () => void;
+  /** Dock 当前页签:对话/协作聊天/成员(TopBar 协作聊天按钮可直接切到 collab) */
+  dockTab: 'chat' | 'collab' | 'members';
+  setDockTab: (tab: CanvasAgentState['dockTab']) => void;
 
   // ---- 消息流 ----
   messages: CanvasAgentMessage[];
@@ -58,6 +62,10 @@ export interface CanvasAgentState {
   pendingClarify: ClarifyItem[];
   setPendingClarify: (items: ClarifyItem[]) => void;
   clearPendingClarify: () => void;
+
+  // ---- 任务清单快照（P0-3 todo_write，PinnedTodoSlot 消费） ----
+  todoSnapshot: TodoSnapshot | null;
+  setTodoSnapshot: (snap: TodoSnapshot | null) => void;
 
   // ---- 生成状态 ----
   isGenerating: boolean;
@@ -101,6 +109,8 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   dockOpen: false,
   setDockOpen: (open) => set({ dockOpen: open }),
   toggleDock: () => set((s) => ({ dockOpen: !s.dockOpen })),
+  dockTab: 'chat',
+  setDockTab: (tab) => set({ dockTab: tab }),
 
   // 消息流
   messages: [],
@@ -134,6 +144,10 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   pendingClarify: [],
   setPendingClarify: (items) => set({ pendingClarify: items }),
   clearPendingClarify: () => set({ pendingClarify: [] }),
+
+  // 任务清单快照
+  todoSnapshot: null,
+  setTodoSnapshot: (snap) => set({ todoSnapshot: snap }),
 
   // 生成状态
   isGenerating: false,
