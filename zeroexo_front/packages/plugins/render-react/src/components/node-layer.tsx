@@ -13,11 +13,11 @@
  * 9. P0-7: hidden 祖先过滤按 graph 引用缓存,viewport 帧内不重复祖先链遍历
  */
 
-import React, { useRef, useLayoutEffect, useState, useMemo } from 'react';
-import type { NodeRecord, NodeTypeExtension, NodeRenderer, CommandQueue } from '@zeroexo/core';
+import React, { useRef, useLayoutEffect, useState, useMemo, useEffect } from 'react';
+import type { NodeRecord, NodeTypeExtension, NodeRenderer, CommandQueue, Viewport } from '@zeroexo/core';
 import { resolveNodeSize } from '@zeroexo/core';
 import type { ReactGraphStore } from '../store.js';
-import { useViewport, useNodeById } from '../store.js';
+import { useNodeById } from '../store.js';
 import { useNodeDefaults } from '../pin-defaults.js';
 import { quantizeZoom } from './edge-layer.js';
 import { NodeScaleContext } from './node-scale-context.js';
@@ -497,13 +497,15 @@ export const NodeLayer = React.memo(function NodeLayer({
   mode,
   onNodeDoubleClick,
 }: NodeLayerProps): React.ReactElement {
-  // 内部订阅 viewport: viewport 变化时仅更新容器 transform,NodeItem 因 memo 跳过
-  const viewport = useViewport(store);
-  // 缩放动画帧率优化:invK 量化(5% 桶)后传给 NodeItem ——
-  // NodeItem memo 比较器含 invK 相等判断,量化后缩放帧仅跨桶时重渲染,
-  // 避免 915 个节点每帧全量重渲染(renderer 内容/Context Provider 全重建)。
-  // 与 edge-layer 的 invK 量化保持同一函数,两层的缩放感知节奏一致。
-  const invK = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
+  const layerRef = useRef<HTMLDivElement>(null);
+
+  // === 视口 transform 直写 DOM + invK 低频更新（平移缩放零 React reconcile）===
+  // 之前用 useViewport 订阅,每次 rAF 合帧后仍触发 NodeLayer 整棵子树重渲染:
+  // 即使 NodeItem 被 memo 拦截,1000 个可见节点每帧 1000 次 props 浅比较,
+  // 加上 Context Provider 重建,在节点多 + 平移缩放时成为主线程瓶颈。
+  // 现改为:store 订阅回调里直接写 layerRef.current.style,React 完全不参与。
+  // 仅 invK(量化到 5% 桶)通过 state 低频更新,驱动 NodeItem 跨桶重渲染。
+  const [invK, setInvK] = useState(1);
 
   // P0-7: 可见性过滤(类型/hidden/hidden祖先)按 graph 引用缓存 ——
   // 祖先链遍历仅在 graph 变更时执行一次,viewport 平移/缩放帧内只做矩形相交 culling
@@ -546,7 +548,6 @@ export const NodeLayer = React.memo(function NodeLayer({
   }, [nodes]);
 
   // 遮挡裁剪(culling): 测量父容器尺寸,计算世界坐标系可见矩形,跳过视口外节点
-  const layerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
 
   useLayoutEffect(() => {
@@ -567,30 +568,90 @@ export const NodeLayer = React.memo(function NodeLayer({
     return () => ro.disconnect();
   }, []);
 
-  // 视口外节点的世界坐标可见矩形
-  const canCull = viewport.k > 0 && containerSize.width > 0 && containerSize.height > 0;
-  const visibleRect = canCull
-    ? {
-        left: -viewport.x / viewport.k - (containerSize.width / viewport.k) * OVERSCAN_RATIO,
-        top: -viewport.y / viewport.k - (containerSize.height / viewport.k) * OVERSCAN_RATIO,
-        right: -viewport.x / viewport.k + (containerSize.width / viewport.k) * (1 + OVERSCAN_RATIO),
-        bottom: -viewport.y / viewport.k + (containerSize.height / viewport.k) * (1 + OVERSCAN_RATIO),
+  // culling 节流：viewport 每帧变化都重算 filteredNodes 会导致空间索引查询 +
+  // 全量 visibleNodes.filter 每帧执行（节点多时 CPU 开销显著）。
+  // 改为节流状态：120ms 窗口内只更新一次可见矩形；缩放跨 5% 桶时立即更新。
+  // 120ms 内已离开视口的节点仍短暂存在（但 DOM 还在，仅几帧），视觉上因 overscan
+  // 缓冲不可见；新进入视口的节点最多延迟 120ms 出现（可接受，且快速平移时本就模糊）。
+  const CULL_THROTTLE_MS = 120;
+  const [cullRect, setCullRect] = useState<{
+    left: number; top: number; right: number; bottom: number;
+  } | null>(null);
+  useEffect(() => {
+    let last = 0;
+    let lastBucket = 0;
+    let timer: number | null = null;
+
+    // 直写 DOM:transform + --zx-invk(每帧,无 React 参与)
+    const writeTransform = (vp: Viewport): void => {
+      const el = layerRef.current;
+      if (el) {
+        const k = vp.k > 0 ? vp.k : 1;
+        el.style.transform = `translate(${vp.x}px, ${vp.y}px) scale(${k})`;
+        el.style.setProperty('--zx-invk', String(1 / k));
       }
-    : null;
+    };
+
+    const compute = (vp: Viewport, immediate: boolean): void => {
+      // 1) transform 始终直写(每帧)
+      writeTransform(vp);
+      // 2) invK 跨 5% 桶时 setState(驱动 NodeItem 重渲染)
+      const nextInvK = quantizeZoom(vp.k > 0 ? 1 / vp.k : 1);
+      setInvK((prev) => (prev === nextInvK ? prev : nextInvK));
+      // 3) culling 矩形节流更新(120ms + 缩放跨桶立即更新)
+      const k = vp.k > 0 ? vp.k : 1;
+      if (containerSize.width === 0) return;
+      const invK = 1 / k;
+      const padW = (containerSize.width * invK) * OVERSCAN_RATIO;
+      const padH = (containerSize.height * invK) * OVERSCAN_RATIO;
+      const cx = -vp.x * invK;
+      const cy = -vp.y * invK;
+      const rect = {
+        left: cx - padW,
+        top: cy - padH,
+        right: cx + containerSize.width * invK + padW,
+        bottom: cy + containerSize.height * invK + padH,
+      };
+      const bucket = Math.round(k / 0.05);
+      const now = performance.now();
+      if (immediate || bucket !== lastBucket || now - last >= CULL_THROTTLE_MS) {
+        last = now;
+        lastBucket = bucket;
+        setCullRect((prev) => {
+          if (prev &&
+            Math.abs(prev.left - rect.left) < 1 &&
+            Math.abs(prev.top - rect.top) < 1 &&
+            Math.abs(prev.right - rect.right) < 1 &&
+            Math.abs(prev.bottom - rect.bottom) < 1) {
+            return prev;
+          }
+          return rect;
+        });
+        if (timer !== null) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+      } else if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          last = performance.now();
+          setCullRect(rect);
+        }, CULL_THROTTLE_MS);
+      }
+    };
+    compute(store.getViewport(), true);
+    return store.subscribeViewport(() => compute(store.getViewport(), false));
+  }, [store, containerSize.width, containerSize.height]);
 
   // P1-5: 使用网格空间索引进行视口裁剪(O(Gq+H) 替代 O(V) 全量遍历)
+  // 依赖 cullRect(节流)而非每帧 viewport，平移缩放时不重算
   const filteredNodes = useMemo(() => {
-    if (!visibleRect) return visibleNodes;
-    // 通过空间索引快速获取可见矩形内的候选节点
+    if (!cullRect) return visibleNodes;
     const candidateIds = store.getSpatialIndex().queryRect(
-      visibleRect.left,
-      visibleRect.top,
-      visibleRect.right,
-      visibleRect.bottom,
+      cullRect.left, cullRect.top, cullRect.right, cullRect.bottom,
     );
-    // 与 visibleNodes(已过滤 hidden/hiddenAncestor/group)取交集
     return visibleNodes.filter((n) => candidateIds.has(n.id));
-  }, [visibleRect, visibleNodes, store]);
+  }, [cullRect, visibleNodes, store]);
 
   return (
       <div
@@ -602,17 +663,14 @@ export const NodeLayer = React.memo(function NodeLayer({
           left: 0,
           width: 0,
           height: 0,
-          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
           transformOrigin: 'top left',
           pointerEvents: 'none',
           willChange: 'transform',
           WebkitBackfaceVisibility: 'hidden',
           backfaceVisibility: 'hidden',
-          // T8: 连续 invK CSS 变量 —— 与容器 transform 同源同帧，供子树内反缩放元素
-          // (node-shell 标题/PIN、NodeResizeHandle) 用 calc(base × var(--zx-invk)) 连续跟随。
-          // 量化 invK(5% 桶)仅用于 NodeItem memo 重渲染门控，不再驱动几何，
-          // 消除「桶内漂移 ±2.5% + 跨桶猛跳」的图标/PIN/标题来回跳动。
-          ['--zx-invk' as string]: String(viewport.k > 0 ? 1 / viewport.k : 1),
+          // transform 与 --zx-invk 由 useLayoutEffect 订阅直写 DOM,
+          // 避免每帧触发 React 重渲染。初始提供占位值。
+          ['--zx-invk' as string]: '1',
         } as React.CSSProperties}
       >
         {filteredNodes.map((node) => {

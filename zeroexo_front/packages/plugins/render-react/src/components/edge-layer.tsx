@@ -19,10 +19,9 @@
  * - 点击连线弹出工具栏:裁剪(支持移动端)
  */
 
-import React, { useMemo, useEffect, useRef } from 'react';
-import type { EdgeRecord, NodeRecord, NodeTypeExtension, Pin } from '@zeroexo/core';
+import React, { useMemo, useEffect, useRef, useState, useLayoutEffect } from 'react';
+import type { EdgeRecord, NodeRecord, NodeTypeExtension, Pin, Viewport } from '@zeroexo/core';
 import type { ReactGraphStore } from '../store.js';
-import { useViewport } from '../store.js';
 import { usePinDefaults } from '../pin-defaults.js';
 import type { PinDefaults } from '../pin-defaults.js';
 
@@ -536,8 +535,37 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   onEdgePointerLeave,
   onCutEdge,
 }: EdgeLayerProps): React.ReactElement {
-  const viewport = useViewport(store);
-  const invK = viewport.k > 0 ? 1 / viewport.k : 1;
+  // === viewport transform 直写 <g> DOM（平移缩放零 React reconcile）===
+  // 与 node-layer 同源:之前 useViewport 每帧触发 EdgeLayer 重渲染,所有 useMemo
+  // 依赖虽命中缓存,但 JSX 重建 + 活跃边 map 每帧执行。现改为 g ref 直写 transform。
+  // invK/edgeLod 仍需驱动路径重算,通过量化(5% 桶)低频 state 更新。
+  const gRef = useRef<SVGGElement>(null);
+  const [vpState, setVpState] = useState<{ k: number; invK: number }>({
+    k: 1, invK: 1,
+  });
+  useLayoutEffect(() => {
+    const apply = (vp: Viewport): void => {
+      const k = vp.k > 0 ? vp.k : 1;
+      const el = gRef.current;
+      if (el) {
+        el.setAttribute('transform', `translate(${vp.x}, ${vp.y}) scale(${k})`);
+      }
+    };
+    apply(store.getViewport());
+    return store.subscribeViewport(() => {
+      const vp = store.getViewport();
+      apply(vp);
+      const k = vp.k > 0 ? vp.k : 1;
+      const nextInvK = quantizeZoom(1 / k);
+      setVpState((prev) => {
+        const prevLod = prev.k < EDGE_LOD_THRESHOLD;
+        const nextLod = k < EDGE_LOD_THRESHOLD;
+        if (prev.invK === nextInvK && prevLod === nextLod) return prev;
+        return { k, invK: nextInvK };
+      });
+    });
+  }, [store]);
+  const invK = 1 / vpState.k; // EdgeItem 用未量化值(命中区等需要精确)
   const pinDefaults = usePinDefaults();
   // P0-2：节点索引（graph 变更时重建，引用变化可作为 useMemo 依赖）
   const nodesById = store.getNodesById();
@@ -553,19 +581,21 @@ export const EdgeLayer = React.memo(function EdgeLayer({
     [onCutEdge],
   );
 
-  // 工具栏位置
+  // 工具栏位置 —— 低频元素(仅单条边选中时显示),从 store 读最新 viewport 计算屏幕坐标,
+  // 不订阅 viewport(避免平移时重渲染)。位置更新由 invK 量化 state 跨桶时顺带刷新。
   const toolbarData = useMemo(() => {
     if (!firstSelectedEdgeId) return null;
     const edge = edges.find((e) => e.id === firstSelectedEdgeId);
     if (!edge) return null;
     const endpoints = getEdgeEndpoints(edge, nodesById, extensions, pinDefaults, invK);
     if (!endpoints) return null;
+    const vp = store.getViewport();
     const mp = bezierMidpoint(endpoints);
     return {
-      x: mp.x * viewport.k + viewport.x,
-      y: mp.y * viewport.k + viewport.y,
+      x: mp.x * vp.k + vp.x,
+      y: mp.y * vp.k + vp.y,
     };
-  }, [firstSelectedEdgeId, edges, nodesById, extensions, pinDefaults, invK, viewport]);
+  }, [firstSelectedEdgeId, edges, nodesById, extensions, pinDefaults, invK, store]);
 
   // 路径生成函数(模块级函数引用稳定,可作为 EdgeItem memo 依赖)
   const pathFn = edgePathType === 'smoothstep' ? smoothstepPath : bezierPath;
@@ -578,9 +608,9 @@ export const EdgeLayer = React.memo(function EdgeLayer({
   // 间距补偿),与 node-layer 的 NodeItem invK 量化保持同一函数、同一节奏。
   // 误差有界:端点世界坐标相对误差 ≤ ±bucket/2=2.5%,换算屏幕 ≈ ≤1px,仅动画期间可感知;
   // 停止缩放后 invKc 与真实值一致(落回桶心),无残留误差。
-  const invKc = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
+  const invKc = vpState.invK; // 已量化(5% 桶),用于非活跃边路径缓存
   // 边 LOD:低缩放(k < EDGE_LOD_THRESHOLD)时视觉边直线化 + 命中区整层降级。
-  const edgeLod = viewport.k < EDGE_LOD_THRESHOLD;
+  const edgeLod = vpState.k < EDGE_LOD_THRESHOLD;
   // 非活跃边视觉路径生成:低缩放用直线(linePath),正常档位保持曲线(pathFn)。
   // useMemo 稳定引用:直接三元会每渲染重建,破坏 EdgeItem 的 memo 命中(Plan#14 T3 直线化)。
   const visualPathFn = useMemo(() => (edgeLod ? linePath : pathFn), [edgeLod, pathFn]);
@@ -671,7 +701,8 @@ export const EdgeLayer = React.memo(function EdgeLayer({
         overflow: 'visible',
       }}
     >
-      <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.k})`}>
+      <g ref={gRef} data-canvas-edge-g>
+        {/* transform 由 useLayoutEffect 订阅直写 DOM,平移缩放不触发 React 重渲染 */}
         {/* P1-4: 非活跃边合并为单 path(视觉),减少 SVG 元素数量 (批次1: useMemo 化) */}
         {inactiveMergedPath && (
           <path

@@ -15,7 +15,6 @@ import {
   ReactGraphStore,
   ReactGraphStoreContext,
   useGraph,
-  useViewport,
   useSelection,
 } from '../store.js';
 
@@ -170,8 +169,9 @@ export function CanvasView({
   threeHost,
 }: CanvasViewProps): React.ReactElement {
   const graph = useGraph(store);
-  const viewport = useViewport(store);
   const selection = useSelection(store);
+  // 注意:不再 useViewport(store) —— 视口变换由 Viewport_/NodeLayer/EdgeLayer/GroupLayer
+  // 各自内部订阅并直写 DOM,避免 CanvasView 每帧重渲染波及整个子树。
 
   // 性能:handleUpdateNode 必须 useCallback 稳定化(引用稳定才让 NodeItem memo 生效),
   // 否则 CanvasView 每次重渲染都产生新引用,穿透 NodeItem 的 memo 比较器导致全量节点重渲染。
@@ -232,7 +232,7 @@ export function CanvasView({
   return (
     <ReactGraphStoreContext.Provider value={store}>
       <Viewport_
-        viewport={viewport}
+        store={store}
         containerRef={containerRef}
         background={background}
         background_color={backgroundColor}

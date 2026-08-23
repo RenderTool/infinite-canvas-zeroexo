@@ -31,9 +31,9 @@
 import React from 'react';
 import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Rect, SceneNode } from '@zeroexo/core';
+import type { Rect, SceneNode, Viewport } from '@zeroexo/core';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { useGraph, useViewport, useSelection, quantizeZoom } from '@zeroexo/plugin-render-react';
+import { useGraph, useSelection, quantizeZoom } from '@zeroexo/plugin-render-react';
 import {
   isGroup,
   isVersionFolder,
@@ -163,8 +163,15 @@ export const GroupLayer = React.memo(function GroupLayer({
   showHints = true,
 }: GroupLayerProps): React.ReactElement | null {
   const graph = useGraph(store);
-  const viewport = useViewport(store);
   const selection = useSelection(store);
+  // === viewport transform 直写 DOM + culling 节流(与 node-layer 同源)===
+  // 之前 useViewport 每帧触发 GroupLayer 重渲染:组数量多时 map + bounds 相交检测
+  // 每帧执行。现改为容器 ref 直写 transform,invK 通过量化(5% 桶)低频更新,
+  // visibleRect 通过 120ms 节流更新(平移时不重算)。
+  const [vpState, setVpState] = React.useState({ k: 1, invK: 1 });
+  const [cullRect, setCullRect] = React.useState<{
+    left: number; top: number; right: number; bottom: number;
+  } | null>(null);
   // 订阅 controller(预览组状态)
   useGroupControllerPreview(controller);
   // 读取全局 Group 默认样式(由 EditorPage 通过 GroupDefaultsProvider 从 canvasConfig 注入)
@@ -174,11 +181,91 @@ export const GroupLayer = React.memo(function GroupLayer({
 
   // T3: invK 量化门控(5% 桶,与 edge-layer/node-layer 同源同节奏)——
   // 缩放动画帧内 GroupItem memo 命中不重渲染,视觉连续由容器 --zx-invk 变量承担
-  const invK = viewport.k > 0 ? quantizeZoom(1 / viewport.k) : 1;
+  const invK = vpState.invK;
   const scene = graph.nodes;
 
   // 容器 ref(直写 + 尺寸测量共用)
   const layerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // 容器尺寸测量(culling 矩形计算依赖,需在 viewport effect 之前声明)
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+  React.useLayoutEffect(() => {
+    const el = layerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      setContainerSize({
+        width: rect.width || window.innerWidth,
+        height: rect.height || window.innerHeight,
+      });
+    };
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // viewport 订阅:transform + --zx-invk 直写 DOM;invK 量化 + cullRect 节流走 state
+  const CULL_THROTTLE_MS = 120;
+  React.useLayoutEffect(() => {
+    let last = 0;
+    let lastBucket = 0;
+    let timer: number | null = null;
+    const writeTransform = (vp: Viewport): void => {
+      const el = layerRef.current;
+      if (el) {
+        const k = vp.k > 0 ? vp.k : 1;
+        el.style.transform = `translate(${vp.x}px, ${vp.y}px) scale(${k})`;
+        el.style.setProperty('--zx-invk', String(1 / k));
+      }
+    };
+    const compute = (vp: Viewport, immediate: boolean): void => {
+      writeTransform(vp);
+      const k = vp.k > 0 ? vp.k : 1;
+      const nextInvK = quantizeZoom(1 / k);
+      setVpState((prev) => (prev.invK === nextInvK ? prev : { k, invK: nextInvK }));
+      if (containerSize.width === 0) return;
+      const invKVal = 1 / k;
+      const padW = (containerSize.width * invKVal) * OVERSCAN_RATIO;
+      const padH = (containerSize.height * invKVal) * OVERSCAN_RATIO;
+      const cx = -vp.x * invKVal;
+      const cy = -vp.y * invKVal;
+      const rect = {
+        left: cx - padW,
+        top: cy - padH,
+        right: cx + containerSize.width * invKVal + padW,
+        bottom: cy + containerSize.height * invKVal + padH,
+      };
+      const bucket = Math.round(k / 0.05);
+      const now = performance.now();
+      if (immediate || bucket !== lastBucket || now - last >= CULL_THROTTLE_MS) {
+        last = now;
+        lastBucket = bucket;
+        setCullRect((prev) => {
+          if (prev &&
+            Math.abs(prev.left - rect.left) < 1 &&
+            Math.abs(prev.top - rect.top) < 1 &&
+            Math.abs(prev.right - rect.right) < 1 &&
+            Math.abs(prev.bottom - rect.bottom) < 1) {
+            return prev;
+          }
+          return rect;
+        });
+        if (timer !== null) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+      } else if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          last = performance.now();
+          setCullRect(rect);
+        }, CULL_THROTTLE_MS);
+      }
+    };
+    compute(store.getViewport(), true);
+    return store.subscribeViewport(() => compute(store.getViewport(), false));
+  }, [store, containerSize.width, containerSize.height]);
 
   // T1: 瞬态拖拽期间组实时跟随 —— 订阅 dragOffsets 直写组 DOM(与 drag-offset-writer 同模式)。
   // 节点拖拽走瞬态通道(graph 不更新),组 bounds 基于静态 scene 计算;本直写把偏移叠加到
@@ -251,39 +338,14 @@ export const GroupLayer = React.memo(function GroupLayer({
     }));
   }, [scene, getNodeSize, detachedIds]);
 
-  // T4: 视口遮挡裁剪(视口外组不渲染 DOM,与 node-layer 同款可见矩形计算)
-  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
-  React.useLayoutEffect(() => {
-    const el = layerRef.current;
-    if (!el) return;
-    const updateSize = () => {
-      const rect = el.getBoundingClientRect();
-      setContainerSize({
-        width: rect.width || window.innerWidth,
-        height: rect.height || window.innerHeight,
-      });
-    };
-    updateSize();
-    const ro = new ResizeObserver(updateSize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const canCull = viewport.k > 0 && containerSize.width > 0 && containerSize.height > 0;
-  const visibleRect = canCull
-    ? {
-        left: -viewport.x / viewport.k - (containerSize.width / viewport.k) * OVERSCAN_RATIO,
-        top: -viewport.y / viewport.k - (containerSize.height / viewport.k) * OVERSCAN_RATIO,
-        right: -viewport.x / viewport.k + (containerSize.width / viewport.k) * (1 + OVERSCAN_RATIO),
-        bottom: -viewport.y / viewport.k + (containerSize.height / viewport.k) * (1 + OVERSCAN_RATIO),
-      }
-    : null;
+  // T4: 视口遮挡裁剪(cullRect 由 viewport 订阅节流更新,不每帧重算)
   // 含被拖/选中节点的组必然与视口相交(被拖节点在视口内,组 bounds ⊇ 节点),culling 安全
-  const visibleGroups = visibleRect
+  const visibleGroups = cullRect
     ? groupsWithBounds.filter(({ bounds }) =>
-        bounds.x < visibleRect.right &&
-        bounds.x + bounds.width > visibleRect.left &&
-        bounds.y < visibleRect.bottom &&
-        bounds.y + bounds.height > visibleRect.top,
+        bounds.x < cullRect.right &&
+        bounds.x + bounds.width > cullRect.left &&
+        bounds.y < cullRect.bottom &&
+        bounds.y + bounds.height > cullRect.top,
       )
     : groupsWithBounds;
 
@@ -377,11 +439,9 @@ export const GroupLayer = React.memo(function GroupLayer({
         left: 0,
         width: 0,
         height: 0,
-        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
         transformOrigin: 'top left',
         pointerEvents: 'none', // 容器不接收事件,子组通过 pointerEvents:auto 接收
-        // T3: 连续反缩放变量(GroupItem 视觉经 calc(var(--zx-invk, 1)) 逐帧连续跟随)
-        ['--zx-invk' as string]: String(viewport.k > 0 ? 1 / viewport.k : 1),
+        // transform 与 --zx-invk 由 useLayoutEffect 订阅直写 DOM,平移缩放不触发 React 重渲染
         // 不设容器 zIndex: 容器 transform 建立 stacking context,子 GroupItem 用
         // GROUP_Z_INDEX(-10) 在 NodeItem(0/5/10)之下,确保组可见且组内节点可命中。
         // (之前用 zIndex:-1 会让整层跑到 CanvasView 背景之后导致组不可见)
