@@ -895,6 +895,7 @@
   "nodes": {
     "textTitle": "文本",
     "doubleClickToEdit": "双击编辑文字",
+    "textEmptyHint": "双击编辑文本，或使用下方面板生成",
     "textLimitExceeded": "文本超过 {{max}} 字符上限，超出部分已被截断",
     "generateImage": "生图",
     "retry": "重试",
@@ -2107,6 +2108,8 @@
     "placeholderLighting": "光影 · 氛围",
     "placeholderDialogue": "对白",
     "placeholderSfx": "音效",
+    "copyShot": "复制本行（描述+提示词）",
+    "copied": "已复制",
     "deleteShot": "删除镜头",
     "environment": "环境",
     "emotion": "情绪",

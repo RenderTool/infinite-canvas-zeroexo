@@ -1,13 +1,14 @@
 /**
- * QuestionBlock - 单问题快速选择壳
+ * QuestionBlock - 征集表单（Plan#36 R2 返工）
  *
- * 参考 tvc-agent (2).html 设计，100% 复刻样式：
- * - 选项卡片列表（poll-opt 风格）
- * - 进度条 + 百分比
- * - 自定义输入
+ * - 投影风格（无边线，分层背景 + 阴影），撑满宽度
+ * - 表单头：纯 icon（无颜色）+「征集表单」+ 引导文案
+ * - 单选确认制：选中仅高亮，底部确认按钮才提交
+ * - 提交完毕后折叠为一行摘要（已选项），点击可展开只读回看
  */
 
 import { useState } from 'react';
+import { Bot, ChevronRight } from 'lucide-react';
 import type { CanvasAgentMessage } from '../types.js';
 import { sendAnswer } from '../session/agent-session.js';
 
@@ -16,28 +17,43 @@ export interface QuestionBlockProps {
   onSelect?: (value: string) => void;
 }
 
+/** 投影风格卡片容器样式（无边线） */
+const cardStyle: React.CSSProperties = {
+  width: '100%',
+  margin: '6px 0',
+  padding: 12,
+  background: 'linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2))',
+  border: 'none',
+  borderRadius: 12,
+  boxShadow: 'var(--agent-shadow)',
+  animation: 'agentFadeUp 0.35s ease',
+};
+
 export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.ReactElement {
   const [selected, setSelected] = useState<string | null>(null);
   const [customText, setCustomText] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  /** R2：提交完毕后折叠为摘要行 */
+  const [folded, setFolded] = useState(false);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
 
   const data = message.question;
   if (!data) return <></>;
 
   const isMulti = data.multi ?? false;
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
   const total = data.items.length;
   const answered = isMulti ? multiSelected.size : selected ? 1 : 0;
 
-  /**
-   * 提交选择(Plan#33 D2 接通真连层):
-   * 优先使用外部 onSelect(兼容旧用法),否则通过 sendAnswer 提交到后端,
-   * 恢复挂起的 Agent 执行循环。提交后锁定防重复。
-   */
+  /** 已选内容的展示标签（折叠摘要用） */
+  const answeredLabels = isMulti
+    ? data.items.filter((it) => multiSelected.has(it.value)).map((it) => it.label).join('、')
+    : customText.trim() || data.items.find((it) => it.value === selected)?.label || '';
+
   const submitAnswer = (value: string) => {
     if (submitted) return;
     setSubmitted(true);
+    setFolded(true); // R2：提交完毕折叠
     if (onSelect) {
       onSelect(value);
     } else {
@@ -55,8 +71,8 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         return next;
       });
     } else {
+      // 单选确认制：选中仅高亮，底部确认按钮才提交（防误触）
       setSelected(value);
-      submitAnswer(value);
     }
   };
 
@@ -65,31 +81,76 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
     if (isMulti) {
       submitAnswer(Array.from(multiSelected).join(','));
     } else {
-      // 自定义输入优先,其次选项
       submitAnswer(customText.trim() || selected || '');
     }
   };
 
-  return (
-    <div
-      style={{
-        width: '100%',
-        margin: '6px 0',
-        padding: 12,
-        background: 'var(--agent-surface)',
-        border: '1px solid var(--agent-border)',
-        borderRadius: 10,
-        animation: 'agentFadeUp 0.35s ease',
-      }}
-    >
-      {/* 引导文案 */}
-      {data.guideText && (
-        <div className="agent-section-label" style={{ margin: '0 0 8px' }}>
-          {data.guideText}
-        </div>
-      )}
+  // ===== 折叠摘要行（提交后） =====
+  if (folded && submitted) {
+    return (
+      <button
+        type="button"
+        onClick={() => setFolded(false)}
+        style={{
+          ...cardStyle,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          textAlign: 'left',
+        }}
+      >
+        <Bot size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--agent-muted)', flexShrink: 0 }}>
+          征集表单
+        </span>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
+            color: 'var(--agent-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          已选：{answeredLabels || '—'}
+        </span>
+        <ChevronRight size={12} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
+      </button>
+    );
+  }
 
-      {/* 选项列表 */}
+  return (
+    <div style={cardStyle}>
+      {/* 表单头：纯 icon（无颜色）+ 征集表单 + 引导文案 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Bot size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--agent-muted)', letterSpacing: '0.04em', flexShrink: 0 }}>
+          征集表单
+        </span>
+        {data.guideText && (
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: 'var(--agent-text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {data.guideText}
+          </span>
+        )}
+      </div>
+
+      {/* 选项列表（无边线，选中=主题浅底） */}
       <div>
         {data.items.map((opt) => {
           const isActive = isMulti ? multiSelected.has(opt.value) : selected === opt.value;
@@ -106,15 +167,16 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
                 gap: 10,
                 padding: '9px 12px',
                 margin: '4px 0',
-                background: isActive ? 'var(--agent-accent-soft)' : 'var(--agent-surface)',
-                border: `1.5px solid ${isActive ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
+                background: isActive ? 'var(--agent-accent-soft)' : 'transparent',
+                border: 'none',
                 borderRadius: 9,
-                cursor: 'pointer',
+                cursor: submitted ? 'default' : 'pointer',
                 fontFamily: 'inherit',
                 fontSize: 12.5,
                 color: 'var(--agent-text)',
                 textAlign: 'left',
                 transition: 'all 0.15s',
+                opacity: submitted ? 0.7 : 1,
               }}
             >
               {/* 选择指示器 */}
@@ -167,8 +229,8 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         })}
       </div>
 
-      {/* 其他想法输入 */}
-      {showCustom && (
+      {/* 其他想法输入（无边线分隔） */}
+      {!submitted && showCustom && (
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <input
             type="text"
@@ -181,15 +243,13 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
               padding: '8px 11px',
               borderRadius: 7,
               background: 'var(--agent-surface)',
-              border: '1.5px solid var(--agent-border)',
+              border: 'none',
               color: 'var(--agent-text)',
               fontSize: 12.5,
               fontFamily: 'inherit',
               outline: 'none',
               boxSizing: 'border-box',
             }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--agent-accent)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--agent-border)'; }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && customText.trim()) handleSubmit();
             }}
@@ -217,7 +277,7 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
           </button>
         </div>
       )}
-      {!showCustom && (
+      {!submitted && !showCustom && (
         <button
           type="button"
           onClick={() => setShowCustom(true)}
@@ -236,21 +296,19 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
         </button>
       )}
 
-      {/* 底部 */}
+      {/* 底部：计数 + 确认提交（无边线分隔） */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           marginTop: 10,
-          paddingTop: 8,
-          borderTop: '1px solid var(--agent-border)',
         }}
       >
         <span style={{ fontSize: 11, color: 'var(--agent-muted)' }}>
-          {answered}/{total} 已选
+          {answered}/{total} 已选{submitted ? ' · 已提交' : ''}
         </span>
-        {isMulti && (
+        {!submitted && (
           <button
             type="button"
             onClick={handleSubmit}
@@ -259,16 +317,16 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
               padding: '4px 14px',
               border: 'none',
               borderRadius: 7,
-              background: answered > 0
+              background: answered > 0 || customText.trim()
                 ? 'var(--agent-accent)'
                 : 'var(--agent-border)',
-              color: answered > 0 ? '#fff' : 'var(--agent-muted)',
+              color: answered > 0 || customText.trim() ? '#fff' : 'var(--agent-muted)',
               fontSize: 11,
               fontWeight: 700,
               fontFamily: 'inherit',
-              cursor: answered > 0 ? 'pointer' : 'default',
+              cursor: answered > 0 || customText.trim() ? 'pointer' : 'default',
             }}
-            disabled={answered === 0}
+            disabled={answered === 0 && !customText.trim()}
           >
             提交
           </button>

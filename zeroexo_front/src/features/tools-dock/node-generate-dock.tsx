@@ -19,7 +19,7 @@ import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Text, Image, Music, Film, Sparkles, LoaderCircle,
+  Text, Image, Music, Film, Sparkles, LoaderCircle, Lock,
   ChevronDown, ChevronUp, Cpu, Trash2, Upload, FileText, Check, X, Layers,
 } from 'lucide-react';
 import { useViewport } from '@zeroexo/plugin-render-react';
@@ -455,6 +455,7 @@ const DockFooterBar = memo(function DockFooterBar({
   modelOptions,
   isRunning,
   hasText,
+  interruptible = true,
   onAction,
   onConfigChange,
   imageQuality,
@@ -477,6 +478,8 @@ const DockFooterBar = memo(function DockFooterBar({
   modelOptions: StyledSelectOption[];
   isRunning: boolean;
   hasText: boolean;
+  /** 生成中是否可打断(文本可打断=停止按钮;媒体不可打断=锁徽标) */
+  interruptible?: boolean;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   imageQuality?: string;
@@ -561,41 +564,61 @@ const DockFooterBar = memo(function DockFooterBar({
 
       <div style={{ flex: 1 }} />
 
-      {/* 生成按钮(主页 AiInputBar 同款:圆形 accent + zeroexo-ripple 呼吸动画) */}
-      <style>{dockRippleKeyframes}</style>
-      <button
-        type="button"
-        onClick={onAction}
-        disabled={actionDisabled}
-        aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
-        title={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
-        style={{
-          width: 36, height: 36, flexShrink: 0,
-          borderRadius: '50%',
-          border: '2px solid transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 0,
-          background: actionDisabled
-            ? (isDark ? '#262626' : '#e5e5e5')
-            : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent,
-          color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff',
-          cursor: actionDisabled ? 'not-allowed' : 'pointer',
-          boxShadow: actionDisabled
-            ? 'none'
-            : `0 4px 12px ${(isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent)}40`,
-          transition: 'all .2s',
-          animation: actionDisabled ? 'none' : 'zeroexo-ripple 3s ease-in-out infinite',
-          fontFamily: 'inherit',
-        }}
-      >
-        {isRunning ? (
-          <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <LoaderCircle size={16} />
-          </span>
-        ) : (
-          <Sparkles size={16} />
-        )}
-      </button>
+      {isRunning && !interruptible ? (
+        /* 媒体类生成中:不可打断(拍板 2026-08-23 R3 D2)——锁徽标替代停止按钮,进度由 agent 消息流步骤卡承载 */
+        <span
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            height: 36, padding: '0 12px', borderRadius: 18, flexShrink: 0,
+            background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+            border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+            color: theme.toolbar.textMuted ?? '',
+            fontSize: 12, fontWeight: 500, userSelect: 'none',
+          }}
+          title={t('nodeDock.lockedGenerating', '媒体生成提交后不可取消,请稍候')}
+        >
+          <Lock size={13} style={{ flexShrink: 0 }} />
+          {t('nodeDock.lockedGenerating', '生成中，不可取消')}
+        </span>
+      ) : (
+        /* 生成按钮(主页 AiInputBar 同款:圆形 accent + zeroexo-ripple 呼吸动画;文本生成中保留停止按钮=可打断) */
+        <>
+          <style>{dockRippleKeyframes}</style>
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={actionDisabled}
+            aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
+            title={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
+            style={{
+              width: 36, height: 36, flexShrink: 0,
+              borderRadius: '50%',
+              border: '2px solid transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 0,
+              background: actionDisabled
+                ? (isDark ? '#262626' : '#e5e5e5')
+                : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent,
+              color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff',
+              cursor: actionDisabled ? 'not-allowed' : 'pointer',
+              boxShadow: actionDisabled
+                ? 'none'
+                : `0 4px 12px ${(isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent)}40`,
+              transition: 'all .2s',
+              animation: actionDisabled ? 'none' : 'zeroexo-ripple 3s ease-in-out infinite',
+              fontFamily: 'inherit',
+            }}
+          >
+            {isRunning ? (
+              <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <LoaderCircle size={16} />
+              </span>
+            ) : (
+              <Sparkles size={16} />
+            )}
+          </button>
+        </>
+      )}
     </>
   );
 });
@@ -1016,6 +1039,7 @@ export function NodeGenerateDock({
           modelOptions={modelOptions}
           isRunning={isRunning}
           hasText={hasText}
+          interruptible={mode === 'text'}
           onAction={handleAction}
           onConfigChange={onConfigChange}
           imageQuality={imageQuality}

@@ -242,6 +242,8 @@ export interface AIStateViewProps {
   onRetry?: () => void;
   /** 生成中/失败:取消回调(节点视图内 emit 到 editor-page) */
   onCancel?: () => void;
+  /** 生成中骨架类型: media=九宫格网格(图片/视频), text=行式段落(文本); 缺省=环形 spinner */
+  skeleton?: 'media' | 'text';
   /** 成功状态内容(由派生节点提供) */
   children: React.ReactNode;
 }
@@ -258,6 +260,68 @@ const aiContainerStyle: React.CSSProperties = {
   justifyContent: 'center',
   gap: 8,
 };
+
+/**
+ * AISkeleton - 生成中 shimmer 骨架(与分镜 StoryboardGeneratingLoader 同款扫光动画)
+ *
+ * - media: 2×2 九宫格网格(模拟图片/视频画面区域)
+ * - text: 变宽行式段落(模拟文字内容)
+ *
+ * 由 AIStateView 与 TextNodeView 共用;宿主节点背景深色,骨架块用白色半透明渐变扫光。
+ */
+export function AISkeleton({ type, accentColor }: { type: 'media' | 'text'; accentColor: string }): React.ReactElement {
+  const shimmerId = `ze-shimmer-${accentColor.replace('#', '')}`;
+  const block: React.CSSProperties = {
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: 6,
+    background: 'rgba(255,255,255,0.08)',
+  };
+  const sweep: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)',
+    animation: `${shimmerId} 1.4s ease-in-out infinite`,
+  };
+  return (
+    <>
+      {type === 'media' ? (
+        <div
+          style={{
+            position: 'relative',
+            width: 'calc(100% - 40px)',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 8,
+          }}
+        >
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} style={{ ...block, aspectRatio: '4/3' }}>
+              <div style={sweep} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            position: 'relative',
+            width: 'calc(100% - 40px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          {[96, 100, 84, 62].map((w, i) => (
+            <div key={i} style={{ ...block, height: 12, width: `${w}%` }}>
+              <div style={sweep} />
+            </div>
+          ))}
+        </div>
+      )}
+      <style>{`@keyframes ${shimmerId} { from { transform: translateX(-100%); } to { transform: translateX(100%); } }`}</style>
+    </>
+  );
+}
 
 /**
  * AIStateView - AI 生成节点的 4 状态渲染
@@ -306,10 +370,11 @@ export function AIStateView({
   taskLabel,
   onRetry,
   onCancel,
+  skeleton,
   children,
 }: AIStateViewProps): React.ReactElement {
   const { t } = useTranslation();
-  // loading: 环形进度 + 半透明遮罩 + 任务信息 + 取消按钮
+  // loading: 骨架(spinner) + 半透明遮罩 + 任务信息 + 取消按钮
   if (status === 'loading') {
     const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
     return (
@@ -323,42 +388,48 @@ export function AIStateView({
             backdropFilter: 'blur(1px)',
           }}
         />
-        <div
-          style={{
-            position: 'relative',
-            width: 40,
-            height: 40,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {/* 内圈:静态圆环(缺口基础) */}
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              borderRadius: '50%',
-              border: `3px solid ${accentColor}30`,
-            }}
-          />
-          {/* 外圈:旋转的进度环 */}
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              borderRadius: '50%',
-              border: `3px solid transparent`,
-              borderTopColor: accentColor,
-              borderRightColor: `${accentColor}aa`,
-              animation: `${spinId} 0.7s linear infinite`,
-            }}
-          />
-          <LoaderCircle size={16} color={accentColor} />
-        </div>
-        <span style={{ position: 'relative', fontSize: 12, color: '#fff', fontWeight: 500 }}>
-          {t('nodes.generating')}
-        </span>
+        {skeleton ? (
+          <AISkeleton type={skeleton} accentColor={accentColor} />
+        ) : (
+          <>
+            <div
+              style={{
+                position: 'relative',
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {/* 内圈:静态圆环(缺口基础) */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  border: `3px solid ${accentColor}30`,
+                }}
+              />
+              {/* 外圈:旋转的进度环 */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  border: `3px solid transparent`,
+                  borderTopColor: accentColor,
+                  borderRightColor: `${accentColor}aa`,
+                  animation: `${spinId} 0.7s linear infinite`,
+                }}
+              />
+              <LoaderCircle size={16} color={accentColor} />
+            </div>
+            <span style={{ position: 'relative', fontSize: 12, color: '#fff', fontWeight: 500 }}>
+              {t('nodes.generating')}
+            </span>
+          </>
+        )}
         {taskLabel ? (
           <span
             style={{
@@ -398,7 +469,7 @@ export function AIStateView({
             {t('nodes.cancelGeneration')}
           </button>
         ) : null}
-        <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>
+        {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
       </div>
     );
   }

@@ -23,7 +23,14 @@ export type AgentSSEEventType =
   | 'agent:question_request'
   | 'agent:md'
   | 'agent:message_delta'
-  | 'agent:thinking_delta';
+  | 'agent:thinking_delta'
+  // Plan#36 R2-5: 执行流程引擎事件（Codex 式 phase）
+  | 'agent:phase'
+  | 'agent:plan'
+  | 'agent:upload_request'
+  | 'agent:brief'
+  // R3-F1: 节点参数契约表单
+  | 'agent:params_request';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -40,6 +47,32 @@ export interface StepRequestData {
   required?: boolean;
   prompts?: string[];
   suggestions?: Array<{ value: string; label: string }>;
+  /** 是否附用户备注输入框（Plan#36 R2-5） */
+  noteEnabled?: boolean;
+}
+
+/** 执行阶段（Plan#36 R2-5，与后端 AgentPhase 对齐） */
+export type AgentPhase = 'thinking' | 'clarify' | 'planning' | 'executing' | 'reporting';
+
+/** 执行计划数据（agent:plan，与后端 PlanData 对齐） */
+export interface PlanData {
+  goal: string;
+  steps: Array<{ id: string; label: string; deliverable?: string; risk?: string }>;
+  risks?: string[];
+}
+
+/** 上传请求数据（agent:upload_request） */
+export interface UploadRequestData {
+  guideText?: string;
+  accept?: string;
+  multiple?: boolean;
+}
+
+/** 任务简报数据（agent:brief） */
+export interface BriefData {
+  summary: string;
+  nodeRefs?: Array<{ nodeId: string; label: string }>;
+  note?: string;
 }
 
 /** 提问接口数据(与后端 QuestionRequestData 对齐, Plan#33 D1) */
@@ -55,17 +88,54 @@ export interface QuestionRequestData {
   }>;
 }
 
+/** 参数表单字段（R3-F1，与后端 ParamFieldData 对齐） */
+export interface ParamFieldData {
+  key: string;
+  label: string;
+  /** select / text / number / boolean */
+  type: 'select' | 'text' | 'number' | 'boolean';
+  options?: Array<{ label: string; value: string }>;
+  default?: string | number | boolean;
+  desc?: string;
+}
+
+/** 参数表单自动方案（R3-F1） */
+export interface ParamPresetData {
+  name: string;
+  desc?: string;
+  values: Record<string, string | number | boolean>;
+}
+
+/** 节点参数契约表单数据（R3-F1） */
+export interface ParamsRequestData {
+  nodeType: string;
+  title?: string;
+  fields?: ParamFieldData[];
+  presets?: ParamPresetData[];
+  noteLabel?: string;
+}
+
 export interface AgentClientCallbacks {
   onThinking?: (message: string) => void;
   onMessageDelta?: (delta: string) => void;
   onThinkingDelta?: (delta: string) => void;
-  onToolCall?: (toolName: string, args: unknown) => void;
+  onToolCall?: (toolName: string, args: unknown, toolCallId?: string) => void;
   onResult?: (result: unknown) => void;
   onCanvasOp?: (op: string, args: unknown) => void;
   onProgress?: (progress: number, message?: string) => void;
   onStepRequest?: (step: StepRequestData) => void;
   onQuestionRequest?: (question: QuestionRequestData) => void;
+  /** R3-F1: 节点参数契约表单 */
+  onParamsRequest?: (params: ParamsRequestData) => void;
   onMd?: (md: string) => void;
+  /** Plan#36 R2-5: 执行阶段转换 */
+  onPhase?: (phase: AgentPhase, label?: string) => void;
+  /** Plan#36 R2-5: 结构化执行计划 */
+  onPlan?: (plan: PlanData) => void;
+  /** Plan#36 R2-5: 对话内上传请求 */
+  onUploadRequest?: (upload: UploadRequestData) => void;
+  /** Plan#36 R2-5: 任务简报 */
+  onBrief?: (brief: BriefData) => void;
   onError?: (error: string) => void;
   onDone?: (output: unknown) => void;
   onClose?: () => void;
@@ -268,8 +338,8 @@ export class AgentClient {
         break;
       }
       case 'agent:tool_call': {
-        const d = event.data as { toolName?: string; arguments?: unknown } | null;
-        callbacks.onToolCall?.(d?.toolName ?? '', d?.arguments ?? {});
+        const d = event.data as { toolName?: string; arguments?: unknown; toolCallId?: string } | null;
+        callbacks.onToolCall?.(d?.toolName ?? '', d?.arguments ?? {}, d?.toolCallId);
         break;
       }
       case 'agent:result':
@@ -295,9 +365,34 @@ export class AgentClient {
         if (d?.question) callbacks.onQuestionRequest?.(d.question);
         break;
       }
+      case 'agent:params_request': {
+        const d = event.data as { params?: ParamsRequestData } | null;
+        if (d?.params) callbacks.onParamsRequest?.(d.params);
+        break;
+      }
       case 'agent:md': {
         const d = event.data as { md?: string } | null;
         if (d?.md) callbacks.onMd?.(d.md);
+        break;
+      }
+      case 'agent:phase': {
+        const d = event.data as { phase?: AgentPhase; label?: string } | null;
+        if (d?.phase) callbacks.onPhase?.(d.phase, d.label);
+        break;
+      }
+      case 'agent:plan': {
+        const d = event.data as { plan?: PlanData } | null;
+        if (d?.plan) callbacks.onPlan?.(d.plan);
+        break;
+      }
+      case 'agent:upload_request': {
+        const d = event.data as { upload?: UploadRequestData } | null;
+        callbacks.onUploadRequest?.(d?.upload ?? {});
+        break;
+      }
+      case 'agent:brief': {
+        const d = event.data as { brief?: BriefData } | null;
+        if (d?.brief) callbacks.onBrief?.(d.brief);
         break;
       }
       case 'agent:error': {

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX } from 'lucide-react';
+import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, X } from 'lucide-react';
 import { Button, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -21,6 +21,7 @@ import { ThinkStream } from './think-stream/ThinkStream.js';
 import { MessageRenderer } from './message-blocks/MessageRenderer.js';
 import { ComposerInput } from './composer/ComposerInput.js';
 import { PinnedTodoSlot } from './PinnedTodoSlot.js';
+import { CopyButton } from './message-blocks/CopyButton.js';
 import {
   loadConversations,
   loadConversationMessages,
@@ -29,7 +30,7 @@ import {
   type ConversationSummary,
   type ConversationMessageDto,
 } from './session/agent-session.js';
-import type { CanvasAgentMessage } from './types.js';
+import type { AttachmentCard, CanvasAgentMessage } from './types.js';
 import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import {
@@ -40,15 +41,50 @@ import {
 } from '@/features/collaboration/collaboration-api.js';
 import type { CollaborationMember } from '@/features/collaboration/collaboration-types.js';
 
-/** 后端消息 → store 消息（跳过记忆压缩摘要等 system 消息） */
+/**
+ * 后端消息 → store 消息（跳过记忆压缩摘要等 system 消息）
+ * R3 FIX-2：解析 [附件清单:JSON] 标记还原附件卡；同时剥离清单标记与附件预览正文段，
+ * 禁止历史加载把附件展开成纯文本。
+ */
 function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | null {
   const ts = Date.parse(dto.createdAt) || Date.now();
   if (dto.role === 'user') {
+    // R2 返工：后端落库的用户消息是 { prompt } 结构序列化，恢复时提取原文，不再显示裸 JSON
+    let text = dto.content;
+    try {
+      const parsed = JSON.parse(dto.content) as { prompt?: unknown };
+      if (parsed && typeof parsed.prompt === 'string') text = parsed.prompt;
+    } catch {
+      /* 非 JSON 保持原文 */
+    }
+    // R3 FIX-2：还原附件卡（清单标记在 prompt 最前，JSON 以 }] 结尾）
+    let attachments: AttachmentCard[] | undefined;
+    const manifestMatch = text.match(/^\[附件清单:(\{[\s\S]*?\})\](?:\n|$)/);
+    if (manifestMatch) {
+      try {
+        const manifest = JSON.parse(manifestMatch[1]!) as { files?: AttachmentCard[] };
+        if (Array.isArray(manifest.files) && manifest.files.length > 0) {
+          attachments = manifest.files;
+        }
+      } catch {
+        /* 清单损坏则忽略，保留原文 */
+      }
+      if (attachments) {
+        // 剥离标记行
+        text = text.slice(manifestMatch[0].length);
+        // 剥离附件预览正文段（文本："[附件 x（size）内容预览]\n预览...（原文共 N 字…）"；非文本："[附件 x（size，非文本文件，按需处理）]"）
+        text = text
+          .replace(/\n\[附件 [^\]]+（[^\]]+，非文本文件，按需处理）\]/g, '')
+          .replace(/\n\[附件 [^\]]+（[^\]]+）内容预览\][\s\S]*?（原文共 [^\n]+）\n?/g, '')
+          .trim();
+      }
+    }
     return {
       id: dto.id,
       role: 'user' as const,
       type: 'text' as const,
-      text: dto.content,
+      text,
+      attachments,
       timestamp: ts,
     };
   }
@@ -356,6 +392,29 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
           ))}
         </div>
 
+        {/* 关闭面板(符合用户习惯;重新打开走顶部 Agent 按钮) */}
+        <button
+          type="button"
+          onClick={() => useCanvasAgentStore.getState().setDockOpen(false)}
+          title="关闭面板"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--agent-muted)',
+            cursor: 'pointer',
+            flexShrink: 0,
+            marginLeft: 2,
+          }}
+        >
+          <X size={14} />
+        </button>
+
         {/* 会话下拉列表 */}
         {convOpen && (
           <div
@@ -475,21 +534,56 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               </div>
             </div>
           ) : (
-            messages.map((m) => (
-              <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : 'assistant'}`}>
-                <div className="role">
-                  <span>{m.role === 'user' ? '你' : 'Agent'}</span>
-                  <span className="msg-time">{formatMsgTime(m.timestamp)}</span>
-                </div>
-                {m.role === 'user' ? (
-                  <div className="user-text">{m.text}</div>
-                ) : (
-                  <div className="ai-body">
-                    <MessageRenderer message={m} />
+            // R2 返工：按回合归组渲染——一组一个角色头，回合结束后整块复制（不是每小块一个复制钮）
+            (() => {
+              const groups: CanvasAgentMessage[][] = [];
+              for (const m of messages) {
+                const last = groups[groups.length - 1];
+                if (last && last[0]!.role === m.role) last.push(m);
+                else groups.push([m]);
+              }
+              return groups.map((group) => {
+                const isAgent = group[0]!.role === 'agent';
+                // 整块复制内容：回合内全部文本/MD 消息拼接
+                const turnText = group
+                  .filter((m) => m.type === 'text' || m.type === 'md')
+                  .map((m) => m.text ?? '')
+                  .filter(Boolean)
+                  .join('\n\n');
+                return (
+                  <div key={group[0]!.id}>
+                    {group.map((m) => (
+                      <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : 'assistant'}`}>
+                        {m === group[0] && (
+                          <div className="role">
+                            {isAgent && (
+                              <span className="agent-avatar">
+                                <Bot size={16} />
+                              </span>
+                            )}
+                            <span>{m.role === 'user' ? '你' : 'Agent'}</span>
+                            <span className="msg-time">{formatMsgTime(m.timestamp)}</span>
+                          </div>
+                        )}
+                        {m.role === 'user' ? (
+                          <div className="user-text">{m.text}</div>
+                        ) : (
+                          <div className="ai-body">
+                            <MessageRenderer message={m} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {/* R2：回合结束后整块复制（GPT 式，一组只有一个复制钮） */}
+                    {isAgent && turnText && (
+                      <div className="msg-actions">
+                        <CopyButton getText={() => turnText} />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))
+                );
+              });
+            })()
           )}
           {/* 思考态融入消息流:作为最后一条消息之后的内容,随滚动呈现(非顶部固定) */}
           <ThinkStream />

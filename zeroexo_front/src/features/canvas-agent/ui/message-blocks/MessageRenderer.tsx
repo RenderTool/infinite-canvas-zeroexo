@@ -16,6 +16,10 @@ import { ProgressBlock } from './ProgressBlock.js';
 import { StepBlock } from './StepBlock.js';
 import { MarkdownBlock } from './MarkdownBlock.js';
 import { TimelineBlock } from './TimelineBlock.js';
+import { UploadBlock } from './UploadBlock.js';
+import { BriefBlock } from './BriefBlock.js';
+import { ReminderBlock } from './ReminderBlock.js';
+import { ParamsBlock } from './ParamsBlock.js';
 
 /** 注册表：消息类型 → 渲染组件 */
 const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: CanvasAgentMessage }>>> = {
@@ -27,6 +31,13 @@ const registry: Partial<Record<CanvasAgentMessageType, ComponentType<{ message: 
   step: StepBlock,
   md: MarkdownBlock,
   timeline: TimelineBlock,
+  // Plan#36 R2-5: 执行流程引擎新消息块
+  upload: UploadBlock,
+  brief: BriefBlock,
+  // R3-D3: 删除调皮回应（气泡内嵌选项）
+  reminder: ReminderBlock,
+  // R3-F1: 节点参数契约表单
+  params: ParamsBlock,
 };
 
 export interface MessageRendererProps {

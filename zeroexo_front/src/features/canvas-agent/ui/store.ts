@@ -18,6 +18,7 @@ import type {
   Reference,
   AgentStrategy,
   TodoSnapshot,
+  AgentPhase,
 } from './types.js';
 
 /** 模拟器回调，由 simulator 注入 */
@@ -70,6 +71,11 @@ export interface CanvasAgentState {
   // ---- 生成状态 ----
   isGenerating: boolean;
   setIsGenerating: (v: boolean) => void;
+
+  // ---- 执行阶段（Plan#36 R2-5，Codex 式 phase） ----
+  phase: AgentPhase | null;
+  phaseLabel: string | null;
+  setPhase: (phase: AgentPhase | null, label?: string) => void;
 
   // ---- 输入区 ----
   inputText: string;
@@ -153,6 +159,11 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   isGenerating: false,
   setIsGenerating: (v) => set({ isGenerating: v }),
 
+  // 执行阶段（R2-5）
+  phase: null,
+  phaseLabel: null,
+  setPhase: (phase, label) => set({ phase, phaseLabel: label ?? null }),
+
   // 输入区
   inputText: '',
   setInputText: (text) => set({ inputText: text }),
@@ -189,5 +200,7 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
       references: [],
       selectedNodeId: null,
       currentTaskId: null,
+      phase: null,
+      phaseLabel: null,
     }),
 }));

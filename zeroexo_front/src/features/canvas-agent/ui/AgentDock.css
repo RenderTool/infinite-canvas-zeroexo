@@ -38,10 +38,30 @@
 @keyframes indent-slide { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes agentFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes msg-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+/* Plan#36 R2-5: 计划卡步骤逐条入场 */
+@keyframes agentPlanStepIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 
 .pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
 .agent-pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
 .spinner { animation: spin 1s linear infinite; }
+/* R2-5: 时间线 running 态图标旋转 */
+.agent-step-spin svg { animation: spin 1.1s linear infinite; }
+
+/* R2-7: 消息操作行（GPT 式：消息底部，hover 显示） */
+.msg .msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg:hover .msg-actions { opacity: 1; }
+.msg-copy-btn:hover { background: var(--agent-surface-2); color: var(--agent-text); }
+
+/* R2-8: 分隔条 hover/拖拽手柄显示 */
+.agent-dock-resizer:hover .agent-dock-resizer-handle,
+.agent-dock-resizer:active .agent-dock-resizer-handle { opacity: 1; }
 .stream-cursor {
   display: inline-block;
   width: 7px;
@@ -69,10 +89,10 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 16px 8px;
+  padding: 16px 16px 10px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 .msg {
   padding: 0;
@@ -92,15 +112,28 @@
   max-width: min(82%, 560px);
 }
 .msg.assistant {
-  align-self: flex-start;
+  align-self: stretch; /* R2 返工：Assistant 内容撑满宽度，选项卡/表单/报告不再只显示一半 */
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  width: 100%;
   max-width: 100%;
+}
+/* R2：Agent 头像（纯 icon 无底色，主题文字色配套；22px 永远大于子动作图标 18px） */
+.agent-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--agent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 .msg .role {
   display: flex;
-  align-items: baseline;
+  align-items: center; /* R2：头像对齐改垂直居中 */
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -130,7 +163,7 @@
   min-width: 0;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--agent-muted);
+  color: var(--agent-text); /* R2 返工：正文用主文本色，弱化色只做辅助信息（此前整体偏灰显得廉价） */
 }
 .msg.assistant .ai-body strong { color: var(--agent-text); }
 .msg.assistant .ai-body p { margin: 6px 0; }
@@ -154,20 +187,22 @@
   flex-shrink: 0;
 }
 .composer-shell {
-  border: 1px solid var(--agent-border);
+  border: none; /* R2：去外边框，分层过渡背景 + 投影 */
   border-radius: var(--agent-radius-lg);
-  background: var(--agent-surface);
+  background: linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2));
+  box-shadow: var(--agent-shadow);
   padding: 8px 10px 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transition: border-color 120ms var(--agent-ease), background 120ms var(--agent-ease);
+  transition: box-shadow 120ms var(--agent-ease), background 120ms var(--agent-ease);
 }
 .composer-shell:focus-within {
-  border-color: var(--agent-accent);
+  box-shadow: 0 0 0 2px var(--agent-accent-soft), var(--agent-shadow);
 }
 .composer-input {
   flex: 1;
+  width: 100%; /* R2-8: 修复半宽问题（父级非 flex 时 textarea 退回默认列宽） */
   background: transparent;
   border: none;
   border-radius: var(--agent-radius-sm);
@@ -177,8 +212,8 @@
   font-family: inherit;
   outline: none;
   resize: none;
-  min-height: 38px;
-  max-height: 120px;
+  min-height: 56px; /* R2：输入区加高 */
+  max-height: 160px;
   line-height: 1.5;
   box-sizing: border-box;
 }
@@ -187,10 +222,26 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--agent-border);
+  padding-top: 4px;
+  border-top: none; /* R2：去掉线条分隔 */
 }
 .composer-spacer { flex: 1; }
+/* R2：附件按钮（弱样式，hover 提亮） */
+.composer-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--agent-radius-md);
+  background: transparent;
+  color: var(--agent-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.composer-attach:hover { background: var(--agent-surface-2); color: var(--agent-text); }
 .composer-send {
   display: inline-flex;
   align-items: center;
@@ -209,9 +260,14 @@
 }
 .composer-send:hover:not(:disabled) { opacity: 0.9; }
 .composer-send:disabled { opacity: 0.4; cursor: not-allowed; }
+/* R2-7: 停止态（生成中）：danger 底色 + 呼吸提示 */
+.composer-stop {
+  background: var(--agent-danger);
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
 
 /* === Welcome === */
-.welcome-wrap { text-align: center; padding: 36px 20px 16px; }
+.welcome-wrap { text-align: center; padding: 48px 20px 16px; }
 .welcome-icon {
   width: 52px;
   height: 52px;

@@ -31,6 +31,7 @@ import { serializeScriptLines, buildSampleLines } from '@/features/canvas-nodes/
 import { getEpisodePageCount, splitContentIntoPages } from './hooks/use-episode-manager.js';
 import { ScriptReader, type ReaderPage } from './components/ScriptReader.js';
 import { ScriptImportFlow } from './components/script-import-flow.js';
+import { StoryboardAssociateModal } from './storyboard-associate-modal.js';
 import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown.js';
 import { ScriptFullscreenEditor } from './script-fullscreen-editor.js';
 import { addAssets } from '@/features/asset-picker/asset-store.js';
@@ -131,6 +132,9 @@ export function ScriptEditorSheet({
   // 剧本导入流程弹窗（SourceTextListModal 源文本列表）
   const [importFlowOpen, setImportFlowOpen] = useState(false);
 
+  // R2：生成分镜选集向导（不再跳过选集；确认后走 storyboard:associate 统一链路）
+  const [associateOpen, setAssociateOpen] = useState(false);
+
   // 主题
   const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   const accent = theme.toolbar.accent;
@@ -150,7 +154,8 @@ export function ScriptEditorSheet({
       nodeActionBus.emit('script:generateStoryboard', { nodeId, mode: 'template' });
       return;
     }
-    nodeActionBus.emit('script:generateStoryboard', { nodeId, mode: 'ai' });
+    // R2：真实剧本先弹选集向导（选集 + 生成方式），不再直接全量生成
+    setAssociateOpen(true);
   }, [nodeId, isSample]);
 
   // ========== 内容变更 ==========
@@ -282,6 +287,8 @@ export function ScriptEditorSheet({
       }]);
       if (asset) {
         onAssetCreated(asset.id);
+        // FIX-6: 通知画布层打开资产库展示结果（资产库 Modal 每次打开时强制重挂载刷新）
+        nodeActionBus.emit('script:assetSaved', { nodeId, assetId: asset.id, title: assetTitle });
         message.success(t('storyboard.addedToAssetLibrary'));
       }
     } catch (err) {
@@ -366,6 +373,17 @@ export function ScriptEditorSheet({
         />,
         document.body,
       )}
+
+      {/* R2：生成分镜选集向导（剧本侧：每选集新建分镜节点 + 可选自动生成分镜，剧管作为分镜下游产物由生成链路创建） */}
+      <StoryboardAssociateModal
+        open={associateOpen}
+        onClose={() => setAssociateOpen(false)}
+        scriptNodeId={nodeId}
+        scriptTitle={title}
+        episodes={episodes.map((ep, idx) => ({ id: ep.id, number: idx + 1, title: ep.title }))}
+        defaultGenerate={true}
+        zIndex={Z_INDEX.FULLSCREEN_MODAL}
+      />
 
       {/* 全屏沉浸式编辑覆盖层(空剧集也可进入,用于新增首集) — 使用统一全屏编辑器组件 */}
       <ScriptFullscreenEditor

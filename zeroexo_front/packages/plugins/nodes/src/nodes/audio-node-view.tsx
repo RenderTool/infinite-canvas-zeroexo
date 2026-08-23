@@ -335,6 +335,7 @@ export function AudioNodeView({
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
           replaceBtnPosition="left"
+          skeleton="media"
         >
           {bubbleContent}
         </AIStateView>
@@ -375,6 +376,7 @@ export function AudioNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"
+        skeleton="media"
       >
         {bubbleContent}
       </AIStateView>

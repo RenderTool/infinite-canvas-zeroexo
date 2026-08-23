@@ -5,7 +5,7 @@
  */
 import { memo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { Input, Tooltip, Button } from 'antd';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign, AiSubject, EntityRef } from '../storyboard-types';
@@ -80,6 +80,31 @@ export const StoryboardRow = memo(function StoryboardRow({
   const [statePicker, setStatePicker] = useState<{ index: number; rect: { top: number; left: number; width: number } } | null>(null);
   // 2026-08-22: 画面描述列统一组件(非编辑态高亮预览 + 点击进入 TextArea 编辑, blur 退出) — 全屏与节点内共用同一渲染路径, 契约色一致
   const [editingDesc, setEditingDesc] = useState(false);
+
+  // R2-7: 行复制（镜头描述 + 提示词），复制成功短暂绿勾反馈
+  const [copied, setCopied] = useState(false);
+  const handleCopyRow = async (): Promise<void> => {
+    const promptText = (shot.prompt ?? shot.promptText ?? '').trim();
+    const parts = [
+      shot.description?.trim() ? `镜头 ${shot.number}：${shot.description.trim()}` : '',
+      promptText ? `提示词：${promptText}` : '',
+    ].filter(Boolean);
+    const text = parts.join('\n') || `镜头 ${shot.number}`;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
 
   const sfx = Array.isArray(shot.sfx) ? shot.sfx : [];
   // 折叠换行: 数据含 \n(LLM 按句分行)时, pre-wrap 原样渲染成竖排阅读;统一折叠为空格实现左右横排
@@ -465,9 +490,18 @@ export const StoryboardRow = memo(function StoryboardRow({
         />
       )}
 
-      {/* 操作 — 仅全屏编辑态;放置删除按钮 */}
+      {/* 操作 — 仅全屏编辑态;复制该行（镜头描述+提示词，R2-7）+ 删除按钮 */}
       {!readOnly && (
-        <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+          <Tooltip title={copied ? t('storyboardRow.copied') : t('storyboardRow.copyShot')}>
+            <Button
+              size="small"
+              type="text"
+              icon={copied ? <Check size={13} style={{ color: '#4ade80' }} /> : <Copy size={13} />}
+              onClick={(e) => { e.stopPropagation(); void handleCopyRow(); }}
+              style={{ width: 24, height: 24, padding: 0, color: mutedColor }}
+            />
+          </Tooltip>
           <Tooltip title={t('storyboardRow.deleteShot')}>
             <Button
               size="small"

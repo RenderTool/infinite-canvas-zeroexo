@@ -381,7 +381,7 @@ export default function AiTestPage() {
       children: (
         <Card
           size="small"
-          style={{ borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 'max(calc(100vh - 155px), 450px)' }}
+          style={{ borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: 'max(calc(100vh - 155px), 450px)' }}
           styles={{ body: { padding: 0, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }}
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

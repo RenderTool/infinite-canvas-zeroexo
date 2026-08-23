@@ -14,6 +14,7 @@
  */
 
 import { Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AssetsService } from '../assets/assets.service';
 import { AiGenerateService } from '../ai-generate/ai-generate.service';
@@ -33,6 +34,8 @@ export interface Tool {
 export interface ToolContext {
   projectId: string;
   userId: string;
+  /** 当前任务 ID（R2：Agent 创建的节点打 agentTaskId 烙印，供追溯/档案关联） */
+  taskId?: string;
   prisma: PrismaService;
   assetsService?: AssetsService;
   aiGenerateService?: AiGenerateService;
@@ -1466,7 +1469,7 @@ function commonTools(ctx: ToolContext): Tool[] {
  * 这些工具不直接写 DB(数据层仍走 save_* 工具),只负责把已保存的数据在画布上呈现。
  */
 export interface CanvasOp {
-  op: 'add_node' | 'add_edge' | 'update_node' | 'remove_node' | 'set_selection' | 'focus' | 'workflow_chain';
+  op: 'add_node' | 'add_edge' | 'update_node' | 'remove_node' | 'set_selection' | 'focus' | 'workflow_chain' | 'set_config' | 'start_storyboard_generate';
   args: Record<string, unknown>;
 }
 
@@ -1496,7 +1499,8 @@ function canvasGetState(ctx: ToolContext): Tool {
   return {
     name: 'canvas_get_state',
     description:
-      '读取当前项目画布关联的分镜/主体数据摘要,返回节点类型与内容概要,供 Agent 了解画布布局(快照摘要,不返回完整数据)',
+      '读取当前项目画布的真实状态：节点图（scene，含 id/类型/标题/内容概要）+ 分镜/主体数据统计。' +
+      '仅当任务涉及画布内容时调用；返回的节点 id 是后续画布操作的唯一依据，禁止凭记忆猜节点',
     parameters: {
       type: 'object',
       properties: {},
@@ -1504,34 +1508,86 @@ function canvasGetState(ctx: ToolContext): Tool {
     execute: async (_args: any) => {
       const project = await ctx.prisma.project.findUnique({
         where: { id: ctx.projectId },
-        select: { storyboard: true },
+        select: { scene: true, connections: true, storyboard: true },
       });
-      const st = (project?.storyboard as any) ?? {};
-      const episodes = Array.isArray(st.episodes) ? st.episodes : [];
-      const entities = st.entities ?? {};
+
+      // 1. 画布节点图（真实画布内容的事实源，Plan#36 R2 返工：此前只读 storyboard 导致对节点"睁眼瞎"）
+      const scene = Array.isArray(project?.scene) ? (project?.scene as Array<Record<string, unknown>>) : [];
+      const connections = Array.isArray(project?.connections) ? (project?.connections as unknown[]) : [];
+      const NODE_LIMIT = 40;
+      const nodes = scene.slice(0, NODE_LIMIT).map((n) => {
+        const type = typeof n?.type === 'string' ? n.type : 'unknown';
+        const data = (n?.data ?? {}) as Record<string, unknown>;
+        const base: Record<string, unknown> = { id: n?.id, type };
+        // R2：坐标（四舍五入）+ 摘要 + Agent 生成烙印，不返回完整数据（控 token）
+        const pos = n?.position as { x?: number; y?: number } | undefined;
+        if (pos && typeof pos.x === 'number') {
+          base.position = { x: Math.round(pos.x), y: Math.round(pos.y ?? 0) };
+        }
+        const title =
+          typeof n?.title === 'string' && n.title
+            ? n.title
+            : typeof data.title === 'string' && data.title
+              ? data.title
+              : undefined;
+        if (title) base.title = title;
+        if (typeof data.agentTaskId === 'string') base.agentTaskId = data.agentTaskId;
+        if (type === 'script' || type === 'text') {
+          const content = typeof data.content === 'string' ? data.content : '';
+          if (content) base.contentPreview = `${content.slice(0, 60)}…（共 ${content.length} 字）`;
+        } else if (type === 'storyboard') {
+          if (Array.isArray(data.shots)) base.shotCount = data.shots.length;
+        } else if (type === 'production-manager') {
+          base.itemCount = Array.isArray(data.items) ? data.items.length : 0;
+        } else if (type === 'image' || type === 'video' || type === 'audio') {
+          base.hasContent = Boolean(data.content || data.storageKey || data.status === 'done');
+        } else if (type === 'generator') {
+          if (typeof data.prompt === 'string' && data.prompt) base.promptPreview = data.prompt.slice(0, 40);
+        }
+        return base;
+      });
+
+      // 2. 分镜数据层统计（storyboard_assistant 写入的结构化数据）
+      const st = (project?.storyboard as Record<string, unknown> | null) ?? {};
+      const episodes = Array.isArray(st.episodes) ? (st.episodes as Array<Record<string, unknown>>) : [];
+      const entities = (st.entities ?? {}) as Record<string, unknown>;
       const charCount = Array.isArray(entities.characters) ? entities.characters.length : 0;
       const shotCount = episodes.reduce(
-        (sum: number, ep: any) => sum + (Array.isArray(ep.shots) ? ep.shots.length : 0),
+        (sum: number, ep) => sum + (Array.isArray(ep.shots) ? ep.shots.length : 0),
         0,
       );
+
+      const empty = nodes.length === 0 && episodes.length === 0;
       return {
         ok: true,
         summary: {
-          episodeCount: episodes.length,
-          shotCount,
-          characterCount: charCount,
-          entities: {
-            characters: Array.isArray(entities.characters) ? entities.characters.map((c: any) => c?.name) : [],
-            scenes: Array.isArray(entities.scenes) ? entities.scenes.map((s: any) => s?.name) : [],
+          nodeCount: scene.length,
+          edgeCount: connections.length,
+          nodes,
+          truncated: scene.length > NODE_LIMIT,
+          storyboard: {
+            episodeCount: episodes.length,
+            shotCount,
+            characterCount: charCount,
+            entities: {
+              characters: Array.isArray(entities.characters)
+                ? entities.characters.map((c) => (c as Record<string, unknown>)?.name)
+                : [],
+              scenes: Array.isArray(entities.scenes)
+                ? entities.scenes.map((s) => (s as Record<string, unknown>)?.name)
+                : [],
+            },
           },
         },
-        message: '画布状态摘要已生成',
+        message: empty
+          ? '画布确实为空（无节点、无分镜数据）'
+          : `画布状态已读取：${scene.length} 个节点、${connections.length} 条连线`,
       };
     },
   };
 }
 
-function canvasAddNode(): Tool {
+function canvasAddNode(ctx: ToolContext): Tool {
   return {
     name: 'canvas_add_node',
     description:
@@ -1547,11 +1603,17 @@ function canvasAddNode(): Tool {
       },
       required: ['id', 'type'],
     },
-    execute: async (args: any) => ({
-      ok: true,
-      message: '已请求创建画布节点',
-      canvasOps: [{ op: 'add_node', args }] as CanvasOp[],
-    }),
+    execute: async (args: any) => {
+      // R2：Agent 创建的节点打任务烙印（agentTaskId），画布状态摘要/档案库可追溯
+
+      const data = args && typeof args.data === 'object' && args.data !== null ? { ...args.data } : {};
+      if (ctx.taskId) data.agentTaskId = ctx.taskId;
+      return {
+        ok: true,
+        message: '已请求创建画布节点',
+        canvasOps: [{ op: 'add_node', args: { ...args, data } }] as CanvasOp[],
+      };
+    },
   };
 }
 
@@ -1654,18 +1716,440 @@ function canvasFocus(): Tool {
   };
 }
 
-/** 画布工具组(挂到 storyboard_assistant / canvas_agent) */
 function canvasTools(ctx: ToolContext): Tool[] {
   return [
     canvasGetState(ctx),
-    canvasAddNode(),
+    canvasAddNode(ctx),
     canvasAddEdge(),
     canvasUpdateNode(),
     canvasRemoveNode(),
     canvasSetSelection(),
     canvasFocus(),
     workflowGenerate(),
+    // R2：全节点读写契约工具（读单节点 / 分镜加镜头）
+    readNode(ctx),
+    storyboardAddShot(ctx),
   ];
+}
+
+/**
+ * read_node - 读单节点全量数据（R2：节点读写契约的读端）
+ * 修改任何节点内容前必须先读，禁止凭摘要猜字段。
+ */
+function readNode(ctx: ToolContext): Tool {
+  return {
+    name: 'read_node',
+    description:
+      '按 id 读取单个画布节点的完整数据（返回 type/title/position/data，超长截断）。修改节点内容前必须先调用本工具，禁止凭 canvas_get_state 摘要猜字段。',
+    parameters: {
+      type: 'object',
+      properties: {
+        nodeId: { type: 'string', description: '节点 id（来自 canvas_get_state 摘要）' },
+      },
+      required: ['nodeId'],
+    },
+    execute: async (args: any) => {
+      const nodeId = String(args.nodeId ?? '');
+      if (!nodeId) return { ok: false, errorMessage: '缺少 nodeId' };
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: ctx.projectId },
+        select: { scene: true },
+      });
+      const scene = Array.isArray(project?.scene) ? (project?.scene as Array<Record<string, unknown>>) : [];
+      const node = scene.find((n) => n?.id === nodeId);
+      if (!node) {
+        return { ok: false, errorMessage: `节点不存在: ${nodeId}（先用 canvas_get_state 获取真实 id）` };
+      }
+      const dataStr = JSON.stringify(node.data ?? {});
+      const truncated = dataStr.length > 1500;
+      return {
+        ok: true,
+        node: {
+          id: node.id,
+          type: node.type,
+          title: node.title,
+          position: node.position,
+          data: truncated ? `${dataStr.slice(0, 1500)}…（共 ${dataStr.length} 字符已截断，请分块处理）` : node.data,
+        },
+      };
+    },
+  };
+}
+
+/**
+ * storyboard_add_shot - 向分镜节点追加单镜头（R2：分镜写端契约）
+ * 直接写库 + 发 update_node 同步前端；自动编号；批量生成请用 create_storyboard。
+ */
+function storyboardAddShot(ctx: ToolContext): Tool {
+  return {
+    name: 'storyboard_add_shot',
+    description:
+      '向指定分镜节点追加一个镜头（自动编号，直接写入节点 data.shots）。适用于新增/补录单镜头；整批生成请用 create_storyboard。nodeId 来自 canvas_get_state，写入前建议先 read_node 确认。',
+    parameters: {
+      type: 'object',
+      properties: {
+        nodeId: { type: 'string', description: '分镜节点 id' },
+        description: { type: 'string', description: '镜头画面描述（必填）' },
+        shotType: { type: 'string', description: '景别（如 特写/近景/中景/全景）' },
+        cameraMovement: { type: 'string', description: '运镜（如 推/拉/摇/移/固定）' },
+        dialogue: { type: 'string', description: '对白（可选）' },
+        duration: { type: 'number', description: '时长秒（默认 5）' },
+      },
+      required: ['nodeId', 'description'],
+    },
+    execute: async (args: any) => {
+      const nodeId = String(args.nodeId ?? '');
+      const description = String(args.description ?? '').trim();
+      if (!nodeId || !description) return { ok: false, errorMessage: 'nodeId 与 description 必填' };
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: ctx.projectId },
+        select: { scene: true },
+      });
+      const scene = Array.isArray(project?.scene) ? [...(project?.scene as Array<Record<string, unknown>>)] : [];
+      const idx = scene.findIndex((n) => n?.id === nodeId);
+      if (idx < 0) return { ok: false, errorMessage: `分镜节点不存在: ${nodeId}（先用 canvas_get_state 获取真实 id）` };
+      const node = scene[idx]!;
+      if (node.type !== 'storyboard') return { ok: false, errorMessage: `节点 ${nodeId} 不是分镜节点（实际类型 ${node.type}）` };
+      const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+      const shots = Array.isArray(data.shots) ? [...(data.shots as Array<Record<string, unknown>>)] : [];
+      const shot = {
+        id: `shot_${Date.now()}_${shots.length + 1}`,
+        number: shots.length + 1,
+        sceneId: typeof args.sceneId === 'string' ? args.sceneId : '',
+        dayNight: typeof args.dayNight === 'string' ? args.dayNight : '',
+        duration: typeof args.duration === 'number' ? args.duration : 5,
+        description,
+        shotType: typeof args.shotType === 'string' ? args.shotType : '',
+        cameraMovement: typeof args.cameraMovement === 'string' ? args.cameraMovement : '',
+        dialogue: typeof args.dialogue === 'string' ? args.dialogue : '',
+        images: [],
+        entities: [],
+      };
+      shots.push(shot);
+      data.shots = shots;
+      scene[idx] = { ...node, data };
+      await ctx.prisma.project.update({
+        where: { id: ctx.projectId },
+        data: { scene: scene as unknown as Prisma.InputJsonValue },
+      });
+      return {
+        ok: true,
+        message: `已添加第 ${shot.number} 个镜头（当前共 ${shots.length} 镜）`,
+        shotId: shot.id,
+        canvasOps: [{ op: 'update_node', args: { id: nodeId, patch: { data: { shots } } } }] as CanvasOp[],
+      };
+    },
+  };
+}
+
+// ============================================================================
+// 全节点生成工具组（Plan#36 R2-3，canvas_agent 专属）
+// ============================================================================
+
+/**
+ * create_script - 生成剧本并落画布节点（R2-3）
+ *
+ * 剧本内容由 LLM 基于用户素材创作（无素材时先用对话/request_upload 收集，禁止脑补），
+ * 本工具负责：写入 project.script + 返回 add_node canvasOps 在画布创建剧本节点。
+ */
+function createScriptNode(ctx: ToolContext): Tool {
+  return {
+    name: 'create_script',
+    description:
+      '将创作好的剧本内容保存为项目剧本并在画布创建剧本节点。调用前提：已拿到用户提供的故事素材（对话/上传/画布引用）；素材缺失时禁止调用，先用对话或 request_upload 收集。content 为剧本文本，title 为剧本标题（可选）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: '剧本文本内容（完整创作结果）' },
+        title: { type: 'string', description: '剧本节点标题（可选）' },
+        nodeId: { type: 'string', description: '节点 id（可选，缺省由前端生成）' },
+      },
+      required: ['content'],
+    },
+    execute: async (args: any) => {
+      const content = String(args.content ?? '').trim();
+      if (!content) return { ok: false, errorMessage: '剧本内容(content)不能为空' };
+      if (content.length > 200000) return { ok: false, errorMessage: '剧本内容超长(>20万字)，请分步处理' };
+      try {
+        await ctx.prisma.project.update({
+          where: { id: ctx.projectId },
+          data: { script: { content, updatedAt: new Date().toISOString() } },
+        });
+      } catch (err) {
+        toolLogger.warn(`create_script 保存失败: ${(err as Error).message}`);
+        return { ok: false, errorMessage: '剧本保存失败' };
+      }
+      return {
+        ok: true,
+        message: '剧本已保存并请求创建画布节点',
+        summary: { charCount: content.length, preview: content.slice(0, 80) },
+        canvasOps: [
+          {
+            op: 'add_node',
+            args: {
+              id: args.nodeId ? String(args.nodeId) : undefined,
+              type: 'script',
+              title: args.title ? String(args.title) : undefined,
+              // R3-D3: 剧本节点同样打 agentTaskId 烙印（删除调皮回应可识别）
+              data: { content, ...(ctx.taskId ? { agentTaskId: ctx.taskId } : {}) },
+            },
+          },
+        ] as CanvasOp[],
+      };
+    },
+  };
+}
+
+/**
+ * create_storyboard - 创建分镜节点并触发分镜生成链路（R2-3）
+ *
+ * 复用既有 storyboard_generate 编排（分块/防幻觉/实体提取）：本工具只准备（建节点），
+ * 实际生成由前端收到 start_storyboard_generate canvasOp 后走既有生成入口（保留骨架/进度/确认全套 UX）。
+ * 无剧本时先走 create_script。
+ */
+function createStoryboardNode(ctx: ToolContext): Tool {
+  return {
+    name: 'create_storyboard',
+    description:
+      '为画布创建分镜节点并触发分镜生成链路（复用既有分块编排/防幻觉机制）。调用前提：项目已有剧本（先 canvas_get_state / read_script 确认；无则先 create_script）。本工具只创建节点并发起生成，不直接产出镜头数据。',
+    parameters: {
+      type: 'object',
+      properties: {
+        scriptNodeId: { type: 'string', description: '画布上剧本节点 id（可选，用于连线）' },
+        nodeId: { type: 'string', description: '分镜节点 id（可选，缺省由前端生成）' },
+        title: { type: 'string', description: '分镜节点标题（可选）' },
+      },
+    },
+    execute: async (args: any) => {
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: ctx.projectId },
+        select: { script: true },
+      });
+      const script = project?.script as { content?: string } | null;
+      if (!script?.content) {
+        return {
+          ok: false,
+          errorMessage: '项目还没有剧本，无法生成分镜。请先用 create_script 创建剧本（素材不足时先向用户收集）。',
+        };
+      }
+      return {
+        ok: true,
+        message: '分镜节点创建请求已下发，前端将走既有分镜生成链路',
+        canvasOps: [
+          {
+            op: 'add_node',
+            args: {
+              id: args.nodeId ? String(args.nodeId) : undefined,
+              type: 'storyboard',
+              title: args.title ? String(args.title) : undefined,
+              // R3-D3: 分镜节点同样打 agentTaskId 烙印（删除调皮回应可识别）
+              data: ctx.taskId ? { agentTaskId: ctx.taskId } : undefined,
+            },
+          },
+          {
+            op: 'start_storyboard_generate',
+            args: {
+              storyboardNodeId: args.nodeId ? String(args.nodeId) : undefined,
+              scriptNodeId: args.scriptNodeId ? String(args.scriptNodeId) : undefined,
+            },
+          },
+        ] as CanvasOp[],
+      };
+    },
+  };
+}
+
+/**
+ * canvas_set_config - 修改画布配置（主题色/节点样式等，R2-3）
+ *
+ * 字段白名单严格对齐前端 DEFAULT_CANVAS_CONFIG 契约（经验 #29）；
+ * 白名单外字段直接拒绝，防止 Agent 污染未受控配置。
+ */
+function canvasSetConfig(): Tool {
+  const WHITELIST = [
+    'nodeBorderRadius', 'nodeOutlineWidth',
+    'groupBackground', 'groupBorderRadius', 'groupOutlineWidth',
+    'groupOutlineColor', 'groupOutlineType', 'groupOutlineOffset', 'groupOpacity',
+    'pinColor', 'pinShape', 'pinSize', 'pinOpacity',
+  ];
+  return {
+    name: 'canvas_set_config',
+    description:
+      '修改画布配置（用户说"调整主题色/改节点圆角/换连线样式"等时调用）。只接受白名单字段：' +
+      WHITELIST.join('/') + '。返回 set_config canvasOps 由前端应用到画布配置。',
+    parameters: {
+      type: 'object',
+      properties: {
+        patch: {
+          type: 'object',
+          description: `要修改的配置字段（仅白名单：${WHITELIST.join('/')}），如 {pinColor:"#e94560"}`,
+        },
+      },
+      required: ['patch'],
+    },
+    execute: async (args: any) => {
+      const patch = args.patch && typeof args.patch === 'object' ? args.patch : {};
+      const keys = Object.keys(patch);
+      if (keys.length === 0) return { ok: false, errorMessage: 'patch 为空' };
+      const invalid = keys.filter((k) => !WHITELIST.includes(k));
+      if (invalid.length > 0) {
+        return { ok: false, errorMessage: `字段不在白名单: ${invalid.join(',')}（可修改: ${WHITELIST.join('/')}）` };
+      }
+      return {
+        ok: true,
+        message: `已请求修改画布配置: ${keys.join(',')}`,
+        canvasOps: [{ op: 'set_config', args: { patch } }] as CanvasOp[],
+      };
+    },
+  };
+}
+
+/**
+ * read_content_chunked - 超长内容分块定位读取（R2-5，追问"某集要改"场景）
+ *
+ * 禁止全量注入上下文（对齐分块防幻觉铁律，经验 #32）：
+ * 按集/章节定位 + 关键词过滤 + 长度截断，只返回目标片段与结构目录。
+ */
+function readContentChunked(ctx: ToolContext): Tool {
+  const MAX_CHARS = 6000;
+  return {
+    name: 'read_content_chunked',
+    description:
+      '分块定位读取超长剧本/分镜内容（用户追问"第 x 集/某章节要改"时使用）。' +
+      '返回：全篇结构目录(episodes/chapters) + 定位到的片段内容（截断保护）。' +
+      '禁止用 read_script 全量读取超长内容后再分析。',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', enum: ['script', 'storyboard'], description: '读取目标：剧本 / 分镜' },
+        episode: { type: 'number', description: '集数（1 基，可选）' },
+        keyword: { type: 'string', description: '章节/内容关键词（可选，与 episode 二选一定位）' },
+      },
+      required: ['source'],
+    },
+    execute: async (args: any) => {
+      const source = String(args.source ?? 'script');
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: ctx.projectId },
+        select: { script: true, storyboard: true },
+      });
+
+      if (source === 'storyboard') {
+        const st = (project?.storyboard as any) ?? {};
+        const episodes = Array.isArray(st.episodes) ? st.episodes : [];
+        const toc = episodes.map((ep: any, i: number) => ({
+          episode: ep.episodeNumber ?? i + 1,
+          title: ep.title ?? '',
+          shotCount: Array.isArray(ep.shots) ? ep.shots.length : 0,
+        }));
+        let target: any = null;
+        if (typeof args.episode === 'number') {
+          target = episodes.find((ep: any, i: number) => (ep.episodeNumber ?? i + 1) === args.episode) ?? null;
+        } else if (args.keyword) {
+          const kw = String(args.keyword);
+          target = episodes.find((ep: any) => JSON.stringify(ep).includes(kw)) ?? null;
+        }
+        if (!target) {
+          return { ok: true, toc, chunk: null, message: '未定位到目标集，请根据目录调整 episode/keyword' };
+        }
+        const raw = JSON.stringify(target);
+        return {
+          ok: true,
+          toc,
+          chunk: raw.length > MAX_CHARS ? `${raw.slice(0, MAX_CHARS)}\n…[已截断，共 ${raw.length} 字符]` : raw,
+          truncated: raw.length > MAX_CHARS,
+        };
+      }
+
+      // script
+      const script = (project?.script as any) ?? null;
+      const content = typeof script === 'string' ? script : script?.content ? String(script.content) : '';
+      if (!content) return { ok: false, errorMessage: '项目暂无剧本内容' };
+      const chapters = content.split(/\n(?=第[\d一二三四五六七八九十百]+[集章回])/).filter(Boolean);
+      const toc = chapters.map((c, i) => ({ index: i + 1, head: c.slice(0, 30).replace(/\n/g, ' ') }));
+      let chunk = '';
+      if (typeof args.episode === 'number') {
+        chunk = chapters[args.episode - 1] ?? '';
+      } else if (args.keyword) {
+        const kw = String(args.keyword);
+        const hit = chapters.find((c) => c.includes(kw));
+        chunk = hit ?? '';
+        if (!hit) {
+          const idx = content.indexOf(kw);
+          if (idx >= 0) chunk = content.slice(Math.max(0, idx - 500), idx + MAX_CHARS - 500);
+        }
+      } else {
+        chunk = content.slice(0, MAX_CHARS);
+      }
+      return {
+        ok: true,
+        toc,
+        totalChars: content.length,
+        chunk: chunk.length > MAX_CHARS ? `${chunk.slice(0, MAX_CHARS)}\n…[已截断]` : chunk,
+        truncated: chunk.length > MAX_CHARS,
+      };
+    },
+  };
+}
+
+/**
+ * read_asset_content - 读取资产库文本资产内容（R3-A1 附件落库三档分流：M/L 档按需分段读取）
+ *
+ * 用户附件发送时前端自动落库到资产库（Asset.text 字段，纯元数据资产无存储文件）。
+ * 附件 >6000 字时 AI 必须用本工具分段读取完整内容，禁止要求用户重新粘贴。
+ */
+function readAssetContent(ctx: ToolContext): Tool {
+  const MAX_CHARS = 6000;
+  return {
+    name: 'read_asset_content',
+    description:
+      '分块读取资产库中的文本资产内容（用户附件落库后按需读取）。' +
+      '返回：全文结构目录(toc，按 第x集/章 切分) + 指定片段（默认前 6000 字）。' +
+      '附件预览超过 6000 字时必须用本工具分段读取完整内容，禁止要求用户重新粘贴。',
+    parameters: {
+      type: 'object',
+      properties: {
+        assetId: { type: 'string', description: '资产 ID（附件清单 [附件清单:...] 中的 assetId）' },
+        offset: { type: 'number', description: '起始字符偏移（默认 0；每段建议 6000 字）' },
+        keyword: { type: 'string', description: '内容关键词（可选，定位包含该词的片段）' },
+      },
+      required: ['assetId'],
+    },
+    execute: async (args: any) => {
+      const assetId = String(args.assetId ?? '');
+      if (!assetId) return { ok: false, errorMessage: '缺少 assetId' };
+      const asset = await ctx.prisma.asset.findFirst({ where: { id: assetId, ownerId: ctx.userId } });
+      if (!asset) return { ok: false, errorMessage: '资产不存在或无权访问' };
+      if (asset.kind !== 'text' && asset.kind !== 'script') {
+        return { ok: false, errorMessage: '该资产不是文本类资产' };
+      }
+      const content = asset.text ?? '';
+      if (!content) return { ok: false, errorMessage: '资产内容为空' };
+      // 结构目录：按 第x集/章 切分（与 read_content_chunked 同款规则）
+      const chapters = content.split(/\n(?=第[\d一二三四五六七八九十百]+[集章回])/).filter(Boolean);
+      const toc = chapters.map((c, i) => ({ index: i + 1, head: c.slice(0, 30).replace(/\n/g, ' ') }));
+      let chunk = '';
+      if (typeof args.offset === 'number' && args.offset > 0) {
+        chunk = content.slice(args.offset, args.offset + MAX_CHARS);
+      } else if (args.keyword) {
+        const kw = String(args.keyword);
+        const idx = content.indexOf(kw);
+        chunk = idx >= 0 ? content.slice(Math.max(0, idx - 500), idx + MAX_CHARS - 500) : '';
+      } else {
+        chunk = content.slice(0, MAX_CHARS);
+      }
+      return {
+        ok: true,
+        assetId: asset.id,
+        filename: asset.filename,
+        totalChars: content.length,
+        toc,
+        offset: typeof args.offset === 'number' && args.offset > 0 ? args.offset : 0,
+        chunk: chunk.length > MAX_CHARS ? `${chunk.slice(0, MAX_CHARS)}\n…[已截断]` : chunk,
+        truncated: content.length > MAX_CHARS,
+      };
+    },
+  };
 }
 
 // ============================================================================
@@ -1765,6 +2249,102 @@ function workflowGenerate(): Tool {
           productTitle: chain.productTitle,
         },
         canvasOps: [{ op: 'workflow_chain', args: chain }] as unknown as CanvasOp[],
+      };
+    },
+  };
+}
+
+/**
+ * artifact_library - 生成产物档案库（Plan#36 R2-4，图书馆式）
+ *
+ * 每次具体生成（剧本/分镜/图/视频/文本）由 worker 自动归档；本工具供 Agent：
+ * - search:   按关键词/类型检索归档（项目维度，支持跨会话引用）
+ * - detail:   读取完整生成信息（输入摘要/参数/产物快照）
+ * - restore:  恢复产物到画布（重建节点+写回内容，节点被删也能恢复）
+ * - reproduce:以同参数复现（返回参数供对应生成工具重跑）
+ * 档案与会话消息分离存储，不进对话历史注入，不污染 Agent 上下文。
+ */
+function artifactLibrary(ctx: ToolContext): Tool {
+  const ACTIONS = ['search', 'detail', 'restore', 'reproduce'];
+  return {
+    name: 'artifact_library',
+    description:
+      '生成产物档案库（图书馆式）：用户提及历史产物（"之前生成的那个剧本/图…"）时必须先用 search 查阅再回答/恢复，支持跨会话。' +
+      'search 按关键词/类型检索；detail 读取完整生成信息；restore 恢复产物到画布（节点被删也能恢复）；reproduce 以同参数复现。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ACTIONS, description: '操作类型' },
+        artifactId: { type: 'string', description: '档案 id（detail/restore/reproduce 必填）' },
+        keyword: { type: 'string', description: '检索关键词（search 可选，匹配输入摘要/产物摘要）' },
+        nodeType: { type: 'string', description: '产物类型过滤（search 可选：script/storyboard/image/video/audio/text）' },
+      },
+      required: ['action'],
+    },
+    execute: async (args: any) => {
+      const action = String(args.action ?? '');
+      if (!ACTIONS.includes(action)) {
+        return { ok: false, errorMessage: `action 不合法: ${action}，可选 ${ACTIONS.join('/')}` };
+      }
+
+      if (action === 'search') {
+        const keyword = args.keyword ? String(args.keyword) : '';
+        const items = await ctx.prisma.agentArtifact.findMany({
+          where: {
+            projectId: ctx.projectId,
+            ...(args.nodeType ? { nodeType: String(args.nodeType) } : {}),
+            ...(keyword
+              ? {
+                  OR: [
+                    { inputSummary: { contains: keyword, mode: 'insensitive' } },
+                    { summary: { contains: keyword, mode: 'insensitive' } },
+                  ],
+                }
+              : {}),
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, nodeType: true, toolName: true, summary: true, nodeId: true, createdAt: true },
+        });
+        return { ok: true, count: items.length, items, message: items.length === 0 ? '档案库无匹配记录' : '检索完成' };
+      }
+
+      const artifactId = String(args.artifactId ?? '');
+      if (!artifactId) return { ok: false, errorMessage: `${action} 需要 artifactId` };
+      const record = await ctx.prisma.agentArtifact.findFirst({
+        where: { id: artifactId, projectId: ctx.projectId },
+      });
+      if (!record) return { ok: false, errorMessage: `档案不存在或不属于当前项目: ${artifactId}` };
+
+      if (action === 'detail') {
+        return { ok: true, artifact: record };
+      }
+
+      if (action === 'restore') {
+        // 重建节点：文本类写回内容快照；其他类型携带参数重建，由前端落位（视口中心契约）
+        const data: Record<string, unknown> = {};
+        if (record.content) data.content = record.content;
+        if (record.params && typeof record.params === 'object') {
+          const p = record.params as Record<string, unknown>;
+          if (p.prompt) data.prompt = p.prompt;
+          if (p.generatorParams) data.generatorParams = p.generatorParams;
+        }
+        // R3-D3: 档案恢复的节点也打烙印（删除调皮回应可识别）
+        if (ctx.taskId) data.agentTaskId = ctx.taskId;
+        return {
+          ok: true,
+          message: `已请求恢复 ${record.nodeType} 产物到画布`,
+          canvasOps: [
+            { op: 'add_node', args: { type: record.nodeType, title: record.summary.slice(0, 40), data } },
+          ] as CanvasOp[],
+        };
+      }
+
+      // reproduce
+      return {
+        ok: true,
+        message: '复现参数已就绪：请用对应生成工具（create_script/create_storyboard/workflow_generate）以相同参数重新执行',
+        artifact: { id: record.id, nodeType: record.nodeType, toolName: record.toolName, params: record.params, inputSummary: record.inputSummary },
       };
     },
   };
@@ -1946,10 +2526,13 @@ export function createToolsForAgentType(
   assetsService?: AssetsService,
   aiGenerateService?: AiGenerateService,
   skillService?: AgentSkillService,
+  /** R2：当前任务 ID（Agent 建节点打 agentTaskId 烙印） */
+  taskId?: string,
 ): Tool[] {
   const ctx: ToolContext = {
     projectId,
     userId,
+    taskId,
     prisma,
     assetsService,
     aiGenerateService,
@@ -1970,7 +2553,18 @@ export function createToolsForAgentType(
       toolLogger.warn(`canvas_agent 缺少 AgentSkillService 注入,agent_self_upgrade 工具将不可用`);
     }
     const upgradeTools = skillService ? [agentSelfUpgrade(ctx, skillService)] : [];
-    return [...canvasTools(ctx), ...commonTools(ctx), ...upgradeTools];
+    return [
+      ...canvasTools(ctx),
+      ...commonTools(ctx),
+      // R2-3/R2-5: 全节点生成 + 配置修改 + 超长内容分块读取
+      createScriptNode(ctx),
+      createStoryboardNode(ctx),
+      canvasSetConfig(),
+      readContentChunked(ctx),
+      readAssetContent(ctx),
+      artifactLibrary(ctx),
+      ...upgradeTools,
+    ];
   }
 
   const legacy = legacyToolFactories[agentType];

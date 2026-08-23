@@ -15,6 +15,8 @@ export function StepBlock(props: { message: CanvasAgentMessage }): React.ReactEl
   const { message } = props;
   const step = message.step;
   const [submitted, setSubmitted] = useState(false);
+  /** 用户备注（R2-5：noteEnabled 时随回执上送） */
+  const [note, setNote] = useState('');
 
   if (!step) return <></>;
   const canSkip = !(step.required ?? false);
@@ -24,7 +26,8 @@ export function StepBlock(props: { message: CanvasAgentMessage }): React.ReactEl
   const submit = (value: string) => {
     if (submitted) return;
     setSubmitted(true);
-    void sendAnswer(value);
+    const trimmedNote = note.trim();
+    void sendAnswer(trimmedNote ? `${value}｜备注: ${trimmedNote}` : value);
   };
 
   return (
@@ -153,6 +156,31 @@ export function StepBlock(props: { message: CanvasAgentMessage }): React.ReactEl
               {s.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* 用户备注（R2-5 noteEnabled） */}
+      {step.noteEnabled && !submitted && (
+        <div style={{ marginBottom: 8 }}>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="补充备注（可选，如偏好/特殊要求）"
+            className="agent-form-input"
+            style={{
+              width: '100%',
+              padding: '7px 11px',
+              borderRadius: 7,
+              background: 'var(--agent-surface)',
+              border: '1.5px solid var(--agent-border)',
+              color: 'var(--agent-text)',
+              fontSize: 12.5,
+              fontFamily: 'inherit',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
         </div>
       )}
 

@@ -12,6 +12,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { notFound } from '../../common/errors/app-exception.js';
 import { MemoryCompactorService } from './memory-compactor.service';
+import type { ChatMessage } from './agent-executor';
+
+/** 历史注入保留的最近文本轮数（Plan#36 R2-1，与 MemoryCompactor 预算对齐） */
+const HISTORY_MAX_TURNS = 20;
 
 @Injectable()
 export class AgentConversationService {
@@ -121,6 +125,49 @@ export class AgentConversationService {
       await this.compactor.compactConversation(conversationId);
     } catch (err) {
       this.logger.warn(`记忆压缩失败: ${conversationId}`, (err as Error).message);
+    }
+  }
+
+  /**
+   * 构建 LLM 会话历史（Plan#36 R2-1 记忆链路，根治上下文遗忘）：
+   * - memory_compact 摘要（role=system）→ 转为带标注的 user 消息，裁剪时始终保留（靠旧历史换取）
+   * - 带 toolName 的工具调用通知消息跳过（避免 tool_calls/tool 消息对断裂触发严格渠道校验）
+   * - 排除当前任务自身已落库的用户消息（excludeTaskId），避免与 execute 输入重复
+   * - 最近 HISTORY_MAX_TURNS 条文本轮 + 全部摘要；失败不阻断任务（返回空历史）
+   */
+  async buildLlmHistory(
+    conversationId: string | null | undefined,
+    excludeTaskId?: string,
+  ): Promise<ChatMessage[]> {
+    if (!conversationId) return [];
+    try {
+      const rows = await this.prisma.agentMessage.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        select: { role: true, content: true, toolName: true, taskId: true },
+      });
+      const summaries: ChatMessage[] = [];
+      const turns: ChatMessage[] = [];
+      for (const row of rows) {
+        if (excludeTaskId && row.taskId === excludeTaskId) continue;
+        if (row.role === 'system' && row.toolName === 'memory_compact') {
+          summaries.push({
+            role: 'user',
+            content: `[系统备注：以下是更早对话历史的摘要，作为既有上下文参考]\n${row.content}`,
+          });
+          continue;
+        }
+        if (row.toolName) continue; // 工具调用通知不入历史（防 OpenAI 严格校验断裂）
+        if (row.role === 'user') {
+          turns.push({ role: 'user', content: row.content });
+        } else if (row.role === 'assistant' && row.content) {
+          turns.push({ role: 'assistant', content: row.content });
+        }
+      }
+      return [...summaries, ...turns.slice(-HISTORY_MAX_TURNS)];
+    } catch (err) {
+      this.logger.warn(`会话历史加载失败: ${conversationId}`, (err as Error).message);
+      return [];
     }
   }
 }

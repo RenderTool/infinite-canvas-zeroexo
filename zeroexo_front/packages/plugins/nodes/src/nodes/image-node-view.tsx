@@ -161,6 +161,7 @@ export function ImageNodeView({
           replaceBtnPosition="left"
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
+          skeleton="media"
         >
           <div
             style={{ ...mediaContainerStyle, background: 'transparent' }}
@@ -218,6 +219,7 @@ export function ImageNodeView({
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
+        skeleton="media"
       >
         <div
           style={{ ...mediaContainerStyle, background: 'transparent' }}

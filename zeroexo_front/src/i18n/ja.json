@@ -2088,6 +2088,8 @@
     "placeholderLighting": "光 · 雰囲気",
     "placeholderDialogue": "セリフ",
     "placeholderSfx": "効果音",
+    "copyShot": "この行をコピー（説明+プロンプト）",
+    "copied": "コピー済み",
     "deleteShot": "ショットを削除",
     "environment": "環境",
     "emotion": "感情",

@@ -817,6 +817,27 @@ model AgentMessage {
   @@index([taskId])
 }
 
+/// Agent 生成产物档案库（Plan#36 R2-4，图书馆式：生成即归档，可索引/可复现/可跨会话恢复）
+/// 独立于画布节点存在：节点被删档案保留可恢复，仅项目删除时由删除服务级联清理；不进对话历史注入，不污染 Agent 上下文
+model AgentArtifact {
+  id             String   @id @default(cuid())
+  userId         String
+  projectId      String
+  conversationId String?
+  taskId         String?
+  nodeType       String /// script | storyboard | image | video | audio | text | config
+  toolName       String /// 产出工具（create_script / workflow_generate / ...）
+  inputSummary   String /// 用户输入/任务描述摘要（检索用）
+  params         Json? /// 生成参数（提示词/生成器参数等，复现用）
+  nodeId         String? /// 产出时画布节点 ID（节点被删后仅供追溯）
+  content        String? /// 产物内容快照（文本类；媒体类存引用/描述）
+  summary        String /// 一句话摘要（检索/展示用）
+  createdAt      DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+}
+
 // ===== 计费系统 =====
 
 /// 用户积分账户 - 每个用户一条记录

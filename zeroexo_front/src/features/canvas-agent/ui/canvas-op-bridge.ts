@@ -20,6 +20,7 @@
 
 import type { CommandQueue, NodeRecord, NodeTypeExtension } from '@zeroexo/core';
 import { CanvasOpExecutor, type CanvasOp } from '@/pages/editor/editor-canvas/interactions/canvas-op-executor.js';
+import { showAgentCursor } from './agent-cursor.js';
 import {
   resolveWorkflowChainPosition,
   type Size2D,
@@ -75,6 +76,10 @@ export interface CanvasOpBridge {
   getStore(): CanvasOpStore | null;
   getContainerSize(): Size2D;
   getExtensions(): Map<string, NodeTypeExtension>;
+  /** 应用画布配置补丁（R2-3 set_config，白名单已在后端校验；未注入返回 false） */
+  applyCanvasConfig?: (patch: Record<string, unknown>) => boolean;
+  /** R3-A2：打开资产库弹窗（附件卡点击跳转；未注入返回 false） */
+  openAssetLibrary?: () => boolean;
 }
 
 /** 单条 Agent 画布操作(后端 CanvasOp 的松散形态) */
@@ -97,7 +102,33 @@ export function getCanvasOpBridge(): CanvasOpBridge | null {
 
 // ===== 工具 =====
 
-/** 生成不与现有节点冲突的 id(冲突时追加 -2/-3...) */
+/** R3-D1: Agent 操作后脉冲光标 + 聚焦高亮（世界→屏幕 = world*k+vp，对齐 CollabOverlay） */
+function pulseAgentCursor(
+  bridge: CanvasOpBridge,
+  opts: { nodeId?: string; bounds?: { x: number; y: number; width: number; height: number }; label: string },
+): void {
+  const store = bridge.getStore();
+  if (!store) return;
+  const vp = store.getViewport();
+  let bounds = opts.bounds ?? null;
+  let cx: number | null = null;
+  let cy: number | null = null;
+  if (opts.nodeId) {
+    const node = store.getNode(opts.nodeId);
+    if (node) {
+      const w = node.size?.width ?? 200;
+      const h = node.size?.height ?? 200;
+      bounds = { x: node.position.x, y: node.position.y, width: w, height: h };
+      cx = (node.position.x + w / 2) * vp.k + vp.x;
+      cy = (node.position.y + h / 2) * vp.k + vp.y;
+    }
+  } else if (bounds) {
+    cx = (bounds.x + bounds.width / 2) * vp.k + vp.x;
+    cy = (bounds.y + bounds.height / 2) * vp.k + vp.y;
+  }
+  if (cx == null || cy == null) return;
+  showAgentCursor({ x: cx, y: cy, bounds, label: opts.label, ts: Date.now() });
+}
 function uniqueId(base: string, existing: Set<string>): string {
   if (!existing.has(base)) return base;
   let i = 2;
@@ -116,10 +147,10 @@ function uniqueId(base: string, existing: Set<string>): string {
  *     由 NodeGenerateDock 三态语义承担生成器态——选中即显示吸附生成面板,连入副本作为参考素材
  * 落点: resolveWorkflowChainPosition(视口中心基准 + 避让),整体包围盒 focusOnBounds。
  */
-async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChainDefinitionLike): Promise<void> {
+async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChainDefinitionLike): Promise<{ x: number; y: number; width: number; height: number } | null> {
   const store = bridge.getStore();
   const queue = bridge.getCommandQueue();
-  if (!store || !queue) return;
+  if (!store || !queue) return null;
 
   const graph = store.getGraph();
   const extensions = bridge.getExtensions();
@@ -209,6 +240,7 @@ async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChain
   const executor = new CanvasOpExecutor(queue);
   await executor.executeOps(ops);
   store.focusOnBounds(positions.bounds, containerSize, 400, 51);
+  return positions.bounds;
 }
 
 // ===== 统一执行入口 =====
@@ -224,15 +256,18 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
   if (!store || !queue) return false;
 
   switch (op.op) {
-    case 'workflow_chain':
-      await executeWorkflowChain(bridge, op.args as unknown as WorkflowChainDefinitionLike);
+    case 'workflow_chain': {
+      const bounds = await executeWorkflowChain(bridge, op.args as unknown as WorkflowChainDefinitionLike);
+      if (bounds) pulseAgentCursor(bridge, { bounds, label: '工作链已就位' });
       return true;
+    }
 
     case 'set_selection': {
       const nodeIds = Array.isArray(op.args.nodeIds)
         ? (op.args.nodeIds as unknown[]).filter((x): x is string => typeof x === 'string')
         : [];
       store.setSelection({ selectedNodeIds: new Set(nodeIds), selectedEdgeIds: new Set() });
+      if (nodeIds[0]) pulseAgentCursor(bridge, { nodeId: nodeIds[0], label: '已选中' });
       return true;
     }
 
@@ -240,6 +275,8 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
       const id = typeof op.args.id === 'string' ? op.args.id : '';
       if (!id) return true;
       const node = store.getNode(id);
+      // R3-A2: 引用节点已被删除时不执行聚焦，返回 false 供调用方友好提示
+      if (!node) return false;
       store.focusOnNode(
         id,
         bridge.getContainerSize(),
@@ -248,12 +285,57 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
         400,
         51,
       );
+      pulseAgentCursor(bridge, { nodeId: id, label: '已定位' });
+      return true;
+    }
+
+    case 'open_assets': {
+      // R3-A2: 附件卡点击 → 打开资产库弹窗（editor-page 注入实现）
+      if (!bridge.openAssetLibrary) return false;
+      return bridge.openAssetLibrary();
+    }
+
+    case 'set_config': {
+      // R2-3: 画布配置修改（主题色等），白名单后端已校验；未注入时回退文本展示
+      const patch = (op.args.patch ?? {}) as Record<string, unknown>;
+      if (!bridge.applyCanvasConfig) return false;
+      return bridge.applyCanvasConfig(patch);
+    }
+
+    case 'start_storyboard_generate': {
+      // R2-3: 分镜节点已由前序 add_node 创建；此处选中+聚焦引导用户在节点上启动既有生成链路
+      const sbNodeId = typeof op.args.storyboardNodeId === 'string' ? op.args.storyboardNodeId : '';
+      if (sbNodeId) {
+        const sbNode = store.getNode(sbNodeId);
+        if (sbNode) {
+          store.setSelection({ selectedNodeIds: new Set([sbNodeId]), selectedEdgeIds: new Set() });
+          store.focusOnNode(
+            sbNodeId,
+            bridge.getContainerSize(),
+            sbNode.size?.width ?? 200,
+            sbNode.size?.height ?? 200,
+            400,
+            51,
+          );
+          pulseAgentCursor(bridge, { nodeId: sbNodeId, label: '分镜就绪' });
+        }
+      }
       return true;
     }
 
     default: {
       const executor = new CanvasOpExecutor(queue);
       await executor.executeOps([op as unknown as CanvasOp]);
+      // R3-D1: 结构操作（add/update/remove）后脉冲光标指向目标节点
+      const targetId = typeof op.args.id === 'string' ? op.args.id : '';
+      if (targetId && store.getNode(targetId)) {
+        const label =
+          op.op === 'add_node' ? '已创建节点'
+          : op.op === 'remove_node' ? '已删除'
+          : op.op === 'update_node' ? '已更新'
+          : `已执行 ${op.op}`;
+        pulseAgentCursor(bridge, { nodeId: targetId, label });
+      }
       return true;
     }
   }

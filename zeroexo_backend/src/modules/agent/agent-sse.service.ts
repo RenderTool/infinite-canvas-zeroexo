@@ -9,7 +9,14 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Observable, ReplaySubject } from 'rxjs';
-import { StepRequestData, QuestionRequestData } from './dto/agent.dto';
+import {
+  StepRequestData,
+  QuestionRequestData,
+  AgentPhase,
+  PlanData,
+  UploadRequestData,
+  BriefData,
+} from './dto/agent.dto';
 
 export type AgentSSEEventType =
   | 'agent:thinking'
@@ -24,7 +31,12 @@ export type AgentSSEEventType =
   | 'agent:md'
   // Plan#36 P0-1: 增量渲染事件
   | 'agent:message_delta'
-  | 'agent:thinking_delta';
+  | 'agent:thinking_delta'
+  // Plan#36 R2-5: 执行流程引擎事件（Codex 式 phase）
+  | 'agent:phase'
+  | 'agent:plan'
+  | 'agent:upload_request'
+  | 'agent:brief';
 
 export interface AgentSSEEvent {
   type: AgentSSEEventType;
@@ -159,6 +171,34 @@ export class AgentSSEService {
    */
   emitThinkingDelta(taskId: string, delta: string): void {
     this.emit(taskId, { type: 'agent:thinking_delta', data: { delta } });
+  }
+
+  /**
+   * 便捷方法：推送 phase 事件（执行阶段转换，Plan#36 R2-5）
+   */
+  emitPhase(taskId: string, phase: AgentPhase, label?: string): void {
+    this.emit(taskId, { type: 'agent:phase', data: { phase, label } });
+  }
+
+  /**
+   * 便捷方法：推送 plan 事件（结构化执行计划，PlanBlock 消费）
+   */
+  emitPlan(taskId: string, plan: PlanData): void {
+    this.emit(taskId, { type: 'agent:plan', data: { plan } });
+  }
+
+  /**
+   * 便捷方法：推送 upload_request 事件（对话内上传卡，UploadBlock 消费）
+   */
+  emitUploadRequest(taskId: string, upload: UploadRequestData): void {
+    this.emit(taskId, { type: 'agent:upload_request', data: { upload } });
+  }
+
+  /**
+   * 便捷方法：推送 brief 事件（任务简报，BriefBlock 消费）
+   */
+  emitBrief(taskId: string, brief: BriefData): void {
+    this.emit(taskId, { type: 'agent:brief', data: { brief } });
   }
 
   /**

@@ -45,6 +45,9 @@ export type ProxyFetch = <T>(
 /** 语言获取函数(由 app 层注入,返回当前用户语言 zh/en/ja) */
 export type LocaleGetter = () => string;
 
+/** JWT token 获取函数(由 app 层注入,供私有资源下载携带 Authorization) */
+export type TokenGetter = () => string | null;
+
 /** 后端 /api/ai/generate 响应 */
 interface GenerateResponse {
   generationId: string;
@@ -75,9 +78,16 @@ interface DownloadUrlResponse {
   url: string;
 }
 
-/** 通用 GET → Blob */
-async function fetchBlob(url: string, signal?: AbortSignal): Promise<Blob> {
-  const res = await fetch(url, { signal });
+/** 通用 GET → Blob(可选携带 JWT:后端私有资源 /api/storage/get 需 Authorization) */
+async function fetchBlob(
+  url: string,
+  signal?: AbortSignal,
+  token?: string | null,
+): Promise<Blob> {
+  const res = await fetch(url, {
+    signal,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
   if (!res.ok) {
     throw new AiError(
       classifyError(null, res.status),
@@ -139,12 +149,32 @@ function extractRetryAfterSec(err: unknown): number | undefined {
   return undefined;
 }
 
+/** 渠道模型编码分隔符(与 ai-config 的 encodeChannelModel 契约一致) */
+const CHANNEL_MODEL_SEPARATOR = '::';
+
+/**
+ * 解析 "channelId::model" 编码值 → providerId + 真实模型名。
+ * 非编码格式(不含分隔符)视为纯模型名,providerId 为空(后端用默认渠道)。
+ * 不解码会把整串当模型名发给默认渠道,导致 404/模型不存在。
+ */
+function splitChannelModel(model: string): { providerId?: string; model: string } {
+  const index = model.indexOf(CHANNEL_MODEL_SEPARATOR);
+  if (index < 0) return { model };
+  const providerId = model.slice(0, index);
+  const realModel = model.slice(index + CHANNEL_MODEL_SEPARATOR.length);
+  return {
+    providerId: providerId || undefined,
+    model: realModel || model,
+  };
+}
+
 export class ProxyProvider implements AIProvider {
   id = 'ai-provider' as const;
 
   constructor(
     private readonly fetcher: ProxyFetch,
     private readonly localeGetter?: LocaleGetter,
+    private readonly tokenGetter?: TokenGetter,
   ) {}
 
   install(): void {
@@ -171,11 +201,13 @@ export class ProxyProvider implements AIProvider {
 
   /** 文生图 */
   async generateImage(req: ImageGenerationRequest): Promise<GeneratedImage[]> {
+    const { providerId, model } = splitChannelModel(req.model);
     const result = await this.callGenerateWithRetry(
       {
         kind: 'image',
         prompt: req.prompt,
-        model: req.model,
+        model,
+        providerId,
         params: {
           size: req.size,
           quality: req.quality,
@@ -186,7 +218,7 @@ export class ProxyProvider implements AIProvider {
     );
     const completed = await this.waitForTask(result.generationId, 'image', req.signal);
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
-    const blob = await fetchBlob(downloadUrl, req.signal);
+    const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
     const dataUrl = await blobToDataUrl(blob);
     return [
       {
@@ -209,13 +241,14 @@ export class ProxyProvider implements AIProvider {
     req: TextGenerationRequest,
     onDelta?: (delta: string) => void,
   ): Promise<string> {
-    console.log('[ProxyProvider.generateText] request:', { model: req.model, providerId: req.providerId, promptLength: req.prompt.length });
+    const decoded = splitChannelModel(req.model);
+    console.log('[ProxyProvider.generateText] request:', { model: decoded.model, providerId: decoded.providerId ?? req.providerId, promptLength: req.prompt.length });
     const result = await this.callGenerateWithRetry(
       {
         kind: 'text',
         prompt: req.prompt,
-        model: req.model,
-        providerId: req.providerId,
+        model: decoded.model,
+        providerId: decoded.providerId ?? req.providerId,
         params: req.params ?? {},
       },
       req.signal,
@@ -231,11 +264,13 @@ export class ProxyProvider implements AIProvider {
 
   /** 视频生成 */
   async generateVideo(req: VideoGenerationRequest): Promise<GeneratedVideo> {
+    const { providerId, model } = splitChannelModel(req.model);
     const result = await this.callGenerateWithRetry(
       {
         kind: 'video',
         prompt: req.prompt,
-        model: req.model,
+        model,
+        providerId,
         params: {
           size: req.size,
           seconds: req.seconds,
@@ -248,17 +283,19 @@ export class ProxyProvider implements AIProvider {
     );
     const completed = await this.waitForTask(result.generationId, 'video', req.signal);
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
-    const blob = await fetchBlob(downloadUrl, req.signal);
+    const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
     return readVideoMetaFromBlob(blob);
   }
 
   /** 音频生成 */
   async generateAudio(req: AudioGenerationRequest): Promise<GeneratedAudio> {
+    const { providerId, model } = splitChannelModel(req.model);
     const result = await this.callGenerateWithRetry(
       {
         kind: 'audio',
         prompt: req.prompt,
-        model: req.model,
+        model,
+        providerId,
         params: {
           voice: req.voice,
           audioFormat: req.format,
@@ -270,7 +307,7 @@ export class ProxyProvider implements AIProvider {
     );
     const completed = await this.waitForTask(result.generationId, 'audio', req.signal);
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
-    const blob = await fetchBlob(downloadUrl, req.signal);
+    const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
     return readAudioMetaFromBlob(blob);
   }
 

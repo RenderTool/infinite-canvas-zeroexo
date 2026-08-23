@@ -1,56 +1,56 @@
 /**
- * PlanBlock - 执行计划卡
+ * PlanBlock - 执行计划卡（Plan#36 R2-5 重做：消费 plan_present 协议）
  *
- * 参考 tvc-agent (2).html 设计，100% 复刻样式：
- * - 步骤列表（skill 名 / 影响节点 / 估价 / 风险色点）
- * - 支持勾选部分步骤
- * - 底部三个按钮
- * - 高风险确认卡带红色边
+ * - 目标 + 步骤逐条入场动画（stagger fade-up）+ 每步预期产物/风险标注
+ * - 底部「确认执行 / 我要修改」：回执走 plan_present 阻塞通道，提交后锁定只读
+ * - 兼容旧形态（message.plan 成本/风险结构）降级为简单列表，不再走旧回执语义
  */
 
-import { useState, useMemo } from 'react';
-import { AlertTriangle, DollarSign, FileText } from 'lucide-react';
-import { stopGenerating, sendAnswer } from '../session/agent-session.js';
-import type { CanvasAgentMessage, PlanStep } from '../types.js';
+import { useState } from 'react';
+import { ClipboardList, AlertTriangle } from 'lucide-react';
+import { sendAnswer } from '../session/agent-session.js';
+import { useCanvasAgentStore } from '../store.js';
+import type { CanvasAgentMessage } from '../types.js';
 
 export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
-  const plan = message.plan!;
-  const [selected, setSelected] = useState<Set<number>>(
-    new Set(plan.steps.map((_, i) => i)),
-  );
-  const [executing, setExecuting] = useState(false);
+  const planCard = message.planCard;
+  const updateMessage = useCanvasAgentStore((s) => s.updateMessage);
+  const [modifying, setModifying] = useState(false);
+  const [modifyText, setModifyText] = useState('');
 
-  const isHighRisk = plan.riskLevel === 'high' || plan.hasHighRiskOps;
+  // 旧形态（模拟器/历史数据）：降级渲染
+  if (!planCard) {
+    const legacy = message.plan;
+    if (!legacy) return <></>;
+    return (
+      <div className="agent-plan-legacy" style={{ width: '100%', margin: '6px 0', padding: 12, background: 'var(--agent-surface)', border: '1px solid var(--agent-border)', borderRadius: 10 }}>
+        {legacy.steps.map((s, i) => (
+          <div key={i} style={{ fontSize: 12.5, color: 'var(--agent-text)', padding: '3px 0' }}>{s.label}</div>
+        ))}
+      </div>
+    );
+  }
 
-  const toggleStep = (index: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      return next;
-    });
+  const locked = planCard.status === 'confirmed' || planCard.status === 'modified';
+
+  const handleConfirm = () => {
+    if (locked) return;
+    updateMessage(message.id, { planCard: { ...planCard, status: 'confirmed' } });
+    void sendAnswer('确认执行');
   };
 
-  const handleExecute = () => {
-    setExecuting(true);
-    // 真连层(Plan#33 D2 修复断链): 提交选中步骤回执
-    const stepKeys = plan.steps.filter((_, i) => selected.has(i)).map((s) => s.skillName ?? s.label);
-    void sendAnswer(`执行:${JSON.stringify(stepKeys)}`);
+  const handleModify = () => {
+    if (locked) return;
+    if (!modifying) {
+      setModifying(true);
+      return;
+    }
+    const text = modifyText.trim();
+    if (!text) return;
+    updateMessage(message.id, { planCard: { ...planCard, status: 'modified' } });
+    void sendAnswer(`修改意见: ${text}`);
   };
-
-  const handlePlanOnly = () => {
-    void sendAnswer('仅规划');
-  };
-
-  const handleCancel = () => {
-    stopGenerating();
-  };
-
-  const selectedCost = useMemo(
-    () => plan.steps.filter((_, i) => selected.has(i)).reduce((sum, s) => sum + s.estimatedCost, 0),
-    [plan.steps, selected],
-  );
 
   return (
     <div
@@ -59,229 +59,203 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
         margin: '6px 0',
         borderRadius: 12,
         overflow: 'hidden',
-        border: `1px solid ${isHighRisk ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
-        boxShadow: isHighRisk ? '0 0 0 1px var(--agent-accent-soft)' : 'none',
+        border: '1px solid var(--agent-border)',
         background: 'var(--agent-panel)',
         animation: 'agentFadeUp 0.35s ease',
       }}
     >
-      {/* 头部 */}
+      {/* 头部：目标 */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 8,
           padding: '10px 14px',
-          background: isHighRisk ? 'var(--agent-accent-soft)' : 'var(--agent-surface-2)',
+          background: 'var(--agent-surface-2)',
           borderBottom: '1px solid var(--agent-border)',
         }}
       >
-        {isHighRisk ? (
-          <AlertTriangle size={14} color="var(--agent-accent)" />
-        ) : (
-          <FileText size={14} color="var(--agent-muted)" />
-        )}
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--agent-text)' }}>
-          执行计划
-        </span>
-        {isHighRisk && (
+        <ClipboardList size={14} color="var(--agent-accent)" style={{ marginTop: 2, flexShrink: 0 }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--agent-muted)', marginBottom: 2 }}>
+            执行计划
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--agent-text)', lineHeight: 1.5 }}>
+            {planCard.goal}
+          </div>
+        </div>
+        {locked && (
           <span
             style={{
+              marginLeft: 'auto',
               fontSize: 10,
               padding: '2px 8px',
               borderRadius: 5,
-              background: 'var(--agent-accent)',
-              color: '#fff',
+              background: 'var(--agent-accent-soft)',
+              color: 'var(--agent-accent)',
               fontWeight: 700,
-              marginLeft: 'auto',
+              flexShrink: 0,
             }}
           >
-            高风险
+            {planCard.status === 'confirmed' ? '已确认' : '已反馈修改'}
           </span>
         )}
       </div>
 
-      {/* 步骤列表 */}
-      <div style={{ padding: '6px 0' }}>
-        {plan.steps.map((step, i) => (
-          <PlanStepRow
-            key={i}
-            step={step}
-            index={i}
-            checked={selected.has(i)}
-            onToggle={() => toggleStep(i)}
-          />
+      {/* 步骤列表（stagger 入场） */}
+      <div style={{ padding: '8px 0' }}>
+        {planCard.steps.map((step, i) => (
+          <div
+            key={step.id || i}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '6px 14px',
+              animation: 'agentPlanStepIn 0.3s ease both',
+              animationDelay: `${i * 70}ms`,
+            }}
+          >
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: 'var(--agent-accent-soft)',
+                color: 'var(--agent-accent)',
+                fontSize: 11,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                marginTop: 1,
+              }}
+            >
+              {i + 1}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--agent-text)', lineHeight: 1.5 }}>
+                {step.label}
+              </div>
+              {step.deliverable && (
+                <div style={{ fontSize: 11, color: 'var(--agent-muted)', marginTop: 2 }}>
+                  产物：{step.deliverable}
+                </div>
+              )}
+              {step.risk && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#fbbf24', marginTop: 2 }}>
+                  <AlertTriangle size={10} />
+                  {step.risk}
+                </div>
+              )}
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* 消耗汇总 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 14px',
-          borderTop: '1px solid var(--agent-border)',
-          background: 'var(--agent-surface)',
-        }}
-      >
-        <span style={{ fontSize: 11, color: 'var(--agent-muted)' }}>
-          已选 <strong style={{ color: 'var(--agent-text)' }}>{selected.size}</strong>/{plan.steps.length} 步
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--agent-muted)' }}>
-          <DollarSign size={10} />
-          估价 <strong style={{ color: '#4ade80' }}>{selectedCost}</strong> 积分
-        </span>
-      </div>
-
-      {/* 操作按钮 */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 6,
-          padding: '8px 14px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <button
-          type="button"
-          onClick={handleExecute}
-          disabled={executing}
-          className="agent-btn-primary"
-          style={{
-            padding: '6px 14px',
-            border: 'none',
-            borderRadius: 7,
-            background: 'var(--agent-accent)',
-            color: '#fff',
-            fontSize: 12,
-            fontWeight: 700,
-            fontFamily: 'inherit',
-            cursor: executing ? 'default' : 'pointer',
-            opacity: executing ? 0.6 : 1,
-          }}
-        >
-          {executing ? '执行中…' : '执行'}
-        </button>
-        <button
-          type="button"
-          onClick={handlePlanOnly}
-          className="agent-btn-secondary"
-          style={{
-            padding: '6px 14px',
-            border: '1.5px solid var(--agent-border)',
-            borderRadius: 7,
-            background: 'transparent',
-            color: 'var(--agent-muted)',
-            fontSize: 12,
-            fontWeight: 600,
-            fontFamily: 'inherit',
-            cursor: 'pointer',
-          }}
-        >
-          仅规划
-        </button>
-        <button
-          type="button"
-          onClick={handleCancel}
-          className="agent-btn-secondary"
-          style={{
-            padding: '6px 14px',
-            border: '1.5px solid var(--agent-border)',
-            borderRadius: 7,
-            background: 'transparent',
-            color: 'var(--agent-muted)',
-            fontSize: 12,
-            fontWeight: 600,
-            fontFamily: 'inherit',
-            cursor: 'pointer',
-          }}
-        >
-          取消
-        </button>
-      </div>
-    </div>
-  );
-}
-
-interface PlanStepRowProps {
-  step: PlanStep;
-  index: number;
-  checked: boolean;
-  onToggle: () => void;
-}
-
-const RISK_COLORS: Record<string, string> = {
-  low: '#4ade80',
-  medium: '#fbbf24',
-  high: 'var(--agent-danger)',
-};
-
-function PlanStepRow({ step, checked, onToggle }: PlanStepRowProps): React.ReactElement {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '7px 14px',
-        cursor: 'pointer',
-        transition: 'background 0.1s',
-      }}
-      onClick={onToggle}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--agent-surface-2)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      {/* 勾选框 */}
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 4,
-          border: `2px solid ${checked ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
-          background: checked ? 'var(--agent-accent)' : 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          transition: 'all 0.15s',
-        }}
-      >
-        {checked && (
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-        )}
-      </span>
-
-      {/* 步骤信息 */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--agent-text)' }}>
-          {step.label}
+      {/* 全局风险提示 */}
+      {planCard.risks && planCard.risks.length > 0 && (
+        <div style={{ padding: '0 14px 8px' }}>
+          {planCard.risks.map((r, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                padding: '6px 10px',
+                margin: '3px 0',
+                background: 'rgba(251,191,36,0.08)',
+                border: '1px solid rgba(251,191,36,0.3)',
+                borderRadius: 8,
+                fontSize: 11.5,
+                color: '#fbbf24',
+                lineHeight: 1.5,
+              }}
+            >
+              <AlertTriangle size={11} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>{r}</span>
+            </div>
+          ))}
         </div>
-        {step.affectedNodes.length > 0 && (
-          <div style={{ fontSize: 10.5, color: 'var(--agent-muted)', marginTop: 2 }}>
-            影响 {step.affectedNodes.length} 个节点
-          </div>
-        )}
-      </div>
+      )}
 
-      {/* 估价 */}
-      <span style={{ fontSize: 11, color: 'var(--agent-muted)', fontVariantNumeric: 'tabular-nums' }}>
-        {step.estimatedCost}
-      </span>
+      {/* 修改输入 */}
+      {modifying && !locked && (
+        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px' }}>
+          <input
+            type="text"
+            value={modifyText}
+            onChange={(e) => setModifyText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleModify(); }}
+            placeholder="说说要怎么改…"
+            className="agent-form-input"
+            style={{
+              flex: 1,
+              padding: '7px 11px',
+              borderRadius: 7,
+              background: 'var(--agent-surface)',
+              border: '1.5px solid var(--agent-border)',
+              color: 'var(--agent-text)',
+              fontSize: 12.5,
+              fontFamily: 'inherit',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+            autoFocus
+          />
+        </div>
+      )}
 
-      {/* 风险点 */}
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: RISK_COLORS[step.riskLevel] ?? 'var(--agent-muted)',
-          flexShrink: 0,
-        }}
-      />
+      {/* 底部操作 */}
+      {!locked && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            padding: '8px 14px',
+            borderTop: '1px solid var(--agent-border)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="agent-btn-primary"
+            style={{
+              padding: '6px 16px',
+              border: 'none',
+              borderRadius: 7,
+              background: 'var(--agent-accent)',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 700,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            确认执行
+          </button>
+          <button
+            type="button"
+            onClick={handleModify}
+            className="agent-btn-secondary"
+            style={{
+              padding: '6px 16px',
+              border: '1.5px solid var(--agent-border)',
+              borderRadius: 7,
+              background: 'transparent',
+              color: 'var(--agent-muted)',
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            {modifying ? '提交修改意见' : '我要修改'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
-

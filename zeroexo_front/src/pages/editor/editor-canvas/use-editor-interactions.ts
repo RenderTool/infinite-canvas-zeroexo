@@ -38,6 +38,7 @@ import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboar
 import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
 import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
+import { collectAgentNodeSnapshots, notifyAgentNodesDeleted } from '@/features/canvas-agent/ui/agent-node-reminder.js';
 import i18n from '@/i18n/config';
 
 // ===== 反推提示词预设 =====
@@ -334,7 +335,17 @@ export function useEditorInteractions({
       }
     };
     const handleNodeDelete = () => {
+      // R3-D3: 删除前收集 Agent 节点快照（调皮回应）；用户自己的节点（无烙印）不触发
+      const store = refs.store;
+      const snaps = store
+        ? collectAgentNodeSnapshots(
+            [...store.getSelection().selectedNodeIds]
+              .map((id) => store.getNode(id))
+              .filter((n): n is NodeRecord => !!n),
+          )
+        : [];
       actions.deleteSelected();
+      notifyAgentNodesDeleted(snaps);
     };
     const handleNodeDetail = ({ node }: { node: NodeRecord }) => {
       setDetailNode(node);
@@ -642,11 +653,16 @@ export function useEditorInteractions({
           if (!store || !refs.commandQueue) return;
           const sel = store.getSelection().selectedNodeIds;
           const targetIds = sel.has(nodeId) && sel.size >= 2 ? sel : new Set([nodeId]);
+          // R3-D3: 删除前收集 Agent 节点快照（调皮回应；无烙印的用户节点不触发）
+          const snaps = collectAgentNodeSnapshots(
+            [...targetIds].map((id) => store.getNode(id)).filter((n): n is NodeRecord => !!n),
+          );
           if (refs.groupPlugin) {
             const graph = store.getGraph();
             const hasGroup = [...targetIds].some((id) => graph.nodes.find((nn) => nn.id === id)?.type === 'group');
             if (hasGroup) {
               refs.groupPlugin.getController().deleteNodes(targetIds);
+              notifyAgentNodesDeleted(snaps);
               return;
             }
           }
@@ -655,6 +671,7 @@ export function useEditorInteractions({
           for (const edgeId of store.getSelection().selectedEdgeIds) cmds.push(new RemoveEdgeCommand(edgeId));
           refs.commandQueue.execute(new BatchCommand(cmds as unknown as Command[]));
           store.clearSelection();
+          notifyAgentNodesDeleted(snaps);
         }});
 
         setContextMenuItems(items);
@@ -1218,6 +1235,11 @@ export function useEditorInteractions({
         });
     };
 
+    // FIX-6: 剧本加入资产库成功 → 打开资产库展示结果（数据刷新由 Modal 每次打开时强制重挂载完成）
+    const unsubAssetSaved = nodeActionBus.on('script:assetSaved', () => {
+      setAssetPickerOpen(true);
+    });
+
     // 剧本 → 生成分镜:每次点击都新建一个全新分镜节点(之前的分镜节点是 AI 生成产物,不复用)
     // 范文态 → 生成"模板分镜"(标注 isSample);真实剧本 → 走 AI 生成
     const unsubGenStory = nodeActionBus.on('script:generateStoryboard', (event: { nodeId: string; mode?: 'new' | 'reuse' | 'template' | 'ai' }) => {
@@ -1611,6 +1633,7 @@ export function useEditorInteractions({
       unsubRetry();
       unsubCancel();
       unsubGenStory();
+      unsubAssetSaved();
       unsubGenSb();
       unsubAssociate();
       unsubRealized();

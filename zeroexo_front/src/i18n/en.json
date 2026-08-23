@@ -896,6 +896,7 @@
   "nodes": {
     "textTitle": "Text",
     "doubleClickToEdit": "Double-click to edit",
+    "textEmptyHint": "Double-click to edit text, or generate from the panel below",
     "textLimitExceeded": "Text exceeds the {{max}}-character limit; the excess was truncated",
     "generateImage": "Gen Image",
     "retry": "Retry",
@@ -2108,6 +2109,8 @@
     "placeholderLighting": "Lighting · Mood",
     "placeholderDialogue": "Dialogue",
     "placeholderSfx": "Sound Effects",
+    "copyShot": "Copy row (description + prompt)",
+    "copied": "Copied",
     "deleteShot": "Delete shot",
     "environment": "Environment",
     "emotion": "Emotion",

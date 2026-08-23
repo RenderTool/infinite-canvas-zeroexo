@@ -18,7 +18,7 @@ import type { GroupPinExpander } from '@zeroexo/plugin-connection';
 import { updateProject } from '@zeroexo/plugin-persistence';
 import { ProxyProvider } from '@zeroexo/plugin-ai-provider';
 import type { AIProvider } from '@zeroexo/plugin-ai-provider';
-import { apiFetch, ApiError } from '@/services/api-client.js';
+import { apiFetch, ApiError, getToken } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
 import { onProjectUpdated, syncProjectFromCloud, markProjectDirty, markProjectClean, checkProjectConflict, forcePullProjectFromCloud, forcePushLocalToCloud, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud } from '@/services/sync/sync-service.js';
 import { markNodesDirty, debugLog } from '@/services/sync/sync-utils.js';
@@ -187,8 +187,8 @@ export function useEditorState(canvasId: string): {
   useEffect(() => {
     if (!containerRef.current) return;
     // P3.4: 注入 ProxyProvider,所有 AI 生成请求经后端 /api/ai/generate 代理
-    // apiFetch 自动携带 JWT Authorization + 401 自动刷新
-    const aiProvider = new ProxyProvider(apiFetch, () => i18n.language);
+    // apiFetch 自动携带 JWT Authorization + 401 自动刷新;产物下载携带 token(私有资源需鉴权)
+    const aiProvider = new ProxyProvider(apiFetch, () => i18n.language, getToken);
     const ed = createDefaultEditor({
       container: containerRef.current,
       storageKey: 'zeroexo:graph',

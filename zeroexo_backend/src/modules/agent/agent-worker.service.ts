@@ -6,6 +6,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AgentFactory } from './agent-factory';
 import { AgentTaskService } from './agent-task.service';
@@ -21,6 +22,68 @@ export class AgentWorkerService {
 
   /** 活跃 AgentExecutor 实例(taskId → executor),用于协议事件(step/question)的前端回执恢复(Plan#33 D1) */
   private activeExecutors = new Map<string, AgentExecutor>();
+
+  /** 需归档的生成类工具 → 产物节点类型（Plan#36 R2-4 生成档案库） */
+  private static readonly ARCHIVABLE_TOOLS: Record<string, (args: Record<string, unknown>) => string> = {
+    create_script: () => 'script',
+    create_storyboard: () => 'storyboard',
+    workflow_generate: (a) => String(a.targetType ?? 'image'),
+  };
+
+  /** 待归档的工具调用参数（toolCallId → {toolName, args}，tool_result 成功后写档案） */
+  private pendingArtifactArgs = new Map<string, { toolName: string; args: Record<string, unknown> }>();
+
+  /**
+   * 生成产物归档（图书馆式，R2-4）：生成类工具成功后自动写入 AgentArtifact。
+   * 档案独立于画布节点与会话消息存在，不进历史注入不污染上下文；失败仅告警不阻断。
+   */
+  private async archiveArtifact(task: any, toolCallId: string, result: any): Promise<void> {
+    const pending = this.pendingArtifactArgs.get(toolCallId);
+    if (!pending) return;
+    this.pendingArtifactArgs.delete(toolCallId);
+    if (!task.projectId || !result || result.ok === false) return;
+    try {
+      const nodeType = AgentWorkerService.ARCHIVABLE_TOOLS[pending.toolName]?.(pending.args) ?? 'text';
+      const contentRaw = typeof pending.args.content === 'string' ? pending.args.content : '';
+      const promptRaw = typeof pending.args.prompt === 'string' ? pending.args.prompt : '';
+      // 输入摘要：优先取用户 prompt 字段
+      const inputStrRaw = typeof task.input === 'string' ? task.input : JSON.stringify(task.input ?? {});
+      let parsedInput = inputStrRaw;
+      try {
+        parsedInput = String((JSON.parse(inputStrRaw) as Record<string, unknown>)?.prompt ?? inputStrRaw);
+      } catch {
+        /* 保持原文 */
+      }
+      const params: Record<string, unknown> = {};
+      if (promptRaw) params.prompt = promptRaw.slice(0, 4000);
+      if (pending.args.generatorParams && typeof pending.args.generatorParams === 'object') {
+        params.generatorParams = pending.args.generatorParams;
+      }
+      if (pending.args.title) params.title = pending.args.title;
+      await this.prisma.agentArtifact.create({
+        data: {
+          userId: task.userId,
+          projectId: task.projectId,
+          conversationId: task.conversationId ?? null,
+          taskId: task.id,
+          nodeType,
+          toolName: pending.toolName,
+          inputSummary: parsedInput.slice(0, 200),
+          params: params as Prisma.InputJsonValue,
+          nodeId:
+            typeof pending.args.nodeId === 'string'
+              ? pending.args.nodeId
+              : typeof pending.args.productId === 'string'
+                ? pending.args.productId
+                : null,
+          content: contentRaw ? contentRaw.slice(0, 20000) : null,
+          summary: `生成 ${nodeType}：${(contentRaw || promptRaw || String(result.message ?? '')).slice(0, 60)}`,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`生成产物归档失败: ${(err as Error).message}`);
+    }
+  }
 
   /** 任务级并发上限: 与 standalone worker(MAX_CONCURRENT_TASKS=3)对齐, 防多任务×分块并发打爆渠道 QPS(Plan#9 T7 评估落地) */
   private static readonly MAX_CONCURRENT_TASKS = 3;
@@ -80,6 +143,7 @@ export class AgentWorkerService {
         task.taskType,
         task.projectId || '__no_project__',
         task.userId,
+        task.id,
       );
       // 注册活跃 executor: 供协议事件(step/question)回执恢复
       this.activeExecutors.set(taskId, agent);
@@ -89,10 +153,14 @@ export class AgentWorkerService {
         ? task.input
         : JSON.stringify(task.input ?? {});
 
+      // 4.5 会话历史注入（Plan#36 R2-1 记忆链路）：排除当前任务自身已落库的用户消息，失败降级为空历史不阻断执行
+      const history = await this.conversationService.buildLlmHistory(task.conversationId, task.id);
+
       const generator = agent.execute(
         inputStr,
         task.projectId || '__no_project__',
         task.userId,
+        history,
       );
 
       let finalOutput = '';
@@ -118,6 +186,25 @@ export class AgentWorkerService {
               (event.data as any)?.toolName ?? '',
               (event.data as any)?.arguments ?? {},
             );
+            // R2-4: 生成类工具暂存参数，tool_result 成功后归档到产物档案库
+            const toolNameStr = (event.data as any)?.toolName ?? '';
+            if (task.projectId && AgentWorkerService.ARCHIVABLE_TOOLS[toolNameStr]) {
+              let parsedArgs: Record<string, unknown> = {};
+              const rawArgs = (event.data as any)?.arguments;
+              if (typeof rawArgs === 'string') {
+                try {
+                  parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
+                } catch {
+                  parsedArgs = {};
+                }
+              } else if (rawArgs && typeof rawArgs === 'object') {
+                parsedArgs = rawArgs as Record<string, unknown>;
+              }
+              this.pendingArtifactArgs.set(String((event.data as any)?.toolCallId ?? toolNameStr), {
+                toolName: toolNameStr,
+                args: parsedArgs,
+              });
+            }
             // 会话内：写入工具调用消息
             if (task.conversationId) {
               void this.writeMessage(task, {
@@ -130,6 +217,8 @@ export class AgentWorkerService {
             break;
           case 'agent:tool_result': {
             const resultData = (event.data as any)?.result;
+            // R2-4: 生成类工具成功 → 归档产物档案库（异步，不阻塞事件流）
+            void this.archiveArtifact(task, String((event.data as any)?.toolCallId ?? ''), resultData);
             // 死路径修复(Plan#33 D4): 工具返回的 canvasOps 逐个 emit,前端 onCanvasOp 真执行
             // 此前 agent-executor 只 yield tool_result,worker 从不消费 canvasOps → 前端画布操作从未生效
             const canvasOps = Array.isArray(resultData?.canvasOps) ? resultData.canvasOps : [];
@@ -156,9 +245,46 @@ export class AgentWorkerService {
           case 'agent:md':
             this.sseService.emitMd(taskId, (event.data as any)?.md ?? '');
             break;
+          case 'agent:phase':
+            // R2-5: 执行阶段转换（前端按 phase 切换面板）
+            this.sseService.emitPhase(
+              taskId,
+              (event.data as any)?.phase ?? 'thinking',
+              (event.data as any)?.label,
+            );
+            break;
+          case 'agent:plan':
+            // R2-5: 结构化执行计划 → PlanBlock
+            this.sseService.emitPlan(taskId, (event.data as any)?.plan ?? event.data);
+            break;
+          case 'agent:upload_request':
+            // R2-5: 对话内上传卡 → UploadBlock
+            this.sseService.emitUploadRequest(taskId, (event.data as any)?.upload ?? {});
+            break;
+          case 'agent:brief':
+            // R2-5: 任务简报 → BriefBlock
+            this.sseService.emitBrief(taskId, (event.data as any)?.brief ?? event.data);
+            break;
           case 'agent:complete': {
             const completeData = event.data as any;
+            // R2 返工：协议交互回合（问题/计划/上传/步骤卡）——发出即收尾，
+            // 不写空回复消息，任务置 completed，用户回执走新一轮任务（无状态，无断连风险）
+            if (completeData?.pause) {
+              this.sseService.emitDone(taskId, { output: '', pause: completeData.pause });
+              await this.taskService.updateTask(taskId, {
+                status: 'completed',
+                output: { pause: completeData.pause },
+                progress: 100,
+                completedAt: new Date(),
+              }).catch(() => undefined);
+              if (task.conversationId) {
+                await this.conversationService.maybeCompact(task.conversationId);
+              }
+              return;
+            }
             finalOutput = completeData?.output ?? '';
+            // R2 兑底：模型无声收尾时补一句引导（提示词"必须回复"铁律是主约束）
+            if (!finalOutput) finalOutput = '这一步已完成，告诉我接下来想做什么。';
             this.sseService.emitResult(taskId, completeData);
             // 会话内：写入最终回复
             if (task.conversationId) {

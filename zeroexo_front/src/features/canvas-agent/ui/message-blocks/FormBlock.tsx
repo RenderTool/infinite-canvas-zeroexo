@@ -83,9 +83,10 @@ export function FormBlock({ form }: FormBlockProps): React.ReactElement {
         width: '100%',
         margin: '6px 0',
         padding: 12,
-        background: 'var(--agent-surface)',
-        border: '1px solid var(--agent-border)',
-        borderRadius: 10,
+        background: 'linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2))', /* R2：投影风格，无边线 */
+        border: 'none',
+        borderRadius: 12,
+        boxShadow: 'var(--agent-shadow)',
         animation: 'agentFadeUp 0.35s ease',
         opacity: submitted ? 0.55 : 1,
         pointerEvents: submitted ? 'none' : 'auto',
@@ -114,8 +115,8 @@ export function FormBlock({ form }: FormBlockProps): React.ReactElement {
                 gap: 10,
                 padding: '9px 12px',
                 margin: '4px 0',
-                background: isActive ? 'var(--agent-accent-soft)' : 'var(--agent-surface)',
-                border: `1.5px solid ${isActive ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
+                background: isActive ? 'var(--agent-accent-soft)' : 'transparent',
+                border: 'none',
                 borderRadius: 9,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
@@ -252,8 +253,6 @@ export function FormBlock({ form }: FormBlockProps): React.ReactElement {
           alignItems: 'center',
           justifyContent: 'space-between',
           marginTop: 10,
-          paddingTop: 8,
-          borderTop: '1px solid var(--agent-border)',
         }}
       >
         <span style={{ fontSize: 11, color: 'var(--agent-muted)' }}>

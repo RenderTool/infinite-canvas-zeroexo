@@ -16,7 +16,7 @@ import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   Bot, BookOpen, Undo2, Redo2, Keyboard, Users,
-  MessageSquareMore, History, Save, SquareMousePointer,
+  History, Save, SquareMousePointer,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -70,8 +70,6 @@ export interface TopBarProps {
   onMobileNavOpen?: () => void;
   /** 打开协作弹窗 */
   onOpenCollaboration?: () => void;
-  /** 打开协作聊天面板 */
-  onOpenCollaborationDock?: () => void;
   /** 打开保存版本弹窗 */
   onSaveVersion?: () => void;
   /** 打开版本历史面板 */
@@ -101,7 +99,6 @@ export function TopBar({
   onRedo,
   canvasMenu,
   onOpenCollaboration,
-  onOpenCollaborationDock,
   onSaveVersion,
   onOpenVersionHistory,
   keyboardShortcuts,
@@ -289,15 +286,7 @@ export function TopBar({
                 style={iconBtnInHeader}
               />
             </Tooltip>
-            {/* 协作聊天面板 */}
-            <Tooltip title={t('topbar.collaborationChat')}>
-              <AntdButton
-                type="text"
-                icon={<MessageSquareMore size={16} />}
-                onClick={() => onOpenCollaborationDock?.()}
-                style={iconBtnInHeader}
-              />
-            </Tooltip>
+            {/* R2-8: 协作聊天面板入口已移除（并入 AgentDock 页签，避免 Nav 双入口） */}
             {/* Agent 面板开关 */}
             <Tooltip title={t('topbar.toggleAgent')}>
               <AntdButton

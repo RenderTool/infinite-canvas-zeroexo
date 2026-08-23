@@ -68,10 +68,84 @@ export type CanvasAgentMessageType =
   | 'progress'
   | 'step'
   | 'md'
-  | 'timeline';
+  | 'timeline'
+  // Plan#36 R2-5: 执行流程引擎新消息块
+  | 'upload'
+  | 'brief'
+  // R3-D3: 删除调皮回应（气泡内嵌选项，非弹窗）
+  | 'reminder'
+  // R3-F1: 节点参数契约表单（request_params → ParamsBlock）
+  | 'params';
 
 /** 消息角色 */
 export type MessageRole = 'agent' | 'user';
+
+/** 附件卡片（R3 FIX-1/2：气泡忠实还原，禁止展开成纯文本） */
+export interface AttachmentCard {
+  name: string;
+  size: number;
+  isText: boolean;
+  /** 是否截断（仅存预览） */
+  truncated?: boolean;
+  /** 原文总字数（truncated 时有效） */
+  totalChars?: number;
+  /** 资产库 assetId（A1 落库后填充，可点击跳转） */
+  assetId?: string;
+  /** 内联预览片段（≤500 字，卡片展开用） */
+  preview?: string;
+}
+
+/** R3-D3：被删除的 Agent 节点快照（补回来时重建用） */
+export interface DeletedNodeSnapshot {
+  nodeId: string;
+  type: string;
+  title?: string;
+  position?: { x: number; y: number };
+  size?: { width: number; height: number };
+  data: Record<string, unknown>;
+}
+
+/** R3-D3：删除调皮回应数据（reminder 消息） */
+export interface ReminderData {
+  /** 被删的 Agent 节点数（批量只问一次） */
+  deletedCount: number;
+  /** 节点快照（供「补回来」重建） */
+  snapshots: DeletedNodeSnapshot[];
+}
+
+// ===== R3-F1 节点参数契约（request_params → ParamsBlock） =====
+
+/** 参数表单字段 */
+export interface ParamFieldData {
+  key: string;
+  label: string;
+  /** select / text / number / boolean */
+  type: 'select' | 'text' | 'number' | 'boolean';
+  options?: Array<{ label: string; value: string }>;
+  default?: string | number | boolean;
+  desc?: string;
+}
+
+/** 参数表单「自动」方案（点击一键填入 fields） */
+export interface ParamPresetData {
+  name: string;
+  desc?: string;
+  values: Record<string, string | number | boolean>;
+}
+
+/** 节点参数契约表单数据 */
+export interface ParamsRequestData {
+  /** 目标节点类型 */
+  nodeType: string;
+  /** 表单标题（引导文案） */
+  title?: string;
+  /** 标准参数选项表单字段 */
+  fields?: ParamFieldData[];
+  /** 「自动」方案（可多套） */
+  presets?: ParamPresetData[];
+  /** 备注输入框标签 */
+  noteLabel?: string;
+}
 
 /** 泛型消息 */
 export interface CanvasAgentMessage {
@@ -79,6 +153,16 @@ export interface CanvasAgentMessage {
   role: MessageRole;
   type: CanvasAgentMessageType;
   text?: string;
+  /** R3：用户消息携带的附件卡片（落库为 [附件清单:JSON] 标记，加载时还原） */
+  attachments?: AttachmentCard[];
+  /** R3-D3：删除调皮回应数据（reminder 类型消息） */
+  reminder?: ReminderData;
+  /** R3-D3：气泡选项已回应（回应后渲染结果态，不再重复询问） */
+  reminderAnswered?: 'restored' | 'refused';
+  /** R3-F1：节点参数契约表单数据（params 类型消息） */
+  params?: ParamsRequestData;
+  /** R3-F1：参数表单已提交（提交后渲染结果态） */
+  paramsAnswered?: boolean;
   /** 问题/选项数据 */
   question?: QuestionData;
   /** 澄清项列表 */
@@ -91,6 +175,12 @@ export interface CanvasAgentMessage {
   step?: StepData;
   /** 执行时间线（P0-4 工具调用时间线） */
   timeline?: TimelineData;
+  /** 执行计划卡（R2-5 plan_present） */
+  planCard?: AgentPlanData;
+  /** 对话内上传卡（R2-5 request_upload） */
+  upload?: UploadCardData;
+  /** 任务简报卡（R2-5 emit_brief） */
+  brief?: BriefCardData;
   /** 关联步骤 */
   stepKey?: string;
   timestamp: number;
@@ -110,6 +200,39 @@ export interface StepData {
   prompts?: string[];
   /** 快捷选项（如"直接生成 N 集"） */
   suggestions?: Array<{ value: string; label: string }>;
+  /** 是否附用户备注输入框（Plan#36 R2-5） */
+  noteEnabled?: boolean;
+}
+
+// ===== 执行阶段（Plan#36 R2-5，Codex 式 phase） =====
+
+export type AgentPhase = 'thinking' | 'clarify' | 'planning' | 'executing' | 'reporting';
+
+/** 执行计划卡数据（plan_present 协议 → PlanBlock，与后端 PlanData 对齐） */
+export interface AgentPlanData {
+  goal: string;
+  steps: Array<{ id: string; label: string; deliverable?: string; risk?: string }>;
+  risks?: string[];
+  /** 确认状态（前端本地，回执后锁定） */
+  status?: 'pending' | 'confirmed' | 'modified';
+}
+
+/** 对话内上传卡数据（request_upload 协议 → UploadBlock） */
+export interface UploadCardData {
+  guideText?: string;
+  accept?: string;
+  multiple?: boolean;
+  /** 上传状态（前端本地） */
+  status?: 'pending' | 'uploading' | 'done';
+  fileName?: string;
+  fileSize?: number;
+}
+
+/** 任务简报卡数据（emit_brief 协议 → BriefBlock） */
+export interface BriefCardData {
+  summary: string;
+  nodeRefs?: Array<{ nodeId: string; label: string }>;
+  note?: string;
 }
 
 // ===== 问题/选项 =====
@@ -170,6 +293,9 @@ export interface TimelineStep {
   name: string;
   kind: 'tool' | 'canvas';
   status: 'running' | 'done' | 'failed';
+  /** 步骤详情（R2：展开可见读取清单/失败原因） */
+  input?: string;
+  result?: string;
 }
 
 export interface TimelineData {
@@ -220,6 +346,8 @@ export interface CanvasPatch {
 export interface ThinkingState {
   active: boolean;
   text: string;
+  /** 任务开始时间戳（R2 返工：trace 计时以此为基准，不再用组件挂载时刻） */
+  startedAt?: number;
   steps: ThinkingStep[];
   tools: ToolCall[];
 }
@@ -229,9 +357,11 @@ export interface ThinkingStep {
   name: string;
   tool?: string;
   dur?: number; // ms
+  /** 开始时间戳（R2-5：完成时计算耗时） */
+  startedAt?: number;
   input?: string;
   result?: string;
-  status: 'running' | 'done' | 'idle';
+  status: 'running' | 'done' | 'idle' | 'failed';
 }
 
 export interface ToolCall {

@@ -22,7 +22,8 @@ import { agentClient, type AgentClientCallbacks } from '@/features/agent-panel/A
 import { getToken } from '@/services/api-client.js';
 import { useCanvasAgentStore } from '../store.js';
 import { executeCanvasOp } from '../canvas-op-bridge.js';
-import type { ProgressData, ProgressStep, TodoSnapshot } from '../types.js';
+import { semanticOfTool, semanticOfCanvasOp } from '../think-stream/tool-semantics.js';
+import type { TodoSnapshot } from '../types.js';
 
 // ===== 会话级状态 =====
 
@@ -37,55 +38,78 @@ export function getSessionProjectId(): string | null {
   return currentProjectId;
 }
 
-/** 当前任务进度消息 ID（用于增量更新 ProgressBlock） */
-let progressMsgId: string | null = null;
-
-/** 当前任务进度步骤缓存（key → step） */
-let progressSteps = new Map<string, ProgressStep>();
-
 /** 流式输出消息 ID（agent:message_delta 增量追加的目标，P0-1） */
 let streamMsgId: string | null = null;
 
-/** 执行时间线消息 ID（P0-4 工具调用时间线 upsert 目标） */
-let timelineMsgId: string | null = null;
+/** 协议交互回执前缀（R2 返工）：交互回合收尾时由 pause 标记设置，
+ * 用户选择/确认回流时拼接到新消息头部，供 Agent 区分回执语义 */
+let pendingReplyPrefix: string | null = null;
+
+/** 工具调用 → 思考步骤索引映射（R2：失败兑底标记用） */
+let toolStepIndex = new Map<string, number>();
+
+/** 画布读取清单展示上限（超出截断） */
+const CANVAS_LIST_MAX = 8;
 
 /**
- * 时间线步骤 upsert（P0-4）：
- * - 新事件（settle 为空）：前序 running 置 done，追加新 running 条目
- * - 收尾（settle=done/failed）：全部 running 条目置为该状态
+ * 工具结果 → 步骤详情文本（R2：展开步骤可看到"读了什么"，感知真实读取）。
+ * canvas_get_state 渲染节点清单（超 N 个截断）；其他工具取 message/短 JSON。
  */
-function upsertTimelineStep(name: string, kind: 'tool' | 'canvas', settle?: 'done' | 'failed'): void {
-  const s = useCanvasAgentStore.getState();
-  const now = Date.now();
-
-  if (timelineMsgId) {
-    const msg = s.messages.find((m) => m.id === timelineMsgId);
-    if (msg?.timeline) {
-      let steps = msg.timeline.steps.map((st) =>
-        st.status === 'running' && !settle ? { ...st, status: 'done' as const } : st,
-      );
-      if (settle) {
-        steps = steps.map((st) =>
-          st.status === 'running' ? { ...st, status: settle } : st,
-        );
-      } else {
-        steps.push({ id: `ts_${now}_${steps.length}`, name, kind, status: 'running' });
-      }
-      s.updateMessage(timelineMsgId, { timeline: { steps } });
-      return;
-    }
-    timelineMsgId = null;
+function summarizeToolResult(toolName: string, res: unknown): string {
+  if (!res || typeof res !== 'object') {
+    return typeof res === 'string' ? res.slice(0, 300) : '';
   }
-  if (settle) return;
-  timelineMsgId = `msg_timeline_${now}`;
-  s.addMessage({
-    id: timelineMsgId,
-    role: 'agent',
-    type: 'timeline',
-    text: '执行时间线',
-    timeline: { steps: [{ id: `ts_${now}_0`, name, kind, status: 'running' }] },
-    timestamp: now,
-  });
+  const r = res as Record<string, unknown>;
+  if (toolName === 'canvas_get_state') {
+    const summary = (r.summary ?? {}) as Record<string, unknown>;
+    const nodes = Array.isArray(summary.nodes) ? (summary.nodes as Array<Record<string, unknown>>) : [];
+    const lines = nodes.slice(0, CANVAS_LIST_MAX).map((n) => {
+      const title = typeof n.title === 'string' && n.title ? ` "${n.title}"` : '';
+      return `- [${String(n.type ?? 'node')}]${title} (${String(n.id ?? '').slice(0, 8)})`;
+    });
+    if (nodes.length > CANVAS_LIST_MAX) lines.push(`… 剩余 ${nodes.length - CANVAS_LIST_MAX} 个节点`);
+    return `已读取 ${String(summary.nodeCount ?? nodes.length)} 个节点、${String(summary.edgeCount ?? 0)} 条连线\n${lines.join('\n')}`;
+  }
+  if (typeof r.message === 'string') return r.message.slice(0, 300);
+  return JSON.stringify(res).slice(0, 300);
+}
+
+/**
+ * 时间线步骤占位（R2 返工：时间线收敛到 ThinkStream 单一展示，Codex 式）。
+ * 不再另生成 TimelineBlock 消息，避免与思考流步骤双展示。
+ */
+function upsertTimelineStep(_name: string, _kind: 'tool' | 'canvas', _settle?: 'done' | 'failed'): void {
+  // no-op：trace 唯一来源 = thinking.steps（ThinkStream 渲染）
+}
+
+/**
+ * 任务收尾时把执行 trace 快照为对话流内消息（R2 返工）：
+ * trace 留在对话流原位，不再由 ThinkStream 常驻底部一直显示。
+ */
+function commitTrace(settle: 'done' | 'failed'): void {
+  const s = useCanvasAgentStore.getState();
+  const { steps } = s.thinking;
+  if (steps.length > 0) {
+    s.addMessage({
+      id: `msg_trace_${Date.now()}`,
+      role: 'agent',
+      type: 'timeline',
+      text: '执行轨迹',
+      timeline: {
+        steps: steps.map((st, i) => ({
+          id: `trace_${i}`,
+          name: st.name,
+          kind: 'tool' as const,
+          // R2：failed 保留红 X；其余未完步骤按收尾态结算；详情随轨迹保留可展开
+          status: st.status === 'failed' ? ('failed' as const) : st.status === 'done' ? ('done' as const) : settle,
+          input: st.input,
+          result: st.result,
+        })),
+      },
+      timestamp: Date.now(),
+    });
+  }
+  s.clearThinking();
 }
 
 // ===== DTO =====
@@ -129,7 +153,8 @@ export interface AgentTaskDto {
 
 // ===== API 封装 =====
 
-/** 通用带 JWT 的 JSON 请求 */
+/** 通用带 JWT 的 JSON 请求（全局响应拦截器统一 { data: T } 包装，此处解包——
+ * 与 AgentClient.send 同源铁律；未解包导致 conversationId=undefined → 会话消息从未落库，刷新全丢） */
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -144,7 +169,8 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const errText = await res.text().catch(() => '');
     throw new Error(`[${res.status}] ${errText.slice(0, 200)}`);
   }
-  return res.json() as Promise<T>;
+  const json = (await res.json()) as { data?: T } & T;
+  return (json?.data ?? json) as T;
 }
 
 // ===== 会话管理 =====
@@ -239,58 +265,14 @@ function parseTodoSnapshot(args: unknown): TodoSnapshot | null {
   };
 }
 
-/** 增量更新/创建 ProgressBlock 消息 */
-function upsertProgress(pct: number, label?: string): void {
-  const store = useCanvasAgentStore.getState();
-  const key = label ?? `步骤 ${progressSteps.size + 1}`;
-
-  const existing = progressSteps.get(key);
-  progressSteps.set(key, {
-    key,
-    label: key,
-    status: 'running',
-    progress: pct,
-    ...(existing ? { duration: existing.duration } : {}),
-  });
-
-  const data: ProgressData = {
-    steps: [...progressSteps.values()],
-    totalProgress: pct,
-    totalCost: 0,
-    currentStep: label ?? null,
-  };
-
-  if (progressMsgId) {
-    store.updateMessage(progressMsgId, { progress: data });
-  } else {
-    progressMsgId = `msg_progress_${Date.now()}`;
-    store.addMessage({
-      id: progressMsgId,
-      role: 'agent',
-      type: 'progress',
-      text: '任务执行中…',
-      progress: data,
-      timestamp: Date.now(),
-    });
-  }
+/** 进度消息（R2 返工：伪百分比进度卡废弃，Codex 无此形态；真实进度由 todo_write 任务卡承载） */
+function upsertProgress(_pct: number, _label?: string): void {
+  // no-op：agent:progress 为迭代数折算的伪进度，展示即误导（开场"全部完成 100%"）
 }
 
-/** 进度消息收尾：标记全部完成 */
+/** 进度消息收尾（同上废弃） */
 function finishProgress(): void {
-  if (!progressMsgId) return;
-  const store = useCanvasAgentStore.getState();
-  const msg = store.messages.find((m) => m.id === progressMsgId);
-  if (!msg?.progress) return;
-  store.updateMessage(progressMsgId, {
-    progress: {
-      ...msg.progress,
-      totalProgress: 100,
-      currentStep: null,
-      steps: msg.progress.steps.map((s) => ({ ...s, status: 'completed', progress: 100 })),
-    },
-  });
-  progressMsgId = null;
-  progressSteps.clear();
+  // no-op
 }
 
 // ===== 核心：发送消息 =====
@@ -308,11 +290,9 @@ export async function sendMessage(
   if (!cleanText || store.isGenerating) return;
 
   store.setIsGenerating(true);
-  store.setThinking({ active: true, text: '正在连接 Agent…' });
-  progressMsgId = null;
-  progressSteps.clear();
+  store.setThinking({ active: true, text: '', steps: [], tools: [], startedAt: Date.now() });
   streamMsgId = null;
-  timelineMsgId = null;
+  toolStepIndex = new Map();
 
   try {
     // 1. 确保会话（首次自动创建，后续复用）
@@ -328,12 +308,10 @@ export async function sendMessage(
 
     // 3. 订阅 SSE 事件流 → store
     const callbacks: AgentClientCallbacks = {
-      onThinking: (message) => {
-        const s = useCanvasAgentStore.getState();
-        s.setThinking({ active: true });
-        if (message) {
-          s.appendThinkingText(s.thinking.text ? `\n${message}` : message);
-        }
+      onThinking: () => {
+        // R2 返工：agent:step 静态文案（"Agent 开始思考..."等）不再写入思考文本，
+        // 思考区只承载模型推理增量（thinking_delta），状态信息由状态行呈现（Codex 式）
+        useCanvasAgentStore.getState().setThinking({ active: true });
       },
       // P0-1: 思考流式增量(直接追加,不换行)
       onThinkingDelta: (delta) => {
@@ -350,6 +328,8 @@ export async function sendMessage(
           }
           streamMsgId = null;
         }
+        // R2 返工：修复绘制顺序——回复文本首次出现前，先提交已执行的子动作轨迹（读取画布等子行为永远在主回复之前）
+        commitTrace('done');
         streamMsgId = `msg_stream_${Date.now()}`;
         s.addMessage({
           id: streamMsgId,
@@ -359,31 +339,61 @@ export async function sendMessage(
           timestamp: Date.now(),
         });
       },
-      onToolCall: (toolName, args) => {
+      onToolCall: (toolName, args, toolCallId) => {
         // P0-3: todo_write 快照剥离为任务卡（PinnedTodoSlot 消费，不显示为工具胶囊）
         if (toolName === 'todo_write') {
           const snap = parseTodoSnapshot(args);
           if (snap) useCanvasAgentStore.getState().setTodoSnapshot(snap);
           return;
         }
-        // P0-4: 工具调用追加进消息流时间线
-        upsertTimelineStep(toolName, 'tool');
+        // R2-5: 工具名→用户语义（时间线/胶囊显示语义名，原始工具名收入 chip）
+        const sem = semanticOfTool(toolName);
+        upsertTimelineStep(sem.label, 'tool');
         const s = useCanvasAgentStore.getState();
         const idx = s.thinking.steps.length;
-        if (idx > 0) s.updateThinkingStep(idx - 1, { status: 'done' });
+        if (idx > 0) {
+          const prev = s.thinking.steps[idx - 1];
+          s.updateThinkingStep(idx - 1, {
+            status: 'done',
+            ...(prev?.startedAt ? { dur: Date.now() - prev.startedAt } : {}),
+          });
+        }
         s.addThinkingStep({
-          icon: 'tool',
-          name: toolName,
+          icon: sem.icon,
+          name: sem.label,
+          tool: toolName,
           status: 'running',
+          startedAt: Date.now(),
           input: JSON.stringify(args).slice(0, 200),
         });
+        // R2：记录 toolCallId → 步骤索引，供 tool_result 失败时标记兑底
+        if (toolCallId) toolStepIndex.set(String(toolCallId), idx);
       },
-      onResult: () => {
-        // 最终输出由 agent:done 统一写入，避免重复消息
+      onResult: (data) => {
+        // R2 失败兑底：工具返回 error/ok=false 时，对应步骤标红（而不是无反应）
+        const d = data as { toolCallId?: string; toolName?: string; result?: { error?: string; ok?: boolean } } | null;
+        const tcId = String(d?.toolCallId ?? '');
+        const stepIdx = toolStepIndex.get(tcId);
+        if (stepIdx === undefined) return;
+        toolStepIndex.delete(tcId);
+        const s = useCanvasAgentStore.getState();
+        const res = d?.result;
+        if (res && (res.error || res.ok === false)) {
+          s.updateThinkingStep(stepIdx, {
+            status: 'failed',
+            result: String(res.error ?? '执行失败'),
+          });
+          return;
+        }
+        // R2：把读取/执行结果写入步骤详情（点开可见画布节点清单，感知真实读取）
+        const detail = summarizeToolResult(d?.toolName ?? '', res);
+        if (detail) s.updateThinkingStep(stepIdx, { result: detail });
+        // R2：工具完成→下一段输出之间的空窗期给可见状态（避免"读了就没反应"）
+        s.setPhase('thinking', '正在整理结果…');
       },
       onCanvasOp: (op, args) => {
-        // P0-4: 画布操作追加进消息流时间线
-        upsertTimelineStep(`画布操作：${op}`, 'canvas');
+        // P0-4: 画布操作追加进消息流时间线（R2-5 语义化）
+        upsertTimelineStep(semanticOfCanvasOp(op), 'canvas');
         // Plan#33 D4:优先桥接真执行(workflow_chain 展开/选中/聚焦/命令),
         // 桥接层未注入(非画布页)时回退文本展示
         void executeCanvasOp({ op, args: (args ?? {}) as Record<string, unknown> }).then((executed) => {
@@ -402,8 +412,8 @@ export async function sendMessage(
       // ---- 契约交互事件(Plan#33 D1/D2) ----
       onStepRequest: (step) => {
         const s = useCanvasAgentStore.getState();
-        // 协议交互期间暂停思考展示,聚焦步骤确认
-        s.setThinking({ active: false });
+        // R2 返工：交互卡发出即收尾（后端无状态回合）——快照已执行步骤到轨迹消息，清空底部常驻 trace
+        commitTrace('done');
         s.addMessage({
           id: `msg_step_${Date.now()}`,
           role: 'agent',
@@ -415,7 +425,7 @@ export async function sendMessage(
       },
       onQuestionRequest: (question) => {
         const s = useCanvasAgentStore.getState();
-        s.setThinking({ active: false });
+        commitTrace('done');
         s.addMessage({
           id: `msg_question_${Date.now()}`,
           role: 'agent',
@@ -435,6 +445,25 @@ export async function sendMessage(
           timestamp: Date.now(),
         });
       },
+      onParamsRequest: (params) => {
+        // R3-F1: 节点参数契约表单 → ParamsBlock（提交后作为新一轮消息回执）
+        const s = useCanvasAgentStore.getState();
+        commitTrace('done');
+        s.addMessage({
+          id: `msg_params_${Date.now()}`,
+          role: 'agent',
+          type: 'params',
+          text: params.title,
+          params: {
+            nodeType: params.nodeType,
+            title: params.title,
+            fields: params.fields ?? [],
+            presets: params.presets ?? [],
+            noteLabel: params.noteLabel,
+          },
+          timestamp: Date.now(),
+        });
+      },
       onMd: (md) => {
         useCanvasAgentStore.getState().addMessage({
           id: `msg_md_${Date.now()}`,
@@ -444,10 +473,46 @@ export async function sendMessage(
           timestamp: Date.now(),
         });
       },
+      // ---- 执行流程引擎事件（Plan#36 R2-5） ----
+      onPhase: (phase, label) => {
+        useCanvasAgentStore.getState().setPhase(phase, label);
+      },
+      onPlan: (plan) => {
+        commitTrace('done');
+        useCanvasAgentStore.getState().addMessage({
+          id: `msg_plan_${Date.now()}`,
+          role: 'agent',
+          type: 'plan',
+          text: plan.goal,
+          planCard: { ...plan, status: 'pending' },
+          timestamp: Date.now(),
+        });
+      },
+      onUploadRequest: (upload) => {
+        commitTrace('done');
+        useCanvasAgentStore.getState().addMessage({
+          id: `msg_upload_${Date.now()}`,
+          role: 'agent',
+          type: 'upload',
+          text: upload.guideText ?? '',
+          upload: { ...upload, status: 'pending' },
+          timestamp: Date.now(),
+        });
+      },
+      onBrief: (brief) => {
+        useCanvasAgentStore.getState().addMessage({
+          id: `msg_brief_${Date.now()}`,
+          role: 'agent',
+          type: 'brief',
+          text: brief.summary,
+          brief,
+          timestamp: Date.now(),
+        });
+      },
       onError: (error) => {
         const s = useCanvasAgentStore.getState();
         streamMsgId = null;
-        upsertTimelineStep('', 'tool', 'failed');
+        commitTrace('failed');
         s.addMessage({
           id: `msg_error_${Date.now()}`,
           role: 'agent',
@@ -456,16 +521,24 @@ export async function sendMessage(
           timestamp: Date.now(),
         });
         s.setIsGenerating(false);
-        s.setThinking({ active: false });
       },
       onDone: (output) => {
         const s = useCanvasAgentStore.getState();
         s.setCurrentTaskId(null);
-        const outputText = typeof output === 'string'
-          ? output
-          : output && typeof output === 'object'
-            ? JSON.stringify(output, null, 2)
-            : '';
+        // R2 返工：协议交互回合——记录回执前缀（用户选择/确认回流时拼接），不渲染空消息
+        const outAny = output as { output?: unknown; pause?: string } | string | null;
+        if (outAny && typeof outAny === 'object' && outAny.pause) {
+          pendingReplyPrefix = String(outAny.pause);
+        }
+        const outputText = typeof outAny === 'string'
+          ? outAny
+          : outAny && typeof outAny === 'object' && typeof outAny.output === 'string'
+            ? outAny.output
+            : outAny && typeof outAny === 'object' && outAny.pause
+              ? ''
+              : outAny && typeof outAny === 'object'
+                ? JSON.stringify(outAny, null, 2)
+                : '';
         // 流式输出已逐块渲染时不再重复整块追加(P0-1); 回退渠道(无增量)时才整块写入
         if (outputText && !streamMsgId) {
           s.addMessage({
@@ -477,17 +550,18 @@ export async function sendMessage(
           });
         }
         streamMsgId = null;
-        upsertTimelineStep('', 'tool', 'done');
+        commitTrace('done');
         finishProgress();
         s.setIsGenerating(false);
-        s.setThinking({ active: false });
+        s.setPhase(null);
       },
       onClose: () => {
         const s = useCanvasAgentStore.getState();
         streamMsgId = null;
-        upsertTimelineStep('', 'tool', 'done');
+        commitTrace('done');
         finishProgress();
         s.setIsGenerating(false);
+        s.setPhase(null);
       },
     };
 
@@ -506,35 +580,41 @@ export async function sendMessage(
   }
 }
 
-/** 停止当前生成（断开 SSE） */
+/** 停止当前生成（断开 SSE + 后端取消任务，Plan#36 R2-7） */
 export function stopGenerating(): void {
-  agentClient.unsubscribe();
   const s = useCanvasAgentStore.getState();
+  const taskId = s.currentTaskId;
+  agentClient.unsubscribe();
+  // 后端取消：阻止 LLM 继续烧 token（端点已存在）；失败静默（任务可能已自然结束）
+  if (taskId) {
+    void agentClient.cancelTask(taskId).catch(() => undefined);
+  }
+  commitTrace('done');
   finishProgress();
   s.setCurrentTaskId(null);
   s.setIsGenerating(false);
-  s.setThinking({ active: false });
+  s.setPhase(null);
 }
 
 /**
- * 协议事件回执(Plan#33 D1/D2): 将用户对 step/question 的回答提交到后端,
- * 恢复挂起的 Agent 执行循环。taskId 取自 store 当前任务。
- * 任务已结束或 taskId 缺失时静默失败(不中断 UI)。
+ * 交互卡回执（R2 返工：无状态回合）：
+ * 用户的选择/确认作为新一轮用户消息回流（拼协议语义前缀），
+ * 上下文由历史注入衔接；不再依赖长等待 SSE 连接，根治断连后确认无响应。
  */
 export async function sendAnswer(answer: string): Promise<boolean> {
-  const taskId = useCanvasAgentStore.getState().currentTaskId;
-  if (!taskId) return false;
-  try {
-    return await agentClient.answer(taskId, answer);
-  } catch (err) {
-    const s = useCanvasAgentStore.getState();
-    s.addMessage({
-      id: `msg_error_${Date.now()}`,
-      role: 'agent',
-      type: 'text',
-      text: `⚠️ 回执提交失败：${err instanceof Error ? err.message : '未知错误'}`,
-      timestamp: Date.now(),
-    });
-    return false;
-  }
+  const text = answer.trim();
+  if (!text) return false;
+  const s = useCanvasAgentStore.getState();
+  if (s.isGenerating) return false;
+  const prefix = pendingReplyPrefix;
+  pendingReplyPrefix = null;
+  s.addMessage({
+    id: `msg_user_reply_${Date.now()}`,
+    role: 'user',
+    type: 'text',
+    text,
+    timestamp: Date.now(),
+  });
+  void sendMessage(prefix ? `${prefix}: ${text}` : text);
+  return true;
 }

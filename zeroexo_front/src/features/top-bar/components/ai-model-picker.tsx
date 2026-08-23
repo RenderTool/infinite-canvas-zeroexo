@@ -1,21 +1,20 @@
 /**
- * AiModelPicker - AI 渠道/模型选择器（收纳式）
+ * AiModelPicker - AI 模型选择器（Plan#36 R2 返工）
  *
- * 显示在 AgentDock 顶部右上角，收纳为单个 Cpu 图标按钮(32x32，与工具栏图标一致)。
- * 点击弹出居中 Modal，双列展示渠道列表 + 模型列表，操作即时生效。
- *
- * 相比原 Select 方案（渠道 130px + 模型 140px + 刷新 24px ≈ 300px），
- * 仅占 32px，节省约 270px 水平空间；同时规避 antd Select 弹层
- * 在 React 19 下静默失效的已知问题。
+ * 废弃早期 Modal 切换设施 + 渠道/模型两级结构，
+ * 改为与提示词输入块同款：SettingsPopoverShell dropdown 触发 + 浮出面板，
+ * 面板内平铺全部 LLM 模型列表（不分模型商），选中即时生效。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
 import { Button, Tooltip } from 'antd';
 import { Cpu, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { Modal } from '@/shared/components/index.js';
 import { useTranslation } from 'react-i18next';
+import {
+  SettingsPopoverShell,
+  SettingGroup,
+} from '../../generator-settings/settings-popover-shell.js';
 import {
   useAiConfigStore,
   getModelIconComponent,
@@ -27,7 +26,6 @@ export function AiModelPicker(): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const isDark = theme.mode === 'dark';
-  const [open, setOpen] = useState(false);
 
   const channels = useAiConfigStore((state) => state.config.channels);
   const loaded = useAiConfigStore((state) => state.loaded);
@@ -37,56 +35,36 @@ export function AiModelPicker(): React.ReactElement {
   const selectedModel = useAiConfigStore((state) => state.selectedModel);
   const setSelectedChannel = useAiConfigStore((state) => state.setSelectedChannel);
 
-  // 每个渠道仅保留 LLM(text) 能力模型（此选择器为 LLM 渠道/模型面板）
-  const channelLlmModels = useMemo(() => {
-    const map = new Map<string, string[]>();
+  // 平铺全部 LLM(text) 能力模型（不分模型商，与提示词输入块一致）
+  const flatModels = useMemo(() => {
+    const opts: Array<{ channelId: string; channelName: string; model: string; iconKey: string }> = [];
     for (const ch of channels) {
-      const llmModels = ch.models.filter((m) =>
-        modelHasCapability(channels, encodeChannelModel(ch.id, m), 'text'),
-      );
-      map.set(ch.id, llmModels);
+      const icons = ch.modelIcons ?? {};
+      for (const m of ch.models) {
+        if (!modelHasCapability(channels, encodeChannelModel(ch.id, m), 'text')) continue;
+        opts.push({
+          channelId: ch.id,
+          channelName: ch.name,
+          model: m,
+          iconKey: icons[m.toLowerCase()] || ch.provider,
+        });
+      }
     }
-    return map;
+    return opts;
   }, [channels]);
-
-  // 只展示至少含一个 LLM 模型的渠道
-  const visibleChannels = useMemo(
-    () => channels.filter((ch) => (channelLlmModels.get(ch.id)?.length ?? 0) > 0),
-    [channels, channelLlmModels],
-  );
 
   const currentChannel = useMemo(
     () => channels.find((ch) => ch.id === selectedChannelId),
     [channels, selectedChannelId],
   );
 
-  // 当前渠道下的 LLM 模型选项列表
-  const modelOptions = useMemo(() => {
-    if (!currentChannel) return [];
-    const modelIcons = currentChannel.modelIcons ?? {};
-    return (channelLlmModels.get(currentChannel.id) ?? []).map((m) => {
-      const iconKey = modelIcons[m.toLowerCase()] || currentChannel.provider;
-      return { value: m, iconKey };
-    });
-  }, [currentChannel, channelLlmModels]);
-
-  const handleChannelChange = useCallback(
-    (id: string) => {
-      const firstModel = channelLlmModels.get(id)?.[0];
-      setSelectedChannel(id, firstModel);
+  const handlePick = useCallback(
+    (channelId: string, model: string) => {
+      setSelectedChannel(channelId, model);
     },
-    [channelLlmModels, setSelectedChannel],
+    [setSelectedChannel],
   );
 
-  const handleModelChange = useCallback(
-    (model: string) => {
-      if (!selectedChannelId) return;
-      setSelectedChannel(selectedChannelId, model);
-    },
-    [selectedChannelId, setSelectedChannel],
-  );
-
-  // 组件挂载时自动加载渠道（如果尚未加载）
   useEffect(() => {
     const store = useAiConfigStore.getState();
     if (!store.loaded) {
@@ -98,7 +76,8 @@ export function AiModelPicker(): React.ReactElement {
     useAiConfigStore.getState().loadChannels();
   }, []);
 
-  const displayName = currentChannel
+  // 触发器摘要：渠道·模型（与提示词面板 dropdown 同款）
+  const summary = currentChannel
     ? selectedModel
       ? `${currentChannel.name} · ${selectedModel}`
       : currentChannel.name
@@ -106,69 +85,35 @@ export function AiModelPicker(): React.ReactElement {
       ? t('aiModelPicker.selectAiChannel')
       : t('aiModelPicker.loading');
 
-  // ─── 样式令牌 ────────────────────────────────────────────────
   const accent = theme.toolbar.accent;
   const text = theme.toolbar.text;
   const textMuted = theme.toolbar.textMuted;
-  const border = theme.toolbar.border;
   const itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
   const hoverBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
   const selectedBg = isDark ? `${accent}33` : `${accent}1F`;
 
-  const listWrapStyle: CSSProperties = {
-    flex: 1,
-    minHeight: 0,
-    overflowY: 'auto',
-    border: `1px solid ${border}`,
-    borderRadius: 8,
-    padding: 4,
-    background: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.015)',
-  };
-
   return (
-    <>
-      {/* 触发按钮：Cpu 图标 + 当前渠道/模型提示 */}
-      <Tooltip title={displayName}>
-        <Button
-          type="text"
-          icon={<Cpu size={16} />}
-          onClick={() => setOpen(true)}
-          style={{ width: 32, height: 32, padding: 0, color: text }}
-        />
-      </Tooltip>
-
-      {/* 居中弹窗：渠道 + 模型双列选择 */}
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title={t('aiModelPicker.modalTitle')}
-        width={600}
-        theme={theme}
-        footer={
-          <Button type="text" onClick={() => setOpen(false)} style={{ color: text }}>
-            {t('aiModelPicker.close')}
-          </Button>
-        }
-      >
+    <SettingsPopoverShell
+      summary={summary}
+      theme={theme}
+      panelWidth={300}
+      placement="topLeft"
+      triggerVariant="dropdown"
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* 工具行：标题 + 刷新 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 10,
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: text }}>
-            {currentChannel ? `${currentChannel.name} · ${selectedModel || t('aiModelPicker.selectModel')}` : displayName}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: text }}>
+            <Cpu size={13} />
+            {t('aiModelPicker.modalTitle')}
           </span>
           <Tooltip title={t('aiModelPicker.refreshChannel')}>
             <Button
               type="text"
-              icon={<RefreshCw size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />}
+              icon={<RefreshCw size={13} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />}
               onClick={handleRefresh}
               disabled={isLoading}
-              style={{ width: 28, height: 28, padding: 0, color: textMuted }}
+              style={{ width: 24, height: 24, padding: 0, color: textMuted }}
             />
           </Tooltip>
         </div>
@@ -179,14 +124,14 @@ export function AiModelPicker(): React.ReactElement {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '10px 12px',
+              padding: '8px 10px',
               borderRadius: 8,
               background: itemBg,
               color: theme.toolbar.danger,
-              fontSize: 13,
+              fontSize: 12,
             }}
           >
-            <AlertCircle size={14} />
+            <AlertCircle size={13} />
             <span style={{ flex: 1 }}>{loadError}</span>
             <Button type="text" size="small" onClick={handleRefresh} style={{ color: theme.toolbar.danger }}>
               {t('aiModelPicker.retry')}
@@ -194,165 +139,90 @@ export function AiModelPicker(): React.ReactElement {
           </div>
         ) : null}
 
-        {/* 双列：渠道 | 模型 */}
-        <div style={{ display: 'flex', gap: 14, height: 300 }}>
-          {/* 渠道列表 */}
-          <div style={{ ...listWrapStyle, flexBasis: '46%' }}>
-            {isLoading && channels.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: textMuted, fontSize: 13 }}>{t('aiModelPicker.loading')}</div>
-            ) : visibleChannels.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: textMuted, fontSize: 13 }}>
+        {/* 平铺模型列表（不分渠道分组） */}
+        <SettingGroup title={t('aiModelPicker.selectModel')} color={textMuted}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }} className="zx-thin-scroll">
+            {isLoading && flatModels.length === 0 ? (
+              <div style={{ padding: 12, textAlign: 'center', color: textMuted, fontSize: 12 }}>{t('aiModelPicker.loading')}</div>
+            ) : flatModels.length === 0 ? (
+              <div style={{ padding: 12, textAlign: 'center', color: textMuted, fontSize: 12 }}>
                 {loaded ? t('aiModelPicker.noAvailableChannels') : t('aiModelPicker.loading')}
               </div>
             ) : (
-              visibleChannels.map((ch) => {
-                const Icon = getModelIconComponent(ch.provider);
-                const selected = ch.id === selectedChannelId;
-                const llmCount = channelLlmModels.get(ch.id)?.length ?? 0;
-                return (
-                  <SelectableItem
-                    key={ch.id}
-                    selected={selected}
-                    accent={accent}
-                    text={text}
-                    selectedBg={selectedBg}
-                    hoverBg={hoverBg}
-                    onClick={() => handleChannelChange(ch.id)}
-                    title={llmCount ? `${ch.name} · ${t('aiModelPicker.modelsCount', { count: llmCount })}` : ch.name}
-                  >
-                    <Icon size={15} />
-                    <span
-                      style={{
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontSize: 13,
-                      }}
-                    >
-                      {ch.name}
-                    </span>
-                    <span style={{ fontSize: 11, color: textMuted, flexShrink: 0 }}>
-                      {t('aiModelPicker.modelsCount', { count: llmCount })}
-                    </span>
-                    {selected ? <Check size={14} color={accent} /> : null}
-                  </SelectableItem>
-                );
-              })
-            )}
-          </div>
-
-          {/* 模型列表 */}
-          <div style={{ ...listWrapStyle, flexBasis: '54%' }}>
-            {!currentChannel ? (
-              <div style={{ padding: 16, textAlign: 'center', color: textMuted, fontSize: 13 }}>
-                {t('aiModelPicker.selectChannelFirst')}
-              </div>
-            ) : modelOptions.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: textMuted, fontSize: 13 }}>
-                {t('aiModelPicker.noModelsInChannel')}
-              </div>
-            ) : (
-              modelOptions.map((opt) => {
+              flatModels.map((opt) => {
                 const Icon = getModelIconComponent(opt.iconKey);
-                const selected = opt.value === selectedModel;
+                const selected = opt.channelId === selectedChannelId && opt.model === selectedModel;
                 return (
-                  <SelectableItem
-                    key={opt.value}
+                  <PickerItem
+                    key={`${opt.channelId}::${opt.model}`}
                     selected={selected}
                     accent={accent}
                     text={text}
                     selectedBg={selectedBg}
                     hoverBg={hoverBg}
-                    onClick={() => handleModelChange(opt.value)}
-                    title={opt.value}
+                    onClick={() => handlePick(opt.channelId, opt.model)}
                   >
-                    <Icon size={15} />
-                    <span
-                      style={{
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontSize: 13,
-                      }}
-                    >
-                      {opt.value}
+                    <Icon size={14} />
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5 }}>
+                      {opt.model}
                     </span>
-                    {selected ? <Check size={14} color={accent} /> : null}
-                  </SelectableItem>
+                    <span style={{ fontSize: 10, color: textMuted, flexShrink: 0, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {opt.channelName}
+                    </span>
+                    {selected ? <Check size={13} color={accent} /> : null}
+                  </PickerItem>
                 );
               })
             )}
           </div>
-        </div>
-
-        {/* 提示行 */}
-        <div
-          style={{
-            marginTop: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-            color: textMuted,
-          }}
-        >
-          <Cpu size={13} />
-          <span>{t('aiModelPicker.currentHint', { displayName })}</span>
-        </div>
-      </Modal>
-    </>
+        </SettingGroup>
+      </div>
+    </SettingsPopoverShell>
   );
 }
 
 export type { ModelChannel } from '../../ai-config/index.js';
 
-// ===== 列表可选项（选中/悬停高亮） =====
+// ===== 面板选项行（选中/悬停高亮） =====
 
-interface SelectableItemProps {
+interface PickerItemProps {
   selected: boolean;
   accent: string;
   text: string;
   selectedBg: string;
   hoverBg: string;
   onClick: () => void;
-  title?: string;
   children: React.ReactNode;
 }
 
-function SelectableItem({
+function PickerItem({
   selected,
   accent,
   text,
   selectedBg,
   hoverBg,
   onClick,
-  title,
   children,
-}: SelectableItemProps): React.ReactElement {
+}: PickerItemProps): React.ReactElement {
   const [hover, setHover] = useState(false);
-
   return (
-    <Tooltip title={title}>
-      <div
-        onClick={onClick}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 10px',
-          borderRadius: 6,
-          cursor: 'pointer',
-          background: selected ? selectedBg : hover ? hoverBg : 'transparent',
-          color: selected ? accent : text,
-          transition: 'background 0.15s ease',
-        }}
-      >
-        {children}
-      </div>
-    </Tooltip>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '7px 10px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        background: selected ? selectedBg : hover ? hoverBg : 'transparent',
+        color: selected ? accent : text,
+        transition: 'background 0.15s ease',
+      }}
+    >
+      {children}
+    </div>
   );
 }

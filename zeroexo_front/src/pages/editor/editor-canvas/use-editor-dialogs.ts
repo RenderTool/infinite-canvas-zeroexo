@@ -15,6 +15,8 @@ import type { ImageDialogState } from '@/features/image-editor/image-dialog-rend
 import { toInsertPayload } from '@/features/asset-picker/components/picker-card.js';
 import type { NavProjectAction } from '@/shared/components/index.js';
 import type { Asset } from '@/features/asset-picker/index.js';
+import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
+import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import { HomeIcon, PlusIcon, CopyIcon, Trash2 } from 'lucide-react';
 import i18n from '@/i18n/config';
 import type { EditorRefs } from './use-editor-state.js';
@@ -224,20 +226,95 @@ export function useEditorDialogs({
     })();
   }, [titleDraft, t, canvasId, onProjectUpdated, message]);
 
-  // 素材插入画布
+  // 素材插入画布（资产/提示词/剧本 三类型，FIX-4/5）
   const handleAssetInsert = useCallback(
-    (item: { type: 'asset'; id: string; data: any }): void => {
+    (item: { type: 'asset' | 'prompt' | 'script'; id: string; data: any }): void => {
       if (!refs.commandQueue || !refs.store) return;
-      if (item.type !== 'asset') return;
-      const asset = item.data as Asset;
-      const payload = toInsertPayload(asset);
       const vp = refs.store.getViewport();
       const cx = (state.containerSize.width / 2 - vp.x) / vp.k;
       const cy = (state.containerSize.height / 2 - vp.y) / vp.k;
       const offsetX = (Math.random() - 0.5) * 80;
       const offsetY = (Math.random() - 0.5) * 80;
+      const pos = { x: cx + offsetX, y: cy + offsetY };
+
+      // 提示词 → text 节点（内容即提示词正文）
+      if (item.type === 'prompt') {
+        const prompt = item.data as { title?: string; content?: string };
+        const content = prompt?.content ?? '';
+        if (content.length > TEXT_MAX_LENGTH) {
+          message.warning(
+            `提示词内容过长（${content.length.toLocaleString()} 字，上限 ${TEXT_MAX_LENGTH.toLocaleString()} 字），无法直接放入画布。建议精简后重试。`,
+          );
+          return;
+        }
+        void (async () => {
+          const node = await createAssetNode({ kind: 'text', content, title: prompt?.title ?? '提示词' }, pos);
+          if (node) {
+            refs.commandQueue!.execute(new AddNodeCommand(node));
+            refs.store!.setSelection({
+              selectedNodeIds: new Set([node.id]),
+              selectedEdgeIds: new Set(),
+            });
+          }
+        })();
+        setAssetPickerOpen(false);
+        return;
+      }
+
+      // 剧本 → script 节点（解析 episodes JSON 还原剧集，随画布 Yjs 同步）
+      if (item.type === 'script') {
+        const asset = item.data as { title?: string; data?: { content?: string } };
+        const raw = asset?.data?.content ?? '';
+        let episodes: Episode[] = [];
+        try {
+          const parsed = JSON.parse(raw);
+          const list = Array.isArray(parsed) ? parsed : ((parsed?.episodes as unknown[]) ?? []);
+          episodes = (list as Array<Partial<Episode>>).map((ep, idx) => ({
+            id: ep.id ?? `ep-import-${Date.now()}-${idx}`,
+            number: typeof ep.number === 'number' ? ep.number : idx + 1,
+            title: ep.title ?? `第${idx + 1}集`,
+            content: ep.content ?? '',
+          }));
+        } catch {
+          episodes = [];
+        }
+        if (episodes.length === 0) {
+          message.warning('剧本内容为空或格式无法解析，无法发送到画布');
+          return;
+        }
+        const node: NodeRecord = {
+          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'script',
+          position: pos,
+          title: asset?.title ?? '剧本',
+          data: {
+            title: asset?.title ?? '剧本',
+            status: 'ready',
+            episodes,
+            activeEpisodeId: episodes[0]!.id,
+          },
+        };
+        refs.commandQueue.execute(new AddNodeCommand(node));
+        refs.store.setSelection({
+          selectedNodeIds: new Set([node.id]),
+          selectedEdgeIds: new Set(),
+        });
+        setAssetPickerOpen(false);
+        return;
+      }
+
+      // 常规资产（图片/视频/音频/文本）
+      const asset = item.data as Asset;
+      const payload = toInsertPayload(asset);
+      // FIX-5: text 超长拦截（防超大文本塞进节点拖垮协作同步）
+      if (payload.kind === 'text' && payload.content.length > TEXT_MAX_LENGTH) {
+        message.warning(
+          `文本内容过长（${payload.content.length.toLocaleString()} 字，上限 ${TEXT_MAX_LENGTH.toLocaleString()} 字），无法直接放入画布。建议通过 Agent 分段整理，或使用「小说导入」分集导入。`,
+        );
+        return;
+      }
       void (async () => {
-        const node = await createAssetNode(payload as any, { x: cx + offsetX, y: cy + offsetY });
+        const node = await createAssetNode(payload as any, pos);
         if (node) {
           refs.commandQueue!.execute(new AddNodeCommand(node));
           refs.store!.setSelection({
@@ -248,7 +325,7 @@ export function useEditorDialogs({
       })();
       setAssetPickerOpen(false);
     },
-    [refs, state.containerSize],
+    [refs, state.containerSize, message],
   );
 
   // 创建新项目

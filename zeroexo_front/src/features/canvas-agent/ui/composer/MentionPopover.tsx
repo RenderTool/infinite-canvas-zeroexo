@@ -45,6 +45,13 @@ export function MentionPopover({
   const [nodes, setNodes] = useState(() => ctx.getNodes());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  // R2：搜索框改为真实输入框（此前只是展示标签，不能打字）；
+  // 初始值同步 @ 后已输入的关键词，之后以框内输入为准
+
+  const [query, setQuery] = useState(search);
+  useEffect(() => {
+    setQuery(search);
+  }, [search]);
 
   // 实时读取:画布节点可能在浮层打开期间变化（新增/删除/重命名）
   useEffect(() => {
@@ -65,15 +72,15 @@ export function MentionPopover({
     return () => clearInterval(timer);
   }, [ctx]);
 
-  const filtered = !search
+  const filtered = !query
     ? nodes
     : nodes.filter(
         (n) =>
-          n.title.toLowerCase().includes(search.toLowerCase()) ||
-          n.type.toLowerCase().includes(search.toLowerCase()),
+          n.title.toLowerCase().includes(query.toLowerCase()) ||
+          n.type.toLowerCase().includes(query.toLowerCase()),
       );
 
-  // 键盘导航
+  // 键盘导航（搜索框内上下键选择，Enter 确认，Esc 关闭）
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
@@ -113,13 +120,13 @@ export function MentionPopover({
       ref={listRef}
       style={{
         position: 'absolute',
-        top: position.top,
+        bottom: 0, /* R2：向上弹出（锚定在输入框上缘，不再飞出屏幕） */
         left: position.left,
         width: 260,
         maxHeight: 280,
         borderRadius: 12,
         background: bgColor,
-        border: `1px solid ${t.border}`,
+        border: 'none', /* R2：投影风格，无边线 */
         boxShadow: 'var(--agent-shadow)',
         zIndex: 1000,
         overflow: 'hidden',
@@ -127,20 +134,37 @@ export function MentionPopover({
         flexDirection: 'column',
       }}
     >
-      {/* 搜索头 */}
+      {/* 搜索头（R2：真实输入框，可打字过滤；此前只是展示标签不能用） */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '8px 10px',
-          borderBottom: '1px solid var(--agent-border)',
+          background: 'var(--agent-surface)',
         }}
       >
-        <Search size={13} color={t.textMuted} />
-        <span style={{ fontSize: 12, color: t.textMuted }}>
-          {search ? `搜索 "${search}"` : '选择节点'}
-        </span>
+        <Search size={13} color={t.textMuted} style={{ flexShrink: 0 }} />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSelectedIndex(0);
+          }}
+          placeholder="搜索节点…"
+          autoFocus
+          style={{
+            flex: 1,
+            minWidth: 0,
+            border: 'none',
+            background: 'transparent',
+            outline: 'none',
+            fontSize: 12,
+            color: t.text,
+            fontFamily: 'inherit',
+          }}
+        />
       </div>
 
       {/* 列表 */}

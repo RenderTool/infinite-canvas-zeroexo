@@ -46,10 +46,12 @@ import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { SyncConflictDialog } from '@/features/sync-conflict-dialog/sync-conflict-dialog.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
+import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
 import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
 import { AssetLibraryModal } from '@/features/asset-library/index.js';
 import { AgentDock, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
 import { setCanvasOpBridge, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
+import { saveCanvasConfig } from '@/features/top-bar/index.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js';
 import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-agent-prompt.js';
@@ -164,12 +166,31 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
   // 卸载时清理,非画布页(AgentDock 在首页等处的复用)保持未注入 → agent-session 回退文本展示
   const bridgeStateRef = useRef(state);
   bridgeStateRef.current = state;
+  // R2-3: 画布配置桥接需要最新 dialogs 状态（set_config 应用+持久化）
+  const dialogsRef = useRef(dialogs);
+  dialogsRef.current = dialogs;
   useEffect(() => {
     setCanvasOpBridge({
       getCommandQueue: () => bridgeStateRef.current.editor?.core.commandQueue ?? null,
       getStore: () => (bridgeStateRef.current.editor?.store as unknown as CanvasOpStore | null) ?? null,
       getContainerSize: () => bridgeStateRef.current.containerSize,
       getExtensions: () => bridgeStateRef.current.extensions,
+      // R2-3: Agent set_config 画布操作 → 应用配置 + 持久化（与设置弹窗确认制同源）
+      applyCanvasConfig: (patch) => {
+        const d = dialogsRef.current;
+        if (!d) return false;
+        const next = { ...d.canvasConfig, ...patch };
+        d.setCanvasConfig(next);
+        saveCanvasConfig(next);
+        return true;
+      },
+      // R3-A2: 附件卡点击 → 打开资产库弹窗
+      openAssetLibrary: () => {
+        const d = dialogsRef.current;
+        if (!d) return false;
+        d.setAssetPickerOpen(true);
+        return true;
+      },
     });
     return () => setCanvasOpBridge(null);
   }, []);
@@ -192,6 +213,9 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     });
     void sendMessage(prompt, { projectId: canvasId });
   }, [state.loading, canvasId]);
+
+  // TopBar Agent 按钮高亮跟随 store 单一状态源(dock 内关闭按钮关闭面板后同步灭灯)
+  const agentDockOpen = useCanvasAgentStore((s) => s.dockOpen);
 
   const handleResetView = useCallback(() => {
     const store = state.editor?.store;
@@ -538,7 +562,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           onStartTitleEditing={() => { dialogs.setTitleDraft(dialogs.title); dialogs.setIsTitleEditing(true); }}
           onFinishTitleEditing={dialogs.handleFinishTitleEditing}
           onCancelTitleEditing={() => dialogs.setIsTitleEditing(false)}
-          agentOpen={dialogs.agentOpen}
+          agentOpen={agentDockOpen}
           onToggleAgent={() => {
             dialogs.setAgentOpen((v: boolean) => !v);
             // 同步到 AgentDock 的 zustand store
@@ -552,14 +576,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
-          onOpenCollaborationDock={() => {
-            // 协作聊天并入 AgentDock:打开 Dock 并切到聊天页签(替代旧 CollaborationPanel)
-            import('@/features/canvas-agent/ui/store.js').then((m) => {
-              const st = m.useCanvasAgentStore.getState();
-              st.setDockOpen(true);
-              st.setDockTab('collab');
-            });
-          }}
+          // R2-8: 协作聊天面板入口已并入 AgentDock 页签，Nav 按钮移除
           onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
           keyboardShortcuts={keyboardShortcuts}
@@ -701,6 +718,8 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
               theme={theme}
               extensions={state.extensions}
             />
+            {/* R3-D1: Agent 操作光标 + 聚焦高亮（操作级低频，3.5s 自动淡出） */}
+            <AgentCursorOverlay store={state.editor.store} />
           </CanvasView>
           </GroupDefaultsProvider>
           </NodeDefaultsProvider>

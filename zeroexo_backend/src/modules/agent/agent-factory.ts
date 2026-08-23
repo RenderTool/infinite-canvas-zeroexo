@@ -42,6 +42,8 @@ export class AgentFactory {
     agentType: string,
     projectId: string,
     userId: string,
+    /** R2：当前任务 ID（建节点打 agentTaskId 烙印，供画布状态摘要/档案库追溯） */
+    taskId?: string,
   ): Promise<AgentExecutor> {
     // 1. 从数据库加载配置
     const config = await this.prisma.aiAgentConfig.findUnique({
@@ -121,6 +123,7 @@ export class AgentFactory {
       this.assetsService,
       this.aiGenerateService,
       this.skillService,
+      taskId,
     );
 
     this.logger.log(

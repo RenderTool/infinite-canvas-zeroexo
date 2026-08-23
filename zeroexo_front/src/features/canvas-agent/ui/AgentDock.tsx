@@ -15,7 +15,6 @@ import { useCanvasAgentStore } from './store.js';
 import { useAgentTheme } from './context/theme-context.js';
 import { DockContent } from './DockContent.js';
 import { setSessionProjectId } from './session/agent-session.js';
-import { AiModelPicker } from '../../top-bar/components/ai-model-picker.js';
 import './AgentDock.css';
 
 const DEFAULT_WIDTH = 460;
@@ -121,19 +120,49 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
         flexDirection: 'row',
       }}
     >
-      {/* 左缘 8px 拖拽分隔条（聊天面板 | 画布工作区） */}
+      {/* 左缘拖拽分隔条（R2-8 美化：透明命中区 + 发丝线 + hover/拖拽手柄） */}
       <div
         onMouseDown={handleResizeDown}
+        className="agent-dock-resizer"
         style={{
           width: RESIZER_WIDTH,
           flexShrink: 0,
           cursor: 'col-resize',
-          background: t.border,
-          transition: 'background 0.15s',
+          background: 'transparent',
+          position: 'relative',
           opacity: dockOpen ? 1 : 0,
         }}
         title="拖拽调整面板宽度"
-      />
+      >
+        {/* 中央发丝线 */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: '50%',
+            width: 1,
+            transform: 'translateX(-0.5px)',
+            background: t.border,
+          }}
+        />
+        {/* hover/拖拽时的主题色手柄指示器 */}
+        <div
+          className="agent-dock-resizer-handle"
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 3,
+            height: 36,
+            borderRadius: 2,
+            background: t.accent,
+            opacity: 0,
+            transition: 'opacity 0.15s',
+          }}
+        />
+      </div>
 
       {/* 聊天面板内容 */}
       <div
@@ -147,17 +176,7 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
           overflow: 'hidden',
         }}
       >
-        {/* 顶部工具行:右上角收纳 AI 模型选择器 */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            padding: '6px 10px 0',
-            flexShrink: 0,
-          }}
-        >
-          <AiModelPicker />
-        </div>
+        {/* R2：顶部工具行已移除（渠道选择迁入输入框附件旁） */}
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <DockContent projectId={projectId} />
         </div>

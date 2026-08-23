@@ -23,6 +23,7 @@
 
 import type { NodeRecord } from '@zeroexo/core';
 import { uploadImage, uploadMediaFile } from '@zeroexo/plugin-persistence';
+import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
 import {
   TEXT_DEFAULT_SIZE,
   IMAGE_DEFAULT_SIZE,
@@ -178,6 +179,8 @@ export async function createAssetNode(
     }
 
     case 'text': {
+      // FIX-5 防御:超长文本拒绝创建节点(主入口已拦截,此处兜底防拖拽等旁路)
+      if (payload.content.length > TEXT_MAX_LENGTH) return null;
       const size = TEXT_DEFAULT_SIZE;
       return {
         id,

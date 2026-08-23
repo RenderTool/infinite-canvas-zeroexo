@@ -12,7 +12,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Type as TypeIcon } from 'lucide-react';
+import { Type as TypeIcon, AlertTriangle, RefreshCw, Square } from 'lucide-react';
 import { App as AntdApp } from 'antd';
 import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -20,7 +20,7 @@ import type { TextNodeData } from '@zeroexo/plugin-ai-provider';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
 
-import { BaseNodeView } from '../base-node-view.js';
+import { BaseNodeView, AISkeleton, nodeActionBus } from '../base-node-view.js';
 import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
 import { buildTextContentCommand } from '../utils/text-model.js';
 
@@ -52,6 +52,12 @@ export function TextNodeView({
 }: TextNodeViewProps): React.ReactElement {
   const data = (node.data ?? {}) as Partial<TextNodeData> & Record<string, unknown>;
   const content = data.content ?? '';
+  // 生成状态机(loading/error 仅在无内容时占用内容区;有内容时始终展示内容)
+  const status = data.status ?? 'idle';
+  const errorDetails = typeof data.errorDetails === 'string' ? data.errorDetails : undefined;
+  const taskLabel = typeof data.taskLabel === 'string' ? data.taskLabel : undefined;
+  const generating = status === 'loading' && !content;
+  const failed = status === 'error' && !content;
   const [isEditing, setIsEditing] = useState(false);
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -196,7 +202,7 @@ export function TextNodeView({
               onEscape={exitEditing}
             />
           </div>
-        ) : (
+        ) : content ? (
           <div
             style={{
               flex: 1,
@@ -228,6 +234,136 @@ export function TextNodeView({
                 __html: content,
               }}
             />
+          </div>
+        ) : generating ? (
+          // 生成中:行式 shimmer 骨架 + 任务信息 + 取消(与分镜同款扫光动画)
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              padding: '8px 12px',
+              boxSizing: 'border-box',
+            }}
+          >
+            <AISkeleton type="text" accentColor={nodeColor} />
+            <span style={{ fontSize: 12, color: theme.toolbar.textMuted, fontWeight: 500 }}>
+              {t('nodes.generating')}
+            </span>
+            {taskLabel ? (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: theme.toolbar.textMuted,
+                  maxWidth: '90%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={taskLabel}
+              >
+                {taskLabel}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 10px',
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.4)',
+                background: 'rgba(255,255,255,0.12)',
+                color: '#fff',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              <Square size={11} fill="currentColor" />
+              {t('nodes.cancelGeneration')}
+            </button>
+          </div>
+        ) : failed ? (
+          // 错误态:图标 + 详情 + 重试(重试复用统一 retry 事件,按节点类型推导生成模式)
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              padding: 12,
+              boxSizing: 'border-box',
+            }}
+          >
+            <AlertTriangle size={18} color="#ef4444" />
+            <span
+              style={{
+                fontSize: 12,
+                color: '#ef4444',
+                textAlign: 'center',
+                lineHeight: 1.5,
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
+              }}
+            >
+              {errorDetails ?? t('nodes.generateFailed')}
+            </span>
+            <button
+              type="button"
+              onClick={() => nodeActionBus.emit('retry', { nodeId: node.id })}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 10px',
+                borderRadius: 6,
+                border: '1px solid rgba(239,68,68,0.5)',
+                background: 'rgba(239,68,68,0.12)',
+                color: '#ef4444',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              <RefreshCw size={11} />
+              {t('nodes.retry')}
+            </button>
+          </div>
+        ) : (
+          // 空态占位:提示双击编辑或使用下方面板生成
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 12,
+              boxSizing: 'border-box',
+              cursor: 'text',
+            }}
+            onDoubleClick={handleDoubleClick}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: theme.toolbar.textMuted,
+                textAlign: 'center',
+                lineHeight: 1.6,
+              }}
+            >
+              {t('nodes.textEmptyHint')}
+            </span>
           </div>
         )}
       </div>

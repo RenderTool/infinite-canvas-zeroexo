@@ -1,77 +1,99 @@
 /**
- * ThinkStream - 思考态（融入消息流）
+ * ThinkStream - Codex 式执行 trace（Plan#36 R2 返工）
  *
- * 以 .msg.assistant 风格渲染为对话流中的一条消息条目（不再顶部固定）:
- * - 角色行:「思考」+ 活跃绿点 + 开始时间
- * - 正文: 打字机效果（TypingText）+ 步骤胶囊（StepCapsuleList）
- * - 思考完成后 2 秒自动折叠为「查看思考过程」摘要行,点击可展开
- * 随消息流滚动呈现。
+ * 收敛为对话流内单一紧凑 trace 块（不再渲染 .msg 角色行/边框盒子）：
+ * - 状态行：脉冲圆点（活跃）/ 完成勾 + phase 语义文案 + 已耗时（基准=任务开始时刻）
+ * - 思考：弱样式可折叠行（仅承载模型推理增量，点击回看）
+ * - 步骤：StepCapsuleList（图标/语义名/弱化工具 chip/耗时/展开 Input-Result）
+ * 时间线已收敛于此（TimelineBlock 消息不再产出，杜绝双展示）。
  */
 
 import { useState, useEffect } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Check, Brain } from 'lucide-react';
 import { useCanvasAgentStore } from '../store.js';
 import { TypingText } from './TypingText.js';
 import { StepCapsuleList } from './StepCapsule.js';
-
-/** 时间戳 → HH:MM（与消息列表 msg-time 一致） */
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
+import { PHASE_STATUS_TEXT } from './tool-semantics.js';
 
 export function ThinkStream(): React.ReactElement {
   const thinking = useCanvasAgentStore((s) => s.thinking);
   const setThinking = useCanvasAgentStore((s) => s.setThinking);
+  const phase = useCanvasAgentStore((s) => s.phase);
+  const phaseLabel = useCanvasAgentStore((s) => s.phaseLabel);
 
-  // 首次渲染时记录开始时间（ThinkingState 无时间戳字段）
-  const [startedAt] = useState(() => Date.now());
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+  // R2 返工：计时基准 = 任务开始时间（store 记录），不再用组件挂载时刻（会累计面板打开时长）
+  const baseTs = thinking.startedAt ?? Date.now();
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
-  // 思考完成时自动折叠（收敛为一行摘要）
+  // 活跃时每 200ms 刷新；结束瞬间定格最终耗时
   useEffect(() => {
-    if (!thinking.active && thinking.text) {
-      const timer = setTimeout(() => setCollapsed(true), 2000);
-      return () => clearTimeout(timer);
+    if (!thinking.active) {
+      if (thinking.startedAt) setNowTs(Date.now());
+      return;
     }
-  }, [thinking.active, thinking.text]);
+    setNowTs(Date.now());
+    const timer = setInterval(() => setNowTs(Date.now()), 200);
+    return () => clearInterval(timer);
+  }, [thinking.active, thinking.startedAt]);
 
-  // 开始思考时展开
+  // 开始新一轮时展开思考（如有）
   useEffect(() => {
     if (thinking.active) setCollapsed(false);
   }, [thinking.active]);
 
-  if (!thinking.active && !thinking.text) return <></>;
+  if (!thinking.active && !thinking.text && thinking.steps.length === 0) return <></>;
+
+  const statusText = phaseLabel || (phase ? PHASE_STATUS_TEXT[phase] : 'Agent 工作中…');
+  const elapsed = Math.max(0, nowTs - baseTs);
+  const elapsedText = `${(elapsed / 1000).toFixed(1)}s`;
+  const hasThinking = thinking.text.length > 0;
 
   return (
-    <div className="msg assistant">
-      {/* 角色行 */}
-      <div className="role">
-        <span>思考</span>
-        {thinking.active && (
+    <div style={{ width: '100%', maxWidth: '100%' }}>
+      {/* 状态行（紧凑，弱色） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 0 4px' }}>
+        {thinking.active ? (
           <span
             className="agent-pulse-dot"
             style={{
-              width: 6,
-              height: 6,
+              width: 7,
+              height: 7,
               borderRadius: '50%',
-              background: '#4ade80',
+              background: 'var(--agent-accent)',
               display: 'inline-block',
+              flexShrink: 0,
             }}
           />
+        ) : (
+          <Check size={12} color="#4ade80" strokeWidth={3} style={{ flexShrink: 0 }} />
         )}
-        <span className="msg-time">{formatTime(startedAt)}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--agent-muted)' }}>
+          {thinking.active
+            ? statusText
+            : `已完成 ${thinking.steps.length} 步 · ${elapsedText}`}
+        </span>
+        {thinking.active && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 11,
+              color: 'var(--agent-muted)',
+              fontVariantNumeric: 'tabular-nums',
+              opacity: 0.8,
+            }}
+          >
+            {elapsedText}
+          </span>
+        )}
       </div>
 
-      {/* 正文区 */}
-      <div className="ai-body">
-        {collapsed ? (
+      {/* 思考折叠卡（大脑图标 + 左侧竖线，对齐 Codex 参考） */}
+      {hasThinking && (
+        <div style={{ padding: '0 0 2px' }}>
           <button
             type="button"
-            onClick={() => setCollapsed(false)}
-            title="展开思考过程"
+            onClick={() => setCollapsed((v) => !v)}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -81,25 +103,47 @@ export function ThinkStream(): React.ReactElement {
               padding: 0,
               cursor: 'pointer',
               fontFamily: 'inherit',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: 'var(--agent-accent)',
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--agent-muted)',
             }}
           >
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                border: '1px solid var(--agent-border)',
+                background: 'var(--agent-surface)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--agent-accent)',
+                flexShrink: 0,
+              }}
+            >
+              <Brain size={11} />
+            </span>
+            思考过程{collapsed ? '' : `（${thinking.text.length} 字）`}
             <ChevronRight
               size={11}
               style={{
                 transition: 'transform 0.2s',
-                transform: 'rotate(90deg)',
+                transform: collapsed ? 'none' : 'rotate(90deg)',
               }}
             />
-            查看思考过程
           </button>
-        ) : (
-          <>
-            {thinking.text && (
+          {!collapsed && (
+            <div
+              style={{
+                margin: '6px 0 2px 9px',
+                padding: '8px 12px',
+                borderLeft: '2px solid var(--agent-border)',
+                color: 'var(--agent-muted)',
+                fontSize: 12.5,
+                lineHeight: 1.7,
+              }}
+            >
               <TypingText
                 text={thinking.text}
                 streaming={thinking.active}
@@ -107,11 +151,13 @@ export function ThinkStream(): React.ReactElement {
                   setThinking({ active: false });
                 }}
               />
-            )}
-            <StepCapsuleList steps={thinking.steps} />
-          </>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 执行步骤（AIAgentStepsTimeline 形态） */}
+      <StepCapsuleList steps={thinking.steps} />
     </div>
   );
 }

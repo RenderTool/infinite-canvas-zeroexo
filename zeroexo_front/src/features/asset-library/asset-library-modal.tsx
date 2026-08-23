@@ -50,6 +50,8 @@ export function AssetLibraryModal({
       style={{ maxWidth: 'calc(100vw - 32px)' }}
     >
       <AssetLibraryPage
+        // FIX-6: 每次打开强制重挂载（画布侧剧本加入资产库/节点保存素材后，打开即可看到最新数据）
+        key={open ? 'open' : 'closed'}
         onSendToCanvas={handleSendToCanvas}
         sidebarRadius={12}
       />

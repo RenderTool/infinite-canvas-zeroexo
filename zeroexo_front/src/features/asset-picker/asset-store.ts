@@ -28,7 +28,7 @@ export interface CreateAssetInput {
 }
 
 /** 更新素材时的输入(部分字段) */
-export type UpdateAssetInput = Partial<Pick<Asset, 'title' | 'tags' | 'coverUrl' | 'folderId' | 'data' | 'favorite'>>;
+export type UpdateAssetInput = Partial<Pick<Asset, 'title' | 'tags' | 'coverUrl' | 'folderId' | 'data' | 'favorite' | 'cloudId'>>;
 
 // ===== localforage 实例(app_state 桶,与 project-store 共用) =====
 
@@ -138,6 +138,7 @@ export async function updateAsset(id: string, patch: UpdateAssetInput): Promise<
     folderId: patch.folderId !== undefined ? patch.folderId : current.folderId,
     data: patch.data ?? current.data,
     favorite: patch.favorite !== undefined ? patch.favorite : current.favorite,
+    cloudId: patch.cloudId !== undefined ? patch.cloudId : current.cloudId,
     createdAt: now(),
   };
   list[idx] = updated;
