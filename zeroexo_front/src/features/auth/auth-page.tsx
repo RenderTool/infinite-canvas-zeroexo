@@ -463,9 +463,9 @@ export function AuthPage({ mode, onSuccess, onSwitchMode, onClose }: AuthPagePro
             {/* 底部居中：技术信息 */}
             <div style={{ textAlign: 'center' }}>
               <div style={{ color: 'rgba(255,255,255,0.25)', fontSize: 10, lineHeight: 1.6 }}>
-                <span>ZeroExo v0.13.0</span>
+                <span>ZeroExo v1.0.0</span>
                 <span style={{ margin: '0 6px', opacity: 0.3 }}>|</span>
-                <span>Build 2026.08.14</span>
+                <span>Build 2026.08.23</span>
                 <span style={{ margin: '0 6px', opacity: 0.3 }}>|</span>
                 <span>React 19 + NestJS</span>
               </div>

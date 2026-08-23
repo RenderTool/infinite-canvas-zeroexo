@@ -52,7 +52,9 @@ export class AiGenerateAssetService {
           size: BigInt(Buffer.byteLength(text, 'utf-8')),
           text,
           tags: [...(dto.tags ?? []), ...(isTest ? ['devtest'] : [])],
-          ...(isTest ? { category: 'ai-generation' } : {}),
+          // AI 生成结果统一归入 ai-generation 分类,与用户素材(user)隔离,
+          // 避免被前端素材库 /resources?category=user 拉到画布外的资产库
+          category: 'ai-generation',
           lastSyncedAt: new Date(),
         },
       });
@@ -97,7 +99,9 @@ export class AiGenerateAssetService {
         ...(result.height ? { height: result.height } : {}),
         ...(result.duration ? { duration: result.duration } : {}),
         tags: [...(dto.tags ?? []), ...(isTest ? ['devtest'] : [])],
-        ...(isTest ? { category: 'ai-generation' } : {}),
+        // AI 生成结果统一归入 ai-generation 分类,与用户素材(user)隔离,
+        // 避免被前端素材库 /resources?category=user 拉到画布外的资产库
+        category: 'ai-generation',
         lastSyncedAt: new Date(),
       },
     });

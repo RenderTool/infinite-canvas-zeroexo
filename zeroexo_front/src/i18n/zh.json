@@ -146,7 +146,7 @@
     "shortcuts": "快捷键",
     "shortcutsDescription": "画布操作的常用快捷键",
     "joystickNav": {
-      "title": "拖拽方向跳转节点"
+      "title": "拖拽红点指向节点跳转"
     },
     "backHome": "回到主页",
     "newProject": "创建新项目",
@@ -427,6 +427,22 @@
     "typeFix": "修复"
   },
   "changelogEntries": {
+    "v1_0_0": {
+      "title": "ZeroExo 1.0 正式发布",
+      "body": "首个正式发布版本：AI 驱动的端到端内容创作平台，覆盖剧本、分镜、统筹、出片全流程。",
+      "items": [
+        "无限画布编辑器：自研渲染管线，500+ 节点流畅操作，多级 LOD 与视口剔除",
+        "节点编排系统：图片/视频/音频/文本/剧本/分镜/堆叠节点，类型化图标与连线交互",
+        "图生图 / 图生视频：参考图作为生成参数，多渠道模型支持",
+        "画布智能体 ZeroExoAgent：对话式生成、@ 引用、参数契约表单、历史会话搜索",
+        "剧本 → 分镜 → 统筹 → 出片全流程：分镜分块生成防幻觉、出片工作台",
+        "实时协作：Yjs 同步 + SSE 事件、在线光标、房间管理与聊天",
+        "云同步：增量同步、冲突 rebase、离线优先",
+        "素材与提示词库：素材管理、公共提示词库、收藏与来源追溯",
+        "管理后台：用户/渠道/政策管理、运营与计费分析看板",
+        "三语国际化（中/英/日）、明暗主题、桌面启动器"
+      ]
+    },
     "v0_13_0": {
       "title": "公共提示词库上线、法律协议体系与政策管理后台",
       "body": "公共提示词库正式上线，支持证书标识与来源追溯；法律协议体系与政策管理后台全面搭建；交互优化与导航重构。",
@@ -742,6 +758,7 @@
     "replayDone": "已复原生成链路：新节点 + {{n}} 个引用已重连，确认后可重新生成",
     "replayPartial": "已复原生成链路，但 {{n}} 个引用无法还原（内容未存档），其余已重连",
     "replayModelInvalid": "已复原生成链路，但原渠道/模型已失效，请重新选择模型",
+    "backToContent": "回到内容",
     "editContent": "编辑内容",
     "paste": "粘贴",
     "delete": "删除",
@@ -907,6 +924,12 @@
     "retry": "重试",
     "generating": "生成中",
     "cancelGeneration": "取消生成",
+    "genLoader": {
+      "image": { "analyzing": "分析提示词…", "drafting": "生成画面…", "refining": "优化细节…", "finalizing": "整理输出结果…" },
+      "video": { "analyzing": "分析提示词…", "drafting": "生成视频帧…", "refining": "合成画面…", "finalizing": "整理输出结果…" },
+      "audio": { "analyzing": "分析内容…", "drafting": "合成音频…", "refining": "优化音色…", "finalizing": "整理输出结果…" },
+      "text": { "analyzing": "分析需求…", "drafting": "撰写内容…", "refining": "润色文本…", "finalizing": "整理输出结果…" }
+    },
     "generateFailed": "生成失败",
     "inputPin": "输入",
     "outputPin": "输出",
@@ -1698,7 +1721,7 @@
     "viewScript": "查看剧本"
   },
   "joystickNav": {
-    "title": "摇杆导航"
+    "title": "拖拽红点指向节点跳转"
   },
   "collab": {
     "title": "协作",

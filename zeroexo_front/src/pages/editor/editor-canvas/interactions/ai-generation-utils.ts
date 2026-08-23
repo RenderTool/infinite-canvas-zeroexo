@@ -540,3 +540,88 @@ export function saveNodeConfig(
     q.execute(new UpdateNodeDataCommand(nodeId, patch));
   }
 }
+
+// ===== 契约参数模块:模板参数组装(与 Admin 契约参数模块对齐) =====
+
+/** provider 强类型兜底字段(模板参数缺失时使用;params 存在时后端以其为准) */
+export interface TemplateProviderFallback {
+  size: string;
+  quality?: string;
+  count?: number;
+  seconds?: number;
+  vquality?: string;
+  generateAudio?: boolean;
+  watermark?: boolean;
+  voice?: string;
+  format?: string;
+  speed?: number;
+  instructions?: string;
+}
+
+/** 不传给后端运营商的 meta/系统参数 */
+const TEMPLATE_META_PARAMS = new Set([
+  'referenceImagesEnabled',
+  'maxReferenceImages',
+  'maxReferenceVideos',
+  'maxReferenceAudios',
+  'referenceVideosEnabled',
+  'referenceAudiosEnabled',
+]);
+
+/**
+ * 从 node.data.paramValues 组装模板参数(契约参数模块)与 provider 强类型兜底字段。
+ *
+ * 尺寸传值策略(与 Admin use-image-generation 一致):
+ * - AUTO 模式(aspectRatio='auto'):保留 resolution + aspectRatio(后端适配器据此计算尺寸),删除显式 size
+ * - 非 AUTO 模式:传 size("WxH" 字符串),删除 resolution + aspectRatio
+ */
+export function buildTemplateParams(
+  mode: 'text' | 'image' | 'video' | 'audio',
+  nodeData: Record<string, unknown>,
+): { params: Record<string, unknown>; fallback: TemplateProviderFallback } {
+  const pv = ((nodeData.paramValues ?? {}) as Record<string, any>) ?? {};
+  const filtered: Record<string, any> = {};
+  for (const [k, v] of Object.entries(pv)) {
+    if (v !== '' && v !== null && v !== undefined) filtered[k] = v;
+  }
+
+  // 尺寸传值策略
+  const isAuto = filtered.aspectRatio === 'auto';
+  if (isAuto) {
+    if (filtered.size && typeof filtered.size === 'object') {
+      const sz = filtered.size as { width: number; height: number };
+      // AUTO 下 SizeRenderer 将 size 置为 {0,0};若有真实尺寸则转字符串兜底
+      filtered.size = sz.width > 0 && sz.height > 0 ? `${sz.width}x${sz.height}` : undefined;
+      if (filtered.size === undefined) delete filtered.size;
+    }
+  } else if (filtered.size && typeof filtered.size === 'object') {
+    const sz = filtered.size as { width: number; height: number };
+    filtered.size = `${sz.width}x${sz.height}`;
+    delete filtered.resolution;
+    delete filtered.aspectRatio;
+  }
+
+  // 清理 meta 参数
+  for (const key of TEMPLATE_META_PARAMS) delete filtered[key];
+
+  // 强类型兜底字段
+  const fallback: TemplateProviderFallback = { size: '1024x1024' };
+  if (mode === 'image') {
+    fallback.size = (filtered.size as string) ?? '1024x1024';
+    fallback.quality = (filtered.quality as string) ?? 'standard';
+    fallback.count = (filtered.count as number) ?? 1;
+  } else if (mode === 'video') {
+    fallback.size = (filtered.size as string) ?? '1280x720';
+    fallback.seconds = (filtered.seconds as number) ?? (filtered.duration as number) ?? 5;
+    fallback.vquality = (filtered.vquality as string) ?? (filtered.resolution as string) ?? '720p';
+    fallback.generateAudio = (filtered.generateAudio as boolean) ?? true;
+    fallback.watermark = (filtered.watermark as boolean) ?? false;
+  } else if (mode === 'audio') {
+    fallback.voice = (filtered.voice as string) ?? 'alloy';
+    fallback.format = (filtered.audioFormat as string) ?? 'mp3';
+    fallback.speed = (filtered.audioSpeed as number) ?? 1;
+    fallback.instructions = (filtered.audioInstructions as string) ?? undefined;
+  }
+
+  return { params: filtered, fallback };
+}

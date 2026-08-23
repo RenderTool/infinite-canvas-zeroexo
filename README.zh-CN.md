@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ZeroExo_Platform-v0.1.0-6c5ce7?style=for-the-badge" alt="version">
+  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.0.0-6c5ce7?style=for-the-badge" alt="version">
   <img src="https://img.shields.io/badge/Active_Development-yellow?style=for-the-badge" alt="active development">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
   <img src="https://img.shields.io/badge/NestJS-10-EA2845?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS">
@@ -27,7 +27,7 @@
 
 ## 服务对象
 
-ZeroExo 短视频创作者、影视自媒体从业者与分镜师**为自己打造**——
+ZeroExo 短视频创作者、影视自媒体从业者
 
 ## 核心亮点
 
@@ -54,11 +54,27 @@ ZeroExo 短视频创作者、影视自媒体从业者与分镜师**为自己打�
 | 分镜与剧本 | 富文本剧本编辑器、分镜集数、镜头列表、剧本导入与转换 |
 | 素材与提示词 | 素材库、可收藏的提示词库、资源同步（云优先） |
 
-| 画布核心 | 画布协作 | AI 出片 |
-|---|---|---|
-| `docs/screenshots/frontend/canvas-core.png` | `docs/screenshots/frontend/collaboration.png` | `docs/screenshots/frontend/ai-production.png` |
+#### 界面预览
 
-> 以上为占位路径，截图正在准备中，后续将补充。
+| 登录页 | 首页 | 白色主题 |
+|---|---|---|
+| ![登录页](docs/screenshots/frontend/前端登录页.webp) | ![首页](docs/screenshots/frontend/前端首页.webp) | ![白色主题](docs/screenshots/frontend/前端白色主题.webp) |
+
+| 剧本编辑 | 剧本与分镜 | 分镜编辑 |
+|---|---|---|
+| ![剧本编辑页](docs/screenshots/frontend/前端剧本编辑页.webp) | ![剧本和分镜](docs/screenshots/frontend/前端剧本和分镜.webp) | ![分镜编辑页](docs/screenshots/frontend/前端分镜编辑页.webp) |
+
+| 提示词库 | 素材库 | 画布管理 |
+|---|---|---|
+| ![提示词](docs/screenshots/frontend/前端提示词.webp) | ![素材库管理页](docs/screenshots/frontend/前端素材库管理页.webp) | ![画布管理页](docs/screenshots/frontend/前端画布管理页.webp) |
+
+动画演示（GIF）：
+
+- [画布协作](docs/screenshots/frontend/前端画布协作.gif)
+
+- [画布堆叠](docs/screenshots/frontend/前端画布堆叠.gif)
+
+- [画布导航](docs/screenshots/frontend/前端画布导航.gif)
 
 ### 管理后台
 
@@ -69,9 +85,33 @@ ZeroExo 短视频创作者、影视自媒体从业者与分镜师**为自己打�
 - 提示词库、品牌定制、多语言政策
 - 基于 ECharts 的运营与计费数据看板
 
-| 数据看板 | 渠道管理 |
+#### 界面预览
+
+| 后台首页 | 站点运营 | 用户资产权限管理 |
+|---|---|---|
+| ![后台首页](docs/screenshots/admin/后台首页.webp) | ![站点运营](docs/screenshots/admin/后台管理站点运营.webp) | ![用户资产权限管理](docs/screenshots/admin/后台管理用户资产权限管理.webp) |
+
+| API 渠道管理 | 渠道详情 | 存储 |
+|---|---|---|
+| ![API渠道管理](docs/screenshots/admin/后台API渠道管理.webp) | ![渠道详情](docs/screenshots/admin/后台API渠道管理具体页.webp) | ![存储](docs/screenshots/admin/后台存储页.webp) |
+
+| 站点管理 | 日志 | 邮件服务 |
+|---|---|---|
+| ![站点管理](docs/screenshots/admin/后台站点管理.webp) | ![日志](docs/screenshots/admin/后台日志.webp) | ![邮件服务](docs/screenshots/admin/后台管理邮件服务.webp) |
+
+### 画布能力展示
+
+| 画布概览 | 快捷键 |
 |---|---|
-| `docs/screenshots/admin/dashboard.png` | `docs/screenshots/admin/providers.png` |
+| ![画布概览](docs/screenshots/canvas/画布概览.webp) | ![画布快捷键](docs/screenshots/canvas/画布快捷键.webp) |
+
+| 节点样式配置 | 层级面板与双击聚焦 |
+|---|---|
+| ![节点样式配置](docs/screenshots/canvas/画布节点样式配置.webp) | ![层级面板和双击聚焦](docs/screenshots/canvas/画布层级面板和双击聚焦.gif) |
+
+| 调试与协作 | 项目工程开发配套 Agent | Agent 自我升级与维护 |
+|---|---|---|
+| ![调试和协作](docs/screenshots/canvas/debug和协作.webp) | ![项目工程开发配套Agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent自我升级项目维护一体](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
 
 ### 后端 API
 
@@ -188,7 +228,7 @@ zeroexo-platform/
 ├── zeroexo_backend/        # NestJS API（Prisma / PostgreSQL / Redis / MinIO）
 │   ├── prisma/             # schema、migrations、种子脚本
 │   └── src/modules/        # 认证、AI 生成、智能体、素材、计费 ...
-├── docs/screenshots/       # 各模块截图（frontend / admin / backend）
+├── docs/screenshots/       # 各模块截图（frontend / canvas / admin）
 ├── docker-compose.yml      # 一键部署
 └── docker/nginx/           # 反向代理配置
 ```
@@ -218,4 +258,4 @@ zeroexo-platform/
 
 ## 许可证
 
-[MIT](LICENSE) © RenderTool <750831855@qq.com>
+[MIT](LICENSE) © 斯高和 <750831855@qq.com>

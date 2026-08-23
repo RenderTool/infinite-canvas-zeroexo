@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, X, Search } from 'lucide-react';
-import { Button, message } from 'antd';
+import { Button, App as AntdApp } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasAgentStore } from './store.js';
@@ -125,6 +125,9 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
   const setTab = useCanvasAgentStore((s) => s.setDockTab);
   const collabStore = useCollaborationStore();
   const { t } = useTranslation();
+  // antd 静态 API（message/Modal.confirm）不走 ConfigProvider 上下文，不适配明暗主题；
+  // 项目惯例：一律用 App.useApp() 实例（继承 AntdThemeProvider 的 dark/light 算法）
+  const { message, modal } = AntdApp.useApp();
   const themeCfg = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -268,19 +271,34 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     };
   }, [activeConversationId, convs]);
 
-  /** 删除会话 */
+  /** 删除会话（先确认，防误触；确认后级联删除消息） */
   const handleDeleteConversation = async (id: string): Promise<void> => {
     const store = useCanvasAgentStore.getState();
-    try {
-      await deleteConversation(id);
-    } catch {
-      return;
-    }
-    setConvs((prev) => prev.filter((c) => c.id !== id));
-    if (store.activeConversationId === id) {
-      store.setActiveConversationId(null);
-      store.clearMessages();
-    }
+    const target = convs.find((c) => c.id === id);
+    const msgCount = target?._count?.messages ?? 0;
+    modal.confirm({
+      title: '删除该会话？',
+      content: target
+        ? `「${target.title ?? '画布 Agent 对话'}」共 ${msgCount} 条消息，删除后不可恢复。`
+        : '删除后历史消息不可恢复。',
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        try {
+          await deleteConversation(id);
+        } catch {
+          message.error('删除会话失败');
+          return;
+        }
+        setConvs((prev) => prev.filter((c) => c.id !== id));
+        if (store.activeConversationId === id) {
+          store.setActiveConversationId(null);
+          store.clearMessages();
+        }
+      },
+    });
   };
 
   const currentTitle = convs.find((c) => c.id === activeConversationId)?.title

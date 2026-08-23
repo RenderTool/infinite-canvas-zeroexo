@@ -8,6 +8,7 @@ import { notFound } from '../../../common/errors/app-exception.js';
 import { ResourceService } from '../../assets/resource.service';
 import { MinioService } from '../../assets/minio.service';
 import { LogsService } from '../../logs/logs.service';
+import { SyncService } from '../../sync/sync.service';
 import { BaseProjectService } from '../common/base-project.service';
 
 /** 快照硬性上限 */
@@ -42,6 +43,7 @@ export class VersionsService extends BaseProjectService {
     private readonly resourceService: ResourceService,
     private readonly minioService: MinioService,
     private readonly logsService: LogsService,
+    private readonly syncService: SyncService,
   ) {
     super();
   }
@@ -196,13 +198,19 @@ export class VersionsService extends BaseProjectService {
    * 2. 检查快照引用的资源是否存在(返回缺失列表 warnings)
    * 3. 将快照数据写回 Project 表(version 递增)
    * 4. 刷新资源引用计数(旧 scene -1,新 scene +1)
-   * 5. 返回新版本号和缺失资源警告
+   * 5. 将回滚结果作为权威版本广播到 Yjs(Hocuspocus),所有在线端实时切换
+   * 6. 返回新版本号、缺失资源警告与回滚后的完整 graph(供前端对齐本地缓存)
    */
   async rollback(
     ownerId: string,
     projectId: string,
     version: number,
-  ): Promise<{ version: number; warnings: string[] }> {
+  ): Promise<{
+    version: number;
+    warnings: string[];
+    graph: { scene: unknown; connections: unknown; viewport: unknown };
+    lastSyncedAt: Date | null;
+  }> {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project || project.ownerId !== ownerId) {
       throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
@@ -275,7 +283,20 @@ export class VersionsService extends BaseProjectService {
       },
     });
 
-    return { version: updated.version, warnings };
+    // 将回滚结果作为权威版本广播到所有在线端(Yjs/Hocuspocus)：
+    // 在线端实时 replaceState 切换到回滚版本；失败仅告警，不影响已落库的结果。
+    await this.syncService.publishCanvasGraph(projectId, {
+      scene,
+      connections,
+      viewport,
+    });
+
+    return {
+      version: updated.version,
+      warnings,
+      graph: { scene, connections, viewport },
+      lastSyncedAt: updated.lastSyncedAt,
+    };
   }
 
   /** 手动触发淘汰清理(供管理后台使用) */

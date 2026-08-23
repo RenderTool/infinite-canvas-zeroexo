@@ -2,23 +2,22 @@
  * AiPlaceholderNodeView - AI 生成占位节点视图
  *
  * 当 AI 任务(图片/视频/剧本/分镜)正在生成时,在画布上显示占位节点。
- * 节点本身即为 StaggerGridRipple 动效背景,文字叠加在涟漪上。
+ * 生成中骨架契约：与分镜 StoryboardGeneratingLoader 同款（脉冲点+阶段文案+shimmer 行），
+ * 禁用四宫格/网格涟漪形态（用户多次强调，2026-08-23 废止 StaggerGridRipple）。
  * 该节点不显示在节点菜单中,仅为 AI 生成任务占位。
  * 固定尺寸,禁止 resize。
  *
  * 状态:
- * - generating: 动态涟漪背景 + 叠加文字"正在生成XXX"
- * - completed: 绿色涟漪收尾 → 自动移除(由外部逻辑处理)
- * - error: 红色涟漪 + 重试/移除按钮
+ * - generating: 分镜同款骨架 + 类型文案/任务信息/停止按钮
+ * - completed: 完成文案 → 自动移除(由外部逻辑处理)
+ * - error: 错误信息 + 重试/移除按钮
  */
-import { AlertCircle, RefreshCw, X, Sparkles, Square } from 'lucide-react';
+import { AlertCircle, RefreshCw, X, Square, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useTheme } from '@zeroexo/plugin-theme';
 import type { NodeRecord, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
-import { BaseNodeView } from '../base-node-view.js';
-import { StaggerGridRipple } from '../components/StaggerGridRipple.js';
+import { BaseNodeView, AISkeleton, type GenLoaderKind } from '../base-node-view.js';
 import { nodeActionBus } from '../base-node-view.js';
 
 export interface AiPlaceholderNodeData {
@@ -64,6 +63,14 @@ function typeLabel(t: string): string {
   return map[t] || t;
 }
 
+/** 生成类型 → 骨架文案类型（script 走文本段，其余同名） */
+const GEN_LOADER_KIND: Record<string, GenLoaderKind> = {
+  image: 'image',
+  video: 'video',
+  script: 'text',
+  storyboard: 'storyboard',
+};
+
 export function AiPlaceholderNodeView({
   node,
   pins,
@@ -76,8 +83,6 @@ export function AiPlaceholderNodeView({
   store,
 }: AiPlaceholderNodeViewProps): React.ReactElement {
   const { t } = useTranslation();
-  const { theme } = useTheme();
-  const isDark = theme.mode === 'dark';
   const data = (node.data ?? {}) as Partial<AiPlaceholderNodeData>;
   const status = data.status ?? 'generating';
   const generationType = data.generationType ?? 'image';
@@ -117,21 +122,28 @@ export function AiPlaceholderNodeView({
       contentPadding="8px"
       store={store}
     >
-      {/* 涟漪本身作为节点内容,文字通过 children 叠加在涟漪上 */}
-      <StaggerGridRipple
-        status={status === 'removed' ? 'idle' : status}
-        accentColor={NODE_COLOR}
-        isDark={isDark}
-        fillContainer
+      {/* 生成中：分镜同款骨架（AISkeleton）；错误/完成：简洁状态层 */}
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          position: 'relative',
+          overflow: 'hidden',
+        }}
       >
         {status === 'generating' && (
           <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#e0e0e0', display: 'flex', alignItems: 'center', gap: 5, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
-              <Sparkles size={13} style={{ color: NODE_COLOR }} />
+            <AISkeleton type="media" accentColor={NODE_COLOR} kind={GEN_LOADER_KIND[generationType] ?? 'image'} />
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>
               {t('nodes.aiPlaceholderGenerating', `正在生成${typeLabel(generationType)}`)}
             </div>
             {taskLabel && (
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', textShadow: '0 1px 3px rgba(0,0,0,0.4)', marginTop: 4 }}>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {taskLabel}
               </div>
             )}
@@ -148,7 +160,6 @@ export function AiPlaceholderNodeView({
                   backdropFilter: 'blur(4px)',
                   color: '#f87171', fontSize: 10, fontWeight: 500,
                   cursor: 'pointer', fontFamily: 'inherit',
-                  marginTop: 8,
                   transition: 'all 0.15s',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; }}
@@ -209,11 +220,12 @@ export function AiPlaceholderNodeView({
           </>
         )}
         {status === 'completed' && (
-          <div style={{ fontSize: 12, color: '#22d3ee', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#10b981' }}>
+            <Check size={14} />
             {t('nodes.aiPlaceholderCompleted', '生成完成')}
           </div>
         )}
-      </StaggerGridRipple>
+      </div>
     </BaseNodeView>
   );
 }

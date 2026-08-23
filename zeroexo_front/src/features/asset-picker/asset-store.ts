@@ -95,30 +95,51 @@ export async function addAsset(input: CreateAssetInput): Promise<Asset> {
 
 /**
  * 批量新增素材元数据（单次读写，避免逐条读写导致的竞态问题）
+ * 幂等:同一 storageKey(后端 CAS 文件)已存在时跳过创建,复用已有记录,避免重复入库
  * @param inputs 由 upload-asset 服务构造的输入数组
- * @returns 新创建的 Asset 数组
+ * @returns 新创建的 Asset 数组(去重跳过的记录不会出现在结果中)
  */
 export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
   if (inputs.length === 0) return [];
   const list = await readAll();
   const nowStr = now();
-  const created: Asset[] = inputs.map((input) => ({
-    id: nanoid(),
-    title: input.title.trim() || '未命名素材',
-    kind: input.kind,
-    coverUrl: input.coverUrl,
-    tags: input.tags ?? [],
-    createdAt: nowStr,
-    bytes: input.bytes,
-    mimeType: input.mimeType,
-    data: input.data,
-    folderId: input.folderId ?? null,
-    favorite: false,
-  }));
+  // 预建已有 storageKey 集合,用于去重判断(文本类无 storageKey,天然不参与)
+  const existingKeys = new Set<string>();
+  for (const a of list) {
+    const key = getStorageKeyOfAsset(a);
+    if (key) existingKeys.add(key);
+  }
+  const created: Asset[] = [];
+  for (const input of inputs) {
+    const key = getStorageKeyOfAsset(input);
+    if (key && existingKeys.has(key)) continue;
+    const asset: Asset = {
+      id: nanoid(),
+      title: input.title.trim() || '未命名素材',
+      kind: input.kind,
+      coverUrl: input.coverUrl,
+      tags: input.tags ?? [],
+      createdAt: nowStr,
+      bytes: input.bytes,
+      mimeType: input.mimeType,
+      data: input.data,
+      folderId: input.folderId ?? null,
+      favorite: false,
+    };
+    created.push(asset);
+    list.push(asset);
+    if (key) existingKeys.add(key);
+  }
   // 追加而非 unshift，保持 createdAt 降序排序由 readAll 保证
-  for (const asset of created) list.push(asset);
   await writeAll(list);
   return created;
+}
+
+/** 提取素材记录/输入的后端 storageKey(文本等纯元数据资产无存储文件,返回 undefined) */
+function getStorageKeyOfAsset(a: Pick<Asset, 'data'> | CreateAssetInput): string | undefined {
+  const d = a.data;
+  if (d.kind === 'text') return undefined;
+  return d.storageKey;
 }
 
 /**
@@ -190,9 +211,24 @@ export async function clearAllAssets(): Promise<void> {
 /**
  * 插入或更新素材(同步拉取时使用)
  * 按 cloudId 匹配已有素材,存在则更新,不存在则插入
+ * 竞态防御:同一 cloudId 出现多条(云端创建与本地 markAssetSynced 之间的 pull 竞态)时收敛为一条
  */
 export async function upsertAsset(asset: Asset): Promise<void> {
   const list = await readAll();
+  if (asset.cloudId) {
+    const dups = list.filter((a) => a.cloudId === asset.cloudId);
+    if (dups.length > 1) {
+      // 收敛重复:以列表第一条为准合并传入记录,移除其余同 cloudId 记录
+      const keep = dups[0]!;
+      const cleaned = list.filter((a) => !(a.cloudId === asset.cloudId && a.id !== keep.id));
+      const merged = { ...keep, ...asset, id: keep.id };
+      const idx = cleaned.findIndex((a) => a.id === keep.id);
+      if (idx >= 0) cleaned[idx] = merged;
+      else cleaned.push(merged);
+      await writeAll(cleaned);
+      return;
+    }
+  }
   const idx = list.findIndex((a) => a.cloudId && a.cloudId === asset.cloudId);
   if (idx >= 0) {
     list[idx] = { ...list[idx], ...asset };

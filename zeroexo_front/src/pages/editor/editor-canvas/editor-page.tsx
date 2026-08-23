@@ -42,6 +42,7 @@ import { LeftSideToolBar } from '@/features/left-side-toolbar/index.js';
 import { NodeCapsuleToolbar } from '@/features/tools-dock/node-capsule-toolbar.js';
 import { GroupStyleDialog } from '@/features/tools-dock/group-style-dialog.js';
 import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-panel.js';
+import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { SyncConflictDialog } from '@/features/sync-conflict-dialog/sync-conflict-dialog.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
@@ -724,6 +725,10 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
           </GroupDefaultsProvider>
           </NodeDefaultsProvider>
           </PinDefaultsProvider>
+          {/* 内容信标(征集#45):远离内容区时画布四周显示游戏任务指示点,点击回到内容丰富区 */}
+          {!state.loading && state.editor && (
+            <ContentBeacon store={state.editor.store} containerSize={state.containerSize} />
+          )}
           {/* 情境化快捷键面板(游戏式 Contextual Controls,随上下文动态显隐) */}
           {!state.loading && (
           <ContextualShortcutsPanel
@@ -871,19 +876,7 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
             configMode={interactions.selectedConfigMode}
             model={(selectedNodeData?.model as string) ?? ''}
             onConfigChange={interactions.handleNodeConfigChange}
-            imageQuality={(selectedNodeData?.quality as string) ?? undefined}
-            imageSize={(selectedNodeData?.size as string) ?? undefined}
-            imageCount={typeof selectedNodeData?.count === 'number' ? (selectedNodeData.count as number) : undefined}
-            videoVquality={(selectedNodeData?.vquality as string) ?? undefined}
-            videoSize={(selectedNodeData?.size as string) ?? undefined}
-            videoSeconds={typeof selectedNodeData?.seconds === 'number' ? (selectedNodeData.seconds as number) : undefined}
-            videoGenerateAudio={typeof selectedNodeData?.generateAudio === 'boolean' ? (selectedNodeData.generateAudio as boolean) : undefined}
-            videoWatermark={typeof selectedNodeData?.watermark === 'boolean' ? (selectedNodeData.watermark as boolean) : undefined}
-            videoMode={(selectedNodeData?.videoMode as string) ?? undefined}
-            audioVoice={(selectedNodeData?.voice as string) ?? undefined}
-            audioFormat={(selectedNodeData?.audioFormat as string) ?? undefined}
-            audioSpeed={typeof selectedNodeData?.audioSpeed === 'number' ? (selectedNodeData.audioSpeed as number) : undefined}
-            audioInstructions={(selectedNodeData?.audioInstructions as string) ?? undefined}
+            paramValues={(selectedNodeData?.paramValues as Record<string, any>) ?? {}}
           />
         ) : null}
 

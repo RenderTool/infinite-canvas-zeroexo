@@ -39,6 +39,7 @@ import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboar
 import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
 import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
+import { buildTemplateParams } from './interactions/ai-generation-utils.js';
 import { collectAgentNodeSnapshots, notifyAgentNodesDeleted } from '@/features/canvas-agent/ui/agent-node-reminder.js';
 import i18n from '@/i18n/config';
 
@@ -406,11 +407,16 @@ export function useEditorInteractions({
       }
       const params = (record?.params ?? {}) as Record<string, any>;
       const graph = store.getGraph();
-      // 2. 新节点落点(源节点右侧)
+      // 2. 新节点落点:用户视口中心 + 重叠避让(征集#45 验收反馈:不再跟随源节点位置,保证在画面合适位置可见),
+      //    无视口信息时回退源节点右侧(与堆叠落点契约同源)
       const newId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const w = srcNode.size?.width ?? 340;
       const h = srcNode.size?.height ?? 240;
-      const newPos = { x: srcNode.position.x + w + 160, y: srcNode.position.y };
+      const spawn = resolveStackSpawnPosition(
+        { commandQueue: cq, getViewport: () => store.getViewport(), getContainerSize: () => state.containerSize } as never,
+        { ignoreNodeIds: new Set([nodeId]) },
+      );
+      const newPos = spawn ?? { x: srcNode.position.x + w + 160, y: srcNode.position.y };
       // 3. 渠道/模型失效判定:被删或禁用 → 回退默认模型(新节点 model 留空)+提示
       let modelValue = '';
       let modelInvalid = false;
@@ -963,6 +969,37 @@ export function useEditorInteractions({
           else if (r.type === 'video') refVideos.push({ dataUrl: src });
           else if (r.type === 'audio') refAudios.push({ dataUrl: src });
         }
+        // 连线自动参考图(征集#51:连线到本节点的图片自动作为参考图,无需手动 @)
+        // 与 @ 显式引用合并去重;堆叠展开为具体卡片,仅收集 image 内容
+        {
+          const graph = refs.store.getGraph();
+          for (const edge of graph.edges) {
+            if (edge.target?.nodeId !== nodeId) continue;
+            const sourceNode = graph.nodes.find((n: any) => n.id === edge.source?.nodeId);
+            if (!sourceNode) continue;
+            if (sourceNode.type === 'stacked-media') {
+              const cards = ((sourceNode.data as { cards?: Array<{ sourceType: string; data?: Record<string, unknown> }> } | undefined)?.cards) ?? [];
+              for (const card of cards) {
+                if (card.sourceType !== 'image') continue;
+                const cardRaw = (card.data as Record<string, unknown>)?.content as string | undefined;
+                if (!cardRaw) continue;
+                try {
+                  const srcUrl = await contentToDataUrl(cardRaw);
+                  if (srcUrl && !refImages.includes(srcUrl)) refImages.push(srcUrl);
+                } catch { /* 跳过无效引用 */ }
+              }
+            } else if (sourceNode.type === 'image') {
+              const srcContent = (sourceNode.data as Record<string, unknown>)?.content as string | undefined;
+              if (!srcContent) continue;
+              try {
+                const srcUrl = await contentToDataUrl(srcContent);
+                if (srcUrl && !refImages.includes(srcUrl)) refImages.push(srcUrl);
+              } catch { /* 跳过无效引用 */ }
+            }
+          }
+        }
+        // 契约参数模块:从 node.data.paramValues 组装模板参数 + provider 强类型兜底字段
+        const { params, fallback } = buildTemplateParams(mode, nodeData as Record<string, unknown>);
         // 生成引用快照(征集#43 方案 A):本次 @ 到的引用节点摘要,后端存 AiGeneration.params._inputs,供溯源/一键同款(文本引用附内容存档供重建)
         const inputRefs = (mentionedRefs ?? []).map((r) => ({
           nodeId: r.id,
@@ -978,9 +1015,10 @@ export function useEditorInteractions({
             ? await provider.editImage({
                 prompt,
                 model: (data?.model as string) ?? 'gpt-4o',
-                size: (data?.size as string) ?? '1024x1024',
-                quality: (data?.quality as string) ?? 'standard',
-                count: (data?.count as number) ?? 1,
+                params,
+                size: fallback.size,
+                quality: fallback.quality!,
+                count: fallback.count!,
                 referenceImages: refImages,
                 inputs: inputRefs,
                 signal: ctl.signal,
@@ -988,9 +1026,10 @@ export function useEditorInteractions({
             : await provider.generateImage({
                 prompt,
                 model: (data?.model as string) ?? 'gpt-4o',
-                size: (data?.size as string) ?? '1024x1024',
-                quality: (data?.quality as string) ?? 'standard',
-                count: (data?.count as number) ?? 1,
+                params,
+                size: fallback.size,
+                quality: fallback.quality!,
+                count: fallback.count!,
                 inputs: inputRefs,
                 signal: ctl.signal,
               });
@@ -1027,11 +1066,12 @@ export function useEditorInteractions({
           const result = await provider.generateVideo({
             prompt,
             model: (data?.model as string) ?? 'sora-2',
-            size: (data?.size as string) ?? '1280x720',
-            seconds: (data?.seconds as number) ?? 5,
-            vquality: (data?.vquality as string) ?? 'medium',
-            generateAudio: data?.generateAudio ?? true,
-            watermark: data?.watermark ?? false,
+            params,
+            size: fallback.size,
+            seconds: fallback.seconds!,
+            vquality: fallback.vquality!,
+            generateAudio: fallback.generateAudio!,
+            watermark: fallback.watermark!,
             referenceImages: refImages.length > 0 ? refImages : undefined,
             referenceVideos: refVideos.length > 0 ? refVideos : undefined,
             referenceAudios: refAudios.length > 0 ? refAudios : undefined,
@@ -1056,9 +1096,11 @@ export function useEditorInteractions({
           const result = await provider.generateAudio({
             prompt,
             model: (data?.model as string) ?? 'tts-1',
-            voice: (data?.voice as string) ?? 'alloy',
-            format: (data?.audioFormat as string) ?? 'mp3',
-            speed: (data?.audioSpeed as number) ?? 1,
+            params,
+            voice: fallback.voice!,
+            format: fallback.format!,
+            speed: fallback.speed!,
+            instructions: fallback.instructions,
             inputs: inputRefs,
             signal: ctl.signal,
           });
@@ -1762,9 +1804,9 @@ export function useEditorInteractions({
       const payload: AssetNodePayload = event.kind === 'text'
         ? { kind: 'text', content: event.content ?? '', title: event.title }
         : event.kind === 'image'
-          ? { kind: 'image', dataUrl: event.content ?? '', title: event.title, storageKey: event.storageKey }
+          ? { kind: 'image', dataUrl: event.content ?? '', title: event.title, storageKey: event.storageKey, width: event.width, height: event.height }
           : event.kind === 'video'
-            ? { kind: 'video', url: event.content ?? '', title: event.title, storageKey: event.storageKey }
+            ? { kind: 'video', url: event.content ?? '', title: event.title, storageKey: event.storageKey, width: event.width, height: event.height }
             : { kind: 'audio', url: event.content ?? '', title: event.title, storageKey: event.storageKey };
       void createAssetNode(payload, { x: host.position.x - 100, y: host.position.y }).then((node) => {
         if (!node) return;

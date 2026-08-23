@@ -346,7 +346,8 @@ export function getImageTools(): ToolDefinition[] {
     ...createBasicTools({ hasDetail: true }),
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
-    // 堆叠:将当前节点自动转为堆叠节点
+    ...buildImageEditTools(),
+    // 堆叠置末(征集#45 H3):与胶囊导航按钮紧邻成一组(堆叠+导航同组)
     {
       id: 'createStackNode',
       label: '堆叠',
@@ -357,7 +358,6 @@ export function getImageTools(): ToolDefinition[] {
         convertToStack(node, ctx);
       },
     },
-    ...buildImageEditTools(),
   ];
 }
 
@@ -367,17 +367,6 @@ export function getVideoTools(): ToolDefinition[] {
     ...createBasicTools({ hasDetail: true }),
     // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
     createReplayTool(),
-    // 堆叠:将当前节点自动转为堆叠节点
-    {
-      id: 'createStackNode',
-      label: '堆叠',
-      title: '',
-      icon: <NODE_ICONS.stack size={14} />,
-      group: 'edit',
-      run: (node: NodeRecord, ctx: ToolContext) => {
-        convertToStack(node, ctx);
-      },
-    },
     // 截帧:截取视频首帧/尾帧/当前帧,并在画布上生成新图片节点
     {
       id: 'captureFrame',
@@ -394,6 +383,17 @@ export function getVideoTools(): ToolDefinition[] {
         { key: 'current', label: '截取当前帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'current'); } },
       ],
       run: () => {},
+    },
+    // 堆叠置末(征集#45 H3):与胶囊导航按钮紧邻成一组(堆叠+导航同组)
+    {
+      id: 'createStackNode',
+      label: '堆叠',
+      title: '',
+      icon: <NODE_ICONS.stack size={14} />,
+      group: 'edit',
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        convertToStack(node, ctx);
+      },
     },
   ];
 }

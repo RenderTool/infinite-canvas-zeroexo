@@ -104,9 +104,9 @@ function parseDocName(docName: string): { namespace: SyncNamespace; artifactId: 
 }
 
 /**
- * 分镜加载规范化：旧数据（无 versions）包装成单个"初始版本"。
- * episodes 是活跃版本的镜像，不写入 Y.Doc（由 onStoreDocument 派生）。
- */
+   * 分镜加载规范化：旧数据（无 versions）包装成单个"初始版本"。
+   * episodes 是活跃版本的镜像，不写入 Y.Doc（由 onStoreDocument 派生）。
+   */
 function normalizeStoryboardForLoad(snapshot: unknown): Record<string, unknown> {
   const obj = (snapshot && typeof snapshot === 'object' ? snapshot : {}) as Record<string, unknown>;
   if (Array.isArray(obj.versions) && obj.versions.length > 0) {
@@ -287,6 +287,41 @@ export class SyncService implements OnModuleDestroy {
     httpServer.on('upgrade', this.upgradeForwarder);
 
     this.logger.log('Yjs sync server attached to HTTP server');
+  }
+
+  /**
+   * 权威写入画布 graph 到 Yjs 文档并广播给所有连接端。
+   * 用于版本回滚等"整体覆盖"语义的权威操作：clear + set 替换 nodes/edges/viewport。
+   * - 有在线连接的 doc：直接 transact 写入 → 各端 Yjs update 实时收到 → replaceState
+   * - 无在线连接的 doc：无需广播，下次连接时 onLoadDocument 从 DB（已被回滚）注入
+   * 失败仅告警，不阻塞回滚主流程（广播是增强，DB 已是权威源）。
+   */
+  async publishCanvasGraph(
+    projectId: string,
+    graph: { scene: unknown; connections: unknown; viewport: unknown },
+  ): Promise<void> {
+    const docName = `${CANVAS_NAMESPACE}:${projectId}`;
+    const doc = this.server?.hocuspocus?.documents?.get(docName);
+    if (!doc) {
+      this.logger.log(`[sync] canvas authoritative publish skip (no active doc): ${docName}`);
+      return;
+    }
+    try {
+      doc.transact(() => {
+        const ymap = doc.getMap();
+        ymap.clear();
+        ymap.set('nodes', (graph.scene as unknown) ?? []);
+        ymap.set('edges', (graph.connections as unknown) ?? []);
+        ymap.set('viewport', (graph.viewport as unknown) ?? { x: 0, y: 0, k: 1 });
+      });
+      this.logger.log(`[sync] canvas authoritative publish: ${docName}`);
+    } catch (err) {
+      this.logger.warn(
+        `[sync] publish canvas graph failed ${docName}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

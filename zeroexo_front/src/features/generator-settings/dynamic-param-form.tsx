@@ -10,7 +10,7 @@
  *   - channel.config.modelSchemas[modelName] (持久化的模型配置)
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Unlink } from 'lucide-react';
 import { Tooltip } from 'antd';
 import type { ThemeConfig } from '@zeroexo/plugin-theme';
@@ -49,6 +49,8 @@ export interface ChannelConstraints {
     minHeight?: number;
     maxHeight?: number;
     maxReferenceImages?: number;
+    maxReferenceVideos?: number;
+    maxReferenceAudios?: number;
   };
 }
 
@@ -75,6 +77,8 @@ export interface DynamicParamFormProps {
   theme: ThemeConfig;
   /** 标题前缀(如 "图片"、"视频"、"音频") */
   titlePrefix?: string;
+  /** 模板约束就绪回调(父级用于获取参考素材上限等边界值) */
+  onConstraintsReady?: (constraints?: ChannelConstraints) => void;
 }
 
 // ===== 尺寸工具函数(从 Admin SizeRenderer 移植) =====
@@ -481,7 +485,7 @@ function getTemplateType(mode: string): string {
 /** 加载模板定义 */
 function loadTemplates(mode: string): Promise<TemplateDef[]> {
   const type = getTemplateType(mode);
-  return apiGet<any>(`/admin/api-providers/templates?type=${type}`)
+  return apiGet<any>(`/ai/templates?type=${type}`)
     .then((result) => {
       const templates = result.data || result;
       if (!Array.isArray(templates)) return [];
@@ -515,20 +519,31 @@ function matchModelParameters(
   return { parameters: [] };
 }
 
-/** 参数显示排除列表(与 Admin 一致) */
+/** 参数显示排除列表(与 Admin 一致;resolution/aspectRatio 仅在存在 size 渲染器时排除)。
+ * 注意:maxReferenceImages/maxReferenceVideos/maxReferenceAudios 等是后端给前端的
+ * 约束上限(参考素材区已按其限制上传),不是供用户编辑的面板参数,一律隐藏。 */
 const DISPLAY_EXCLUDE_NAMES = new Set([
   'maxEdgeLength',
   'minTotalPixels',
   'referenceImagesEnabled',
+  'referenceVideosEnabled',
+  'referenceAudiosEnabled',
   'prompt',
   'maxReferenceImages',
-  'resolution',   // 由 size 类型参数内部渲染,不重复显示
-  'aspectRatio',  // 由 size 类型参数内部渲染,不重复显示
+  'maxReferenceVideos',
+  'maxReferenceAudios',
 ]);
 
 /** 过滤需要显示的参数 */
 function filterDisplayParameters(parameters: ParameterDef[]): ParameterDef[] {
-  return parameters.filter((p) => !DISPLAY_EXCLUDE_NAMES.has(p.name) && (p.type as string) !== 'images');
+  const exclude = new Set(DISPLAY_EXCLUDE_NAMES);
+  // 存在 size 类型参数时,resolution/aspectRatio 由 size 渲染器内部处理,不重复显示;
+  // 视频等无 size 渲染器的模板则保留独立显示
+  if (parameters.some((p) => p.type === 'size')) {
+    exclude.add('resolution');
+    exclude.add('aspectRatio');
+  }
+  return parameters.filter((p) => !exclude.has(p.name) && (p.type as string) !== 'images');
 }
 
 /** 获取枚举值显示标签 */
@@ -578,6 +593,7 @@ export function DynamicParamForm({
   onChange,
   theme,
   titlePrefix = '',
+  onConstraintsReady,
 }: DynamicParamFormProps): React.ReactElement {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<TemplateDef[]>([]);
@@ -603,17 +619,50 @@ export function DynamicParamForm({
     return matchModelParameters(model, templates);
   }, [model, templates, loaded]);
 
+  // 模板约束就绪回调(父级获取参考素材上限等边界值)
+  useEffect(() => {
+    onConstraintsReady?.(constraints);
+  }, [constraints, onConstraintsReady]);
+
+  // Bug3: 模型切换时参数必须随之刷新 —— 将新模型模板的默认值写回 paramValues,
+  // 避免旧模型残留参数(如 mode/分辨率)继续显示。初始挂载模型不重置(保留已保存参数)。
+  const prevModelRef = useRef<string>(model);
+  useEffect(() => {
+    if (!loaded || prevModelRef.current === model || parameters.length === 0) return;
+    prevModelRef.current = model;
+    const defaults: Record<string, any> = {};
+    for (const p of parameters) defaults[p.name] = p.default;
+    onChange(defaults);
+  }, [loaded, model, parameters, onChange]);
+
+  // Bug3: 首次加载完成且该节点尚未保存任何参数时,将当前模型模板默认值写回,
+  // 保证"默认选中模型"时面板参数立即与实际生效参数一致(不覆盖用户已保存的参数)
+  const initialDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || initialDefaultAppliedRef.current || parameters.length === 0) return;
+    const hasSavedValues = paramValues && Object.keys(paramValues).length > 0;
+    if (hasSavedValues) {
+      initialDefaultAppliedRef.current = true;
+      return;
+    }
+    initialDefaultAppliedRef.current = true;
+    const defaults: Record<string, any> = {};
+    for (const p of parameters) defaults[p.name] = p.default;
+    onChange(defaults);
+  }, [loaded, parameters, paramValues, onChange]);
+
   // 过滤显示参数
   const displayParams = useMemo(() => filterDisplayParameters(parameters), [parameters]);
 
-  // 合并所有值用于摘要和联动
+  // 合并所有值用于摘要和联动(基于完整 parameters 构建默认值,确保被 size 渲染器
+  // 内部处理的 resolution/aspectRatio 也能拿到模板默认值)
   const allValues = useMemo(() => {
     const result: Record<string, any> = {};
-    for (const p of displayParams) {
+    for (const p of parameters) {
       result[p.name] = p.default;
     }
     return { ...result, ...paramValues };
-  }, [displayParams, paramValues]);
+  }, [parameters, paramValues]);
 
   // 计算摘要
   const summary = useMemo(() => {

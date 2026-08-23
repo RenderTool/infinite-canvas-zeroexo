@@ -156,6 +156,18 @@ export class AssetsService {
     if (!isMetadataOnly) {
       // 服务端校验 storageKey 前缀与路径穿越,不信任客户端任意路径
       assertSafeStorageKey(dto.storageKey ?? '');
+      // 幂等:同一用户重复上传同一 storageKey(如 CAS 去重命中后再次创建元数据 / push 重试)
+      // 时复用已有记录,避免云端出现多条指向同一文件的重复素材,最终 pull 回本地素材库造成重复显示
+      const existing = await this.prisma.asset.findFirst({
+        where: { ownerId: userId, storageKey: dto.storageKey! },
+      });
+      if (existing) {
+        this.logsService.log('asset', `素材去重命中(同 storageKey): ${dto.filename}`, {
+          userId,
+          meta: { storageKey: dto.storageKey, existingId: existing.id },
+        });
+        return existing;
+      }
     }
     const storageKey = isMetadataOnly
       ? `${dto.kind}/${userId}/${nanoid()}`

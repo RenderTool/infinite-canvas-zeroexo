@@ -44,9 +44,7 @@ import { filterChannelModelsByCapability } from '@/features/ai-config/use-ai-con
 import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-config-store.js';
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
-import { ImageSettingsPopover } from '@/features/generator-settings/image-settings-popover.js';
-import { VideoSettingsPopover } from '@/features/generator-settings/video-settings-popover.js';
-import { AudioSettingsPopover } from '@/features/generator-settings/audio-settings-popover.js';
+import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
 
 /** 生成模式(宿主节点类型映射;text 模式走文本能力) */
 export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
@@ -64,19 +62,8 @@ export interface NodeGenerateDockProps {
   /** 当前节点选用的模型值("channelId::model" 编码) */
   model?: string;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
-  imageQuality?: string;
-  imageSize?: string;
-  imageCount?: number;
-  videoVquality?: string;
-  videoSize?: string;
-  videoSeconds?: number;
-  videoGenerateAudio?: boolean;
-  videoWatermark?: boolean;
-  videoMode?: string;
-  audioVoice?: string;
-  audioFormat?: string;
-  audioSpeed?: number;
-  audioInstructions?: string;
+  /** 契约参数模块:当前模板参数值(存 node.data.paramValues) */
+  paramValues?: Record<string, any>;
   /** 图形 store(订阅视口与图变化) */
   store: ReactGraphStore;
   /** 锚点包围盒(世界坐标);null 时回退 node.position + size */
@@ -269,18 +256,59 @@ const dockRippleKeyframes = `
 `;
 
 // ===== 参考素材区(memo 隔离:提示词输入/视口变化时不重渲染) =====
+
+/** 参考素材类型上限(与后端模板 channelConstraints.bounds 对齐) */
+interface VideoReferenceBounds {
+  maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
+}
+
+/**
+ * 根据视频生成模式返回参考素材配置(与 Admin getReferenceConfigByMode 一致):
+ * - 首尾帧(image-to-video-first-last-frame):首帧/尾帧两个图片槽位,最多 2 张
+ * - 多模态(multi-modal-reference):按上限显示图片/视频/音频参考
+ */
+function getReferenceConfigByMode(
+  mode: string,
+  bounds: VideoReferenceBounds,
+): { isFirstLastFrameMode: boolean; showImages: boolean; showVideos: boolean; showAudio: boolean } {
+  const maxReferenceImages = bounds.maxReferenceImages ?? 0;
+  const maxReferenceVideos = bounds.maxReferenceVideos ?? 0;
+  const maxReferenceAudios = bounds.maxReferenceAudios ?? 0;
+  switch (mode) {
+    case 'image-to-video-first-last-frame':
+      return { isFirstLastFrameMode: true, showImages: false, showVideos: false, showAudio: false };
+    case 'multi-modal-reference':
+    case 'video-edit':
+    case 'video-extend':
+      return {
+        isFirstLastFrameMode: false,
+        showImages: maxReferenceImages > 0,
+        showVideos: maxReferenceVideos > 0,
+        showAudio: maxReferenceAudios > 0,
+      };
+    default:
+      return { isFirstLastFrameMode: false, showImages: false, showVideos: false, showAudio: false };
+  }
+}
+
 const DockReferencesSection = memo(function DockReferencesSection({
   nodeId,
   incomingNodes,
   refUrlMap,
   nodeCompatibility,
   onRemoveIncoming,
+  mode,
+  bounds,
 }: {
   nodeId: string;
   incomingNodes: Array<{ id: string; type: string; title: string; content?: string; storageKey?: string }>;
   refUrlMap: Record<string, string>;
   nodeCompatibility: Record<string, boolean>;
   onRemoveIncoming: (sourceNodeId: string) => void;
+  mode: string;
+  bounds: VideoReferenceBounds;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -290,114 +318,198 @@ const DockReferencesSection = memo(function DockReferencesSection({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const handleAddReference = useCallback(() => { fileInputRef.current?.click(); }, []);
 
+  // 模式感知配置(与 Admin 一致:首尾帧模式切换为首帧/尾帧槽位)
+  const config = getReferenceConfigByMode(mode, bounds);
+  const isFirstLast = config.isFirstLastFrameMode;
+  // 首尾帧:图片按连接顺序填入首帧/尾帧;其余类型(视频/音频/文本)仍可小方块展示用于 @ 引用
+  const imageNodes = incomingNodes.filter((n) => n.type === 'image');
+  const otherNodes = incomingNodes.filter((n) => n.type !== 'image');
+  const slotsFull = imageNodes.length >= 2;
+  const accept = isFirstLast ? 'image/*' : 'image/*,video/*,.txt,.md,.docx,.pdf';
+
   const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // 首尾帧模式:仅接受图片且槽位未满(最多 2 张 = 首帧 + 尾帧)
+    if (isFirstLast) {
+      if (!file.type.startsWith('image/')) return;
+      if (slotsFull) return;
+    }
     try {
       const uploaded = await uploadAsset(file);
       const d = uploaded.data;
       const base = { nodeId, title: uploaded.title.replace(/\.[^.]+$/, '') };
       if (d.kind === 'text') {
         nodeActionBus.emit('nodeDock:addReferenceNode', { ...base, kind: 'text', content: d.content });
-      } else {
+      } else if (d.kind === 'image' || d.kind === 'video') {
+        // 携带原始宽高:createAssetNode 依赖它按真实比例定节点尺寸,否则回退 16:9
         nodeActionBus.emit('nodeDock:addReferenceNode', {
           ...base,
           kind: d.kind,
           storageKey: d.storageKey,
           content: d.kind === 'image' ? d.dataUrl : d.url,
+          width: d.width,
+          height: d.height,
+        });
+      } else {
+        nodeActionBus.emit('nodeDock:addReferenceNode', {
+          ...base,
+          kind: d.kind,
+          storageKey: d.storageKey,
+          content: d.url,
         });
       }
     } catch {
       // 上传失败静默(不打断当前编辑)
     }
-  }, [nodeId]);
+  }, [nodeId, isFirstLast, slotsFull]);
+
+  /** 单个参考缩略图(多模态统一列表 / 首尾帧非图片项共用) */
+  const renderThumb = (n: { id: string; type: string; title: string; content?: string; storageKey?: string }) => {
+    const meta = TYPE_META[n.type] ?? { icon: <FileText size={14} />, label: n.type };
+    const isCompatible = nodeCompatibility[n.id] ?? true;
+    const url = refUrlMap[n.id] || (n.type === 'image' ? n.content : undefined);
+    const hasThumb = !!url;
+    return (
+      <div
+        key={n.id}
+        style={{
+          position: 'relative', width: 48, height: 48, borderRadius: 14,
+          overflow: 'hidden', flexShrink: 0, border: `1px solid ${navBorder}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: hasThumb ? 'transparent' : bgHover, cursor: 'default',
+        }}
+        title={`${meta.label}: ${n.title}`}
+      >
+        {hasThumb ? (
+          <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: 4, width: '100%' }}>
+            <span style={{ flexShrink: 0, display: 'inline-flex', opacity: 0.7 }}>{meta.icon}</span>
+            <span style={{ fontSize: 10, color: theme.toolbar.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 40, textAlign: 'center', lineHeight: 1.2 }}>
+              {n.title}
+            </span>
+          </div>
+        )}
+        {/* 兼容性指示(蓝勾/红叉,与生成器一致) */}
+        <div style={{
+          position: 'absolute', top: 2, left: 2, width: 12, height: 12,
+          borderRadius: '50%', background: isCompatible ? '#3b82f6' : '#ef4444',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
+        }}>
+          {isCompatible
+            ? <Check size={7} color="#fff" strokeWidth={3} />
+            : <X size={7} color="#fff" strokeWidth={3} />}
+        </div>
+        {/* 删除按钮(方块样式,与生成器一致) */}
+        <button
+          type="button"
+          onClick={() => onRemoveIncoming(n.id)}
+          style={{
+            position: 'absolute', top: 2, right: 2, width: 12, height: 12,
+            borderRadius: 4, background: '#ff4d4f', color: '#fff', border: 'none',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 0, zIndex: 2, opacity: 0.85, transition: 'opacity 0.12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+        >
+          <Trash2 size={7} />
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      {/* 上传按钮(吸附面板内常显) */}
-      <button
-        type="button"
-        onClick={handleAddReference}
-        style={{
-          width: 48, height: 48, borderRadius: 14,
-          border: `1px dashed ${navBorder}`,
-          background: 'transparent', color: theme.toolbar.textMuted ?? '',
-          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, transition: 'background 0.12s',
-        }}
-        title={t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
-        onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-      >
-        <Upload size={15} />
-      </button>
+      {isFirstLast ? (
+        <>
+          {/* 首尾帧模式:首帧/尾帧两个槽位(仅图片,按上传顺序),空槽位点击即上传 */}
+          {[{ slot: 'first', label: '首帧', node: imageNodes[0] }, { slot: 'last', label: '尾帧', node: imageNodes[1] }].map(({ slot, label, node }) => (
+            <div key={slot} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+              {node ? (
+                <div style={{ position: 'relative', width: 56, height: 48, borderRadius: 14, overflow: 'hidden', border: `1px solid ${navBorder}`, background: 'transparent' }}>
+                  <img src={refUrlMap[node.id] || node.content} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                  <button
+                    type="button"
+                    onClick={() => onRemoveIncoming(node.id)}
+                    style={{
+                      position: 'absolute', top: 2, right: 2, width: 12, height: 12,
+                      borderRadius: 4, background: '#ff4d4f', color: '#fff', border: 'none',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: 0, zIndex: 2, opacity: 0.85,
+                    }}
+                  >
+                    <Trash2 size={7} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAddReference}
+                  title={t('nodeDock.uploadFirstFrame', '上传图片作为首帧/尾帧')}
+                  style={{
+                    width: 56, height: 48, borderRadius: 14,
+                    border: `1px dashed ${navBorder}`,
+                    background: 'transparent', color: theme.toolbar.textMuted ?? '',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0, transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Upload size={14} />
+                </button>
+              )}
+              <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1 }}>{label}</span>
+            </div>
+          ))}
+          {/* 非图片参考(视频/音频/文本)仍可小方块展示,供 @ 引用 */}
+          {otherNodes.map(renderThumb)}
+        </>
+      ) : (
+        <>
+          {/* 多模态模式:统一上传按钮(图片/视频/文本) */}
+          <button
+            type="button"
+            onClick={handleAddReference}
+            style={{
+              width: 48, height: 48, borderRadius: 14,
+              border: `1px dashed ${navBorder}`,
+              background: 'transparent', color: theme.toolbar.textMuted ?? '',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, transition: 'background 0.12s',
+            }}
+            title={t('nodeDock.uploadRef', '上传参考素材(支持图片/视频/文本)')}
+            onMouseEnter={(e) => { e.currentTarget.style.background = bgHover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Upload size={15} />
+          </button>
+          {incomingNodes.map(renderThumb)}
+        </>
+      )}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*,.txt,.md,.docx,.pdf"
+        accept={accept}
         style={{ display: 'none' }}
         onChange={handleFileInputChange}
       />
 
-      {incomingNodes.map((n) => {
-        const config = TYPE_META[n.type] ?? { icon: <FileText size={14} />, label: n.type };
-        const isCompatible = nodeCompatibility[n.id] ?? true;
-        const url = refUrlMap[n.id] || (n.type === 'image' ? n.content : undefined);
-        const hasThumb = !!url;
-        return (
-          <div
-            key={n.id}
-            style={{
-              position: 'relative', width: 48, height: 48, borderRadius: 14,
-              overflow: 'hidden', flexShrink: 0, border: `1px solid ${navBorder}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: hasThumb ? 'transparent' : bgHover, cursor: 'default',
-            }}
-            title={`${config.label}: ${n.title}`}
-          >
-            {hasThumb ? (
-              <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: 4, width: '100%' }}>
-                <span style={{ flexShrink: 0, display: 'inline-flex', opacity: 0.7 }}>{config.icon}</span>
-                <span style={{ fontSize: 10, color: theme.toolbar.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 40, textAlign: 'center', lineHeight: 1.2 }}>
-                  {n.title}
-                </span>
-              </div>
-            )}
-            {/* 兼容性指示(蓝勾/红叉,与生成器一致) */}
-            <div style={{
-              position: 'absolute', top: 2, left: 2, width: 12, height: 12,
-              borderRadius: '50%', background: isCompatible ? '#3b82f6' : '#ef4444',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
-            }}>
-              {isCompatible
-                ? <Check size={7} color="#fff" strokeWidth={3} />
-                : <X size={7} color="#fff" strokeWidth={3} />}
-            </div>
-            {/* 删除按钮(方块样式,与生成器一致) */}
-            <button
-              type="button"
-              onClick={() => onRemoveIncoming(n.id)}
-              style={{
-                position: 'absolute', top: 2, right: 2, width: 12, height: 12,
-                borderRadius: 4, background: '#ff4d4f', color: '#fff', border: 'none',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 0, zIndex: 2, opacity: 0.85, transition: 'opacity 0.12s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
-            >
-              <Trash2 size={7} />
-            </button>
-          </div>
-        );
-      })}
-
       {incomingNodes.length === 0 && (
         <span style={{ fontSize: 11, color: theme.toolbar.textMuted ?? '', flexShrink: 0 }}>
-          {t('nodeDock.refHint', '拖入节点连入参考,或点击上传素材')}
+          {isFirstLast
+            ? t('nodeDock.firstLastHint', '首尾帧模式:按顺序填入首帧/尾帧,最多 2 张图片')
+            : mode === 'video-edit' || mode === 'video-extend'
+              ? t('nodeDock.editRefHint', '编辑/延长模式:上传参考视频,并描述要修改或延伸的画面')
+              : t('nodeDock.refHint', '拖入节点连入参考,或点击上传素材')}
+        </span>
+      )}
+      {isFirstLast && incomingNodes.length > 0 && imageNodes.length < 2 && (
+        <span style={{ fontSize: 11, color: theme.toolbar.textMuted ?? '', flexShrink: 0 }}>
+          {t('nodeDock.firstLastHint', '首尾帧模式:按顺序填入首帧/尾帧,最多 2 张图片')}
         </span>
       )}
     </div>
@@ -453,48 +565,29 @@ const DockFooterBar = memo(function DockFooterBar({
   mode,
   model,
   modelOptions,
+  paramValues,
   isRunning,
   hasText,
   interruptible = true,
   onAction,
   onConfigChange,
-  imageQuality,
-  imageSize,
-  imageCount,
-  videoVquality,
-  videoSize,
-  videoSeconds,
-  videoGenerateAudio,
-  videoWatermark,
-  videoMode,
-  audioVoice,
-  audioFormat,
-  audioSpeed,
-  audioInstructions,
+  onParamValuesChange,
+  onConstraintsReady,
 }: {
   nodeId: string;
   mode: GenerationMode;
   model: string;
   modelOptions: StyledSelectOption[];
+  paramValues: Record<string, any>;
   isRunning: boolean;
   hasText: boolean;
   /** 生成中是否可打断(文本可打断=停止按钮;媒体不可打断=锁徽标) */
   interruptible?: boolean;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
-  imageQuality?: string;
-  imageSize?: string;
-  imageCount?: number;
-  videoVquality?: string;
-  videoSize?: string;
-  videoSeconds?: number;
-  videoGenerateAudio?: boolean;
-  videoWatermark?: boolean;
-  videoMode?: string;
-  audioVoice?: string;
-  audioFormat?: string;
-  audioSpeed?: number;
-  audioInstructions?: string;
+  onParamValuesChange: (patch: Record<string, any>) => void;
+  /** 模板约束就绪回调(参考区读取参考素材上限) */
+  onConstraintsReady?: (constraints?: ChannelConstraints) => void;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -525,39 +618,15 @@ const DockFooterBar = memo(function DockFooterBar({
         height={26}
       />
 
-      {/* 参数弹层(SettingsPopoverShell 同款,读写 node.data 字段契约不变) */}
-      {onConfigChange && mode === 'image' && modelOptions.length > 0 ? (
-        <ImageSettingsPopover
+      {/* 参数弹层(契约参数模块:模板驱动渲染,读写 node.data.paramValues;text 模式无参数面板) */}
+      {onConfigChange && mode !== 'text' && modelOptions.length > 0 ? (
+        <DynamicParamForm
           model={model}
-          quality={imageQuality ?? 'auto'}
-          size={imageSize ?? 'auto'}
-          count={imageCount ?? 1}
+          generationMode={mode}
+          paramValues={paramValues}
+          onChange={(patch) => onParamValuesChange(patch)}
           theme={theme}
-          onChange={(patch) => onConfigChange(nodeId, patch)}
-        />
-      ) : null}
-      {onConfigChange && mode === 'video' && modelOptions.length > 0 ? (
-        <VideoSettingsPopover
-          model={model}
-          vquality={videoVquality ?? '720p'}
-          size={videoSize ?? 'adaptive'}
-          seconds={videoSeconds ?? 5}
-          generateAudio={videoGenerateAudio ?? true}
-          watermark={videoWatermark ?? false}
-          videoMode={videoMode}
-          theme={theme}
-          onChange={(patch) => onConfigChange(nodeId, patch)}
-        />
-      ) : null}
-      {onConfigChange && mode === 'audio' && modelOptions.length > 0 ? (
-        <AudioSettingsPopover
-          model={model}
-          voice={audioVoice ?? 'alloy'}
-          format={audioFormat ?? 'mp3'}
-          speed={audioSpeed ?? 1}
-          instructions={audioInstructions}
-          theme={theme}
-          onChange={(patch) => onConfigChange(nodeId, patch)}
+          onConstraintsReady={onConstraintsReady}
         />
       ) : null}
       {/* 未配置模型:直接不显示(用户拍板:不展示跳转入口,避免误导) */}
@@ -636,19 +705,7 @@ export function NodeGenerateDock({
   configMode,
   model,
   onConfigChange,
-  imageQuality,
-  imageSize,
-  imageCount,
-  videoVquality,
-  videoSize,
-  videoSeconds,
-  videoGenerateAudio,
-  videoWatermark,
-  videoMode,
-  audioVoice,
-  audioFormat,
-  audioSpeed,
-  audioInstructions,
+  paramValues,
   store,
   getAnchorBounds,
   node,
@@ -886,6 +943,26 @@ export function NodeGenerateDock({
     [onPromptChange, nodeId],
   );
 
+  // 契约参数模块:单字段 patch 合并进 node.data.paramValues
+  const handleParamValuesChange = useCallback(
+    (patch: Record<string, any>) => {
+      onConfigChange?.(nodeId, { paramValues: { ...(paramValues ?? {}), ...patch } });
+    },
+    [onConfigChange, nodeId, paramValues],
+  );
+
+  // 视频参考模式(与 Admin VideoTab 一致:paramValues.mode 驱动参考区智能切换)
+  const currentVideoMode = (paramValues?.mode as string) ?? 'image-to-video-first-last-frame';
+  // 参考素材上限(从模板约束回调读取,与后端 channelConstraints.bounds 对齐)
+  const [refBounds, setRefBounds] = useState<VideoReferenceBounds>({});
+  const handleConstraintsReady = useCallback((constraints?: ChannelConstraints) => {
+    setRefBounds({
+      maxReferenceImages: constraints?.bounds?.maxReferenceImages,
+      maxReferenceVideos: constraints?.bounds?.maxReferenceVideos,
+      maxReferenceAudios: constraints?.bounds?.maxReferenceAudios,
+    });
+  }, []);
+
   const submit = useCallback(() => {
     const text = promptRef.current.trim();
     if (!text || isRunning) return;
@@ -1008,7 +1085,7 @@ export function NodeGenerateDock({
         <ChevronDown size={13} />
       </button>
 
-      {/* 参考素材区(单色融入;memo 隔离) */}
+      {/* 参考素材区(单色融入;memo 隔离;按 paramValues.mode 智能切换首尾帧/多模态) */}
       <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DockReferencesSection
           nodeId={nodeId}
@@ -1016,6 +1093,8 @@ export function NodeGenerateDock({
           refUrlMap={refUrlMap}
           nodeCompatibility={nodeCompatibility}
           onRemoveIncoming={handleRemoveIncoming}
+          mode={currentVideoMode}
+          bounds={refBounds}
         />
       </div>
 
@@ -1037,24 +1116,14 @@ export function NodeGenerateDock({
           mode={mode}
           model={model ?? ''}
           modelOptions={modelOptions}
+          paramValues={paramValues ?? {}}
           isRunning={isRunning}
           hasText={hasText}
           interruptible={mode === 'text'}
           onAction={handleAction}
           onConfigChange={onConfigChange}
-          imageQuality={imageQuality}
-          imageSize={imageSize}
-          imageCount={imageCount}
-          videoVquality={videoVquality}
-          videoSize={videoSize}
-          videoSeconds={videoSeconds}
-          videoGenerateAudio={videoGenerateAudio}
-          videoWatermark={videoWatermark}
-          videoMode={videoMode}
-          audioVoice={audioVoice}
-          audioFormat={audioFormat}
-          audioSpeed={audioSpeed}
-          audioInstructions={audioInstructions}
+          onParamValuesChange={handleParamValuesChange}
+          onConstraintsReady={handleConstraintsReady}
         />
       </div>
       </div>

@@ -335,7 +335,7 @@ export function AudioNodeView({
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
           replaceBtnPosition="left"
-          skeleton="media"
+          skeleton="media" skeletonKind="audio"
         >
           {bubbleContent}
         </AIStateView>
@@ -376,7 +376,7 @@ export function AudioNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"
-        skeleton="media"
+        skeleton="media" skeletonKind="audio"
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

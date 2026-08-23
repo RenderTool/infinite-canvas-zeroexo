@@ -214,6 +214,10 @@ export class ProxyProvider implements AIProvider {
           size: req.size,
           quality: req.quality,
           count: req.count,
+          // 契约参数模块:模板参数原样透传(尺寸策略/水印等),存在时优先
+          ...(req.params ?? {}),
+          // 图生图:参考图随 params 透传,后端适配器按模型能力转换(base64)并提交
+          ...(req.referenceImages?.length ? { referenceImages: req.referenceImages } : {}),
         },
       },
       req.signal,
@@ -234,9 +238,9 @@ export class ProxyProvider implements AIProvider {
     ];
   }
 
-  /** 图生图/图片编辑(后端目前不支持,直接抛错) */
-  async editImage(_req: ImageEditRequest): Promise<GeneratedImage[]> {
-    throw new AiError('VALIDATION_ERROR', '图生图/图片编辑暂未支持,请使用文生图');
+  /** 图生图/图片编辑:复用文生图链路,参考图作为参数转发后端(参考图需对应模型支持) */
+  async editImage(req: ImageEditRequest): Promise<GeneratedImage[]> {
+    return this.generateImage(req);
   }
 
   /** 文本生成 */
@@ -281,6 +285,16 @@ export class ProxyProvider implements AIProvider {
           vquality: req.vquality,
           generateAudio: req.generateAudio,
           watermark: req.watermark,
+          // 契约参数模块:模板参数原样透传(mode/resolution/ratio/duration 等),存在时优先
+          ...(req.params ?? {}),
+          // Seedance 参考素材:图片/视频/音频随 params 透传
+          ...(req.referenceImages?.length ? { referenceImages: req.referenceImages } : {}),
+          ...(req.referenceVideos?.length
+            ? { referenceVideos: req.referenceVideos.map((v) => v.dataUrl ?? v.url).filter(Boolean) }
+            : {}),
+          ...(req.referenceAudios?.length
+            ? { referenceAudio: req.referenceAudios.map((a) => a.dataUrl ?? a.url).filter(Boolean) }
+            : {}),
         },
       },
       req.signal,
@@ -307,6 +321,8 @@ export class ProxyProvider implements AIProvider {
           audioFormat: req.format,
           audioSpeed: req.speed,
           audioInstructions: req.instructions,
+          // 契约参数模块:模板参数原样透传(voice/audioFormat/audioSpeed/audioInstructions 等)
+          ...(req.params ?? {}),
         },
       },
       req.signal,

@@ -27,8 +27,12 @@ export interface ImageGenerationRequest {
   size: string;
   quality: string;
   count: number;
+  /** 参考图(dataUrl 或公网 URL 列表),图生图时传入,由后端适配器转换后提交 */
+  referenceImages?: string[];
   /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
   inputs?: GenerationInputRef[];
+  /** 模板参数(契约参数模块:resolution/aspectRatio/size/watermark 等,原样透传后端适配器;存在时优先于 size/quality/count) */
+  params?: Record<string, unknown>;
   signal?: AbortSignal;
 }
 
@@ -90,6 +94,8 @@ export interface VideoGenerationRequest {
   signal?: AbortSignal;
   /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
   inputs?: GenerationInputRef[];
+  /** 模板参数(契约参数模块:mode/resolution/ratio/duration 等,原样透传后端适配器;存在时优先于 size/seconds/vquality) */
+  params?: Record<string, unknown>;
   /** Seedance 参考图(dataUrl 或公网 URL) */
   referenceImages?: string[];
   /** Seedance 参考视频 */
@@ -121,6 +127,8 @@ export interface AudioGenerationRequest {
   signal?: AbortSignal;
   /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
   inputs?: GenerationInputRef[];
+  /** 模板参数(契约参数模块:voice/audioFormat/audioSpeed/audioInstructions 等,原样透传后端适配器) */
+  params?: Record<string, unknown>;
 }
 
 export interface GeneratedAudio {

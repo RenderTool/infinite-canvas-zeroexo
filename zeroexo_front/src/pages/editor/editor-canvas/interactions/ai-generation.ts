@@ -15,7 +15,7 @@ import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { GenerationMode } from '@/features/tools-dock/node-generate-dock';
 import { modelOptionLabel } from '@/features/ai-config/use-ai-config-store.js';
 import type { AiConfig } from '@/features/ai-config/use-ai-config-store.js';
-import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources } from './ai-generation-utils.js';
+import { replacePlaceholderWithNode, restoreOldNode, convertTargetNodeType, assembleGeneratorPrompt, collectGeneratorTextSources, contentToDataUrl, buildTemplateParams } from './ai-generation-utils.js';
 import { CanvasOpExecutor } from './canvas-op-executor.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import i18n from '@/i18n/config';
@@ -278,17 +278,44 @@ export function useAiGeneration({
         } as Record<string, unknown>),
       );
       try {
+        // 连线自动参考图(征集#51):连入本节点的图片自动作为参考图(图生图/图生视频),无需手动 @
+        const refImages: string[] = [];
+        for (const r of connectedRefs) {
+          if (!r.active || r.kind !== 'image') continue;
+          const raw = r.previewUrl;
+          if (!raw) continue;
+          try {
+            const src = await contentToDataUrl(raw);
+            if (src && !refImages.includes(src)) refImages.push(src);
+          } catch { /* 跳过无效引用 */ }
+        }
+        // 契约参数模块:从 node.data.paramValues 组装模板参数 + provider 强类型兜底字段
+        const { params, fallback } = buildTemplateParams(mode, nodeData as Record<string, unknown>);
         if (mode === 'image') {
           const data = nodeData;
-          const results = await provider.generateImage({
-            prompt: fullPrompt,
-            model: (data?.model as string) ?? 'gpt-4o',
-            size: (data?.size as string) ?? '1024x1024',
-            quality: (data?.quality as string) ?? 'standard',
-            count: (data?.count as number) ?? 1,
-            inputs: inputRefs,
-            signal: ctl.signal,
-          });
+          // 有连线参考图 → 图生图(editImage);否则文生图
+          const results = refImages.length > 0
+            ? await provider.editImage({
+                prompt: fullPrompt,
+                model: (data?.model as string) ?? 'gpt-4o',
+                params,
+                size: fallback.size,
+                quality: fallback.quality!,
+                count: fallback.count!,
+                referenceImages: refImages,
+                inputs: inputRefs,
+                signal: ctl.signal,
+              })
+            : await provider.generateImage({
+                prompt: fullPrompt,
+                model: (data?.model as string) ?? 'gpt-4o',
+                params,
+                size: fallback.size,
+                quality: fallback.quality!,
+                count: fallback.count!,
+                inputs: inputRefs,
+                signal: ctl.signal,
+              });
           const first = results[0];
           if (!first) throw new Error(t('nodes.noImageReturned'));
           refs.commandQueue.execute(
@@ -349,11 +376,13 @@ export function useAiGeneration({
           const result = await provider.generateVideo({
             prompt: fullPrompt,
             model: (data?.model as string) ?? 'sora-2',
-            size: (data?.size as string) ?? '1280x720',
-            seconds: (data?.seconds as number) ?? 5,
-            vquality: (data?.vquality as string) ?? 'medium',
-            generateAudio: data?.generateAudio ?? true,
-            watermark: data?.watermark ?? false,
+            params,
+            size: fallback.size,
+            seconds: fallback.seconds!,
+            vquality: fallback.vquality!,
+            generateAudio: fallback.generateAudio!,
+            watermark: fallback.watermark!,
+            referenceImages: refImages.length > 0 ? refImages : undefined,
             inputs: inputRefs,
             signal: ctl.signal,
           });
@@ -405,9 +434,11 @@ export function useAiGeneration({
           const result = await provider.generateAudio({
             prompt: fullPrompt,
             model: (data?.model as string) ?? 'tts-1',
-            voice: (data?.voice as string) ?? 'alloy',
-            format: (data?.audioFormat as string) ?? 'mp3',
-            speed: (data?.audioSpeed as number) ?? 1,
+            params,
+            voice: fallback.voice!,
+            format: fallback.format!,
+            speed: fallback.speed!,
+            instructions: fallback.instructions,
             inputs: inputRefs,
             signal: ctl.signal,
           });

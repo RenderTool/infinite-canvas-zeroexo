@@ -13,6 +13,9 @@ import { useTranslation } from 'react-i18next';
 import { History, RotateCcw, Trash2 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { apiGet, apiPost, apiDelete, ApiError } from '@/services/api-client.js';
+import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
+import { markProjectClean } from '@/services/sync/sync-service.js';
+import type { GraphModel } from '@zeroexo/core';
 
 interface VersionRecord {
   id: string;
@@ -23,6 +26,18 @@ interface VersionRecord {
   label?: string | null;
   source: string;
   createdAt: string;
+}
+
+/** 回滚接口返回:新版本号 + 缺失资源警告 + 回滚后的完整 graph(用于对齐本地缓存) */
+interface RollbackResult {
+  version: number;
+  warnings: string[];
+  graph?: {
+    scene: unknown;
+    connections: unknown;
+    viewport: unknown;
+  };
+  lastSyncedAt?: string | null;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -136,11 +151,36 @@ export function VersionDialogs({
         onOk: async () => {
           setRollbacking(version);
           try {
-            const result = await apiPost<{ version: number; warnings: string[] }>(
+            const result = await apiPost<RollbackResult>(
               `/projects/${canvasId}/rollback`,
               { version },
             );
             const warnings = result?.warnings ?? [];
+            // ① 权威回滚结果写回本地缓存:覆盖旧 graph + 对齐 version/lastSyncedAt。
+            //    否则 reload 后 localforage 优先加载回滚前的旧数据并反向推送覆盖云端,
+            //    导致"回滚后强制变回新版"。
+            if (result?.graph) {
+              const nodes = Array.isArray(result.graph.scene)
+                ? (result.graph.scene as GraphModel['nodes'])
+                : [];
+              const existing = await loadProjectGraph(canvasId);
+              await saveProjectGraph(canvasId, {
+                nodes,
+                edges: Array.isArray(result.graph.connections)
+                  ? (result.graph.connections as GraphModel['edges'])
+                  : [],
+                viewport:
+                  (result.graph.viewport as GraphModel['viewport']) ?? { x: 0, y: 0, k: 1 },
+                metadata: existing?.metadata ?? {},
+              });
+              await updateProject(canvasId, {
+                version: result.version,
+                lastSyncedAt: result.lastSyncedAt ?? new Date().toISOString(),
+                nodeCount: nodes.length,
+              });
+            }
+            // ② 清除脏标记,避免 reload 前残留 dirty 触发旧数据推送
+            markProjectClean(canvasId);
             if (warnings.length > 0) {
               modal.warning({
                 title: t('versions.missingResourcesTitle'),
@@ -158,7 +198,8 @@ export function VersionDialogs({
                 centered: true,
               });
             }
-            // 回退成功后重新加载画布(避免本地旧状态回推)
+            // ③ 后端已通过 Yjs 把回滚结果广播给所有在线端(实时切换);
+            //    当前端覆盖本地缓存后刷新,走完整初始化链路(资源解析/协作重连)
             window.location.reload();
           } catch {
             modal.error({

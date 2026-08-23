@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ZeroExo_Platform-v0.1.0-6c5ce7?style=for-the-badge" alt="version">
+  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.0.0-6c5ce7?style=for-the-badge" alt="version">
   <img src="https://img.shields.io/badge/Active_Development-yellow?style=for-the-badge" alt="active development">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
   <img src="https://img.shields.io/badge/NestJS-10-EA2845?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS">
@@ -73,11 +73,25 @@ production pipeline of script → storyboard → shot → finished film:
 | Storyboard & script | Rich-text script editor, storyboard episodes, shot lists, script import & conversion |
 | Material & prompt | Asset library, prompt library with favorites, resource sync (cloud-first) |
 
-| Canvas core | Collaboration | AI production |
-|---|---|---|
-| `docs/screenshots/frontend/canvas-core.png` | `docs/screenshots/frontend/collaboration.png` | `docs/screenshots/frontend/ai-production.png` |
+#### Screenshots
 
-> Placeholder paths — screenshots are being prepared and will be added soon.
+| Login | Home | Light theme |
+|---|---|---|
+| ![Login](docs/screenshots/frontend/前端登录页.webp) | ![Home](docs/screenshots/frontend/前端首页.webp) | ![Light theme](docs/screenshots/frontend/前端白色主题.webp) |
+
+| Script editor | Script & storyboard | Storyboard editor |
+|---|---|---|
+| ![Script editor](docs/screenshots/frontend/前端剧本编辑页.webp) | ![Script and storyboard](docs/screenshots/frontend/前端剧本和分镜.webp) | ![Storyboard editor](docs/screenshots/frontend/前端分镜编辑页.webp) |
+
+| Prompt library | Asset library | Canvas manager |
+|---|---|---|
+| ![Prompts](docs/screenshots/frontend/前端提示词.webp) | ![Asset library](docs/screenshots/frontend/前端素材库管理页.webp) | ![Canvas manager](docs/screenshots/frontend/前端画布管理页.webp) |
+
+Animated demos (GIF):
+
+- [Canvas collaboration](docs/screenshots/frontend/前端画布协作.gif)
+- [Canvas stacking](docs/screenshots/frontend/前端画布堆叠.gif)
+- [Canvas navigation](docs/screenshots/frontend/前端画布导航.gif)
 
 ### Admin Console
 
@@ -88,9 +102,33 @@ Operational control plane for the platform:
 - Prompt library, branding, multi-language policies
 - Analytics dashboards (operations & billing) built on ECharts
 
-| Dashboard | Provider management |
+#### Screenshots
+
+| Admin home | Site operations | User asset & permission management |
+|---|---|---|
+| ![Admin home](docs/screenshots/admin/后台首页.webp) | ![Site operations](docs/screenshots/admin/后台管理站点运营.webp) | ![User asset & permission management](docs/screenshots/admin/后台管理用户资产权限管理.webp) |
+
+| API provider management | Provider details | Storage |
+|---|---|---|
+| ![API provider management](docs/screenshots/admin/后台API渠道管理.webp) | ![Provider details](docs/screenshots/admin/后台API渠道管理具体页.webp) | ![Storage](docs/screenshots/admin/后台存储页.webp) |
+
+| Site settings | Logs | Email service |
+|---|---|---|
+| ![Site settings](docs/screenshots/admin/后台站点管理.webp) | ![Logs](docs/screenshots/admin/后台日志.webp) | ![Email service](docs/screenshots/admin/后台管理邮件服务.webp) |
+
+### Canvas Capabilities
+
+| Canvas overview | Keyboard shortcuts |
 |---|---|
-| `docs/screenshots/admin/dashboard.png` | `docs/screenshots/admin/providers.png` |
+| ![Canvas overview](docs/screenshots/canvas/画布概览.webp) | ![Keyboard shortcuts](docs/screenshots/canvas/画布快捷键.webp) |
+
+| Node style config | Hierarchy panel & double-click focus |
+|---|---|
+| ![Node style config](docs/screenshots/canvas/画布节点样式配置.webp) | ![Hierarchy panel and double-click focus](docs/screenshots/canvas/画布层级面板和双击聚焦.gif) |
+
+| Debug & collaboration | Project dev agent | Agent self-upgrade & maintenance |
+|---|---|---|
+| ![Debug and collaboration](docs/screenshots/canvas/debug和协作.webp) | ![Project dev agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent self-upgrade and maintenance](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
 
 ### Backend API
 
@@ -220,7 +258,7 @@ zeroexo-platform/
 ├── zeroexo_backend/        # NestJS API (Prisma, PostgreSQL, Redis, MinIO)
 │   ├── prisma/             # schema, migrations, seeders
 │   └── src/modules/        # auth, ai-generate, agent, assets, billing, ...
-├── docs/screenshots/       # screenshots per module (frontend/admin/backend)
+├── docs/screenshots/       # screenshots per module (frontend/canvas/admin)
 ├── docker-compose.yml      # one-command deployment
 └── docker/nginx/           # reverse proxy config
 ```
@@ -251,4 +289,4 @@ check [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ## License
 
-[MIT](LICENSE) © RenderTool <750831855@qq.com>
+[MIT](LICENSE) © 斯高和 <750831855@qq.com>

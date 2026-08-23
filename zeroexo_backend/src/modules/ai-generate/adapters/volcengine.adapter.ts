@@ -410,15 +410,26 @@ export class VolcengineAdapter implements AiProviderAdapter {
     const baseUrl = ctx.baseUrl.replace(/\/$/, '');
     const submitUrl = `${baseUrl}/contents/generations/tasks`;
 
+    // UI 生成模式(模板 mode 枚举值):驱动 content role 语义与编辑/延长任务约束
+    const uiMode = (req.params.mode as string) ?? 'image-to-video-first-last-frame';
+    const isFirstLast = uiMode === 'image-to-video-first-last-frame';
+    const isEditOrExtend = uiMode === 'video-edit' || uiMode === 'video-extend';
+
     // ─── 1. 构建 content 数组 ──────────────────────────────────
     const content: any[] = [{ type: 'text', text: req.prompt }];
 
     // 参考图(base64 data-url)
+    // 首尾帧模式:官方要求 role 必填,按顺序分配 first_frame / last_frame(互斥场景)
+    // 其余模式(多模态参考/编辑/延长):role=reference_image
     const refImages = req.params.referenceImages as string[] | undefined;
     if (refImages?.length) {
-      for (const img of refImages) {
-        content.push({ type: 'image_url', image_url: { url: img }, role: 'reference_image' });
-      }
+      refImages.forEach((img, idx) => {
+        content.push({
+          type: 'image_url',
+          image_url: { url: img },
+          role: isFirstLast ? (idx === 0 ? 'first_frame' : 'last_frame') : 'reference_image',
+        });
+      });
     }
     // 参考视频
     const refVideos = req.params.referenceVideos as string[] | undefined;
@@ -440,15 +451,23 @@ export class VolcengineAdapter implements AiProviderAdapter {
     delete intermediateParams.referenceImages;
     delete intermediateParams.referenceVideos;
     delete intermediateParams.referenceAudio;
-    delete intermediateParams.mode;           // UI 参数
     delete intermediateParams.maxReferenceImages;
     delete intermediateParams.maxReferenceVideos;
     delete intermediateParams.maxReferenceAudios;
     delete intermediateParams.referenceImagesEnabled;
     delete intermediateParams.referenceVideosEnabled;
     delete intermediateParams.referenceAudiosEnabled;
+    // mode 保留:模板 paramMapping.mode="task" + valueMapping 将其映射为官方 task 值
+    // (reference / edit / extend),由 applyParamMapping 写入请求体
 
     const mapped = applyParamMapping(intermediateParams, req.template);
+
+    // 编辑/延长任务:官方硬性要求 ratio=adaptive、duration=-1(时长由模型自动选择),
+    // 无论前端参数面板如何设置,一律强制兜底
+    if (isEditOrExtend) {
+      mapped.ratio = 'adaptive';
+      mapped.duration = -1;
+    }
 
     const body: Record<string, any> = {
       model: req.model,

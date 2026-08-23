@@ -52,7 +52,13 @@ export function SettingsPopoverShell({
       if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       setOpen(false);
     };
-    const closeOnScroll = () => setOpen(false);
+    // 仅当滚动发生在面板/按钮之外时才关闭:
+    // 面板内部内容滚动(scroll 事件 target 为面板自身)不得关闭,否则参数面板一滚动就收起
+    const closeOnScroll = (event: Event) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     syncPosition();
     window.addEventListener('resize', syncPosition);
     window.addEventListener('scroll', closeOnScroll, true);
@@ -164,6 +170,7 @@ function SettingsPortal({
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
     >
       {children}
     </div>,

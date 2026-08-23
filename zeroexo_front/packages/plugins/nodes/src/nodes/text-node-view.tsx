@@ -250,7 +250,7 @@ export function TextNodeView({
               boxSizing: 'border-box',
             }}
           >
-            <AISkeleton type="text" accentColor={nodeColor} />
+            <AISkeleton type="text" accentColor={nodeColor} kind="text" />
             <span style={{ fontSize: 12, color: theme.toolbar.textMuted, fontWeight: 500 }}>
               {t('nodes.generating')}
             </span>

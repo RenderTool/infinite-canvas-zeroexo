@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ZeroExo_Server-v0.1.0-blue?style=for-the-badge" alt="version">
+  <img src="https://img.shields.io/badge/ZeroExo_Server-v1.0.0-blue?style=for-the-badge" alt="version">
   <img src="https://img.shields.io/badge/NestJS-10-EA2845?style=for-the-badge&logo=nestjs" alt="NestJS">
   <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql" alt="PostgreSQL">
   <img src="https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis" alt="Redis">

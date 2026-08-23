@@ -1,0 +1,78 @@
+{
+  "id": "tts-audio-base",
+  "name": "TTS 语音合成",
+  "protocol": "openai",
+  "modelType": "audio",
+  "endpoint": "/audio/speech",
+  "maxPromptLength": 2000,
+  "parameters": [
+    {
+      "name": "voice",
+      "type": "enum",
+      "label": "音色",
+      "default": "alloy",
+      "values": ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"],
+      "labels": {
+        "alloy": "Alloy", "ash": "Ash", "ballad": "Ballad", "coral": "Coral", "echo": "Echo",
+        "fable": "Fable", "nova": "Nova", "onyx": "Onyx", "sage": "Sage", "shimmer": "Shimmer",
+        "verse": "Verse", "marin": "Marin", "cedar": "Cedar"
+      },
+      "display": "radio",
+      "valueTooltips": {
+        "alloy": "中性平衡音色",
+        "ash": "低沉磁性男声",
+        "ballad": "温暖抒情音色",
+        "coral": "明亮女声",
+        "echo": "清晰女声",
+        "fable": "讲述感音色",
+        "nova": "自然女声",
+        "onyx": "沉稳男声",
+        "sage": "柔和女声",
+        "shimmer": "清亮女声",
+        "verse": "叙事男声",
+        "marin": "温暖男声",
+        "cedar": "沉稳男声"
+      }
+    },
+    {
+      "name": "audioFormat",
+      "type": "enum",
+      "label": "音频格式",
+      "default": "mp3",
+      "values": ["mp3", "wav", "opus", "aac", "flac", "pcm"],
+      "labels": { "mp3": "MP3", "wav": "WAV", "opus": "Opus", "aac": "AAC", "flac": "FLAC", "pcm": "PCM" },
+      "display": "radio"
+    },
+    {
+      "name": "audioSpeed",
+      "type": "number",
+      "label": "语速",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.05,
+      "tooltip": "生成语音的语速倍率(0.25x - 4x)"
+    },
+    {
+      "name": "audioInstructions",
+      "type": "string",
+      "label": "声音指令",
+      "placeholder": "可选：控制声音情绪、停顿、发音风格等",
+      "required": false
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minSpeed": 0.25,
+      "maxSpeed": 4
+    },
+    "paramMapping": {
+      "voice": "voice",
+      "audioFormat": "response_format",
+      "audioSpeed": "speed",
+      "audioInstructions": "instructions"
+    }
+  },
+  "pricing": { "perChar": 0.015 },
+  "matchKeywords": ["tts", "tts-1", "tts-1-hd", "doubao-tts", "elevenlabs", "azure-tts", "cosyvoice", "speech"]
+}

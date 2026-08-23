@@ -59,7 +59,7 @@ ZeroExo（以下简称"我们"）非常重视用户（以下简称"您"）的隐
 
 如果您对本隐私政策有任何疑问或建议，或需要行使您的个人信息相关权利，请通过以下方式联系我们：
 
-邮箱：support@zeroexo.app
+邮箱：750831855@qq.com
 
 GitHub Issues：https://github.com/zeroexo/zeroexo/issues
 
@@ -108,7 +108,7 @@ We may update this Privacy Policy from time to time. When material changes are m
 
 If you have any questions or suggestions regarding this Privacy Policy, or need to exercise your rights regarding personal information, please contact us through the following channels:
 
-Email: support@zeroexo.app
+Email: 750831855@qq.com
 
 GitHub Issues: https://github.com/zeroexo/zeroexo/issues
 
@@ -157,7 +157,7 @@ ZeroExo（以下「当社」といいます）は、ユーザー（以下「お�
 
 本プライバシーポリシーに関するご質問やご提案、または個人情報に関する権利を行使する必要がある場合は、以下の方法でお問い合わせください：
 
-メール：support@zeroexo.app
+メール：750831855@qq.com
 
 GitHub Issues：https://github.com/zeroexo/zeroexo/issues
 
@@ -207,7 +207,7 @@ ZeroExo AI 是一款基于人工智能技术的创作工具平台，为用户提
 
 ## 10. 联系我们
 
-如您对本协议或本平台的服务有任何疑问、意见或建议，请通过以下邮箱与我们联系：support@zeroexo.ai。我们将尽快回复您的咨询。`,
+如您对本协议或本平台的服务有任何疑问、意见或建议，请通过以下邮箱与我们联系：750831855@qq.com。我们将尽快回复您的咨询。`,
     contentEn: `## 1. Acceptance of Terms
 
 Welcome to ZeroExo AI. Please read and fully understand these Terms of Service (the "Terms") before using any services provided by ZeroExo AI. By accessing or using our services, you agree to be bound by all the terms and conditions of these Terms. If you do not agree with any part of these Terms, please immediately stop using our services. We reserve the right to modify these Terms at any time. Modified Terms will take effect immediately upon publication without prior notice.
@@ -246,7 +246,7 @@ These Terms shall be governed by and construed in accordance with the laws of th
 
 ## 10. Contact Us
 
-If you have any questions about these Terms or our services, please contact us at: support@zeroexo.ai.`,
+If you have any questions about these Terms or our services, please contact us at: 750831855@qq.com.`,
     contentJa: `## 1. 契約の承諾
 
 ZeroExo AIへようこそ。本サービスをご利用いただく前に、本利用規約（以下「本規約」といいます）をよくお読みいただき、十分にご理解ください。本プラットフォームのサービスにアクセスまたはご利用いただくことで、本規約のすべての条項に拘束されることに同意したものとみなされます。本規約のいずれかの部分に同意できない場合は、直ちにサービスの利用を中止してください。本プラットフォームは、随時本規約を変更する権利を有します。変更後の規約は、公開と同時に効力を生じるものとします。
@@ -285,7 +285,7 @@ ZeroExo AIは、AI技術を活用したクリエイティブツールプラッ�
 
 ## 10. お問い合わせ
 
-本規約に関するご質問は、support@zeroexo.aiまでお問い合わせください。`,
+本規約に関するご質問は、750831855@qq.comまでお問い合わせください。`,
   },
   {
     key: 'disclaimer',
@@ -315,7 +315,7 @@ ZeroExo AIは、AI技術を活用したクリエイティブツールプラッ�
 
 ## 6. 适用法律
 
-本法律声明及您对本平台的使用均适用中华人民共和国法律。如本声明的任何条款被认定为无效或不可执行，不影响其他条款的效力。本平台保留对本法律声明的最终解释权。如有任何疑问，请通过 contact@zeroexo.ai 与我们联系。`,
+本法律声明及您对本平台的使用均适用中华人民共和国法律。如本声明的任何条款被认定为无效或不可执行，不影响其他条款的效力。本平台保留对本法律声明的最终解释权。如有任何疑问，请通过 750831855@qq.com 与我们联系。`,
     contentEn: `## 1. Copyright Notice
 
 All intellectual property rights and related rights in the interface design, user interface elements, front-end code, back-end systems, logos, and brand identity of this platform (ZeroExo AI) are owned by ZeroExo AI and its operators. Without our written permission, no individual or entity may reproduce, distribute, modify, transmit, sell, or exploit any part of this platform. We reserve the right to pursue legal action against infringers.
@@ -338,7 +338,7 @@ Users retain all intellectual property rights to content created through our pla
 
 ## 6. Governing Law
 
-This Legal Notice and your use of our platform are governed by the laws of the People's Republic of China. If any provision is found to be invalid or unenforceable, the remaining provisions shall remain in effect. For any questions, please contact us at contact@zeroexo.ai.`,
+This Legal Notice and your use of our platform are governed by the laws of the People's Republic of China. If any provision is found to be invalid or unenforceable, the remaining provisions shall remain in effect. For any questions, please contact us at 750831855@qq.com.`,
     contentJa: `## 1. 著作権表示
 
 本プラットフォーム（ZeroExo AI）のインターフェースデザイン、ユーザーインターフェース要素、フロントエンドコード、バックエンドシステム、ロゴ、ブランドイメージに関するすべての知的財産権および関連する権利は、ZeroExo AIおよびその運営者に帰属します。書面による許可なく、本プラットフォームの一部を複製、転載、修正、送信、販売することはできません。
@@ -361,7 +361,7 @@ AI生成コンテンツは、不正確、不完全、または誤情報を含む
 
 ## 6. 準拠法
 
-本法的通知およびお客様による本プラットフォームの利用は、中華人民共和国の法律に準拠します。ご質問は、contact@zeroexo.aiまでお問い合わせください。`,
+本法的通知およびお客様による本プラットフォームの利用は、中華人民共和国の法律に準拠します。ご質問は、750831855@qq.comまでお問い合わせください。`,
   },
   {
     key: 'about',
@@ -392,7 +392,7 @@ ZeroExo AI 是一款基于人工智能的创意工具平台，致力于为创作
 
 GitHub：github.com/zeroexo
 
-邮箱：contact@zeroexo.ai`,
+邮箱：750831855@qq.com`,
     contentEn: `## About ZeroExo AI
 
 ZeroExo AI is an AI-powered creative tool platform dedicated to providing creators with an efficient and intelligent creative experience. By combining advanced AI models with intuitive interaction design, we make it easy for everyone to turn inspiration into outstanding works.
@@ -416,7 +416,7 @@ Built with React 19 + TypeScript frontend, Rust high-performance backend service
 
 GitHub: github.com/zeroexo
 
-Email: contact@zeroexo.ai`,
+Email: 750831855@qq.com`,
     contentJa: `## ZeroExo AIについて
 
 ZeroExo AIは、AIを活用したクリエイティブツールプラットフォームであり、クリエイターに効率的でインテリジェントな制作体験を提供することを使命としています。先進的なAIモデルと直感的なインタラクションデザインを組み合わせ、誰もがインスピレーションを素晴らしい作品に変換できるようにします。
@@ -440,7 +440,7 @@ React 19 + TypeScriptによるフロントエンド、Rustによる高性能バ�
 
 GitHub：github.com/zeroexo
 
-メール：contact@zeroexo.ai`,
+メール：750831855@qq.com`,
   },
   {
     key: 'changelog',

@@ -161,7 +161,7 @@ export function ImageNodeView({
           replaceBtnPosition="left"
           backgroundColor={nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
-          skeleton="media"
+          skeleton="media" skeletonKind="image"
         >
           <div
             style={{ ...mediaContainerStyle, background: 'transparent' }}
@@ -219,7 +219,7 @@ export function ImageNodeView({
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
-        skeleton="media"
+        skeleton="media" skeletonKind="image"
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

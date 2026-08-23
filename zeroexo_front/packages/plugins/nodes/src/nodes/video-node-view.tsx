@@ -550,7 +550,7 @@ export function VideoNodeView({
           replaceBtnPosition="left"
           backgroundColor={emptyBackground ?? nodeColor}
           taskLabel={(data.taskLabel as string) ?? undefined}
-          skeleton="media"
+          skeleton="media" skeletonKind="video"
         >
           {renderContent()}
         </AIStateView>
@@ -598,7 +598,7 @@ export function VideoNodeView({
         replaceBtnPosition="left"
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
-        skeleton="media"
+        skeleton="media" skeletonKind="video"
         onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
         onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >

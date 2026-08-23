@@ -17,6 +17,7 @@ import { AiGenerateService } from './ai-generate.service';
 import { AiThinkTaskService } from './ai-generate.think-task.service';
 import { AiThinkStreamService } from './ai-generate.think-stream.service';
 import { GenerateRequestDto } from './dto/generate-request.dto';
+import { getTemplatesByType } from './templates/built-in-templates';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AiThrottle } from '../../common/throttler/decorators/throttle.decorator';
@@ -68,6 +69,17 @@ export class AiGenerateController {
     @Query('capability') capability?: string,
   ) {
     return this.aiGenerateService.listChannels(userId, capability);
+  }
+
+  /**
+   * 获取指定模型类型的参数模板(供 C 端节点生成面板动态渲染参数表单)
+   * GET /api/ai/templates?type=image|video|audio
+   */
+  @Get('templates')
+  @ApiOperation({ summary: '获取参数模板列表(按模型类型过滤)' })
+  templates(@Query('type') type?: string) {
+    if (!type) return getTemplatesByType('image');
+    return getTemplatesByType(type);
   }
 
   @Post('think')

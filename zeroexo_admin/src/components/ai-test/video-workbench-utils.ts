@@ -133,6 +133,8 @@ export function getReferenceConfigByMode(
         audioMaxCount: 0,
       };
     case 'multi-modal-reference':
+    case 'video-edit':
+    case 'video-extend':
       return {
         isFirstLastFrameMode: false,
         showImages: maxReferenceImages > 0,

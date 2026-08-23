@@ -373,6 +373,9 @@ export function NodeCapsuleToolbar({
 
   return (
     <>
+    <style>{`
+@keyframes ze-capsule-pop { from { opacity: 0; transform: translate(-50%, -100%) scale(0.9); } to { opacity: 1; transform: translate(-50%, -100%) scale(1); } }
+    `}</style>
     <div
       ref={dockRef}
       data-capsule-toolbar
@@ -396,6 +399,8 @@ export function NodeCapsuleToolbar({
         color: textColor,
         overflow: 'visible',
         maxWidth: 'min(92vw, 640px)',
+        // 胶囊弹出动画(征集#45 H5)
+        animation: 'ze-capsule-pop 0.22s cubic-bezier(0.34,1.56,0.64,1)',
       }}
       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onPointerDown={(e) => e.stopPropagation()}
@@ -540,20 +545,42 @@ export function NodeCapsuleToolbar({
       ) : null}
       {isMixedSelection && showArrangeAgg ? null : null}
 
-      {/* 导航按钮 — 摇杆触发 */}
+      {/* 导航按钮 — 与堆叠同组(征集#45 H3):前置工具非堆叠时才补分隔线 */}
       {showNavButton ? (
         <>
-          <div style={{ width: 1, height: 20, margin: '0 2px', background: dividerBg }} />
+          {visibleTools[visibleTools.length - 1]?.id !== 'createStackNode' ? (
+            <div style={{ width: 1, height: 20, margin: '0 2px', background: dividerBg }} />
+          ) : null}
           <button
             ref={navBtnRef}
             type="button"
             title={t('joystickNav.title')}
             onPointerDown={(e) => { e.stopPropagation(); setJoystickOpen(true); }}
-            style={toolButtonStyle(false, false, false, nodeAccent, dangerColor, textColor, hoverBg)}
-            onMouseEnter={(e) => { e.currentTarget.style.background = hoverBg; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 30,
+              height: 30,
+              marginLeft: 2,
+              borderRadius: 999,
+              border: `1px solid ${borderColor}`,
+              background: 'transparent',
+              // 导航按钮保持普通白色菜单按钮样式(征集#47):不随选中态变红,
+              // 红/绿链路反馈全部下沉到摇杆 overlay(红点/虚线/土星环)
+              color: textColor,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              touchAction: 'none',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = textColor; e.currentTarget.style.background = hoverBg; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = borderColor; e.currentTarget.style.background = 'transparent'; }}
           >
-            <span style={{ display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{
+              display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              // 「取下来」隐喻:摇杆开启后白色外圈留在槽位当底座，仅指南针内芯被取走(由 overlay 同款红/绿圆代替)
+              visibility: joystickOpen ? 'hidden' : 'visible',
+            }}>
               <Compass size={16} />
             </span>
           </button>
@@ -562,13 +589,14 @@ export function NodeCapsuleToolbar({
 
       </div>
 
-      {/* 摇杆 overlay */}
+      {/* 摇杆 overlay:以导航按钮自身为中心 */}
       {joystickOpen && showNavButton && node && navBtnRef.current ? (
         <NodeJoystickNav
-          anchorX={navBtnRef.current.getBoundingClientRect().left + navBtnRef.current.offsetWidth / 2}
-          anchorY={navBtnRef.current.getBoundingClientRect().top + navBtnRef.current.offsetHeight / 2}
+          anchorX={navBtnRef.current.getBoundingClientRect().left + navBtnRef.current.getBoundingClientRect().width / 2}
+          anchorY={navBtnRef.current.getBoundingClientRect().top + navBtnRef.current.getBoundingClientRect().height / 2}
           store={store}
           nodeId={node.id}
+          getExtension={getExtension}
           onClose={() => setJoystickOpen(false)}
         />
       ) : null}

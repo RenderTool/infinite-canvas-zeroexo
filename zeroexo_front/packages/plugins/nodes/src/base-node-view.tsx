@@ -242,8 +242,10 @@ export interface AIStateViewProps {
   onRetry?: () => void;
   /** 生成中/失败:取消回调(节点视图内 emit 到 editor-page) */
   onCancel?: () => void;
-  /** 生成中骨架类型: media=九宫格网格(图片/视频), text=行式段落(文本); 缺省=环形 spinner */
+  /** 生成中骨架类型: media(图片/视频/音频)/text(文本)——视觉已统一为分镜同款骨架（脉冲点+阶段文案+shimmer 行） */
   skeleton?: 'media' | 'text';
+  /** 骨架阶段文案类型（与生成物一致；禁止用分镜文案渲染图片/视频生成） */
+  skeletonKind?: GenLoaderKind;
   /** 成功状态内容(由派生节点提供) */
   children: React.ReactNode;
 }
@@ -261,65 +263,82 @@ const aiContainerStyle: React.CSSProperties = {
   gap: 8,
 };
 
+/** 生成中骨架文案类型：按生成物类型取阶段文案，禁止混用分镜专属文案（editor.loader 段仅限分镜） */
+export type GenLoaderKind = 'image' | 'video' | 'audio' | 'text' | 'storyboard';
+
+/** 骨架阶段 i18n 后缀（与分镜 StoryboardGeneratingLoader 同轮播节奏） */
+const AI_SKELETON_STAGES = ['analyzing', 'drafting', 'refining', 'finalizing'] as const;
+
+/** 骨架行宽度（与分镜同款：渐进式从左到右，模拟流式输出） */
+const AI_SKELETON_ROW_WIDTHS = ['96%', '88%', '92%', '60%'];
+
+/** 按生成类型解析阶段文案 key：storyboard 用专属段，其余走 nodes.genLoader.{kind} */
+function genLoaderStageKey(kind: GenLoaderKind, stageIndex: number): string {
+  const stage = AI_SKELETON_STAGES[stageIndex] ?? AI_SKELETON_STAGES[0]!;
+  return kind === 'storyboard' ? `editor.loader.${stage}` : `nodes.genLoader.${kind}.${stage}`;
+}
+
 /**
- * AISkeleton - 生成中 shimmer 骨架(与分镜 StoryboardGeneratingLoader 同款扫光动画)
+ * AISkeleton - 生成中骨架（契约：与分镜 StoryboardGeneratingLoader 同款视觉）
  *
- * - media: 2×2 九宫格网格(模拟图片/视频画面区域)
- * - text: 变宽行式段落(模拟文字内容)
- *
- * 由 AIStateView 与 TextNodeView 共用;宿主节点背景深色,骨架块用白色半透明渐变扫光。
+ * 三元素：AI 脉冲点 + 阶段文案轮播 + shimmer 骨架行。
+ * media/text 统一形态（此前 media 为 2×2 四宫格，已按用户多次强调废止）。
+ * 阶段文案按 kind 区分生成类型（图片生成显示图片文案，禁止串用分镜文案）。
+ * 宿主节点背景深色，骨架块用白色半透明渐变扫光；文案/脉冲点随 accentColor。
  */
-export function AISkeleton({ type, accentColor }: { type: 'media' | 'text'; accentColor: string }): React.ReactElement {
-  const shimmerId = `ze-shimmer-${accentColor.replace('#', '')}`;
-  const block: React.CSSProperties = {
-    position: 'relative',
-    overflow: 'hidden',
+export function AISkeleton({ type: _type, accentColor, kind = 'image' }: { type: 'media' | 'text'; accentColor: string; kind?: GenLoaderKind }): React.ReactElement {
+  const { t } = useTranslation();
+  const animId = `ze-skel-${accentColor.replace('#', '')}`;
+  const [stageIndex, setStageIndex] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setStageIndex((prev) => (prev + 1 >= AI_SKELETON_STAGES.length ? prev : prev + 1));
+    }, 2200);
+    return () => clearInterval(timer);
+  }, []);
+
+  const row: React.CSSProperties = {
+    height: 14,
     borderRadius: 6,
-    background: 'rgba(255,255,255,0.08)',
+    background: 'linear-gradient(90deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.14) 20%, rgba(255,255,255,0.05) 40%)',
+    backgroundSize: '200% 100%',
+    animation: `${animId}-shimmer 1.6s ease-in-out infinite, ${animId}-grow 0.5s ease forwards`,
+    transformOrigin: 'left center',
+    transform: 'scaleX(0)',
+    animationFillMode: 'forwards',
   };
-  const sweep: React.CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)',
-    animation: `${shimmerId} 1.4s ease-in-out infinite`,
-  };
+
   return (
-    <>
-      {type === 'media' ? (
+    <div style={{ position: 'relative', width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 头部：AI 脉冲点 + 阶段文案（与分镜同款轮播节奏 2.2s） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
         <div
           style={{
-            position: 'relative',
-            width: 'calc(100% - 40px)',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 8,
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            background: accentColor,
+            animation: `${animId}-pulse 1.2s ease-in-out infinite`,
+            flexShrink: 0,
           }}
-        >
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} style={{ ...block, aspectRatio: '4/3' }}>
-              <div style={sweep} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div
-          style={{
-            position: 'relative',
-            width: 'calc(100% - 40px)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
-          {[96, 100, 84, 62].map((w, i) => (
-            <div key={i} style={{ ...block, height: 12, width: `${w}%` }}>
-              <div style={sweep} />
-            </div>
-          ))}
-        </div>
-      )}
-      <style>{`@keyframes ${shimmerId} { from { transform: translateX(-100%); } to { transform: translateX(100%); } }`}</style>
-    </>
+        />
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', animation: `${animId}-fade 0.25s ease` }}>
+          {t(genLoaderStageKey(kind, stageIndex))}
+        </span>
+      </div>
+      {/* Shimmer 骨架行（分镜同款宽度序列） */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+        {AI_SKELETON_ROW_WIDTHS.map((w, i) => (
+          <div key={i} style={{ ...row, width: w, animationDelay: `0s, ${i * 0.15}s` }} />
+        ))}
+      </div>
+      <style>{`
+@keyframes ${animId}-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } }
+@keyframes ${animId}-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes ${animId}-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes ${animId}-fade { 0% { opacity: 0; } 100% { opacity: 1; } }
+`}</style>
+    </div>
   );
 }
 
@@ -371,6 +390,7 @@ export function AIStateView({
   onRetry,
   onCancel,
   skeleton,
+  skeletonKind,
   children,
 }: AIStateViewProps): React.ReactElement {
   const { t } = useTranslation();
@@ -389,7 +409,7 @@ export function AIStateView({
           }}
         />
         {skeleton ? (
-          <AISkeleton type={skeleton} accentColor={accentColor} />
+          <AISkeleton type={skeleton} accentColor={accentColor} kind={skeletonKind ?? 'image'} />
         ) : (
           <>
             <div

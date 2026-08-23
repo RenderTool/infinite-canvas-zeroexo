@@ -11,15 +11,19 @@
       "type": "enum",
       "label": "生成模式",
       "default": "image-to-video-first-last-frame",
-      "values": ["image-to-video-first-last-frame", "multi-modal-reference"],
+      "values": ["image-to-video-first-last-frame", "multi-modal-reference", "video-edit", "video-extend"],
       "labels": {
         "image-to-video-first-last-frame": "首尾帧",
-        "multi-modal-reference": "多模态"
+        "multi-modal-reference": "多模态",
+        "video-edit": "编辑视频",
+        "video-extend": "延长视频"
       },
       "display": "radio",
       "valueTooltips": {
         "image-to-video-first-last-frame": "输入首帧和/或尾帧图片，配合文本提示词生成视频，至少需要提供一张图片",
-        "multi-modal-reference": "输入图片、视频、音频等多种参考素材，配合文本提示词生成视频"
+        "multi-modal-reference": "输入图片、视频、音频等多种参考素材，配合文本提示词生成视频",
+        "video-edit": "对原视频的画面或音频进行编辑修改，需至少提供一个参考视频（官方要求比例 adaptive、时长自动）",
+        "video-extend": "对原视频向前或向后延长，需至少提供一个参考视频（官方要求比例 adaptive、时长自动）"
       }
     },
     {
@@ -164,7 +168,7 @@
       "supportsImageToImage": false
     },
     "paramMapping": {
-      "mode": "mode",
+      "mode": "task",
       "resolution": "resolution",
       "ratio": "ratio",
       "duration": "duration",
@@ -186,8 +190,10 @@
         "4k": "4k"
       },
       "mode": {
-        "image-to-video-first-last-frame": "image_to_video_first_last_frame",
-        "multi-modal-reference": "multi_modal_reference"
+        "image-to-video-first-last-frame": "reference",
+        "multi-modal-reference": "reference",
+        "video-edit": "edit",
+        "video-extend": "extend"
       }
     }
   },

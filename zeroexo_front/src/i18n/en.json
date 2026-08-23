@@ -147,7 +147,7 @@
     "shortcuts": "Shortcuts",
     "shortcutsDescription": "Common shortcuts for canvas operations",
     "joystickNav": {
-      "title": "Drag to navigate to nearby node"
+      "title": "Drag the red dot toward a node to jump"
     },
     "backHome": "Back to Home",
     "newProject": "New Project",
@@ -428,6 +428,22 @@
     "typeFix": "Fix"
   },
   "changelogEntries": {
+    "v1_0_0": {
+      "title": "ZeroExo 1.0 Official Release",
+      "body": "First official release: an AI-driven end-to-end content creation platform covering script, storyboard, production management, and video export.",
+      "items": [
+        "Infinite canvas editor: self-built rendering pipeline, smooth operation with 500+ nodes, multi-level LOD and viewport culling",
+        "Node orchestration: image/video/audio/text/script/storyboard/stack nodes with typed icons and connection interactions",
+        "Image-to-image & image-to-video: reference images passed as generation parameters, multi-channel model support",
+        "Canvas agent ZeroExoAgent: conversational generation, @ mentions, parameter contract forms, history session search",
+        "Script → storyboard → production → export pipeline: chunked generation with hallucination prevention, production workbench",
+        "Real-time collaboration: Yjs sync + SSE events, presence cursors, room management and chat",
+        "Cloud sync: incremental sync, conflict rebase, offline-first",
+        "Asset & prompt library: asset management, public prompt library, favorites with source attribution",
+        "Admin dashboard: user/channel/policy management, operations and billing analytics",
+        "Trilingual i18n (zh/en/ja), light/dark themes, desktop launcher"
+      ]
+    },
     "v0_13_0": {
       "title": "Public Prompt Library, Legal Agreements & Policy Admin",
       "body": "Public prompt library launched with license badges and source attribution; legal agreement system and policy management dashboard built; interaction optimization and navigation redesign.",
@@ -743,6 +759,7 @@
     "replayDone": "Generation chain restored: new node + {{n}} reference(s) reconnected — review and regenerate",
     "replayPartial": "Generation chain restored, but {{n}} reference(s) could not be recovered (content not archived)",
     "replayModelInvalid": "Generation chain restored, but the original channel/model is unavailable — please reselect a model",
+    "backToContent": "Back to Content",
     "editContent": "Edit Content",
     "paste": "Paste",
     "delete": "Delete",
@@ -908,6 +925,12 @@
     "retry": "Retry",
     "generating": "Generating",
     "cancelGeneration": "Cancel generation",
+    "genLoader": {
+          "image": { "analyzing": "Analyzing prompt…", "drafting": "Rendering image…", "refining": "Refining details…", "finalizing": "Finalizing output…" },
+          "video": { "analyzing": "Analyzing prompt…", "drafting": "Generating video frames…", "refining": "Compositing footage…", "finalizing": "Finalizing output…" },
+          "audio": { "analyzing": "Analyzing content…", "drafting": "Synthesizing audio…", "refining": "Polishing timbre…", "finalizing": "Finalizing output…" },
+          "text": { "analyzing": "Analyzing request…", "drafting": "Writing content…", "refining": "Polishing text…", "finalizing": "Finalizing output…" }
+        },
     "generateFailed": "Generation failed",
     "inputPin": "Input",
     "outputPin": "Output",
@@ -1699,7 +1722,7 @@
     "viewScript": "View script"
   },
   "joystickNav": {
-    "title": "Joystick Navigation"
+    "title": "Drag the red dot toward a node to jump"
   },
   "collab": {
     "title": "Collaboration",
