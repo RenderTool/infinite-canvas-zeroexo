@@ -59,6 +59,34 @@ dashboard bolted onto a generic editor.
 
 ## Product Modules
 
+### Canvas Capabilities
+
+| Canvas overview | Keyboard shortcuts | Node style config |
+|---|---|---|
+| ![Canvas overview](docs/screenshots/canvas/画布概览.webp) | ![Keyboard shortcuts](docs/screenshots/canvas/画布快捷键.webp) | ![Node style config](docs/screenshots/canvas/画布节点样式配置.webp) |
+
+| Debug & collaboration | Project dev agent | Agent self-upgrade & maintenance |
+|---|---|---|
+| ![Debug and collaboration](docs/screenshots/canvas/debug和协作.webp) | ![Project dev agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent self-upgrade and maintenance](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
+
+### Animated Demos (Canvas Operations)
+
+**Collaboration**
+
+![Collaboration](docs/screenshots/frontend/前端画布协作.gif)
+
+**Node stacking & merge**
+
+![Node stacking](docs/screenshots/frontend/前端画布堆叠.gif)
+
+**Quick node navigation**
+
+![Quick node navigation](docs/screenshots/frontend/前端画布导航.gif)
+
+**Hierarchy panel & double-click focus**
+
+![Hierarchy panel](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
+
 ### Frontend — Canvas (the core)
 
 The canvas editor is the platform's core module, covering the complete
@@ -109,34 +137,6 @@ Operational control plane for the platform:
 | Site settings | Logs | Email service |
 |---|---|---|
 | ![Site settings](docs/screenshots/admin/后台站点管理.webp) | ![Logs](docs/screenshots/admin/后台日志.webp) | ![Email service](docs/screenshots/admin/后台管理邮件服务.webp) |
-
-### Canvas Capabilities
-
-| Canvas overview | Keyboard shortcuts | Node style config |
-|---|---|---|
-| ![Canvas overview](docs/screenshots/canvas/画布概览.webp) | ![Keyboard shortcuts](docs/screenshots/canvas/画布快捷键.webp) | ![Node style config](docs/screenshots/canvas/画布节点样式配置.webp) |
-
-| Debug & collaboration | Project dev agent | Agent self-upgrade & maintenance |
-|---|---|---|
-| ![Debug and collaboration](docs/screenshots/canvas/debug和协作.webp) | ![Project dev agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent self-upgrade and maintenance](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
-
-### Animated Demos (Canvas Operations)
-
-**Collaboration**
-
-![Collaboration](docs/screenshots/frontend/前端画布协作.gif)
-
-**Node stacking & merge**
-
-![Node stacking](docs/screenshots/frontend/前端画布堆叠.gif)
-
-**Quick node navigation**
-
-![Quick node navigation](docs/screenshots/frontend/前端画布导航.gif)
-
-**Hierarchy panel & double-click focus**
-
-![Hierarchy panel](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
 ### Backend API
 
