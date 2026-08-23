@@ -68,14 +68,6 @@ ZeroExo 短视频创作者、影视自媒体从业者
 |---|---|---|
 | ![提示词](docs/screenshots/frontend/前端提示词.webp) | ![素材库管理页](docs/screenshots/frontend/前端素材库管理页.webp) | ![画布管理页](docs/screenshots/frontend/前端画布管理页.webp) |
 
-动画演示（GIF）：
-
-- [画布协作](docs/screenshots/frontend/前端画布协作.gif)
-
-- [画布堆叠](docs/screenshots/frontend/前端画布堆叠.gif)
-
-- [画布导航](docs/screenshots/frontend/前端画布导航.gif)
-
 ### 管理后台
 
 平台运营控制面：
@@ -101,17 +93,31 @@ ZeroExo 短视频创作者、影视自媒体从业者
 
 ### 画布能力展示
 
-| 画布概览 | 快捷键 |
-|---|---|
-| ![画布概览](docs/screenshots/canvas/画布概览.webp) | ![画布快捷键](docs/screenshots/canvas/画布快捷键.webp) |
-
-| 节点样式配置 | 层级面板与双击聚焦 |
-|---|---|
-| ![节点样式配置](docs/screenshots/canvas/画布节点样式配置.webp) | ![层级面板和双击聚焦](docs/screenshots/canvas/画布层级面板和双击聚焦.gif) |
+| 画布概览 | 快捷键 | 节点样式配置 |
+|---|---|---|
+| ![画布概览](docs/screenshots/canvas/画布概览.webp) | ![画布快捷键](docs/screenshots/canvas/画布快捷键.webp) | ![节点样式配置](docs/screenshots/canvas/画布节点样式配置.webp) |
 
 | 调试与协作 | 项目工程开发配套 Agent | Agent 自我升级与维护 |
 |---|---|---|
 | ![调试和协作](docs/screenshots/canvas/debug和协作.webp) | ![项目工程开发配套Agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent自我升级项目维护一体](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
+
+### 动态演示（画布操作）
+
+**协作**
+
+![协作](docs/screenshots/frontend/前端画布协作.gif)
+
+**节点堆叠合并**
+
+![节点堆叠合并](docs/screenshots/frontend/前端画布堆叠.gif)
+
+**节点快速导航**
+
+![节点快速导航](docs/screenshots/frontend/前端画布导航.gif)
+
+**层级面板与双击聚焦**
+
+![层级面板和双击聚焦](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
 ### 后端 API
 

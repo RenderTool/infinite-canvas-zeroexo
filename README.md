@@ -87,12 +87,6 @@ production pipeline of script → storyboard → shot → finished film:
 |---|---|---|
 | ![Prompts](docs/screenshots/frontend/前端提示词.webp) | ![Asset library](docs/screenshots/frontend/前端素材库管理页.webp) | ![Canvas manager](docs/screenshots/frontend/前端画布管理页.webp) |
 
-Animated demos (GIF):
-
-- [Canvas collaboration](docs/screenshots/frontend/前端画布协作.gif)
-- [Canvas stacking](docs/screenshots/frontend/前端画布堆叠.gif)
-- [Canvas navigation](docs/screenshots/frontend/前端画布导航.gif)
-
 ### Admin Console
 
 Operational control plane for the platform:
@@ -118,17 +112,31 @@ Operational control plane for the platform:
 
 ### Canvas Capabilities
 
-| Canvas overview | Keyboard shortcuts |
-|---|---|
-| ![Canvas overview](docs/screenshots/canvas/画布概览.webp) | ![Keyboard shortcuts](docs/screenshots/canvas/画布快捷键.webp) |
-
-| Node style config | Hierarchy panel & double-click focus |
-|---|---|
-| ![Node style config](docs/screenshots/canvas/画布节点样式配置.webp) | ![Hierarchy panel and double-click focus](docs/screenshots/canvas/画布层级面板和双击聚焦.gif) |
+| Canvas overview | Keyboard shortcuts | Node style config |
+|---|---|---|
+| ![Canvas overview](docs/screenshots/canvas/画布概览.webp) | ![Keyboard shortcuts](docs/screenshots/canvas/画布快捷键.webp) | ![Node style config](docs/screenshots/canvas/画布节点样式配置.webp) |
 
 | Debug & collaboration | Project dev agent | Agent self-upgrade & maintenance |
 |---|---|---|
 | ![Debug and collaboration](docs/screenshots/canvas/debug和协作.webp) | ![Project dev agent](docs/screenshots/canvas/项目工程开发配套Agent.webp) | ![Agent self-upgrade and maintenance](docs/screenshots/canvas/Agent自我升级项目维护一体.webp) |
+
+### Animated Demos (Canvas Operations)
+
+**Collaboration**
+
+![Collaboration](docs/screenshots/frontend/前端画布协作.gif)
+
+**Node stacking & merge**
+
+![Node stacking](docs/screenshots/frontend/前端画布堆叠.gif)
+
+**Quick node navigation**
+
+![Quick node navigation](docs/screenshots/frontend/前端画布导航.gif)
+
+**Hierarchy panel & double-click focus**
+
+![Hierarchy panel](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
 ### Backend API
 
