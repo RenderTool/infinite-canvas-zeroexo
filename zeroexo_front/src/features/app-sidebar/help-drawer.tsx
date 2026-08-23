@@ -34,7 +34,7 @@ interface HelpItem {
 const HELP_ITEMS: HelpItem[] = [
   { key: 'policies', label: '政策公告', icon: <Newspaper size={18} />, type: 'navigate' },
   { key: 'follow', label: '关注我们', icon: <QrCode size={18} />, type: 'navigate' },
-  { key: 'github', label: '帮助与反馈', icon: <Github size={18} />, type: 'external', href: 'https://github.com' },
+  { key: 'github', label: '帮助与反馈', icon: <Github size={18} />, type: 'external', href: 'https://github.com/RenderTool/zeroexo-platform-infinite-canvas' },
 ];
 
 export function HelpDrawer({ open, onClose, onNavigate }: HelpDrawerProps): React.ReactElement {

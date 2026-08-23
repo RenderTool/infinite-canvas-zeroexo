@@ -172,7 +172,7 @@ ZeroExo AI 是一款基于人工智能的创意工具平台，致力于为创作
 
 ## 联系我们
 
-GitHub：github.com/zeroexo
+GitHub：github.com/RenderTool/zeroexo-platform-infinite-canvas
 
 邮箱：750831855@qq.com`,
   },

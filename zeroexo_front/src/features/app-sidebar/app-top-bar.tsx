@@ -90,7 +90,7 @@ export function AppTopBar({
             <Button
               type="text"
               icon={<Github size={16} />}
-              href="https://github.com/zeroexo"
+              href="https://github.com/RenderTool/zeroexo-platform-infinite-canvas"
               target="_blank"
               rel="noopener noreferrer"
               className="zeroexo-icon-btn"

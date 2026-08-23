@@ -61,7 +61,7 @@ ZeroExo（以下简称"我们"）非常重视用户（以下简称"您"）的隐
 
 邮箱：750831855@qq.com
 
-GitHub Issues：https://github.com/zeroexo/zeroexo/issues
+GitHub Issues：https://github.com/RenderTool/zeroexo-platform-infinite-canvas/issues
 
 我们将在收到您的请求后尽快回复，通常不超过15个工作日。`,
     contentEn: `## 1. Introduction
@@ -110,7 +110,7 @@ If you have any questions or suggestions regarding this Privacy Policy, or need 
 
 Email: 750831855@qq.com
 
-GitHub Issues: https://github.com/zeroexo/zeroexo/issues
+GitHub Issues: https://github.com/RenderTool/zeroexo-platform-infinite-canvas/issues
 
 We will respond to your request as soon as possible, typically within 15 business days.`,
     contentJa: `## 1. はじめに
@@ -159,7 +159,7 @@ ZeroExo（以下「当社」といいます）は、ユーザー（以下「お�
 
 メール：750831855@qq.com
 
-GitHub Issues：https://github.com/zeroexo/zeroexo/issues
+GitHub Issues：https://github.com/RenderTool/zeroexo-platform-infinite-canvas/issues
 
 ご依頼を受けてから、通常15営業日以内にできるだけ早く回答いたします。`,
   },
@@ -390,7 +390,7 @@ ZeroExo AI 是一款基于人工智能的创意工具平台，致力于为创作
 
 ## 联系我们
 
-GitHub：github.com/zeroexo
+GitHub：github.com/RenderTool/zeroexo-platform-infinite-canvas
 
 邮箱：750831855@qq.com`,
     contentEn: `## About ZeroExo AI
@@ -414,7 +414,7 @@ Built with React 19 + TypeScript frontend, Rust high-performance backend service
 
 ## Contact Us
 
-GitHub: github.com/zeroexo
+GitHub: github.com/RenderTool/zeroexo-platform-infinite-canvas
 
 Email: 750831855@qq.com`,
     contentJa: `## ZeroExo AIについて
@@ -438,7 +438,7 @@ React 19 + TypeScriptによるフロントエンド、Rustによる高性能バ�
 
 ## お問い合わせ
 
-GitHub：github.com/zeroexo
+GitHub：github.com/RenderTool/zeroexo-platform-infinite-canvas
 
 メール：750831855@qq.com`,
   },
