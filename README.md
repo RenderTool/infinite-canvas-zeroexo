@@ -29,12 +29,10 @@
 ## Who It's For
 
 ZeroExo is built **by and for short-video creators, film/TV self-media
-operators, and storyboard artists** — the people who currently pay for
-expensive, locked-down, closed-source online tools that own your workflow
-and your data. This project is an **open-source alternative to those
-overpriced commercial services**: self-hosted, self-controlled, and
-purpose-built for the canvas + AI production workflow rather than a
-dashboard bolted onto a generic editor.
+operators, and storyboard artists**. It centers on the canvas + AI
+production workflow, supports self-hosted deployment with full data
+control, and ships an open, transparent tech stack for teams that want
+to extend and maintain it long-term.
 
 ## Highlights
 
