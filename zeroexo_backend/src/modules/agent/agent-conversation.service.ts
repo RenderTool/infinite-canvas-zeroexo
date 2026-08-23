@@ -17,6 +17,9 @@ import type { ChatMessage } from './agent-executor';
 /** 历史注入保留的最近文本轮数（Plan#36 R2-1，与 MemoryCompactor 预算对齐） */
 const HISTORY_MAX_TURNS = 20;
 
+/** 空会话保留窗口（分钟）：刚懒创建的会话尚无消息，窗口内不过滤/不清理，避免竞态误删 */
+const EMPTY_SESSION_GRACE_MINUTES = 5;
+
 @Injectable()
 export class AgentConversationService {
   private readonly logger = new Logger(AgentConversationService.name);
@@ -26,8 +29,25 @@ export class AgentConversationService {
     private readonly compactor: MemoryCompactorService,
   ) {}
 
-  /** 创建会话 */
+  /** 创建会话（创建前先清理该用户名下无消息无任务的空会话，防空会话堆积；
+   * 前端新建按钮已改懒创建，此处为存量/异常残留的兜底清理） */
   async createConversation(userId: string, opts: { title?: string; projectId?: string }) {
+    try {
+      const graceBefore = new Date(Date.now() - EMPTY_SESSION_GRACE_MINUTES * 60_000);
+      const cleaned = await this.prisma.agentConversation.deleteMany({
+        where: {
+          userId,
+          createdAt: { lt: graceBefore },
+          messages: { none: {} },
+          tasks: { none: {} },
+        },
+      });
+      if (cleaned.count > 0) {
+        this.logger.log(`清理空 Agent 会话 ${cleaned.count} 条, userId=${userId}`);
+      }
+    } catch (err) {
+      this.logger.warn('清理空会话失败（不阻断创建）', (err as Error).message);
+    }
     const conv = await this.prisma.agentConversation.create({
       data: {
         userId,
@@ -46,12 +66,21 @@ export class AgentConversationService {
     return { limit, offset };
   }
 
-  /** 会话列表（含消息数与最后一条消息预览，按最近活动排序） */
+  /** 会话列表（含消息数与最后一条消息预览，按最近活动排序）。
+   * 过滤空会话（无消息且超出懒创建宽限期），避免空对话污染列表 */
   async listConversations(userId: string, filters: { limit?: number; offset?: number } = {}) {
     const { limit, offset } = this.pagingOf(filters, 20, 100);
+    const graceBefore = new Date(Date.now() - EMPTY_SESSION_GRACE_MINUTES * 60_000);
+    const where = {
+      userId,
+      OR: [
+        { messages: { some: {} } },
+        { createdAt: { gte: graceBefore } },
+      ],
+    };
     const [items, total] = await Promise.all([
       this.prisma.agentConversation.findMany({
-        where: { userId },
+        where,
         orderBy: { updatedAt: 'desc' },
         take: limit,
         skip: offset,
@@ -64,7 +93,7 @@ export class AgentConversationService {
           },
         },
       }),
-      this.prisma.agentConversation.count({ where: { userId } }),
+      this.prisma.agentConversation.count({ where }),
     ]);
     return { items, total, limit, offset };
   }

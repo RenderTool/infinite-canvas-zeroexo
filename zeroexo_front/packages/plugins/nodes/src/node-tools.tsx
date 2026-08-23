@@ -16,7 +16,7 @@ import {
   Settings2,
   Brush, Scissors,
   Grid2x2, Camera, AlertCircle, Bold, Italic, Underline, Palette, Highlighter, RemoveFormatting,
-  Heading1,
+  Heading1, History,
 } from 'lucide-react';
 import { NODE_ICONS } from './icons.js';
 import type { NodeRecord, EdgeRecord, ToolContext, ToolDefinition, ToolMenuItem } from '@zeroexo/core';
@@ -25,6 +25,7 @@ import { setImageBlob } from '@zeroexo/plugin-persistence';
 import { collectCard } from './nodes/stacked-media-model.js';
 import { parseStackedMediaData } from './nodes/stacked-media-types.js';
 import { STACKED_MEDIA_DEFAULT_SIZE, IMAGE_DEFAULT_SIZE } from './utils/node-contracts.js';
+import { nodeActionBus } from './base-node-view.js';
 
 // ===== 通用工具(所有节点共用) =====
 
@@ -38,6 +39,24 @@ function createBasicTools(
   const tools: ToolDefinition[] = [];
   if (hasDetail) tools.push(createDetailTool());
   return tools;
+}
+
+/**
+ * 一键同款工具(征集#43):仅对 AI 生成型资源显示(节点带 generationId 烙印)。
+ * 点击经 nodeActionBus 交由 editor 层 handleReplayGeneration 复原完整生成链路。
+ */
+function createReplayTool(): ToolDefinition {
+  return {
+    id: 'replayGeneration',
+    label: '一键同款',
+    title: '一键同款：复原提示词/参数/引用的完整生成链路',
+    icon: <History size={14} />,
+    group: 'basic',
+    visible: (node: NodeRecord) => !!((node.data as Record<string, unknown> | null | undefined)?.generationId),
+    run: (node: NodeRecord) => {
+      nodeActionBus.emit('replayGeneration', { nodeId: node.id });
+    },
+  };
 }
 
 // ===== 各节点类型工具集 =====
@@ -88,6 +107,8 @@ function restoreEditorFocus(): void {
 export function getTextTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: false }),
+    // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
+    createReplayTool(),
     // 标题下拉(H1-H6+正文)
     {
       id: 'header',
@@ -252,45 +273,43 @@ function hasMediaContent(data: Record<string, unknown> | null | undefined): bool
   return Boolean(data?.['content'] || data?.['storageKey']);
 }
 
-/** 图片节点编辑相关工具(归并为"更多"分组) */
+/** 图片节点编辑工具(征集#45 H2:从「更多」子菜单拍平为胶囊独立按钮) */
 function buildImageEditTools(): ToolDefinition[] {
+  const visibleWithContent = (node: NodeRecord): boolean =>
+    hasMediaContent(node.data as Record<string, unknown> | null | undefined);
   return [
     {
-      id: 'moreEdit',
-      label: '更多',
-      title: '更多编辑',
-      icon: <Settings2 size={14} />,
+      id: 'maskEdit',
+      label: '局部遮罩',
+      title: '局部遮罩',
+      icon: <Brush size={14} />,
       group: 'edit',
-      visible: (node: NodeRecord) => {
-        return hasMediaContent(node.data as Record<string, unknown> | null | undefined);
+      visible: visibleWithContent,
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        ctx.openImageDialog?.(node, 'maskEdit');
       },
-      menu: () => [
-        {
-          key: 'maskEdit',
-          label: '局部遮罩',
-          icon: <Brush size={14} />,
-          run: (node: NodeRecord, ctx: ToolContext) => {
-            ctx.openImageDialog?.(node, 'maskEdit');
-          },
-        },
-        {
-          key: 'crop',
-          label: '裁剪',
-          icon: <Scissors size={14} />,
-          run: (node: NodeRecord, ctx: ToolContext) => {
-            ctx.openImageDialog?.(node, 'crop');
-          },
-        },
-        {
-          key: 'split',
-          label: '分割',
-          icon: <Grid2x2 size={14} />,
-          run: (node: NodeRecord, ctx: ToolContext) => {
-            ctx.openImageDialog?.(node, 'split');
-          },
-        },
-      ],
-      run: () => {},
+    },
+    {
+      id: 'crop',
+      label: '裁剪',
+      title: '裁剪',
+      icon: <Scissors size={14} />,
+      group: 'edit',
+      visible: visibleWithContent,
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        ctx.openImageDialog?.(node, 'crop');
+      },
+    },
+    {
+      id: 'split',
+      label: '分割',
+      title: '分割',
+      icon: <Grid2x2 size={14} />,
+      group: 'edit',
+      visible: visibleWithContent,
+      run: (node: NodeRecord, ctx: ToolContext) => {
+        ctx.openImageDialog?.(node, 'split');
+      },
     },
   ];
 }
@@ -325,6 +344,8 @@ function createDetailTool(): ToolDefinition {
 export function getImageTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
+    createReplayTool(),
     // 堆叠:将当前节点自动转为堆叠节点
     {
       id: 'createStackNode',
@@ -344,6 +365,8 @@ export function getImageTools(): ToolDefinition[] {
 export function getVideoTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
+    createReplayTool(),
     // 堆叠:将当前节点自动转为堆叠节点
     {
       id: 'createStackNode',
@@ -627,6 +650,8 @@ async function captureAndCreateImageNode(
 export function getAudioTools(): ToolDefinition[] {
   return [
     ...createBasicTools({ hasDetail: true }),
+    // 一键同款(征集#43):AI 生成型资源复原生成链路(仅带 generationId 时显示)
+    createReplayTool(),
   ];
 }
 

@@ -7,12 +7,28 @@
 
 // ===== 图片生成 =====
 
+/**
+ * 生成引用快照项(征集#43 方案 A):提交生成时随请求携带,
+ * 后端写入 AiGeneration.params._inputs,供"一键同款"复原生成链路。
+ * 失效判定见复原侧(节点被删/资产被清理/跨画布)。
+ */
+export interface GenerationInputRef {
+  nodeId: string;
+  nodeType: string;
+  assetStorageKey?: string;
+  title?: string;
+  /** 文本类引用的内容存档(截断),供引用节点被删后重建复原 */
+  textPreview?: string;
+}
+
 export interface ImageGenerationRequest {
   prompt: string;
   model: string;
   size: string;
   quality: string;
   count: number;
+  /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
+  inputs?: GenerationInputRef[];
   signal?: AbortSignal;
 }
 
@@ -27,6 +43,8 @@ export interface GeneratedImage {
   height: number;
   mimeType: string;
   bytes: number;
+  /** 后端生成记录 id(成功后回写节点,供溯源/一键同款) */
+  generationId?: string;
 }
 
 // ===== 文本生成 =====
@@ -70,6 +88,8 @@ export interface VideoGenerationRequest {
   generateAudio: boolean;
   watermark: boolean;
   signal?: AbortSignal;
+  /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
+  inputs?: GenerationInputRef[];
   /** Seedance 参考图(dataUrl 或公网 URL) */
   referenceImages?: string[];
   /** Seedance 参考视频 */
@@ -85,6 +105,8 @@ export interface GeneratedVideo {
   durationMs: number;
   mimeType: string;
   bytes: number;
+  /** 后端生成记录 id(成功后回写节点,供溯源/一键同款) */
+  generationId?: string;
 }
 
 // ===== 音频生成 =====
@@ -97,6 +119,8 @@ export interface AudioGenerationRequest {
   speed: number;
   instructions?: string;
   signal?: AbortSignal;
+  /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
+  inputs?: GenerationInputRef[];
 }
 
 export interface GeneratedAudio {
@@ -104,6 +128,8 @@ export interface GeneratedAudio {
   durationMs: number;
   mimeType: string;
   bytes: number;
+  /** 后端生成记录 id(成功后回写节点,供溯源/一键同款) */
+  generationId?: string;
 }
 
 // ===== 生成状态 =====
@@ -136,6 +162,8 @@ export interface ImageNodeData {
   freeResize?: boolean;
   generationType?: 'generation' | 'edit';
   references?: string[];
+  /** 后端生成记录 id(生成成功后回写,供溯源/一键同款) */
+  generationId?: string;
 }
 
 /** 文本节点数据 */
@@ -188,6 +216,8 @@ export interface VideoNodeData {
   thumbnailUrl?: string;
   /** 截帧捕获的图片(base64 dataUrl),由截帧工具写入 */
   capturedFrame?: string;
+  /** 后端生成记录 id(生成成功后回写,供溯源/一键同款) */
+  generationId?: string;
 }
 
 /** BUG8.5: Seedance 视频生成模式 */
@@ -221,6 +251,8 @@ export interface AudioNodeData {
   durationMs?: number;
   /** 预计算波形数据(60 柱振幅值),避免每次挂载重复 fetch+decode */
   waveformData?: number[];
+  /** 后端生成记录 id(生成成功后回写,供溯源/一键同款) */
+  generationId?: string;
 }
 
 // ===== DirectProvider 配置(Phase VI.5-VI.8) =====

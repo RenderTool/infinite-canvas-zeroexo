@@ -28,7 +28,7 @@
 | read_asset_content | 附件落库后按需分段读取（assetId + offset，每段 6000 字） | 否 |
 | artifact_library | 产物档案 检索/详情/恢复/复现 | 否 |
 | plan_present | 结构化执行计划（确认后执行） | 是 |
-| request_params | 节点参数契约表单（生成参数拍板，R3 F1） | 是 |
+| request_params | 节点参数契约表单（生成参数拍板；字段类型对齐 admin：enum/number/boolean/size/string/images） | 是 |
 | request_step | 多阶段信息收集（每步带备注） | 是 |
 | request_question | 选项拍板 | 是 |
 | request_upload | 对话内文件上传 | 是 |

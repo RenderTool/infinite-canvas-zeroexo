@@ -27,8 +27,9 @@ const VALID_NAMESPACES: readonly string[] = ['script', 'storyboard', 'generation
  */
 class RateLimitExtension implements Extension {
   private readonly logger = new Logger('RateLimitExtension');
-  private readonly updateCounts = new Map<string, { count: number; resetAt: number }>();
+  private readonly updateCounts = new Map<string, { count: number; resetAt: number; lastWarnedAt?: number }>();
   private cleanupTimer?: ReturnType<typeof setInterval>;
+  private lastSizeWarnAt = 0;
 
   constructor() {
     // 每 5 分钟清理过期记录，防止内存泄漏
@@ -43,14 +44,24 @@ class RateLimitExtension implements Extension {
   }
 
   // 实现 Extension.onChange(data) 钩子 — 每个 Yjs 更新都会触发
+  // ⚠️ 禁止在此 throw：Hocuspocus 4.x 的 onChange 钩子调用点无 catch 保护，
+  // 抛错会变成 unhandledRejection 直接退出整个进程（Node 15+ 默认行为）。
+  // 画布大更新（>1MB，如含 base64 图的完整 graph）会周期性触发，导致后端
+  // 「启动一会就自己关闭」。超限仅记录告警并放行，保护优先级低于服务可用性。
   async onChange(data: { documentName: string; context: any; update: Uint8Array }) {
-    // 1. 检查消息大小（单条更新不超过 1MB）
+    // 1. 检查消息大小（单条更新不超过 1MB；超限仅告警不阻断）
     if (data.update && data.update.byteLength > 1_048_576) {
-      this.logger.warn(`[SIZE] 更新过大: ${data.documentName}, size=${(data.update.byteLength / 1024).toFixed(1)}KB`);
-      throw new Error('Update too large (max 1MB)');
+      const now = Date.now();
+      if (now - this.lastSizeWarnAt > 5000) {
+        this.logger.warn(
+          `[SIZE] 更新过大: ${data.documentName}, size=${(data.update.byteLength / 1024).toFixed(1)}KB（已放行）`,
+        );
+        this.lastSizeWarnAt = now;
+      }
+      return;
     }
 
-    // 2. 检查频率
+    // 2. 检查频率（同样只告警不抛错，5s 节流防刷屏）
     const userId = data.context?.userId as string | undefined;
     if (!userId) return;
 
@@ -63,8 +74,11 @@ class RateLimitExtension implements Extension {
 
     record.count++;
     if (record.count > 60) {
-      this.logger.warn(`[RATE] 用户 ${userId} 更新频率过高: ${data.documentName}`);
-      throw new Error('Update rate limit exceeded (max 60 updates/second)');
+      if (!record.lastWarnedAt || now - record.lastWarnedAt > 5000) {
+        this.logger.warn(`[RATE] 用户 ${userId} 更新频率过高: ${data.documentName}（已放行）`);
+        record.lastWarnedAt = now;
+      }
+      return;
     }
   }
 

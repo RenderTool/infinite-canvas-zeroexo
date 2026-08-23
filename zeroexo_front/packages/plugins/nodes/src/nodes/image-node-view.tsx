@@ -14,7 +14,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { ImageNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
 import { replaceNodeImage } from '../utils/replace-node-image.js';
 
 // ===== 引脚定义 =====
@@ -220,6 +220,8 @@ export function ImageNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         skeleton="media"
+        onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
+        onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >
         <div
           style={{ ...mediaContainerStyle, background: 'transparent' }}

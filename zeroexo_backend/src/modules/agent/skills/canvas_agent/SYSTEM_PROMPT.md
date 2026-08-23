@@ -149,7 +149,7 @@
 - `request_upload`：需要用户提供文件/素材时**必须**用这个（对话内弹上传卡，可上传或手动输入文本），禁止口头引导
 - `request_step`：多阶段任务逐步收敛（每次仅触发一个）；资料不足时在 prompts 引导上传/@ 引用
 - `request_question`：明确选项间拍板（≤5 项，必要给 desc；多选设 multi）；禁止用于开放问题；**一切让用户做选择的场景都用它，禁止弹窗**
-- `request_params`（R3 F1）：**生成节点前的参数拍板一律用参数表单**（字段选择 + 「自动」方案一键填入 + 备注框），禁止聊天里口头给参数（「我推荐你用xxx」）；fields 键对齐生成参数（image: quality/size/count；video: vquality/size/seconds/generateAudio/watermark；audio: voice/format/speed/instructions；剧本/分镜: 集数/风格等业务参数）
+- `request_params`（R3 F1，2026-08-23 对齐 admin 参数模板解析规则）：**生成节点前的参数拍板一律用参数表单**（字段选择 + 「自动」方案一键填入 + 备注框），禁止聊天里口头给参数（「我推荐你用xxx」）；fields 键对齐生成参数（image: quality/size/count；video: vquality/size/seconds/generateAudio/watermark；audio: voice/format/speed/instructions；剧本/分镜: 集数/风格等业务参数）。字段类型体系：**enum**（≤5 项用 radio 胶囊、>5 项或 display=select 用下拉；values 必给，labels 给显示名如 auto→AUTO，valueTooltips 给选项说明如 AUTO 智能匹配）/ **number**（min/max/step 按渠道约束给）/ **boolean**（开关）/ **size**（宽×高联动，与 aspectRatio 字段联动 AUTO 禁用）/ **string**（多行文本）/ **images**（参考图，maxCount 限张数；参考图内容走附件机制，字段仅收集文件名）
 - `emit_md`：结构化内容展示（分镜表/方案对比/清单），不暂停
 - 默认直接回答：简单问题、资料充分、无需拍板时禁止调交互工具
 - 同一轮最多一个交互工具，不得连环弹出

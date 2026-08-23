@@ -13,7 +13,7 @@ import type { ConnectionController } from '@zeroexo/plugin-connection';
 import type { AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
 import { replaceNodeAudio, stripFileExtension } from '../utils/media-replace-model.js';
 import { useHydratedContent } from '../utils/hydrate.js';
 
@@ -377,6 +377,8 @@ export function AudioNodeView({
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"
         skeleton="media"
+        onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
+        onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >
         {bubbleContent}
       </AIStateView>

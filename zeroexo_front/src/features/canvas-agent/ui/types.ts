@@ -115,14 +115,34 @@ export interface ReminderData {
 
 // ===== R3-F1 节点参数契约（request_params → ParamsBlock） =====
 
-/** 参数表单字段 */
+/** 参数表单字段（类型体系对齐 admin ParameterDef，2026-08-23 修订；兼容旧协议 select/text 与 key/options/desc） */
 export interface ParamFieldData {
-  key: string;
+  /** 字段键（对齐生成参数：quality/size/count/vquality/seconds/voice/format…；兼容旧协议 key） */
+  name: string;
   label: string;
-  /** select / text / number / boolean */
-  type: 'select' | 'text' | 'number' | 'boolean';
+  /** enum=枚举（≤5 项 radio 胶囊 / >5 项下拉）/ number / boolean / size=宽高联动 / string=多行文本 / images=参考图 */
+  type: 'enum' | 'number' | 'boolean' | 'size' | 'string' | 'images' | 'select' | 'text';
+  default?: any;
+  /** type=enum：可选项值列表 */
+  values?: string[];
+  /** type=enum：选项显示名映射（如 auto → AUTO） */
+  labels?: Record<string, string>;
+  /** type=enum：展示形式（缺省 ≤5 项 radio、>5 项 select） */
+  display?: 'radio' | 'select';
+  /** type=enum：选项 tooltip（如 AUTO 按钮说明） */
+  valueTooltips?: Record<string, string>;
+  /** type=number：数值边界 */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** type=images：参考图最大数量 */
+  maxCount?: number;
+  /** 字段 tooltip（label 旁说明） */
+  tooltip?: string;
+  placeholder?: string;
+  required?: boolean;
+  /** 兼容旧协议：options（select 类型）与 desc */
   options?: Array<{ label: string; value: string }>;
-  default?: string | number | boolean;
   desc?: string;
 }
 
@@ -378,6 +398,8 @@ export interface Reference {
   kind: 'image' | 'video' | 'audio' | 'text';
   label: string;
   role?: 'reference_image' | 'first_frame' | 'style' | 'text_context' | 'audio_ref';
+  /** 媒体节点缩略图 URL（异步解析后回填，徽标展示用） */
+  thumb?: string;
 }
 
 // ===== 策略 =====

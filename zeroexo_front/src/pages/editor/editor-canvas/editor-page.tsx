@@ -910,11 +910,13 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
               const store = state.editor?.store;
               if (!store) return [];
               return store.getGraph().nodes.map((n) => {
-                const data = n.data as { title?: string } | null | undefined;
+                const data = n.data as { title?: string; storageKey?: string } | null | undefined;
                 return {
                   id: n.id,
                   title: n.title || data?.title || n.type,
                   type: n.type,
+                  // 媒体节点缩略图解析依赖 storageKey（@ 提及浮层/引用徽标展示用）
+                  storageKey: typeof data?.storageKey === 'string' ? data.storageKey : undefined,
                 };
               });
             },

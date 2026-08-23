@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, X } from 'lucide-react';
+import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, X, Search } from 'lucide-react';
 import { Button, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -25,7 +25,6 @@ import { CopyButton } from './message-blocks/CopyButton.js';
 import {
   loadConversations,
   loadConversationMessages,
-  createConversation,
   deleteConversation,
   type ConversationSummary,
   type ConversationMessageDto,
@@ -131,6 +130,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
 
   const [convs, setConvs] = useState<ConversationSummary[]>([]);
   const [convOpen, setConvOpen] = useState(false);
+  /** 历史会话搜索关键词（标题/最后消息预览模糊匹配） */
+  const [convQuery, setConvQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   // 挂载：恢复最近会话历史 + 加载会话列表
@@ -224,6 +225,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     const store = useCanvasAgentStore.getState();
     if (store.isGenerating) return;
     setConvOpen(false);
+    setConvQuery('');
     store.setActiveConversationId(id);
     store.clearMessages();
     try {
@@ -237,21 +239,34 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     }
   };
 
-  /** 新建会话 */
-  const handleNewConversation = async (): Promise<void> => {
+  /** 新建会话（懒创建：不立即落库，首条消息发送时由 ensureConversation 创建，
+   * 避免每点一次新建就堆积一条空会话） */
+  const handleNewConversation = (): void => {
     const store = useCanvasAgentStore.getState();
     if (store.isGenerating) return;
-    try {
-      const conv = await createConversation(projectId);
-      store.setActiveConversationId(conv.id);
-      store.clearMessages();
-      setConvs((prev) => [conv, ...prev.filter((c) => c.id !== conv.id)]);
-      setConvOpen(false);
-      setTab('chat');
-    } catch {
-      // 创建失败静默
-    }
+    setConvOpen(false);
+    setTab('chat');
+    // 当前已是空会话（未落库且无消息）→ 无需重复新建
+    if (!store.activeConversationId && store.messages.length === 0) return;
+    store.setActiveConversationId(null);
+    store.clearMessages();
   };
+
+  // 懒创建会话落库后刷新列表：首条消息发送后后端才创建会话，
+  // activeConversationId 不在列表中时静默重拉，保证下拉列表与会话标题同步
+  useEffect(() => {
+    if (!activeConversationId) return;
+    if (convs.some((c) => c.id === activeConversationId)) return;
+    let cancelled = false;
+    void loadConversations()
+      .then((list) => {
+        if (!cancelled) setConvs(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId, convs]);
 
   /** 删除会话 */
   const handleDeleteConversation = async (id: string): Promise<void> => {
@@ -270,6 +285,17 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
 
   const currentTitle = convs.find((c) => c.id === activeConversationId)?.title
     ?? (messages.length > 0 ? '画布 Agent 对话' : '新对话');
+
+  // 历史会话搜索：标题 + 最后消息预览模糊匹配（不区分大小写）
+  const filteredConvs = (() => {
+    const q = convQuery.trim().toLowerCase();
+    if (!q) return convs;
+    return convs.filter((c) => {
+      const title = (c.title ?? '').toLowerCase();
+      const preview = (c.messages?.[0]?.content ?? '').toLowerCase();
+      return title.includes(q) || preview.includes(q);
+    });
+  })();
 
   return (
     <div
@@ -306,7 +332,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             padding: '5px 10px',
             borderRadius: 8,
             border: '1.5px solid var(--agent-border)',
-            background: 'var(--agent-surface)',
+            background: 'var(--agent-surface-2)',
             color: 'var(--agent-text)',
             fontSize: 12,
             fontWeight: 600,
@@ -336,10 +362,10 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
           />
         </button>
 
-        {/* 新建会话 */}
+        {/* 新建会话（懒创建：首条消息发送时才落库） */}
         <button
           type="button"
-          onClick={() => void handleNewConversation()}
+          onClick={handleNewConversation}
           title="新建会话"
           style={{
             display: 'inline-flex',
@@ -349,7 +375,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             height: 26,
             borderRadius: 7,
             border: '1.5px solid var(--agent-border)',
-            background: 'var(--agent-surface)',
+            background: 'var(--agent-surface-2)',
             color: 'var(--agent-muted)',
             cursor: 'pointer',
             flexShrink: 0,
@@ -366,7 +392,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             marginLeft: 'auto',
             padding: 2,
             borderRadius: 8,
-            background: 'var(--agent-surface)',
+            background: 'var(--agent-surface-2)',
             border: '1px solid var(--agent-border)',
           }}
         >
@@ -424,22 +450,71 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               left: 14,
               right: 14,
               zIndex: 40,
-              background: 'var(--agent-surface)',
+              background: 'var(--agent-bg)',
               border: '1px solid var(--agent-border)',
               borderRadius: 10,
               boxShadow: 'var(--agent-shadow)',
-              maxHeight: 280,
+              maxHeight: 320,
               overflowY: 'auto',
               padding: 6,
               marginTop: 4,
             }}
           >
-            {convs.length === 0 && (
+            {/* 搜索框：历史会话按标题/预览过滤 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 8px',
+                marginBottom: 4,
+                borderRadius: 7,
+                background: 'var(--agent-surface-2)',
+              }}
+            >
+              <Search size={12} style={{ color: 'var(--agent-muted)', flexShrink: 0 }} />
+              <input
+                type="text"
+                value={convQuery}
+                onChange={(e) => setConvQuery(e.target.value)}
+                placeholder="搜索历史会话…"
+                autoFocus
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  outline: 'none',
+                  fontSize: 12,
+                  color: 'var(--agent-text)',
+                  fontFamily: 'inherit',
+                }}
+              />
+              {convQuery && (
+                <button
+                  type="button"
+                  onClick={() => setConvQuery('')}
+                  title="清空搜索"
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--agent-muted)',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'inline-flex',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+            {filteredConvs.length === 0 && (
               <div style={{ padding: '10px 8px', fontSize: 12, color: 'var(--agent-muted)' }}>
-                暂无历史会话，点击 + 新建
+                {convs.length === 0 ? '暂无历史会话，点击 + 新建' : '未找到匹配的会话'}
               </div>
             )}
-            {convs.map((c) => (
+            {filteredConvs.map((c) => (
               <div
                 key={c.id}
                 onClick={() => void handleSwitchConversation(c.id)}

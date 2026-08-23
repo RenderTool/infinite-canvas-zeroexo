@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search, FileText, Image as ImageIcon, Film, AudioLines, Wand2, Folder, File, type LucideIcon } from 'lucide-react';
 import { useCanvasContext } from '../context/canvas-context.js';
 import { useAgentTheme } from '../context/theme-context.js';
+import { resolveNodeThumb } from '../node-thumb.js';
 
 /** 节点类型 → Lucide 图标（与全局图标规范一致，无色、随主题文字色） */
 const TYPE_ICONS: Record<string, LucideIcon> = {
@@ -29,9 +30,71 @@ export interface MentionPopoverProps {
   /** 浮层位置（相对于输入框） */
   position: { top: number; left: number };
   /** 选中节点回调 */
-  onSelect: (node: { id: string; title: string; type: string }) => void;
+  onSelect: (node: { id: string; title: string; type: string; storageKey?: string }) => void;
   /** 关闭 */
   onClose: () => void;
+}
+
+/** 列表行缩略图：媒体节点异步解析小图，解析中/失败回退类型图标 */
+function MentionNodeThumb({
+  storageKey,
+  type,
+  Icon,
+}: {
+  storageKey?: string;
+  type: string;
+  Icon: LucideIcon;
+}): React.ReactElement {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!storageKey) {
+      setUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void resolveNodeThumb(storageKey, type).then((u) => {
+      if (!cancelled) setUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [storageKey, type]);
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        draggable={false}
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          objectFit: 'cover',
+          flexShrink: 0,
+          border: '1px solid var(--agent-border)',
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        background: 'var(--agent-surface)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--agent-muted)',
+        flexShrink: 0,
+        border: '1px solid var(--agent-border)',
+      }}
+    >
+      <Icon size={12} />
+    </span>
+  );
 }
 
 export function MentionPopover({
@@ -205,22 +268,7 @@ export function MentionPopover({
                   transition: 'background 0.1s',
                 }}
               >
-                <span
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 6,
-                    background: 'var(--agent-surface)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: t.textMuted,
-                    flexShrink: 0,
-                    border: '1px solid var(--agent-border)',
-                  }}
-                >
-                  <Icon size={12} />
-                </span>
+                <MentionNodeThumb storageKey={node.storageKey} type={node.type} Icon={Icon} />
                 <div style={{ minWidth: 0 }}>
                   <div
                     style={{

@@ -18,6 +18,19 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
   return String(this);
 };
 
+// 全局异步兜底:三方库回调(如 Hocuspocus onChange 钩子)抛出的异步错误若无人捕获,
+// Node 15+ 会以 unhandledRejection 直接退出进程。这里仅记录不退出(开发环境保活),
+// 避免任何单点异常导致整个后端服务"莫名挂掉"。
+process.on('unhandledRejection', (reason) => {
+  Logger.warn(
+    `[unhandledRejection] ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`,
+    'GlobalGuard',
+  );
+});
+process.on('uncaughtException', (error) => {
+  Logger.error(`[uncaughtException] ${error.stack ?? error.message}`, 'GlobalGuard');
+});
+
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // 禁用默认 body parser,手动配置以支持大 payload(画布 graph 含 base64 图片)

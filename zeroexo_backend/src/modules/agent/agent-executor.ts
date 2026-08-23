@@ -96,7 +96,7 @@ export const PROTOCOL_TOOLS: Tool[] = [
   {
     name: 'request_params',
     description:
-      '发起节点参数契约表单（R3 F1）：生成类任务需要用户确认参数时调用，前端以 ParamsBlock 渲染标准参数表单（字段选择 + 「自动」方案一键填入 + 备注输入框），提交后作为新一轮消息回执。禁止在聊天里用「我推荐你用xxx」口头给参数；生成节点前涉及参数拍板一律用本工具。',
+      '发起节点参数契约表单（R3 F1）：生成类任务需要用户确认参数时调用，前端以 ParamsBlock 渲染标准参数表单（字段选择 + 「自动」方案一键填入 + 备注输入框），提交后作为新一轮消息回执。禁止在聊天里用「我推荐你用xxx」口头给参数；生成节点前涉及参数拍板一律用本工具。字段类型体系与 admin 参数模板对齐：enum（≤5 项用 radio 胶囊、>5 项或 display=select 用下拉；values/labels/valueTooltips 配套）/ number（min/max/step）/ boolean / size（宽×高联动）/ string（多行文本）/ images（参考图）。',
     parameters: {
       type: 'object',
       properties: {
@@ -111,22 +111,24 @@ export const PROTOCOL_TOOLS: Tool[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: '字段键（对齐生成参数：quality/size/count/vquality/seconds/voice/format…）' },
+              name: { type: 'string', description: '字段键（对齐生成参数：quality/size/count/vquality/seconds/voice/format…）' },
               label: { type: 'string', description: '字段显示名' },
-              type: { type: 'string', enum: ['select', 'text', 'number', 'boolean'], description: '字段类型' },
-              options: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: { label: { type: 'string' }, value: { type: 'string' } },
-                  required: ['label', 'value'],
-                },
-                description: 'select 类型的选项列表',
-              },
+              type: { type: 'string', enum: ['enum', 'number', 'boolean', 'size', 'string', 'images'], description: '字段类型（enum=枚举/number=数字/boolean=开关/size=宽高联动/string=多行文本/images=参考图）' },
               default: { description: '默认值' },
+              values: { type: 'array', items: { type: 'string' }, description: 'enum 类型的可选项值列表' },
+              labels: { type: 'object', description: 'enum 类型选项显示名映射（如 auto → AUTO）' },
+              display: { type: 'string', enum: ['radio', 'select'], description: 'enum 展示形式（缺省 ≤5 项 radio、>5 项 select）' },
+              valueTooltips: { type: 'object', description: 'enum 选项 tooltip（如 AUTO 按钮说明）' },
+              min: { type: 'number', description: 'number 最小值' },
+              max: { type: 'number', description: 'number 最大值' },
+              step: { type: 'number', description: 'number 步长' },
+              maxCount: { type: 'number', description: 'images 参考图最大数量' },
+              tooltip: { type: 'string', description: '字段 tooltip（label 旁说明）' },
+              placeholder: { type: 'string', description: '输入占位提示' },
+              required: { type: 'boolean', description: '是否必填' },
               desc: { type: 'string', description: '字段说明' },
             },
-            required: ['key', 'label', 'type'],
+            required: ['name', 'label', 'type'],
           },
           description: '标准参数选项表单字段（用户逐项填写）',
         },

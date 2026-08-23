@@ -22,6 +22,7 @@ import { Paperclip, FileText, X, Eye } from 'lucide-react';
 import { AiModelPicker } from '@/features/top-bar/components/ai-model-picker.js';
 import { useCanvasAgentStore } from '../store.js';
 import { sendMessage, stopGenerating } from '../session/agent-session.js';
+import { resolveNodeThumb } from '../node-thumb.js';
 import { ReferenceChip } from './ReferenceChip.js';
 import { MentionPopover } from './MentionPopover.js';
 import type { AttachmentCard, Reference } from '../types.js';
@@ -85,6 +86,7 @@ export function ComposerInput(): React.ReactElement {
   const references = useCanvasAgentStore((s) => s.references);
   const addReference = useCanvasAgentStore((s) => s.addReference);
   const removeReference = useCanvasAgentStore((s) => s.removeReference);
+  const updateReference = useCanvasAgentStore((s) => s.updateReference);
   const clearReferences = useCanvasAgentStore((s) => s.clearReferences);
   const isGenerating = useCanvasAgentStore((s) => s.isGenerating);
   const addMessage = useCanvasAgentStore((s) => s.addMessage);
@@ -241,9 +243,9 @@ export function ComposerInput(): React.ReactElement {
     [setInputText],
   );
 
-  /** @ 选中：插入 @标签 + 引用徽标（可移除） */
+  /** @ 选中：插入 @标签 + 引用徽标（可移除；媒体节点异步回填缩略图） */
   const handleMentionSelect = useCallback(
-    (node: { id: string; title: string; type: string }) => {
+    (node: { id: string; title: string; type: string; storageKey?: string }) => {
       const label = node.title || node.id;
       const el = textareaRef.current;
       if (el) {
@@ -258,9 +260,15 @@ export function ComposerInput(): React.ReactElement {
         });
       }
       addReference({ nodeId: node.id, label, kind: mentionKind(node.type) });
+      // 媒体节点（图片/视频/音频）异步解析缩略图回填徽标；失败保持类型图标
+      if (node.storageKey) {
+        void resolveNodeThumb(node.storageKey, node.type).then((thumb) => {
+          if (thumb) updateReference(node.id, { thumb });
+        });
+      }
       setMentionOpen(false);
     },
-    [setInputText, addReference],
+    [setInputText, addReference, updateReference],
   );
 
   /** R2：附件入列——文本不再灌输入框；超长先给确认选项 */

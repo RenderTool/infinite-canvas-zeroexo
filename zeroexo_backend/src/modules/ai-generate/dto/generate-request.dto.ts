@@ -4,8 +4,34 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/**
+ * 生成引用快照项(征集#43 方案 A):提交生成时的引用节点摘要,
+ * 后端写入 params._inputs,供溯源与"一键同款"复原生成链路。
+ */
+export class GenerationInputRefDto {
+  @IsString()
+  nodeId!: string;
+
+  @IsString()
+  nodeType!: string;
+
+  @IsOptional()
+  @IsString()
+  assetStorageKey?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  textPreview?: string;
+}
 
 /**
  * AI 生成请求 DTO - P3.3
@@ -61,6 +87,16 @@ export class GenerateRequestDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  @ApiPropertyOptional({
+    description: '生成引用快照(引用节点摘要,存 params._inputs,供溯源/一键同款)',
+    type: [GenerationInputRefDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GenerationInputRefDto)
+  inputs?: GenerationInputRefDto[];
 
   @ApiPropertyOptional({ description: '是否为测试生成(管理后台使用)', default: false })
   @IsOptional()

@@ -19,7 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { Button, Input, message, Spin } from 'antd';
-import { Send, X, Bot, CornerUpLeft, Reply } from 'lucide-react';
+import { X, Bot, CornerUpLeft, Reply } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useAuth } from '@/features/auth/auth-store.js';
@@ -75,8 +75,10 @@ export function MentionInput({
   members,
   placeholder,
   disabled,
-  theme,
+  theme: _theme,
 }: MentionInputProps): React.ReactElement {
+  // theme 保留于接口签名（外部调用方仍传入）；内部样式已对齐 Agent 面板 CSS 变量
+  void _theme;
   const textareaRef = useRef<TextAreaRef>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
 
@@ -177,9 +179,9 @@ export function MentionInput({
     zIndex: 10,
     borderRadius: 8,
     padding: 4,
-    background: theme.toolbar.panel,
-    border: `1px solid ${theme.toolbar.border}`,
-    boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+    background: 'var(--agent-bg)',
+    border: '1px solid var(--agent-border)',
+    boxShadow: 'var(--agent-shadow)',
   };
 
   const suggestionStyle: (active: boolean) => CSSProperties = (active) => ({
@@ -190,8 +192,8 @@ export function MentionInput({
     borderRadius: 6,
     cursor: 'pointer',
     fontSize: 13,
-    color: theme.toolbar.text,
-    background: active ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)') : 'transparent',
+    color: 'var(--agent-text)',
+    background: active ? 'var(--agent-surface-2)' : 'transparent',
   });
 
   return (
@@ -217,7 +219,7 @@ export function MentionInput({
                   justifyContent: 'center',
                   fontSize: 10,
                   flexShrink: 0,
-                  background: theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+                  background: 'var(--agent-surface-2)',
                 }}
               >
                 {s.label.charAt(0)}
@@ -234,13 +236,15 @@ export function MentionInput({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}
-        autoSize={{ minRows: 1, maxRows: 5 }}
+        autoSize={{ minRows: 2, maxRows: 5 }}
         style={{
           fontSize: 13,
-          color: theme.toolbar.text,
-          background: theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-          borderColor: theme.toolbar.border,
+          color: 'var(--agent-text)',
+          background: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
           resize: 'none',
+          padding: '2px 2px',
         }}
       />
     </div>
@@ -348,11 +352,7 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
   };
 
   const inputAreaStyle: CSSProperties = {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: 8,
-    paddingTop: 10,
-    borderTop: `1px solid ${theme.toolbar.border}`,
+    paddingTop: 8,
   };
 
   return (
@@ -563,8 +563,9 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
         </div>
       )}
 
+      {/* 输入区：对齐 Agent 对话 ComposerInput 的 composer-shell 视觉（征集 #44 Req2） */}
       <div style={inputAreaStyle}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="composer-shell">
           <MentionInput
             value={text}
             onChange={setText}
@@ -574,17 +575,25 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
             disabled={!canChat || sending}
             theme={theme}
           />
+          <div className="composer-row">
+            <div className="composer-spacer" />
+            <button
+              type="button"
+              onClick={() => void handleSend()}
+              disabled={!canChat || sending || !text.trim()}
+              className="composer-send"
+              title={t('collab.chatSend')}
+            >
+              {sending ? (
+                <Spin size="small" />
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Send size={13} />}
-          onClick={() => void handleSend()}
-          loading={sending}
-          disabled={!canChat}
-        >
-          {t('collab.chatSend')}
-        </Button>
       </div>
     </div>
   );

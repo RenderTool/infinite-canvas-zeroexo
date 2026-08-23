@@ -21,6 +21,7 @@ import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
 import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
 import type { AssetNodePayload, ReferenceItem } from '@zeroexo/plugin-nodes';
 import { duplicateSubtree } from '@zeroexo/preset-default';
+import { apiGet } from '@/services/api-client.js';
 import { PREVIEW_GROUP_ID, getChildren, getGroupBounds, getGroupBoundsWithEmptyFallback, MoveGroupCommand } from '@zeroexo/plugin-group';
 import { arrangeNodes, alignNodes, distributeNodes, unifyNodeSizes } from '@zeroexo/plugin-layout';
 import type { ArrangeMode, AlignMode, DistributeMode, UnifySizeMode, LayoutNode } from '@zeroexo/plugin-layout';
@@ -377,6 +378,139 @@ export function useEditorInteractions({
     refs.commandQueue?.execute(new RemoveEdgeCommand(edgeId));
   }, [refs.commandQueue]);
 
+  /**
+   * 一键同款(征集#43 G4/H1):完整复原生成链路 = 新节点(提示词/参数/模型) + 全部引用副本。
+   * 两套缓存隔离(用户拍板):画布态高频变动,复原只读生成时刻冻结的快照(_inputs),引用一律创建副本节点,
+   * 不连接画布现存节点(避免把用户已改动的新内容误当原始引用)。遗留记录(无快照)降级从现存连入节点取存档。
+   * 渠道/模型失效 → 回退默认模型+提示。
+   */
+  const handleReplayGeneration = useCallback(
+    async (nodeId: string): Promise<void> => {
+      const store = refs.store;
+      const cq = refs.commandQueue;
+      if (!store || !cq) return;
+      const srcNode = store.getGraph().nodes.find((n: any) => n.id === nodeId) as NodeRecord | undefined;
+      const srcData = (srcNode?.data ?? {}) as Record<string, any>;
+      const generationId = srcData?.generationId as string | undefined;
+      if (!srcNode || !generationId) {
+        message.info(t('editor.replayNoRecord'));
+        return;
+      }
+      // 1. 拉生成记录(后端已存 prompt/参数/模型/_inputs 快照)
+      let record: any;
+      try {
+        record = await apiGet(`/ai/generations/${generationId}`);
+      } catch {
+        message.error(t('editor.replayNoRecord'));
+        return;
+      }
+      const params = (record?.params ?? {}) as Record<string, any>;
+      const graph = store.getGraph();
+      // 2. 新节点落点(源节点右侧)
+      const newId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const w = srcNode.size?.width ?? 340;
+      const h = srcNode.size?.height ?? 240;
+      const newPos = { x: srcNode.position.x + w + 160, y: srcNode.position.y };
+      // 3. 渠道/模型失效判定:被删或禁用 → 回退默认模型(新节点 model 留空)+提示
+      let modelValue = '';
+      let modelInvalid = false;
+      if (record?.providerId && record?.model) {
+        try {
+          const ch = await apiGet<{ items: Array<{ id: string; models: Array<{ name: string }> }> }>('/ai/channels');
+          const channel = (ch.items ?? []).find((c) => c.id === record.providerId);
+          if (channel && (channel.models ?? []).some((m) => m.name === record.model)) {
+            modelValue = `${record.providerId}::${record.model}`;
+          } else {
+            modelInvalid = true;
+          }
+        } catch {
+          modelInvalid = true;
+        }
+      }
+      // 4. 干净参数:剩离内部 _ 字段(_inputs/_resultUrl/_tags/_isTest 等)
+      const cleanParams: Record<string, any> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (!k.startsWith('_') && v !== undefined && v !== null) cleanParams[k] = v;
+      }
+      // 5. 命令集:建新节点(提示词/参数/模型) + 引用链路全量复原
+      const commands: Command[] = [
+        new AddNodeCommand({
+          id: newId,
+          type: srcNode.type,
+          position: newPos,
+          title: t('editor.replaySuffix'),
+          data: {
+            prompt: record.prompt ?? '',
+            ...(record.negativePrompt ? { negativePrompt: record.negativePrompt } : {}),
+            status: 'idle',
+            ...(modelValue ? { model: modelValue } : {}),
+            ...cleanParams,
+          },
+        } as NodeRecord),
+      ];
+      const targetPin = NODE_INPUT_PIN[srcNode.type] ?? 'input';
+      // 5a. 引用清单:优先生成时刻快照(冻结缓存);遗留记录(无快照)降级从当前连入节点取存档(尽力而为)
+      type RefSpec = { type: string; storageKey?: string; content?: string; text?: string; title?: string };
+      const refSpecs: RefSpec[] = [];
+      let unrestorable = 0;
+      const inputs: Array<{ nodeId: string; nodeType: string; assetStorageKey?: string; title?: string; textPreview?: string }> =
+        Array.isArray(params._inputs) ? params._inputs : [];
+      if (inputs.length > 0) {
+        for (const it of inputs) {
+          const isMedia = it.nodeType === 'image' || it.nodeType === 'video' || it.nodeType === 'audio';
+          if (isMedia && it.assetStorageKey) {
+            refSpecs.push({ type: it.nodeType, storageKey: it.assetStorageKey, title: it.title });
+          } else if (it.nodeType === 'text' && it.textPreview) {
+            refSpecs.push({ type: 'text', text: it.textPreview, title: it.title });
+          } else {
+            unrestorable += 1;
+          }
+        }
+      } else {
+        // 遗留记录无快照:从现存连入节点读内容建副本(降级链路,新记录不再出现)
+        for (const e of graph.edges.filter((ed: any) => ed.target?.nodeId === nodeId)) {
+          const src = graph.nodes.find((n: any) => n.id === e.source.nodeId);
+          if (!src) continue;
+          const d = (src.data ?? {}) as Record<string, any>;
+          if ((src.type === 'image' || src.type === 'video' || src.type === 'audio') && (d.storageKey || d.content)) {
+            refSpecs.push({ type: src.type, storageKey: d.storageKey, content: typeof d.content === 'string' ? d.content : undefined, title: src.title });
+          } else if (src.type === 'text' && typeof d.content === 'string' && d.content) {
+            refSpecs.push({ type: 'text', text: d.content.slice(0, 2000), title: src.title });
+          }
+        }
+      }
+      // 5b. 一律创建引用副本节点(新 id)并重连新节点:不触碰画布现存节点(画布高频改动,快照才是唯一可信源)
+      let copiedCount = 0;
+      for (const spec of refSpecs) {
+        const copyId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-rv${copiedCount}`;
+        const isMedia = spec.type === 'image' || spec.type === 'video' || spec.type === 'audio';
+        commands.push(new AddNodeCommand({
+          id: copyId,
+          type: spec.type,
+          position: { x: newPos.x - 460, y: newPos.y + copiedCount * 280 },
+          title: spec.title || undefined,
+          data: isMedia
+            ? { storageKey: spec.storageKey, content: spec.content ?? '', status: 'idle' }
+            : { content: spec.text ?? '', prompt: '', status: 'idle' },
+        } as NodeRecord));
+        commands.push(new AddEdgeCommand({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-r${copiedCount}`,
+          source: { nodeId: copyId, pinId: NODE_OUTPUT_PIN[spec.type] ?? 'output' },
+          target: { nodeId: newId, pinId: targetPin },
+        }));
+        copiedCount += 1;
+      }
+      cq.execute(new BatchCommand(commands, 'replay-generation'));
+      store.setSelection({ selectedNodeIds: new Set([newId]), selectedEdgeIds: new Set() });
+      // 6. 反馈:三级降级提示(引用全复原→成功;有缺失→警告;渠道失效另提示)
+      if (unrestorable > 0) message.warning(t('editor.replayPartial', { n: unrestorable }));
+      else if (modelInvalid) message.warning(t('editor.replayModelInvalid'));
+      else message.success(t('editor.replayDone', { n: copiedCount }));
+      store.focusOnNode(newId, state.containerSize, w, h, 400, 51);
+    },
+    [refs, state.containerSize, t, message],
+  );
+
   // 右键菜单:检测点击目标并构建菜单项
   const handleCanvasContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -471,6 +605,12 @@ export function useEditorInteractions({
               else if (nodeType === 'audio') setReplaceAccept('audio/*');
               else setReplaceAccept('image/*');
               replaceInputRef.current?.click();
+            }}]
+            : []),
+          // 一键同款(征集#43):有生成记录的 AI 生成型资源(含文本/剧本) → 复原完整生成链路(提示词/参数/模型/引用)
+          ...((['image', 'video', 'audio', 'text', 'script'].includes(nodeType ?? '') && !!nodeData['generationId'])
+            ? [{ key: 'replay-generation', label: t('editor.replaySame'), icon: createElement(EDITOR_ICONS.replay, { size: 14 }), onClick: () => {
+              void handleReplayGeneration(nodeId);
             }}]
             : []),
           // 编辑内容(text 节点):与双击/胶囊 editText 同源(进节点内编辑态)
@@ -683,7 +823,7 @@ export function useEditorInteractions({
     (e as unknown as { skipBuiltinMenu?: boolean }).skipBuiltinMenu = true;
     setNodeCreateMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuItems(null);
-  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog]);
+  }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog, handleReplayGeneration]);
 
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
   // 节点语义重构(Plan#33 延伸):创建逻辑恢复原逻辑——直接创建空节点。
@@ -823,6 +963,14 @@ export function useEditorInteractions({
           else if (r.type === 'video') refVideos.push({ dataUrl: src });
           else if (r.type === 'audio') refAudios.push({ dataUrl: src });
         }
+        // 生成引用快照(征集#43 方案 A):本次 @ 到的引用节点摘要,后端存 AiGeneration.params._inputs,供溯源/一键同款(文本引用附内容存档供重建)
+        const inputRefs = (mentionedRefs ?? []).map((r) => ({
+          nodeId: r.id,
+          nodeType: r.type,
+          assetStorageKey: r.asset?.storageKey,
+          title: r.title ?? r.name,
+          textPreview: r.type === 'text' && r.asset?.content ? r.asset.content.slice(0, 2000) : undefined,
+        }));
         if (mode === 'image') {
           const data = nodeData;
           // 有 @ 参考图 → 图生图(editImage);否则文生图
@@ -834,6 +982,7 @@ export function useEditorInteractions({
                 quality: (data?.quality as string) ?? 'standard',
                 count: (data?.count as number) ?? 1,
                 referenceImages: refImages,
+                inputs: inputRefs,
                 signal: ctl.signal,
               })
             : await provider.generateImage({
@@ -842,6 +991,7 @@ export function useEditorInteractions({
                 size: (data?.size as string) ?? '1024x1024',
                 quality: (data?.quality as string) ?? 'standard',
                 count: (data?.count as number) ?? 1,
+                inputs: inputRefs,
                 signal: ctl.signal,
               });
           const first = results[0];
@@ -853,6 +1003,7 @@ export function useEditorInteractions({
             naturalHeight: first.height,
             mimeType: first.mimeType,
             bytes: first.bytes,
+            generationId: first.generationId,
             errorDetails: undefined,
             errorType: undefined,
           } as Record<string, unknown>, { width: first.width, height: first.height, fallbackWidth: 340, fallbackHeight: 240 });
@@ -884,6 +1035,7 @@ export function useEditorInteractions({
             referenceImages: refImages.length > 0 ? refImages : undefined,
             referenceVideos: refVideos.length > 0 ? refVideos : undefined,
             referenceAudios: refAudios.length > 0 ? refAudios : undefined,
+            inputs: inputRefs,
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
@@ -895,6 +1047,7 @@ export function useEditorInteractions({
             durationMs: result.durationMs,
             mimeType: result.mimeType,
             bytes: result.bytes,
+            generationId: result.generationId,
             errorDetails: undefined,
             errorType: undefined,
           } as Record<string, unknown>, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
@@ -906,6 +1059,7 @@ export function useEditorInteractions({
             voice: (data?.voice as string) ?? 'alloy',
             format: (data?.audioFormat as string) ?? 'mp3',
             speed: (data?.audioSpeed as number) ?? 1,
+            inputs: inputRefs,
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
@@ -915,6 +1069,7 @@ export function useEditorInteractions({
             durationMs: result.durationMs,
             mimeType: result.mimeType,
             bytes: result.bytes,
+            generationId: result.generationId,
             errorDetails: undefined,
             errorType: undefined,
           } as Record<string, unknown>);
@@ -987,6 +1142,10 @@ export function useEditorInteractions({
         ? node.type
         : 'image') as GenerationMode;
       void handlePromptGenerate(node.id, mode, prompt);
+    });
+    // 一键同款(征集#43):胶囊工具栏/右键菜单 emit → 复原完整生成链路
+    const unsubReplay = nodeActionBus.on('replayGeneration', (event: { nodeId: string }) => {
+      void handleReplayGeneration(event.nodeId);
     });
     const unsubCancel = nodeActionBus.on('cancel', (event: { nodeId: string }) => {
       // 分镜节点: 嵌套 Map(epKey → { taskId }), 断开 SSE + 取消后端任务
@@ -1631,6 +1790,7 @@ export function useEditorInteractions({
 
     return () => {
       unsubRetry();
+      unsubReplay();
       unsubCancel();
       unsubGenStory();
       unsubAssetSaved();
@@ -1647,7 +1807,7 @@ export function useEditorInteractions({
       unsubAddRef();
       unsubRemoveRef();
     };
-  }, [refs.store, handlePromptGenerate, handlePromptStop, message]);
+  }, [refs.store, handlePromptGenerate, handlePromptStop, handleReplayGeneration, message]);
 
   // saveAsset:将图片/视频/音频节点内容保存到素材库
   const handleSaveNodeAsset = useCallback(async (node: NodeRecord) => {

@@ -9,8 +9,8 @@ import { createContext, useContext } from 'react';
 import type { Reference } from '../types.js';
 
 export interface CanvasContextValue {
-  /** 获取画布节点列表（用于 @ 提及搜索） */
-  getNodes: () => { id: string; title: string; type: string }[];
+  /** 获取画布节点列表（用于 @ 提及搜索；storageKey 供媒体节点解析缩略图） */
+  getNodes: () => { id: string; title: string; type: string; storageKey?: string }[];
   /** 添加引用到画布 */
   addReference?: (ref: Reference) => void;
   /** 获取当前选中节点 */

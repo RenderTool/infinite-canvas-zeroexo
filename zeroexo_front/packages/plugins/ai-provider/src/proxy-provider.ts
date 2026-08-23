@@ -19,6 +19,7 @@ import type {
   GeneratedAudio,
   GeneratedImage,
   GeneratedVideo,
+  GenerationInputRef,
   ImageEditRequest,
   ImageGenerationRequest,
   TextGenerationRequest,
@@ -208,6 +209,7 @@ export class ProxyProvider implements AIProvider {
         prompt: req.prompt,
         model,
         providerId,
+        inputs: req.inputs,
         params: {
           size: req.size,
           quality: req.quality,
@@ -227,6 +229,7 @@ export class ProxyProvider implements AIProvider {
         height: completed.height ?? 0,
         mimeType: completed.mimeType ?? 'image/png',
         bytes: blob.size,
+        generationId: result.generationId,
       },
     ];
   }
@@ -271,6 +274,7 @@ export class ProxyProvider implements AIProvider {
         prompt: req.prompt,
         model,
         providerId,
+        inputs: req.inputs,
         params: {
           size: req.size,
           seconds: req.seconds,
@@ -284,7 +288,8 @@ export class ProxyProvider implements AIProvider {
     const completed = await this.waitForTask(result.generationId, 'video', req.signal);
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
-    return readVideoMetaFromBlob(blob);
+    const video = await readVideoMetaFromBlob(blob);
+    return { ...video, generationId: result.generationId };
   }
 
   /** 音频生成 */
@@ -296,6 +301,7 @@ export class ProxyProvider implements AIProvider {
         prompt: req.prompt,
         model,
         providerId,
+        inputs: req.inputs,
         params: {
           voice: req.voice,
           audioFormat: req.format,
@@ -308,7 +314,8 @@ export class ProxyProvider implements AIProvider {
     const completed = await this.waitForTask(result.generationId, 'audio', req.signal);
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
-    return readAudioMetaFromBlob(blob);
+    const audio = await readAudioMetaFromBlob(blob);
+    return { ...audio, generationId: result.generationId };
   }
 
   /**
@@ -327,6 +334,8 @@ export class ProxyProvider implements AIProvider {
       prompt: string;
       model: string;
       providerId?: string;
+      /** 生成引用快照(后端写 params._inputs,供一键同款) */
+      inputs?: GenerationInputRef[];
       params?: Record<string, unknown>;
       locale?: string;
     },

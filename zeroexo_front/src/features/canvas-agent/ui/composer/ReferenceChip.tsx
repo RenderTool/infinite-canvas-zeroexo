@@ -46,14 +46,30 @@ export function ReferenceChip({ references, onRemove, onClick }: ReferenceChipPr
             style={chipStyle}
             title={ref.label}
           >
-            <span style={{ fontSize: 12, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
-              <KindIcon size={12} />
-            </span>
+            {/* 媒体节点优先展示缩略图（异步回填），无图时回退类型图标 */}
+            {ref.thumb ? (
+              <img
+                src={ref.thumb}
+                alt={ref.label}
+                draggable={false}
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 4,
+                  objectFit: 'cover',
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <span style={{ fontSize: 12, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
+                <KindIcon size={12} />
+              </span>
+            )}
             <span
               style={{
                 fontSize: 11.5,
                 color: t.text,
-                maxWidth: 80,
+                maxWidth: 100,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',

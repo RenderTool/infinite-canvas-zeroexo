@@ -10,6 +10,7 @@ export type {
   ImageGenerationRequest,
   ImageEditRequest,
   GeneratedImage,
+  GenerationInputRef,
   TextGenerationRequest,
   VideoGenerationRequest,
   GeneratedVideo,

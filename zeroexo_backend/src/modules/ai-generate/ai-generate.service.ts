@@ -170,6 +170,16 @@ export class AiGenerateService {
     const storedParams: Record<string, any> = { ...(dto.params ?? {}) };
     if (dto.tags?.length) storedParams._tags = dto.tags;
     storedParams._isTest = dto.isTest ?? false;
+    // 生成引用快照(征集#43 方案 A):供溯源/一键同款;上限 20 项 + title/textPreview 截断防 params 膨胀
+    if (Array.isArray(dto.inputs) && dto.inputs.length > 0) {
+      storedParams._inputs = dto.inputs.slice(0, 20).map((item) => ({
+        nodeId: item.nodeId,
+        nodeType: item.nodeType,
+        ...(item.assetStorageKey ? { assetStorageKey: item.assetStorageKey } : {}),
+        ...(item.title ? { title: item.title.slice(0, 80) } : {}),
+        ...(item.textPreview ? { textPreview: item.textPreview.slice(0, 2000) } : {}),
+      }));
+    }
 
     const generation = await this.prisma.aiGeneration.create({
       data: {
@@ -467,7 +477,7 @@ export class AiGenerateService {
         assetUrl = await this.minio.presignGet(asset.storageKey, 1800);
       }
 
-      // 构造回写 params
+      // 构造回写 params(保留 _inputs 快照:复原链路依赖,不随 _tags/_isTest 剩离)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _tags: _t, _isTest: _i, ...originalParams } = rawParams;
       const enrichedParams: Record<string, any> = { ...originalParams };

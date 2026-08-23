@@ -85,6 +85,8 @@ export interface CanvasAgentState {
   references: Reference[];
   addReference: (ref: Reference) => void;
   removeReference: (nodeId: string) => void;
+  /** 局部更新引用（如异步解析缩略图后回填 thumb） */
+  updateReference: (nodeId: string, patch: Partial<Reference>) => void;
   clearReferences: () => void;
 
   // ---- 选中节点（画布联动） ----
@@ -173,6 +175,10 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   addReference: (ref) => set((s) => ({ references: [...s.references, ref] })),
   removeReference: (nodeId) =>
     set((s) => ({ references: s.references.filter((r) => r.nodeId !== nodeId) })),
+  updateReference: (nodeId, patch) =>
+    set((s) => ({
+      references: s.references.map((r) => (r.nodeId === nodeId ? { ...r, ...patch } : r)),
+    })),
   clearReferences: () => set({ references: [] }),
 
   // 选中节点

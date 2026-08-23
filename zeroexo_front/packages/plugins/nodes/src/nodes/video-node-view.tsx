@@ -19,7 +19,7 @@ import { resolveAnyThumbUrl } from '../utils/hydrate.js';
 import { replaceNodeVideo, stripFileExtension } from '../utils/media-replace-model.js';
 import { VIDEO_DEFAULT_SIZE } from '../utils/node-contracts.js';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { BaseNodeView, AIStateView, useHasIncomingEdges } from '../base-node-view.js';
+import { BaseNodeView, AIStateView, useHasIncomingEdges, nodeActionBus } from '../base-node-view.js';
 
 // ===== requestVideoFrameCallback 元数据类型(TS DOM lib 未内置) =====
 interface VideoFrameMetadata {
@@ -599,6 +599,8 @@ export function VideoNodeView({
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         skeleton="media"
+        onRetry={() => nodeActionBus.emit('retry', { nodeId: node.id })}
+        onCancel={() => nodeActionBus.emit('cancel', { nodeId: node.id })}
       >
         {renderContent()}
       </AIStateView>

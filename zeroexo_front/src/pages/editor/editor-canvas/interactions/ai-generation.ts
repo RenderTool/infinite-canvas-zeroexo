@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useRef, useEffect } from 'react';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand, ResizeNodeCommand, resolveBaseWidth, resolveMinHeight } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, UpdateNodeDataCommand, UpdateNodeTitleCommand, ResizeNodeCommand, resolveBaseWidth, resolveMinHeight } from '@zeroexo/core';
 import type { NodeRecord, NodeTypeExtension } from '@zeroexo/core';
 import type { ImageNodeData, VideoNodeData, AudioNodeData } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
@@ -77,6 +77,16 @@ export function buildPrompt(
   }
 
   return parts.join('');
+}
+
+/** 生成成功后的标题摘要：取提示词正文（剥离引用资源段/配置注释），
+ * 压缩空白并截断为短标题，让用户一眼知道节点生成了什么 */
+export function promptTitleSummary(rawPrompt: string): string {
+  let text = rawPrompt.split('\n\n参考资源')[0] ?? '';
+  text = text.replace(/<!--[\s\S]*?-->/g, '').trim();
+  text = text.replace(/\s+/g, ' ');
+  if (!text) return '';
+  return text.length > 24 ? `${text.slice(0, 24)}…` : text;
 }
 
 // ===== G7: 通过 CanvasOpExecutor 添加参考资源 =====
@@ -247,6 +257,15 @@ export function useAiGeneration({
       const graph = refs.store.getGraph();
       const connectedRefs = buildConnectedReferences(graph, nodeId);
       const fullPrompt = buildPrompt(prompt, connectedRefs, nodeData as Record<string, unknown>);
+      // 生成引用快照(征集#43 方案 A):连入引用节点摘要,后端存 AiGeneration.params._inputs,供溯源/一键同款
+      const inputRefs = connectedRefs
+        .filter((r) => r.active)
+        .map((r) => ({
+          nodeId: r.nodeId,
+          nodeType: r.kind,
+          title: r.title,
+          textPreview: r.text ? r.text.slice(0, 2000) : undefined,
+        }));
 
       // 设置 loading + 写入 prompt + 清除旧错误 + 记录任务信息
       refs.commandQueue.execute(
@@ -267,6 +286,7 @@ export function useAiGeneration({
             size: (data?.size as string) ?? '1024x1024',
             quality: (data?.quality as string) ?? 'standard',
             count: (data?.count as number) ?? 1,
+            inputs: inputRefs,
             signal: ctl.signal,
           });
           const first = results[0];
@@ -279,6 +299,7 @@ export function useAiGeneration({
               naturalHeight: first.height,
               mimeType: first.mimeType,
               bytes: first.bytes,
+              generationId: first.generationId,
               errorDetails: undefined,
               errorType: undefined,
             } as Record<string, unknown>),
@@ -333,6 +354,7 @@ export function useAiGeneration({
             vquality: (data?.vquality as string) ?? 'medium',
             generateAudio: data?.generateAudio ?? true,
             watermark: data?.watermark ?? false,
+            inputs: inputRefs,
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
@@ -345,6 +367,7 @@ export function useAiGeneration({
               durationMs: result.durationMs,
               mimeType: result.mimeType,
               bytes: result.bytes,
+              generationId: result.generationId,
               errorDetails: undefined,
               errorType: undefined,
             } as Record<string, unknown>),
@@ -385,6 +408,7 @@ export function useAiGeneration({
             voice: (data?.voice as string) ?? 'alloy',
             format: (data?.audioFormat as string) ?? 'mp3',
             speed: (data?.audioSpeed as number) ?? 1,
+            inputs: inputRefs,
             signal: ctl.signal,
           });
           const url = URL.createObjectURL(result.blob);
@@ -395,12 +419,18 @@ export function useAiGeneration({
               durationMs: result.durationMs,
               mimeType: result.mimeType,
               bytes: result.bytes,
+              generationId: result.generationId,
               errorDetails: undefined,
               errorType: undefined,
             } as Record<string, unknown>),
           );
           // 生成成功后自动按层排列
           triggerAutoLayoutAndFocusRef.current([nodeId]);
+        }
+        // 生成成功：标题替换为提示词摘要（失败/取消不改标题，保留原标题）
+        const titleSummary = promptTitleSummary(prompt);
+        if (titleSummary) {
+          refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, titleSummary));
         }
         // 成功:清空失败计数
         nodeFailureCountRef.current.delete(nodeId);
