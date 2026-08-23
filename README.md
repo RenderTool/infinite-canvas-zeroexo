@@ -59,6 +59,10 @@ dashboard bolted onto a generic editor.
 
 ## Product Modules
 
+### Home Page
+
+![Home page](docs/screenshots/frontend/前端首页.webp)
+
 ### Canvas Capabilities
 
 | Canvas overview | Keyboard shortcuts | Node style config |
