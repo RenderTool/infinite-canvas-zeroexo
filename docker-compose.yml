@@ -82,6 +82,10 @@ services:
     restart: unless-stopped
     ports:
       - '3000:3000'
+    env_file:
+      # 透传 .env（AI 密钥、SMTP、SEED 密码等）；文件不存在时忽略
+      - path: ./zeroexo_backend/.env
+        required: false
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://zeroexo:${POSTGRES_PASSWORD:-zeroexo}@postgres:5432/zeroexo
@@ -108,7 +112,8 @@ services:
     container_name: zeroexo-frontend
     restart: unless-stopped
     environment:
-      API_BASE_URL: http://backend:3000
+      # 浏览器经 nginx 同源访问 /api，使用相对路径即可（entrypoint.sh 会写入 runtime-config.js）
+      API_BASE_URL: /api
     depends_on:
       - backend
     networks:
@@ -120,8 +125,6 @@ services:
       dockerfile: Dockerfile
     container_name: zeroexo-admin
     restart: unless-stopped
-    environment:
-      API_BASE_URL: http://backend:3000
     depends_on:
       - backend
     networks:

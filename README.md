@@ -187,6 +187,17 @@ cp zeroexo_backend/.env.example zeroexo_backend/.env   # then edit secrets
 docker compose up -d
 ```
 
+Create the initial admin account (super-admin):
+
+```bash
+# seed requires strong passwords via env vars (seed refuses defaults in production)
+docker compose exec backend sh -c \
+  "SEED_SUPER_ADMIN_PASSWORD='<strong-password>' \
+   SEED_ADMIN_PASSWORD='<strong-password>' \
+   SEED_USER_PASSWORD='<strong-password>' \
+   npx ts-node prisma/seed.ts"
+```
+
 | Service   | URL                     |
 |-----------|-------------------------|
 | Frontend (canvas) | http://localhost:80 |

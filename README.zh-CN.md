@@ -158,6 +158,17 @@ cp zeroexo_backend/.env.example zeroexo_backend/.env   # 然后修改密钥
 docker compose up -d
 ```
 
+创建初始管理员账号（super_admin）：
+
+```bash
+# seed 必须通过环境变量提供强密码（生产环境下 seed 会拒绝使用默认值）
+docker compose exec backend sh -c \
+  "SEED_SUPER_ADMIN_PASSWORD='<强密码>' \
+   SEED_ADMIN_PASSWORD='<强密码>' \
+   SEED_USER_PASSWORD='<强密码>' \
+   npx ts-node prisma/seed.ts"
+```
+
 | 服务     | 地址                          |
 |----------|-------------------------------|
 | 前端画布 | http://localhost:80           |
