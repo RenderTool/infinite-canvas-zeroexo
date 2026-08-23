@@ -97,6 +97,18 @@ The hierarchy panel overviews node relationships in a tree structure; double-cli
 
 ![Hierarchy panel & double-click focus](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
+**Multi-language Switching**
+
+Switch the interface between Chinese, English, and Japanese in real time with a single click.
+
+![Multi-language switching](docs/screenshots/frontend/多语言切换.gif)
+
+**Canvas Theme Switching**
+
+Toggle between light and dark themes across all pages, with every UI element fully adapting to the active theme.
+
+![Canvas theme switching](docs/screenshots/frontend/画布换肤.gif)
+
 ### Frontend — Canvas (the core)
 
 The canvas editor is the platform's core module, covering the complete
