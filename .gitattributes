@@ -1,0 +1,30 @@
+# 默认文本文件自动检测换行符
+* text=auto
+
+# 源码文件统一使用 LF（Linux/macOS/Windows 一致）
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.css  text eol=lf
+*.less text eol=lf
+*.html text eol=lf
+*.prisma text eol=lf
+*.sql  text eol=lf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# 二进制文件禁止转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
