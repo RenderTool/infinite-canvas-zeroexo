@@ -53,21 +53,29 @@ ZeroExo 短视频创作者、影视自媒体从业者
 
 ### 动态演示（画布操作）
 
-**协作**
+**实时协作编辑**
 
-![协作](docs/screenshots/frontend/前端画布协作.gif)
+多人同时在线编辑同一画布，基于 Yjs 与 Hocuspocus 实现实时同步与离线优先本地持久化，操作结果即时可见。
 
-**节点堆叠合并**
+![实时协作编辑](docs/screenshots/frontend/前端画布协作.gif)
 
-![节点堆叠合并](docs/screenshots/frontend/前端画布堆叠.gif)
+**堆叠节点收纳**
 
-**节点快速导航**
+将多个节点一键聚合为堆叠节点，支持展开、切换与移出，实现节点的分组管理与紧凑排布。
 
-![节点快速导航](docs/screenshots/frontend/前端画布导航.gif)
+![堆叠节点收纳](docs/screenshots/frontend/前端画布堆叠.gif)
+
+**节点快速定位**
+
+通过节点导航控件快速定位与聚焦画布节点，提升大规模画布下的浏览与编辑效率。
+
+![节点快速定位](docs/screenshots/frontend/前端画布导航.gif)
 
 **层级面板与双击聚焦**
 
-![层级面板和双击聚焦](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
+层级面板以树状结构总览节点关系，双击节点即时聚焦视口，兼顾全局视图与局部编辑。
+
+![层级面板与双击聚焦](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
 ### 前端 — 画布（核心）
 

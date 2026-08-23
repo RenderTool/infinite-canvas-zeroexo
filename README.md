@@ -71,21 +71,29 @@ dashboard bolted onto a generic editor.
 
 ### Animated Demos (Canvas Operations)
 
-**Collaboration**
+**Real-time Collaborative Editing**
 
-![Collaboration](docs/screenshots/frontend/前端画布协作.gif)
+Multiple users edit the same canvas simultaneously with Yjs + Hocuspocus real-time sync and offline-first local persistence — changes are visible instantly.
 
-**Node stacking & merge**
+![Real-time collaborative editing](docs/screenshots/frontend/前端画布协作.gif)
 
-![Node stacking](docs/screenshots/frontend/前端画布堆叠.gif)
+**Stacked Node Aggregation**
 
-**Quick node navigation**
+Group multiple nodes into a single stacked node with one click, with expand, switch, and remove actions for organized, compact layouts.
 
-![Quick node navigation](docs/screenshots/frontend/前端画布导航.gif)
+![Stacked node aggregation](docs/screenshots/frontend/前端画布堆叠.gif)
 
-**Hierarchy panel & double-click focus**
+**Rapid Node Navigation**
 
-![Hierarchy panel](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
+Quickly locate and focus canvas nodes via navigation controls, improving browsing and editing efficiency on large canvases.
+
+![Rapid node navigation](docs/screenshots/frontend/前端画布导航.gif)
+
+**Hierarchy Panel & Double-click Focus**
+
+The hierarchy panel overviews node relationships in a tree structure; double-click any node to instantly focus the viewport, balancing global overview and local editing.
+
+![Hierarchy panel & double-click focus](docs/screenshots/canvas/画布层级面板和双击聚焦.gif)
 
 ### Frontend — Canvas (the core)
 
