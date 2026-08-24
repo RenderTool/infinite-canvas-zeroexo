@@ -215,6 +215,9 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
           closeConnection(canvasId);
           store.getState().setActive(false);
           store.getState().setError('你已被移出协作房间');
+          // 派发事件让编辑器弹窗提示并引导返回主页(modal 遮罩阻断画布交互,
+          // 确认返回后 useCanvasSync 卸载 → releaseDoc 断开 Yjs WS)
+          window.dispatchEvent(new CustomEvent('zeroexo:collab-kicked', { detail: { canvasId } }));
           return;
         }
       }

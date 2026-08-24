@@ -1893,6 +1893,8 @@
     "expiredRemoveContent": "该协作已失效，此画布将从你的列表移除。",
     "roomClosedByOwnerTitle": "协作已失效",
     "roomClosedByOwnerContent": "发起者已关闭此协作，你将被移出协作画布。",
+    "kickedByOwnerTitle": "已被移出协作",
+    "kickedByOwnerContent": "发起者已将你移出协作房间，该画布将从你的列表中移除。",
     "backToHome": "返回主页"
   },
   "coverUpload": {

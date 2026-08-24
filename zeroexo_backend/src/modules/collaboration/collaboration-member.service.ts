@@ -132,7 +132,10 @@ export class CollaborationMemberService implements OnModuleDestroy {
   }
 
   /**
-   * 踢出成员
+   * 踢出成员（移出本次协作，可重新加入）
+   * 删除成员记录而非置 offline：offline 语义是"离屏≠退出"（重进画布自动恢复），
+   * 被踢者若保留记录仍能通过 canAccessCanvas 校验继续编辑落库（曾实测复现）。
+   * 删除后：Yjs 读写/画布访问权限墙自然拒绝；重新加入走 join 的 create 分支。
    */
   async kickMember(canvasId: string, memberUserId: string, requesterId: string) {
     const room = await this.prisma.collaborationRoom.findFirst({
@@ -142,9 +145,8 @@ export class CollaborationMemberService implements OnModuleDestroy {
     if (room.ownerId !== requesterId) throw forbidden('COLLAB_ROOM_OWNER_REQUIRED', 'Only the room owner can kick members');
     if (memberUserId === room.ownerId) throw badRequest('BAD_REQUEST', 'Cannot kick the room owner');
 
-    await this.prisma.collaborationMember.updateMany({
+    await this.prisma.collaborationMember.deleteMany({
       where: { roomId: room.id, userId: memberUserId },
-      data: { status: 'offline' },
     });
 
     this.logger.log(`成员 ${memberUserId} 被踢出房间 ${room.id}`);

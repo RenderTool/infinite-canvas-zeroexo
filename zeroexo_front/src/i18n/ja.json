@@ -1835,6 +1835,8 @@
     "expiredRemoveContent": "このコラボレーションは無効です。このキャンバスはリストから削除されます。",
     "roomClosedByOwnerTitle": "コラボレーション終了",
     "roomClosedByOwnerContent": "オーナーがこのコラボレーションを終了しました。このキャンバスから退出します。",
+    "kickedByOwnerTitle": "コラボから退出させられました",
+    "kickedByOwnerContent": "オーナーがあなたをコラボレーションから退出させました。このキャンバスはリストから削除されます。",
     "backToHome": "ホームに戻る"
   },
   "scriptEditor": {

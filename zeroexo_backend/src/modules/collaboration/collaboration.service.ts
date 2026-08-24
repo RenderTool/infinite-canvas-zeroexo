@@ -444,6 +444,14 @@ export class CollaborationService {
     });
 
     if (existingMembers.length === 0) {
+      // 封禁拦截：被踢出是删除记录（可重加），封禁是 banned（禁止重入）——
+      // 两者都表现为"无 active 记录"，这里必须显式拦截 banned，否则封禁用户
+      // 经邀请链接 autoJoin 会重建成员记录直接入房（封禁失效漏洞）
+      const banned = await this.prisma.collaborationMember.findFirst({
+        where: { roomId: room.id, userId, status: 'banned' },
+        select: { id: true },
+      });
+      if (banned) throw forbidden('COLLAB_MEMBER_BANNED', 'You are banned and cannot join');
       // 账户不在房间中（可能是邀请加入，也可能是房主的新设备）
       // 权限模型与 joinByInvite 对齐（Plan#38 Phase 7.2）：allowEdit → editor + edit/download 捆绑
       const isOwner = room.ownerId === userId;

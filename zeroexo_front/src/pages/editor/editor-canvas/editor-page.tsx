@@ -143,6 +143,25 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     return () => window.removeEventListener('zeroexo:collab-room-expired', handler);
   }, [canvasId, modal, onBack, t]);
 
+  // 被踢出：发起者移出成员(member_left + kicked) → 弹窗提示，确认后返回主页
+  // modal 遮罩同时阻断画布交互；返回后 useCanvasSync 卸载断开 Yjs WS
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ canvasId?: string } | undefined>).detail;
+      if (!detail || detail.canvasId !== canvasId) return;
+      modal.confirm({
+        title: t('collab.kickedByOwnerTitle'),
+        content: t('collab.kickedByOwnerContent'),
+        okText: t('collab.backToHome'),
+        cancelButtonProps: { style: { display: 'none' } },
+        centered: true,
+        onOk: () => onBack(),
+      });
+    };
+    window.addEventListener('zeroexo:collab-kicked', handler);
+    return () => window.removeEventListener('zeroexo:collab-kicked', handler);
+  }, [canvasId, modal, onBack, t]);
+
   // 只读保护（Plan#38 Phase 7.4）：协作中自己是无 edit 权限的成员（viewer）时，
   // 透明遮罩拦截画布全部指针交互（仅保留浏览），并展示「只读模式」徽标；
   // 房主/可编辑成员不受影响。服务端写校验为已知缺口（版本接口已按 role 拦截）。

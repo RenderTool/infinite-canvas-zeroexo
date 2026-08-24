@@ -1894,6 +1894,8 @@
     "expiredRemoveContent": "This collaboration has expired. This canvas will be removed from your list.",
     "roomClosedByOwnerTitle": "Collaboration Closed",
     "roomClosedByOwnerContent": "The owner has closed this collaboration. You will be removed from this canvas.",
+    "kickedByOwnerTitle": "Removed from Collaboration",
+    "kickedByOwnerContent": "The owner has removed you from the collaboration. This canvas will be removed from your list.",
     "backToHome": "Back to Home"
   },
   "coverUpload": {
