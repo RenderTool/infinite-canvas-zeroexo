@@ -1500,7 +1500,8 @@ function canvasGetState(ctx: ToolContext): Tool {
     name: 'canvas_get_state',
     description:
       '读取当前项目画布的真实状态：节点图（scene，含 id/类型/标题/内容概要）+ 分镜/主体数据统计。' +
-      '仅当任务涉及画布内容时调用；返回的节点 id 是后续画布操作的唯一依据，禁止凭记忆猜节点',
+      '仅当任务涉及画布内容时调用；返回的节点 id 是后续画布操作的唯一依据，禁止凭记忆猜节点。' +
+      '**调用后必须继续：同一回合必须继续处理任务（出选项表单或直接执行），禁止仅输出画布现状就结束回合**',
     parameters: {
       type: 'object',
       properties: {},
@@ -1514,7 +1515,7 @@ function canvasGetState(ctx: ToolContext): Tool {
       // 1. 画布节点图（真实画布内容的事实源，Plan#36 R2 返工：此前只读 storyboard 导致对节点"睁眼瞎"）
       const scene = Array.isArray(project?.scene) ? (project?.scene as Array<Record<string, unknown>>) : [];
       const connections = Array.isArray(project?.connections) ? (project?.connections as unknown[]) : [];
-      const NODE_LIMIT = 40;
+      const NODE_LIMIT = 20;
       const nodes = scene.slice(0, NODE_LIMIT).map((n) => {
         const type = typeof n?.type === 'string' ? n.type : 'unknown';
         const data = (n?.data ?? {}) as Record<string, unknown>;
@@ -1534,7 +1535,7 @@ function canvasGetState(ctx: ToolContext): Tool {
         if (typeof data.agentTaskId === 'string') base.agentTaskId = data.agentTaskId;
         if (type === 'script' || type === 'text') {
           const content = typeof data.content === 'string' ? data.content : '';
-          if (content) base.contentPreview = `${content.slice(0, 60)}…（共 ${content.length} 字）`;
+          if (content) base.contentPreview = `${content.slice(0, 32)}…（${content.length}字）`;
         } else if (type === 'storyboard') {
           if (Array.isArray(data.shots)) base.shotCount = data.shots.length;
         } else if (type === 'production-manager') {
@@ -1542,7 +1543,7 @@ function canvasGetState(ctx: ToolContext): Tool {
         } else if (type === 'image' || type === 'video' || type === 'audio') {
           base.hasContent = Boolean(data.content || data.storageKey || data.status === 'done');
         } else if (type === 'generator') {
-          if (typeof data.prompt === 'string' && data.prompt) base.promptPreview = data.prompt.slice(0, 40);
+          if (typeof data.prompt === 'string' && data.prompt) base.promptPreview = data.prompt.slice(0, 24);
         }
         return base;
       });
@@ -1558,6 +1559,16 @@ function canvasGetState(ctx: ToolContext): Tool {
       );
 
       const empty = nodes.length === 0 && episodes.length === 0;
+      // 按类型分类统计
+      const typeCounts = new Map<string, number>();
+      for (const n of scene) {
+        const t = typeof n?.type === 'string' ? n.type : 'unknown';
+        typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1);
+      }
+      const typeSummary = [...typeCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, c]) => `${t}×${c}`)
+        .join('、');
       return {
         ok: true,
         summary: {
@@ -1580,8 +1591,8 @@ function canvasGetState(ctx: ToolContext): Tool {
           },
         },
         message: empty
-          ? '画布确实为空（无节点、无分镜数据）'
-          : `画布状态已读取：${scene.length} 个节点、${connections.length} 条连线`,
+          ? '画布为空（无节点、无分镜数据）。需要我帮你创建内容吗？'
+          : `画布有 ${scene.length} 个节点（${typeSummary}）、${connections.length} 条连线。${charCount > 0 ? `已识别 ${charCount} 个角色。` : ''}请告诉我你对这些节点做什么操作（修改/生成/布局/…）。`,
       };
     },
   };
@@ -1762,15 +1773,20 @@ function readNode(ctx: ToolContext): Tool {
       }
       const dataStr = JSON.stringify(node.data ?? {});
       const truncated = dataStr.length > 1500;
+      const nodeType = typeof node.type === 'string' ? node.type : 'unknown';
+      const nodeTitle = typeof node.title === 'string' && node.title ? node.title : '无标题';
       return {
         ok: true,
         node: {
           id: node.id,
-          type: node.type,
-          title: node.title,
+          type: nodeType,
+          title: nodeTitle,
           position: node.position,
           data: truncated ? `${dataStr.slice(0, 1500)}…（共 ${dataStr.length} 字符已截断，请分块处理）` : node.data,
         },
+        message: `已读取节点「${nodeTitle}」（${nodeType}）${
+          truncated ? '，内容较长已截断，需要分块读取' : ''
+        }。如需修改请告诉我具体改什么，或继续下一步操作。`,
       };
     },
   };

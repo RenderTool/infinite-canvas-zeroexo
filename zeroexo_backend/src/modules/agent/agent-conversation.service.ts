@@ -177,6 +177,14 @@ export class AgentConversationService {
       });
       const summaries: ChatMessage[] = [];
       const turns: ChatMessage[] = [];
+      // 交互协议工具名（需保留在历史中，供回执时 LLM 理解上下文）
+      const INTERACTION_TOOLS = new Set([
+        'request_question',
+        'request_step',
+        'request_params',
+        'request_upload',
+        'plan_present',
+      ]);
       for (const row of rows) {
         if (excludeTaskId && row.taskId === excludeTaskId) continue;
         if (row.role === 'system' && row.toolName === 'memory_compact') {
@@ -186,7 +194,14 @@ export class AgentConversationService {
           });
           continue;
         }
-        if (row.toolName) continue; // 工具调用通知不入历史（防 OpenAI 严格校验断裂）
+        // 交互协议消息保留在历史中（LLM 需要理解之前的交互上下文）
+        if (row.toolName && INTERACTION_TOOLS.has(row.toolName)) {
+          if (row.role === 'assistant' && row.content) {
+            turns.push({ role: 'assistant', content: row.content });
+          }
+          continue;
+        }
+        if (row.toolName) continue; // 普通工具调用通知不入历史（防 OpenAI 严格校验断裂）
         if (row.role === 'user') {
           turns.push({ role: 'user', content: row.content });
         } else if (row.role === 'assistant' && row.content) {

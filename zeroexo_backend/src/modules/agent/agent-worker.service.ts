@@ -238,9 +238,29 @@ export class AgentWorkerService {
             break;
           case 'agent:step_request':
             this.sseService.emitStepRequest(taskId, (event.data as any)?.step ?? event.data);
+            // 交互协议：写入 step_request 消息到历史，供回执时 LLM 理解上下文
+            if (task.conversationId) {
+              const step = (event.data as any)?.step;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[交互步骤请求] ${step?.title ?? '步骤'}，等待用户确认`,
+                toolName: 'request_step',
+                toolArguments: JSON.stringify(step ?? {}),
+              });
+            }
             break;
           case 'agent:question_request':
             this.sseService.emitQuestionRequest(taskId, (event.data as any)?.question ?? event.data);
+            // 交互协议：写入 question_request 消息到历史，供回执时 LLM 理解上下文
+            if (task.conversationId) {
+              const question = (event.data as any)?.question;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[交互选择请求] ${question?.guideText ?? '请选择'}，等待用户回答`,
+                toolName: 'request_question',
+                toolArguments: JSON.stringify(question ?? {}),
+              });
+            }
             break;
           case 'agent:md':
             this.sseService.emitMd(taskId, (event.data as any)?.md ?? '');
