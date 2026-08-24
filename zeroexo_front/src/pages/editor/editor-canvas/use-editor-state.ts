@@ -20,7 +20,7 @@ import { ProxyProvider } from '@zeroexo/plugin-ai-provider';
 import type { AIProvider } from '@zeroexo/plugin-ai-provider';
 import { apiFetch, ApiError, getToken } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
-import { onProjectUpdated, syncProjectFromCloud, syncProjectToCloud, markProjectDirty, checkProjectConflict, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud, notifyConflictSnapshot } from '@/services/sync/sync-service.js';
+import { syncProjectFromCloud, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud, notifyConflictSnapshot } from '@/services/sync/sync-service.js';
 import { markNodesDirty, debugLog } from '@/services/sync/sync-utils.js';
 import type { ConflictSnapshotInfo } from '@/services/sync/sync-service.js';
 import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
@@ -146,11 +146,6 @@ export function useEditorState(canvasId: string): {
   // 直接引用 collaboration 会捕获首个渲染的旧值(此时 active=false,远端光标永远收不到本地广播)
   const collaborationRef = useRef(collaboration);
   collaborationRef.current = collaboration;
-
-  // Yjs 连接状态镜像:onGraphChanged 等 store 订阅闭包需读取最新状态
-  // (Yjs 健康时抑制 HTTP 冗余全量推送,仅 Yjs 不可用时走 HTTP 兜底)
-  const canvasSyncStatusRef = useRef(canvasSync.status);
-  canvasSyncStatusRef.current = canvasSync.status;
 
   // 协作掉线警告去抖间隔:Yjs 断开后去抖 3s 仍断才提示,避免信号抖动频繁弹窗
   const COLLAB_OFFLINE_WARN_DEBOUNCE_MS = 3000;
@@ -377,7 +372,9 @@ export function useEditorState(canvasId: string): {
             try {
               await syncProjectResourcesFromCloud(saved.nodes);
               if (!isMountedRef.current) return;
-              onProjectUpdated(canvasId);
+              // Phase3:本地快照兜底恢复后写回 Y.Doc(替代 HTTP 推送)——
+              // idb 持久化 + 重连后自动合并上云,服务端 storeCanvasDocument upsert 兜底重建
+              pushGraph({ nodes: saved.nodes, edges: saved.edges });
             } catch (err) {
               console.warn('[use-editor-state] resolve node resources failed:', err);
             }
@@ -393,7 +390,7 @@ export function useEditorState(canvasId: string): {
               if (retry && retry.nodes.length > 0) {
                 await syncProjectResourcesFromCloud(retry.nodes);
                 if (!isMountedRef.current) return;
-                onProjectUpdated(canvasId);
+                pushGraph({ nodes: retry.nodes, edges: retry.edges });
                 ed.plugins.persistence?.suppressNextSave();
                 commandQueue.replaceState(retry);
               }
@@ -404,18 +401,6 @@ export function useEditorState(canvasId: string): {
         }
 
         if (!isMountedRef.current) return;
-
-        // 刷新页面兜底:检测版本差异,若有冲突按「本地优先」自动解决
-        // (syncProjectToCloud 内部先保存云端快照再推送本地覆盖,完成后通知提示条)
-        try {
-          const detected = await checkProjectConflict(canvasId);
-          if (!isMountedRef.current) return;
-          if (detected) {
-            await syncProjectToCloud(canvasId);
-          }
-        } catch (err) {
-          console.warn('[use-editor-state] checkProjectConflict failed:', err);
-        }
 
         isInitialized = true;
 
@@ -474,7 +459,7 @@ export function useEditorState(canvasId: string): {
         if (!saved) return;
         // suppressNextSave 防止 replaceState 触发 persistence 写回(刚读出来的数据无需回写)
         ed.plugins.persistence?.suppressNextSave();
-        // suppressNextSync 防止 replaceState 触发 onProjectUpdated(避免拉取-推送循环)
+        // suppressNextSync 防止 replaceState 触发 pushGraph 广播(避免拉取-推送循环)
         suppressNextSync = true;
         commandQueue.replaceState(saved);
       })();
@@ -680,14 +665,9 @@ export function useEditorState(canvasId: string): {
         if (trans.draggingNode || trans.resizing) {
           scheduleDragYjsPush();
         } else {
+          // Phase3:Yjs 唯一写主干——编辑一律写 Y.Doc(增量广播+服务端落库),
+          // 未连接时由 y-indexeddb 本地持久化,重连自动合并;HTTP 推送已退役
           flushDragYjsPush();
-          // Yjs 已连接时编辑由 Yjs 增量广播+服务端 onStoreDocument 落库(单主干),
-          // HTTP 全量推送冗余;仅 Yjs 不可用(未登录/WS失败/降级链路)时走 HTTP 兜底
-          if (canvasSyncStatusRef.current !== 'connected') {
-            onProjectUpdated(canvasId);
-            // 标记项目有未推送修改
-            markProjectDirty(canvasId);
-          }
         }
       }
       suppressNextSync = false;
@@ -843,13 +823,8 @@ export function useEditorState(canvasId: string): {
       // 拖拽/resize 结束后触发一次云同步推送(避免拖拽期间每帧 rawFetch)
       // 同时 flush Yjs 节流帧:丢弃拖拽中间帧,补发最终位置
       if (isInitialized && !suppressNextSync && (wasDraggingNode || wasResizing)) {
+        // Phase3:拖拽最终帧由 flushDragYjsPush 写 Y.Doc(广播+落库),HTTP 推送已退役
         flushDragYjsPush();
-        // Yjs 健康时拖拽最终帧已由 flushDragYjsPush 广播并落库(单主干),
-        // HTTP 推送仅作 Yjs 不可用兜底
-        if (canvasSyncStatusRef.current !== 'connected') {
-          onProjectUpdated(canvasId);
-          markProjectDirty(canvasId);
-        }
       }
       // 补发光标最后一帧(rAF 节流下 pointerup 时可能仍有一帧未广播)
       flushCursorBroadcast();
@@ -1018,8 +993,8 @@ export function useEditorState(canvasId: string): {
       // 更新项目元数据(nodeCount + updatedAt),fire-and-forget 不阻塞 UI
       const graph = store.getGraph();
       void updateProject(canvasId, { nodeCount: graph.nodes.length });
-      // 卸载时触发一次云同步推送(nodeCount 变动)
-      onProjectUpdated(canvasId);
+      // 卸载时画布数据已在 Y.Doc(idb 持久化 + 服务端防抖落库),无需 HTTP 补推;
+      // 云端 nodeCount 由服务端 storeCanvasDocument 落库时派生(Phase3)
       // 移除云端 reload 事件监听
       window.removeEventListener(PROJECT_RELOAD_EVENT, handleProjectReload);
       // 移除云端 diff(版本差异)事件监听
