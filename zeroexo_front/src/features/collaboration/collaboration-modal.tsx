@@ -187,8 +187,9 @@ export function CollaborationModal({
     }
   };
 
-  // 动态构造邀请链接，不依赖后端存储的静态域名
-  const dynamicInviteLink = inviteCode ? `${window.location.origin}/c/${inviteCode}` : '';
+  // 动态构造邀请链接，不依赖后端存储的静态域名；
+  // 前端为 hash 路由，链接必须带 #/ 前缀，否则打开后 hash 为空回落主页（验收热修）
+  const dynamicInviteLink = inviteCode ? `${window.location.origin}/#/c/${inviteCode}` : '';
 
   // 复制文本到剪贴板
   const handleCopy = async (text: string) => {

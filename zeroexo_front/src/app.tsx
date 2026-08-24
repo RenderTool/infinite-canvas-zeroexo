@@ -142,6 +142,23 @@ function serializeRoute(route: Route): string {
   }
 }
 
+/**
+ * 初始路由解析（Plan#38 验收热修）：
+ * 对外分享的邀请链接唯一格式为路径式 `/c/<code>`，应用内解析后改写为
+ * hash 形态供后续刷新/前进后退持久化；其余页面仍直接读 hash。
+ * 服务端（生产 nginx try_files / 开发 vite SPA fallback）已保证
+ * 任意路径回落 index.html，无需额外服务端配置。
+ */
+function resolveInitialRoute(): Route {
+  const pathMatch = window.location.pathname.match(/^\/c\/([A-Za-z0-9]{6})\/?$/);
+  if (pathMatch) {
+    const inviteCode = decodeURIComponent(pathMatch[1] ?? '');
+    window.history.replaceState(null, '', `/#/c/${encodeURIComponent(inviteCode)}`);
+    return { name: 'invite', inviteCode };
+  }
+  return parseHash(window.location.hash);
+}
+
 /** 全屏 Loading(鉴权初始化期间显示) */
 function FullScreenLoading(): React.ReactElement {
   const { theme } = useTheme();
@@ -173,8 +190,8 @@ function FullScreenLoading(): React.ReactElement {
 export function App(): React.ReactElement {
   const { loading, isAuthenticated, logout } = useAuth();
   const isMobile = useIsMobile();
-  // 初始化时从 URL hash 恢复路由,解决刷新后跳回主页的问题
-  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
+  // 初始化时恢复路由：路径式邀请链接 /c/<code> 原生解析（见 resolveInitialRoute），其余读 hash
+  const [route, setRoute] = useState<Route>(() => resolveInitialRoute());
   // Plan#38 Phase 9: 未登录点击邀请页「加入」跳登录前暂存邀请码,
   // 登录/注册成功后回流到邀请页并自动加入（不再丢失）
   const pendingInviteCodeRef = useRef<string | null>(null);
