@@ -147,6 +147,11 @@ export function useEditorState(canvasId: string): {
   const collaborationRef = useRef(collaboration);
   collaborationRef.current = collaboration;
 
+  // Yjs 连接状态镜像:onGraphChanged 等 store 订阅闭包需读取最新状态
+  // (Yjs 健康时抑制 HTTP 冗余全量推送,仅 Yjs 不可用时走 HTTP 兜底)
+  const canvasSyncStatusRef = useRef(canvasSync.status);
+  canvasSyncStatusRef.current = canvasSync.status;
+
   // 协作掉线警告去抖间隔:Yjs 断开后去抖 3s 仍断才提示,避免信号抖动频繁弹窗
   const COLLAB_OFFLINE_WARN_DEBOUNCE_MS = 3000;
   // 播种等待窗口:本地有快照时给 Y.Doc 短暂窗口(弱网下服务端播种来不及就降级本地快照);
@@ -676,9 +681,13 @@ export function useEditorState(canvasId: string): {
           scheduleDragYjsPush();
         } else {
           flushDragYjsPush();
-          onProjectUpdated(canvasId);
-          // 标记项目有未推送修改
-          markProjectDirty(canvasId);
+          // Yjs 已连接时编辑由 Yjs 增量广播+服务端 onStoreDocument 落库(单主干),
+          // HTTP 全量推送冗余;仅 Yjs 不可用(未登录/WS失败/降级链路)时走 HTTP 兜底
+          if (canvasSyncStatusRef.current !== 'connected') {
+            onProjectUpdated(canvasId);
+            // 标记项目有未推送修改
+            markProjectDirty(canvasId);
+          }
         }
       }
       suppressNextSync = false;
@@ -835,8 +844,12 @@ export function useEditorState(canvasId: string): {
       // 同时 flush Yjs 节流帧:丢弃拖拽中间帧,补发最终位置
       if (isInitialized && !suppressNextSync && (wasDraggingNode || wasResizing)) {
         flushDragYjsPush();
-        onProjectUpdated(canvasId);
-        markProjectDirty(canvasId);
+        // Yjs 健康时拖拽最终帧已由 flushDragYjsPush 广播并落库(单主干),
+        // HTTP 推送仅作 Yjs 不可用兜底
+        if (canvasSyncStatusRef.current !== 'connected') {
+          onProjectUpdated(canvasId);
+          markProjectDirty(canvasId);
+        }
       }
       // 补发光标最后一帧(rAF 节流下 pointerup 时可能仍有一帧未广播)
       flushCursorBroadcast();
