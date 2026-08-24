@@ -343,17 +343,46 @@ export class SyncService implements OnModuleDestroy {
     projectId: string,
     json: Record<string, unknown>,
   ): Promise<void> {
-    if (!(await this.canAccessCanvas(userId, projectId, true))) return;
-
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { scene: true },
+      select: { ownerId: true, scene: true },
     });
-    if (!project) return;
 
     const scene = (json.nodes as unknown) ?? [];
     const connections = (json.edges as unknown) ?? [];
     const viewport = (json.viewport as unknown) ?? { x: 0, y: 0, k: 1 };
+
+    // 项目不存在 → 自动创建（对齐 HTTP update 的 upsert 语义，兼容历史本地 ID）。
+    // 必要性：Yjs connected 时前端已抑制 HTTP 推送（Phase3 前置），此处不建则
+    // 新画布编辑只存在于内存与本地 IndexedDB，直到离开页面才补推创建。
+    // 安全边界：仅当 findUnique 确实不存在时创建；存在但无权限时下方跳过，
+    // 防止越权覆盖他人项目。
+    if (!project) {
+      await this.prisma.project.create({
+        data: {
+          id: projectId,
+          ownerId: userId,
+          title: '未命名画布',
+          scene: scene as object,
+          connections: connections as object,
+          viewport: viewport as object,
+          lastSyncedAt: new Date(),
+        },
+      });
+      // 新建项目：全量增加 scene 中所有 storageKey 的引用计数（对齐 HTTP 自动创建）
+      const keys = this.resourceService.extractStorageKeysFromScene(scene);
+      if (keys.size > 0) {
+        await this.resourceService.adjustRefs(keys, new Set());
+      }
+      this.logger.log(`[sync] canvas auto-created via Yjs store: ${projectId}`);
+      return;
+    }
+
+    // 权限：owner 直通；非 owner 需为 active 协作房间的已批准编辑成员
+    // （项目不存在分支已在上方处理，canAccessCanvas 的 findUnique 仅非 owner 触发）
+    if (project.ownerId !== userId && !(await this.canAccessCanvas(userId, projectId, true))) {
+      return;
+    }
 
     // refCount 增量 diff：新旧 scene 的 storageKey 集合对比，只调整变化项（拍板点①）
     const oldKeys = this.resourceService.extractStorageKeysFromScene(project.scene);
