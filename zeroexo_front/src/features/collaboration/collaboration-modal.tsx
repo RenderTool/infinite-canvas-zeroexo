@@ -1,22 +1,25 @@
 /**
- * CollaborationModal - 协作管理弹窗
+ * CollaborationModal - 协作管理弹窗（统一组件）
  *
- * 功能:
- * - 邀请卡片: 显示邀请码和邀请链接 + 复制按钮
- * - 权限设置: allowChat/allowAgentChat/allowEdit/allowDownload 复选框
- * - 邀请码过期选择 + 重新生成按钮
- * - 申请加入卡片: 输入邀请码加入
- * - 当前成员列表卡片: 显示每个成员 + 踢人按钮(仅房主)
- * - 关闭协作房间按钮
+ * 画布内 Nav「协作」入口与主页「发起协作 / 协作详情」入口共用。
+ * 按「协作状态 × 角色」分派视图：
+ *   - idle（未开启）：房主看到"开启协作"按钮 + 加入协作 Tab
+ *   - active（协作中，房主）：发起协作 Tab（邀请码/权限/成员/关闭）+ 加入协作 Tab
+ *   - active（协作中，参与者）：加入更多协作 Tab + 退出本次协作 Tab
+ *   - expired（已失效，参与者）：失效视图（提示 + 从列表移除）
+ *   - expired（已失效，房主）：视同 idle，可重新开启
+ *
+ * 状态单一事实源：useCollaborationStore 的 room/status；本地 state 仅保留
+ * 表单输入（邀请码/权限/成员列表镜像）。
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { App, Modal, Button, Select, Checkbox, Tabs, Input } from 'antd';
+import { App, Modal, Button, Select, Checkbox, Tabs, Input, Switch } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
-import type { CollaborationRoom, CollaborationMember } from './collaboration-types';
+import type { CollaborationMember } from './collaboration-types';
 import {
   createRoom,
   getRoomByCanvas,
@@ -30,6 +33,7 @@ import {
   unmuteMember,
   joinRoom,
   verifyInvite,
+  removeSelfFromRoom,
 } from './collaboration-api';
 import { useCollaborationStore } from './use-collaboration-store';
 import { useAuth } from '@/features/auth/auth-store';
@@ -65,7 +69,6 @@ export function CollaborationModal({
   const { user } = useAuth();
   const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
-  const [room, setRoom] = useState<CollaborationRoom | null>(null);
   const [members, setMembers] = useState<CollaborationMember[]>([]);
   const [inviteCode, setInviteCode] = useState('');
   const [expiresInHours, setExpiresInHours] = useState<number>(0);
@@ -75,32 +78,29 @@ export function CollaborationModal({
   const [allowDownload, setAllowDownload] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joinLoading, setJoinLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
+  const [activeTab, setActiveTab] = useState<string>('manage');
 
-  const isOwner = room?.ownerId === String(user?.id);
-  // 当前用户是否已是房间成员(用于决定是否显示"申请加入"卡片)
-  const amMember = members.some((m) => m.isSelf);
+  // 单一事实源：store 中的房间信息与协作状态
+  const storeRoom = useCollaborationStore((s) => s.room);
+  const status = useCollaborationStore((s) => s.status);
 
-  // 初始化 tab: 如果没有房间，默认"创建"；如果已有房间但自己不是成员，默认"加入"
+  // 角色判定：房间存在时按 ownerId 判断；
+  // 房间不存在(未开启)时能打开协作弹窗者必为画布所有者（非所有者需通过邀请码进入，此时房间必然存在）
+  const isOwner = storeRoom ? storeRoom.ownerId === String(user?.id) : true;
+
+  // 初始化 tab: 房主默认"发起协作"(含未开启面板)，参与者默认"加入协作"
   useEffect(() => {
     if (open) {
-      if (!room) {
-        setActiveTab('create');
-      } else if (!isOwner && !amMember) {
-        setActiveTab('join');
-      } else {
-        setActiveTab('create');
-      }
+      setActiveTab(isOwner ? 'manage' : 'join');
     }
-  }, [open, room, isOwner, amMember]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  // 重置所有本地状态（弹窗关闭后重新打开时触发）
+  // 重置本地表单状态（弹窗关闭后重新打开时触发）
   const resetState = useCallback(() => {
-    setRoom(null);
     setInviteCode('');
     setMembers([]);
     setJoinCode('');
-    setActiveTab('create');
     setExpiresInHours(0);
     setAllowChat(true);
     setAllowAgentChat(true);
@@ -108,38 +108,35 @@ export function CollaborationModal({
     setAllowDownload(false);
   }, []);
 
-  // 加载房间信息
+  // 加载房间信息（不自动创建；房间不存在 → 显示"未开启"状态）
   const loadRoom = useCallback(async () => {
     setLoading(true);
     try {
-      let data = await getRoomByCanvas(canvasId);
+      const data = await getRoomByCanvas(canvasId);
+      useCollaborationStore.getState().setRoom(data); // null → status idle
       if (!data) {
-        // 房间不存在（已关闭或从未创建）→ 自动创建新房间
-        try {
-          data = await createRoom({ canvasId, mode: 'invite-only' });
-        } catch (createErr) {
-          console.error('[CollaborationModal] auto-create room failed:', createErr);
-          setRoom(null);
-          setInviteCode('');
-          setMembers([]);
-          useCollaborationStore.getState().setMembers([]);
-          return;
-        }
+        setInviteCode('');
+        setMembers([]);
+        useCollaborationStore.getState().setMembers([]);
+        return;
       }
-      setRoom(data);
       setInviteCode(data.inviteCode);
       setAllowChat(data.allowChat);
       setAllowAgentChat(data.allowAgentChat);
       setAllowEdit(data.allowEdit);
       setAllowDownload(data.allowDownload);
       setExpiresInHours(data.expiresAt ? 24 : 0);
-      // 同步到全局 store，确保 collaborationActive 为 true，光标广播等协作功能正常
-      useCollaborationStore.getState().setRoom(data);
-      useCollaborationStore.getState().setActive(true);
-      // 加载成员列表
-      const memberList = await listMembers(canvasId);
-      setMembers(memberList);
-      useCollaborationStore.getState().setMembers(memberList);
+      if (data.status === 'active') {
+        try {
+          const memberList = await listMembers(canvasId);
+          setMembers(memberList);
+          useCollaborationStore.getState().setMembers(memberList);
+        } catch {
+          setMembers([]);
+        }
+      } else {
+        setMembers([]);
+      }
     } catch (err) {
       console.error('[CollaborationModal] load room failed:', err);
       message.error(t('collab.loadFailed'));
@@ -150,11 +147,35 @@ export function CollaborationModal({
 
   useEffect(() => {
     if (open) {
-      // 先重置状态，再加载新鲜数据（避免旧状态残留）
+      // 先重置本地表单，再加载新鲜数据（避免旧状态残留）
       resetState();
       void loadRoom();
     }
   }, [open, resetState, loadRoom]);
+
+  // 开启协作（仅画布所有者）
+  const handleStartCollaboration = async () => {
+    setLoading(true);
+    try {
+      const data = await createRoom({ canvasId, mode: 'invite-only' });
+      useCollaborationStore.getState().setRoom(data);
+      setInviteCode(data.inviteCode);
+      setAllowChat(data.allowChat);
+      setAllowAgentChat(data.allowAgentChat);
+      setAllowEdit(data.allowEdit);
+      setAllowDownload(data.allowDownload);
+      setExpiresInHours(data.expiresAt ? 24 : 0);
+      const memberList = await listMembers(canvasId);
+      setMembers(memberList);
+      useCollaborationStore.getState().setMembers(memberList);
+      message.success(t('collab.collabStarted'));
+    } catch (err) {
+      console.error('[CollaborationModal] start collaboration failed:', err);
+      message.error(t('collab.startFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 动态构造邀请链接，不依赖后端存储的静态域名
   const dynamicInviteLink = inviteCode ? `${window.location.origin}/c/${inviteCode}` : '';
@@ -204,13 +225,11 @@ export function CollaborationModal({
       await joinRoom(targetCanvasId, code);
       // 加入成功后重新加载房间与成员
       const roomData = await getRoomByCanvas(targetCanvasId);
-      setRoom(roomData);
+      useCollaborationStore.getState().setRoom(roomData);
       setInviteCode(roomData.inviteCode);
       const memberList = await listMembers(targetCanvasId);
       setMembers(memberList);
-      useCollaborationStore.getState().setRoom(roomData);
       useCollaborationStore.getState().setMembers(memberList);
-      useCollaborationStore.getState().setActive(true);
       message.success(t('collab.applyJoinSuccess'));
       // 如果加入的是非同画布房间，跳转到目标画布编辑器
       if (targetCanvasId !== canvasId) {
@@ -235,7 +254,7 @@ export function CollaborationModal({
     await doJoin(code);
   };
 
-  // 通过邀请链接(/c/<code>)进入时:预填邀请码、切到"申请加入"Tab 并自动申请
+  // 通过邀请链接(/c/<code>)进入时:预填邀请码、切到"加入协作"Tab 并自动申请
   useEffect(() => {
     if (open && pendingInviteCode) {
       setJoinCode(pendingInviteCode);
@@ -279,6 +298,7 @@ export function CollaborationModal({
         </div>
       ),
       okText: t('collab.kick'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       centered: true,
       onOk: async () => {
@@ -319,12 +339,14 @@ export function CollaborationModal({
     }
   };
 
-  // 关闭协作房间
+  // 关闭协作（房主；关闭后回到"未开启"状态）
   const handleCloseRoom = async () => {
     if (!isOwner) return;
     modal.confirm({
       title: t('collab.closeRoomConfirmTitle'),
       content: t('collab.closeRoomConfirmContent'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
       okType: 'danger',
       centered: true,
       onOk: async () => {
@@ -332,13 +354,51 @@ export function CollaborationModal({
           await closeRoom(canvasId);
           useCollaborationStore.getState().setRoom(null);
           message.success(t('collab.roomClosed'));
-          onClose();
         } catch (err) {
           console.error('[CollaborationModal] close room failed:', err);
           message.error(t('collab.closeFailed'));
         }
       },
     });
+  };
+
+  // 参与者退出本次协作
+  const handleExitCollaboration = () => {
+    modal.confirm({
+      title: t('collab.exitConfirmTitle'),
+      content: t('collab.exitConfirmContent'),
+      okText: t('collab.exitCollaboration'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      centered: true,
+      onOk: async () => {
+        try {
+          await removeSelfFromRoom(canvasId);
+          useCollaborationStore.getState().setRoom(null);
+          message.success(t('collab.exitSuccess'));
+          onClose();
+        } catch (err) {
+          console.error('[CollaborationModal] exit collaboration failed:', err);
+          message.error(t('collab.operationFailed'));
+        }
+      },
+    });
+  };
+
+  // 失效协作：从列表移除
+  const handleRemoveFromList = async () => {
+    setLoading(true);
+    try {
+      await removeSelfFromRoom(canvasId);
+      useCollaborationStore.getState().setRoom(null);
+      message.success(t('collab.removedSuccess'));
+      onClose();
+    } catch (err) {
+      console.error('[CollaborationModal] remove from list failed:', err);
+      message.error(t('collab.operationFailed'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const cardStyle: CSSProperties = {
@@ -416,6 +476,285 @@ export function CollaborationModal({
     color: theme.toolbar.textMuted,
   };
 
+  // ==================== 视图片段 ====================
+
+  /** 未开启 / 已失效(房主视角) → 开启面板 */
+  const renderStartPanel = () => (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ ...cardTitleStyle, marginBottom: 0 }}>{t('collab.inviteSection')}</div>
+        <Switch
+          checked={false}
+          loading={loading}
+          onChange={(checked) => {
+            if (checked) void handleStartCollaboration();
+          }}
+        />
+      </div>
+      <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
+        <div style={{ color: theme.toolbar.text, fontSize: 14, marginBottom: 4 }}>
+          {t('collab.notStarted')}
+        </div>
+        <div style={{ color: theme.toolbar.textMuted, fontSize: 13 }}>
+          {t('collab.notStartedHint')}
+        </div>
+      </div>
+    </div>
+  );
+
+  /** 房主发起协作面板（active） */
+  const renderManagePanel = () => (
+    <>
+      {/* 邀请卡片 */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ ...cardTitleStyle, marginBottom: 0 }}>{t('collab.inviteSection')}</div>
+          <Switch
+            checked
+            loading={loading}
+            onChange={(checked) => {
+              if (!checked) void handleCloseRoom();
+            }}
+          />
+        </div>
+
+        <div style={rowStyle}>
+          <span style={labelStyle}>{t('collab.inviteCode')}</span>
+          <div style={valueContainerStyle}>
+            <span style={codeTextStyle}>{inviteCode || '-'}</span>
+            <Button
+              size="small"
+              icon={<Copy size={14} />}
+              onClick={() => inviteCode && handleCopy(inviteCode)}
+              disabled={!inviteCode}
+            >
+              {t('common.copy')}
+            </Button>
+          </div>
+        </div>
+
+        <div style={rowStyle}>
+          <span style={labelStyle}>{t('collab.inviteLink')}</span>
+          <div style={valueContainerStyle}>
+            <span style={{ ...codeTextStyle, textAlign: 'left', flex: 1 }}>
+              {dynamicInviteLink || '-'}
+            </span>
+            <Button
+              size="small"
+              icon={<Copy size={14} />}
+              onClick={() => dynamicInviteLink && handleCopy(dynamicInviteLink)}
+              disabled={!dynamicInviteLink}
+            >
+              {t('common.copy')}
+            </Button>
+          </div>
+        </div>
+
+        <div style={rowStyle}>
+          <span style={labelStyle}>{t('collab.expiresIn')}</span>
+          <div style={valueContainerStyle}>
+            <Select
+              size="small"
+              style={{ width: 140 }}
+              value={expiresInHours}
+              onChange={setExpiresInHours}
+              options={EXPIRY_OPTIONS}
+            />
+          </div>
+        </div>
+
+        <div style={{ ...rowStyle, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Button
+            size="small"
+            type="primary"
+            icon={<RefreshCw size={14} />}
+            onClick={handleRegenerateInvite}
+            loading={loading}
+          >
+            {t('collab.regenerateInvite')}
+          </Button>
+        </div>
+      </div>
+
+      {/* 权限设置卡片 */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>{t('collab.permissions')}</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Checkbox checked={allowChat} onChange={(e) => setAllowChat(e.target.checked)}>
+            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
+              {t('collab.allowChat')}
+            </span>
+          </Checkbox>
+          <Checkbox checked={allowAgentChat} onChange={(e) => setAllowAgentChat(e.target.checked)}>
+            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
+              {t('collab.allowAgentChat')}
+            </span>
+          </Checkbox>
+          <Checkbox checked={allowEdit} onChange={(e) => setAllowEdit(e.target.checked)}>
+            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
+              {t('collab.allowEdit')}
+            </span>
+          </Checkbox>
+          <Checkbox checked={allowDownload} onChange={(e) => setAllowDownload(e.target.checked)}>
+            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
+              {t('collab.allowDownload')}
+            </span>
+          </Checkbox>
+        </div>
+
+        <div style={{ textAlign: 'right', marginTop: 12 }}>
+          <Button
+            type="primary"
+            size="small"
+            onClick={handleUpdateSettings}
+            loading={loading}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </div>
+
+      {/* 当前成员列表 */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>
+          {t('collab.currentMembers')} ({members.length})
+        </div>
+        <div>
+          {members.length === 0 ? (
+            <div style={{ color: theme.toolbar.textMuted, fontSize: 13, padding: '8px 0' }}>
+              {t('collab.noMembers')}
+            </div>
+          ) : (
+            members.map((member) => {
+              const isSelf = member.isSelf;
+              const isOnline = member.sessions.some((s) => s.status === 'online');
+              return (
+                <div key={member.userId} style={memberItemStyle(isSelf)}>
+                  <div style={memberInfoStyle}>
+                    <span style={memberNameStyle}>
+                      {member.nickname || t('collab.unnamed')}
+                      {isSelf && ` (${t('collab.self')})`}
+                    </span>
+                    <span style={memberRoleStyle}>
+                      {t(`collab.role.${member.role}`)} · {t(`collab.status.${isOnline ? 'online' : 'offline'}`)}
+                    </span>
+                  </div>
+                  {isOwner && !isSelf && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <Button
+                        size="small"
+                        onClick={() => handleMuteMember(member.userId, member.sessions.some((s) => s.status === 'muted'))}
+                      >
+                        {member.sessions.some((s) => s.status === 'muted') ? t('collab.unmute') : t('collab.mute')}
+                      </Button>
+                      <Button
+                        size="small"
+                        danger
+                        onClick={() => handleKickMember(member.userId)}
+                      >
+                        {t('collab.kick')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  /** 加入协作卡片（房主/参与者共用） */
+  const renderJoinCard = (label: string) => (
+    <div style={cardStyle}>
+      <div style={cardTitleStyle}>{label}</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Input
+          size="small"
+          placeholder={t('collab.applyJoinPlaceholder')}
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value)}
+          onPressEnter={() => void handleApplyJoin()}
+          style={{ flex: 1 }}
+        />
+        <Button
+          type="primary"
+          size="small"
+          loading={joinLoading}
+          onClick={() => void handleApplyJoin()}
+        >
+          {t('collab.applyJoin')}
+        </Button>
+      </div>
+    </div>
+  );
+
+  /** 参与者退出本次协作卡片 */
+  const renderExitCard = () => (
+    <div style={cardStyle}>
+      <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+        <div style={{ color: theme.toolbar.textMuted, fontSize: 13 }}>
+          {t('collab.exitHint')}
+        </div>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <Button danger loading={loading} onClick={handleExitCollaboration}>
+          {t('collab.exitCollaboration')}
+        </Button>
+      </div>
+    </div>
+  );
+
+  /** 参与者失效视图 */
+  const renderExpiredView = () => (
+    <div style={cardStyle}>
+      <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: theme.toolbar.text, marginBottom: 8 }}>
+          {t('collab.roomExpired')}
+        </div>
+        <div style={{ color: theme.toolbar.textMuted, fontSize: 13 }}>
+          {t('collab.roomExpiredHint')}
+        </div>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <Button danger size="small" loading={loading} onClick={() => void handleRemoveFromList()}>
+          {t('collab.removeFromList')}
+        </Button>
+      </div>
+    </div>
+  );
+
+  // 参与者视角（房间存在且非房主）：失效 → 失效视图；协作中 → 加入更多/退出 双 Tab
+  const isGuestExpired = status === 'expired' && !isOwner;
+
+  const tabs = isOwner
+    ? [
+        {
+          key: 'manage',
+          label: t('collab.createRoom'),
+          children: status === 'active' ? renderManagePanel() : renderStartPanel(),
+        },
+        {
+          key: 'join',
+          label: t('collab.joinRoom'),
+          children: renderJoinCard(t('collab.applyJoinSection')),
+        },
+      ]
+    : [
+        {
+          key: 'join',
+          label: t('collab.joinMoreCollaboration'),
+          children: renderJoinCard(t('collab.joinMoreCollaboration')),
+        },
+        {
+          key: 'exit',
+          label: t('collab.exitCollaboration'),
+          children: renderExitCard(),
+        },
+      ];
+
   return (
     <Modal
       open={open}
@@ -438,214 +777,16 @@ export function CollaborationModal({
         },
       }}
     >
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'create' | 'join')}
-        style={{ marginBottom: 0 }}
-        items={[
-          {
-            key: 'create',
-            label: t('collab.createRoom'),
-            children: (
-              <>
-                {/* 邀请卡片 */}
-                {isOwner && (
-                <div style={cardStyle}>
-                  <div style={cardTitleStyle}>{t('collab.inviteSection')}</div>
-
-                  <div style={rowStyle}>
-                    <span style={labelStyle}>{t('collab.inviteCode')}</span>
-                    <div style={valueContainerStyle}>
-                      <span style={codeTextStyle}>{inviteCode || '-'}</span>
-                      <Button
-                        size="small"
-                        icon={<Copy size={14} />}
-                        onClick={() => inviteCode && handleCopy(inviteCode)}
-                        disabled={!inviteCode}
-                      >
-                        {t('common.copy')}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div style={rowStyle}>
-                    <span style={labelStyle}>{t('collab.inviteLink')}</span>
-                    <div style={valueContainerStyle}>
-                      <span style={{ ...codeTextStyle, textAlign: 'left', flex: 1 }}>
-                        {dynamicInviteLink || '-'}
-                      </span>
-                      <Button
-                        size="small"
-                        icon={<Copy size={14} />}
-                        onClick={() => dynamicInviteLink && handleCopy(dynamicInviteLink)}
-                        disabled={!dynamicInviteLink}
-                      >
-                        {t('common.copy')}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {isOwner && (
-                    <>
-                      <div style={rowStyle}>
-                        <span style={labelStyle}>{t('collab.expiresIn')}</span>
-                        <div style={valueContainerStyle}>
-                          <Select
-                            size="small"
-                            style={{ width: 140 }}
-                            value={expiresInHours}
-                            onChange={setExpiresInHours}
-                            options={EXPIRY_OPTIONS}
-                          />
-                        </div>
-                      </div>
-
-                      <div style={{ ...rowStyle, justifyContent: 'flex-end', marginTop: 4 }}>
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<RefreshCw size={14} />}
-                          onClick={handleRegenerateInvite}
-                          loading={loading}
-                        >
-                          {t('collab.regenerateInvite')}
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                )}
-
-                {/* 权限设置卡片 */}
-                {isOwner && (
-                  <div style={cardStyle}>
-                    <div style={cardTitleStyle}>{t('collab.permissions')}</div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <Checkbox checked={allowChat} onChange={(e) => setAllowChat(e.target.checked)}>
-                        <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-                          {t('collab.allowChat')}
-                        </span>
-                      </Checkbox>
-                      <Checkbox checked={allowAgentChat} onChange={(e) => setAllowAgentChat(e.target.checked)}>
-                        <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-                          {t('collab.allowAgentChat')}
-                        </span>
-                      </Checkbox>
-                      <Checkbox checked={allowEdit} onChange={(e) => setAllowEdit(e.target.checked)}>
-                        <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-                          {t('collab.allowEdit')}
-                        </span>
-                      </Checkbox>
-                      <Checkbox checked={allowDownload} onChange={(e) => setAllowDownload(e.target.checked)}>
-                        <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-                          {t('collab.allowDownload')}
-                        </span>
-                      </Checkbox>
-                    </div>
-
-                    <div style={{ textAlign: 'right', marginTop: 12 }}>
-                      <Button
-                        type="primary"
-                        size="small"
-                        onClick={handleUpdateSettings}
-                        loading={loading}
-                      >
-                        {t('common.save')}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 当前成员列表 */}
-                <div style={cardStyle}>
-                  <div style={cardTitleStyle}>
-                    {t('collab.currentMembers')} ({members.length})
-                  </div>
-                  <div>
-                    {members.length === 0 ? (
-                      <div style={{ color: theme.toolbar.textMuted, fontSize: 13, padding: '8px 0' }}>
-                        {t('collab.noMembers')}
-                      </div>
-                    ) : (
-                      members.map((member) => {
-                        const isSelf = member.isSelf;
-                        const isOnline = member.sessions.some((s) => s.status === 'online');
-                        return (
-                          <div key={member.userId} style={memberItemStyle(isSelf)}>
-                            <div style={memberInfoStyle}>
-                              <span style={memberNameStyle}>
-                                {member.nickname || t('collab.unnamed')}
-                                {isSelf && ` (${t('collab.self')})`}
-                              </span>
-                              <span style={memberRoleStyle}>
-                                {t(`collab.role.${member.role}`)} · {t(`collab.status.${isOnline ? 'online' : 'offline'}`)}
-                              </span>
-                            </div>
-                            {isOwner && !isSelf && (
-                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                <Button
-                                  size="small"
-                                  onClick={() => handleMuteMember(member.userId, member.sessions.some((s) => s.status === 'muted'))}
-                                >
-                                  {member.sessions.some((s) => s.status === 'muted') ? t('collab.unmute') : t('collab.mute')}
-                                </Button>
-                                <Button
-                                  size="small"
-                                  danger
-                                  onClick={() => handleKickMember(member.userId)}
-                                >
-                                  {t('collab.kick')}
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* 关闭房间按钮 */}
-                {isOwner && (
-                  <div style={{ textAlign: 'right' }}>
-                    <Button danger onClick={handleCloseRoom} loading={loading}>
-                      {t('collab.closeRoom')}
-                    </Button>
-                  </div>
-                )}
-              </>
-            ),
-          },
-          {
-            key: 'join',
-            label: t('collab.joinRoom'),
-            children: (
-              <div style={cardStyle}>
-                <div style={cardTitleStyle}>{t('collab.applyJoinSection')}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Input
-                    size="small"
-                    placeholder={t('collab.applyJoinPlaceholder')}
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                    onPressEnter={() => void handleApplyJoin()}
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    type="primary"
-                    size="small"
-                    loading={joinLoading}
-                    onClick={() => void handleApplyJoin()}
-                  >
-                    {t('collab.applyJoin')}
-                  </Button>
-                </div>
-              </div>
-            ),
-          },
-        ]}
-      />
+      {isGuestExpired ? (
+        renderExpiredView()
+      ) : (
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          style={{ marginBottom: 0 }}
+          items={tabs}
+        />
+      )}
     </Modal>
   );
 }

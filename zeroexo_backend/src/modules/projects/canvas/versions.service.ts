@@ -11,14 +11,22 @@ import { LogsService } from '../../logs/logs.service';
 import { SyncService } from '../../sync/sync.service';
 import { BaseProjectService } from '../common/base-project.service';
 
-/** 快照硬性上限 */
-const MAX_VERSIONS = 30;
-/** 24 小时毫秒数(该窗口内快照全保留) */
+/**
+ * 快照保留策略(时间维度):
+ * - 保留最近 SNAPSHOT_RETENTION_DAYS(30) 天内的全部快照,不做窗口抽样
+ * - 超过 30 天自动清理(时间维度,替代旧的"24h 全保留 + 分桶抽样"混合策略)
+ * - 兜底队列上限 MAX_VERSIONS:极端高频保存时从最旧开始丢弃,防止存储膨胀
+ */
+const SNAPSHOT_RETENTION_DAYS = 30;
+/** 快照兜底上限(超出从最旧开始删) */
+const MAX_VERSIONS = 1000;
+/** 24 小时毫秒数 */
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const WEEK_MS = 7 * DAY_MS;
 /** 定时快照窗口(30 分钟),同一窗口内只存一个 */
 const TIMER_WINDOW_MS = 30 * 60 * 1000;
+/** 自定义快照内容上限(离线端留档上传,防恶意大包) */
+const SNAPSHOT_DATA_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * 版本快照服务 - 画布时间点快照的创建/查询/淘汰/回退。
@@ -49,25 +57,70 @@ export class VersionsService extends BaseProjectService {
   }
 
   /**
-   * 创建版本快照(主动保存或自动触发)。
+   * 创建版本快照(主动保存/自动触发/离线端留档)。
    * 快照写入失败不阻塞主流程,仅记录日志(NFR-1)。
+   * - 权限: 项目 owner 或协作成员(editor 及以上角色)
+   * - data: 调用方上传的自定义快照内容(离线端旧图留档),不传则基于 DB 当前 scene
+   * - skipIfIdentical: 内容去重,与最近一条快照相同则跳过并返回 null
    */
   async createVersion(
-    ownerId: string,
+    userId: string,
     projectId: string,
-    opts: { label?: string; source?: string } = {},
-  ): Promise<ProjectVersion> {
+    opts: {
+      label?: string;
+      source?: string;
+      data?: { scene?: unknown; connections?: unknown; viewport?: unknown };
+      skipIfIdentical?: boolean;
+    } = {},
+  ): Promise<ProjectVersion | null> {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.ownerId !== ownerId) {
+    if (!project) {
       throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
     }
+    await this.assertVersionAccess(userId, projectId, true);
 
     const latest = await this.prisma.projectVersion.findFirst({
       where: { projectId },
       orderBy: { version: 'desc' },
     });
     const version = (latest?.version ?? 0) + 1;
-    const scene = project.scene;
+
+    // 快照内容:优先用调用方上传的 data(离线端留档),否则读 DB 当前 scene
+    let scene: unknown = project.scene;
+    let connections: unknown = project.connections;
+    let viewport: unknown = project.viewport;
+    if (opts.data && opts.data.scene !== undefined) {
+      scene = opts.data.scene;
+      connections = opts.data.connections ?? connections;
+      viewport = opts.data.viewport ?? viewport;
+      if (!Array.isArray(scene)) {
+        throw notFound('INVALID_SNAPSHOT_DATA', 'Snapshot scene must be an array');
+      }
+      const payloadSize = Buffer.byteLength(
+        JSON.stringify({ scene, connections, viewport }),
+      );
+      if (payloadSize > SNAPSHOT_DATA_MAX_BYTES) {
+        throw notFound('SNAPSHOT_DATA_TOO_LARGE', 'Snapshot payload too large');
+      }
+    }
+
+    // 内容去重:与最近一条快照的 scene 相同则跳过(自动冲突快照防冗余)
+    if (opts.skipIfIdentical && latest) {
+      const identical = await this.snapshotSceneEquals(
+        project.ownerId,
+        projectId,
+        latest.version,
+        scene,
+      );
+      if (identical) {
+        this.logsService.log('project', `跳过重复版本快照: ${project.title} v${version}`, {
+          userId,
+          meta: { id: projectId, version: latest.version },
+        });
+        return null;
+      }
+    }
+
     const nodeCount = Array.isArray(scene) ? scene.length : 0;
 
     // 序列化快照内容,写入 scene-v{N}.json
@@ -75,15 +128,15 @@ export class VersionsService extends BaseProjectService {
       projectId,
       version,
       scene,
-      connections: project.connections,
-      viewport: project.viewport,
+      connections,
+      viewport,
       title: project.title,
       createdAt: new Date().toISOString(),
     };
     const size = Buffer.byteLength(JSON.stringify(payload));
 
     try {
-      const dir = this.getProjectDir(ownerId, projectId);
+      const dir = this.getProjectDir(project.ownerId, projectId);
       await fs.mkdir(dir, { recursive: true });
       const filePath = path.join(dir, `scene-v${version}.json`);
       await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
@@ -95,7 +148,7 @@ export class VersionsService extends BaseProjectService {
       );
       this.logsService.log('project', `版本快照文件写入失败: ${projectId}`, {
         level: 'warn',
-        userId: ownerId,
+        userId,
         meta: { version, error: err instanceof Error ? err.message : String(err) },
       });
     }
@@ -110,7 +163,7 @@ export class VersionsService extends BaseProjectService {
         version,
         size,
         nodeCount,
-        createdBy: ownerId,
+        createdBy: userId,
         label: opts.label ?? null,
         source: opts.source ?? 'manual',
       },
@@ -120,7 +173,7 @@ export class VersionsService extends BaseProjectService {
     await this.evictVersions(projectId);
 
     this.logsService.log('project', `创建版本快照: ${project.title}`, {
-      userId: ownerId,
+      userId,
       meta: { id: projectId, version, source: record.source, nodeCount },
     });
 
@@ -129,7 +182,7 @@ export class VersionsService extends BaseProjectService {
 
   /** 版本列表(元数据),按 version 降序 */
   async listVersions(ownerId: string, projectId: string): Promise<ProjectVersion[]> {
-    await this.assertOwner(ownerId, projectId);
+    await this.assertVersionAccess(ownerId, projectId, false);
     return this.prisma.projectVersion.findMany({
       where: { projectId },
       orderBy: { version: 'desc' },
@@ -142,14 +195,14 @@ export class VersionsService extends BaseProjectService {
     projectId: string,
     version: number,
   ): Promise<Record<string, unknown>> {
-    await this.assertOwner(ownerId, projectId);
+    const { ownerId: storageOwner } = await this.assertVersionAccess(ownerId, projectId, false);
     const record = await this.prisma.projectVersion.findUnique({
       where: { projectId_version: { projectId, version } },
     });
     if (!record) {
       throw notFound('VERSION_NOT_FOUND', 'Snapshot version not found');
     }
-    const filePath = this.getVersionFilePath(ownerId, projectId, version);
+    const filePath = this.getVersionFilePath(storageOwner, projectId, version);
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       return JSON.parse(raw) as Record<string, unknown>;
@@ -165,7 +218,7 @@ export class VersionsService extends BaseProjectService {
 
   /** 删除指定快照(文件 + 元数据 + 解除资源保护) */
   async deleteVersion(ownerId: string, projectId: string, version: number): Promise<void> {
-    await this.assertOwner(ownerId, projectId);
+    const { ownerId: storageOwner } = await this.assertVersionAccess(ownerId, projectId, true);
     const record = await this.prisma.projectVersion.findUnique({
       where: { projectId_version: { projectId, version } },
     });
@@ -174,11 +227,11 @@ export class VersionsService extends BaseProjectService {
     }
 
     // 删除快照文件(文件不存在则忽略)
-    const filePath = this.getVersionFilePath(ownerId, projectId, version);
+    const filePath = this.getVersionFilePath(storageOwner, projectId, version);
     await fs.unlink(filePath).catch(() => {});
 
     // 解除该快照引用的资源保护
-    const scene = await this.readSnapshotScene(ownerId, projectId, version).catch(() => null);
+    const scene = await this.readSnapshotScene(storageOwner, projectId, version).catch(() => null);
     if (scene) {
       const keys = this.resourceService.extractStorageKeysFromScene(scene);
       await this.releaseResources(keys);
@@ -212,9 +265,10 @@ export class VersionsService extends BaseProjectService {
     lastSyncedAt: Date | null;
   }> {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.ownerId !== ownerId) {
+    if (!project) {
       throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
     }
+    await this.assertVersionAccess(ownerId, projectId, true);
     const record = await this.prisma.projectVersion.findUnique({
       where: { projectId_version: { projectId, version } },
     });
@@ -291,6 +345,22 @@ export class VersionsService extends BaseProjectService {
       viewport,
     });
 
+    // 回退后创建新快照副本(不删除旧快照):
+    // 回退结果本身成为新的还原点,用户仍可再次回退到任意历史版本;
+    // 旧快照保留,直到超出 30 天保留期或队列上限才被淘汰。
+    try {
+      await this.createVersion(ownerId, projectId, {
+        label: '回退副本',
+        source: 'rollback',
+      });
+    } catch (err) {
+      this.logger.warn(
+        `回退后创建快照副本失败(projectId=${projectId}, version=${version}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
     return {
       version: updated.version,
       warnings,
@@ -301,7 +371,7 @@ export class VersionsService extends BaseProjectService {
 
   /** 手动触发淘汰清理(供管理后台使用) */
   async runCleanup(ownerId: string, projectId: string): Promise<number> {
-    await this.assertOwner(ownerId, projectId);
+    await this.assertVersionAccess(ownerId, projectId, true);
     const before = await this.prisma.projectVersion.count({ where: { projectId } });
     await this.evictVersions(projectId);
     const after = await this.prisma.projectVersion.count({ where: { projectId } });
@@ -353,13 +423,59 @@ export class VersionsService extends BaseProjectService {
 
   // ========== 内部方法 ==========
 
-  private async assertOwner(ownerId: string, projectId: string): Promise<void> {
+  /**
+   * 版本访问权限: 项目 owner 或协作成员。
+   * - write=true: owner 或协作成员 editor/owner 角色可操作(保存/回退/删除)
+   * - write=false: owner 或任意协作成员(含 viewer)可读
+   * 返回项目 ownerId(快照文件按项目 owner 目录存储)。
+   */
+  private async assertVersionAccess(
+    userId: string,
+    projectId: string,
+    write: boolean,
+  ): Promise<{ ownerId: string }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { ownerId: true },
     });
-    if (!project || project.ownerId !== ownerId) {
+    if (!project) {
       throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
+    }
+    if (project.ownerId === userId) return project;
+
+    const member = await this.prisma.collaborationMember.findFirst({
+      where: {
+        room: { canvasId: projectId, status: 'active' },
+        userId,
+        status: { not: 'banned' },
+      },
+      select: { role: true },
+    });
+    if (!member) {
+      throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
+    }
+    const canWrite = member.role === 'owner' || member.role === 'editor';
+    if (write && !canWrite) {
+      throw notFound('PROJECT_NOT_FOUND', 'Project not found or access denied');
+    }
+    return project;
+  }
+
+  /** 比较指定版本的快照 scene 与给定 scene 是否相同(内容去重用) */
+  private async snapshotSceneEquals(
+    storageOwner: string,
+    projectId: string,
+    version: number,
+    scene: unknown,
+  ): Promise<boolean> {
+    const filePath = this.getVersionFilePath(storageOwner, projectId, version);
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const payload = JSON.parse(raw) as { scene?: unknown };
+      return JSON.stringify(payload.scene) === JSON.stringify(scene);
+    } catch {
+      // 快照文件缺失/损坏:不去重,直接创建
+      return false;
     }
   }
 
@@ -404,45 +520,30 @@ export class VersionsService extends BaseProjectService {
   }
 
   /**
-   * 时间窗口淘汰策略:
-   * - 24 小时内: 全保留
-   * - 24 小时 ~ 7 天: 每 2 小时保留一个
-   * - 7 天以上: 每天保留一个
-   * - 硬性上限: 最多 30 个(超出时从最旧开始删)
+   * 快照淘汰策略(时间维度):
+   * - 保留最近 SNAPSHOT_RETENTION_DAYS(30) 天内的全部快照,不做窗口抽样
+   * - 超过 30 天自动清理
+   * - 兜底上限 MAX_VERSIONS:极端高频保存时从最旧开始删,防止存储膨胀
    */
   private async evictVersions(projectId: string): Promise<void> {
     const versions = await this.prisma.projectVersion.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
     });
-    if (versions.length <= MAX_VERSIONS) return;
+    if (versions.length === 0) return;
 
     const now = Date.now();
-    // 分组桶: 每窗口保留最新一个
-    const buckets = new Map<string, ProjectVersion>();
-    for (const v of versions) {
-      const age = now - v.createdAt.getTime();
-      if (age <= DAY_MS) continue; // 24h 内全保留
-      const windowMs = age <= WEEK_MS ? 2 * HOUR_MS : DAY_MS;
-      const bucketKey = `${windowMs}:${Math.floor(v.createdAt.getTime() / windowMs)}`;
-      const existing = buckets.get(bucketKey);
-      if (!existing || v.createdAt > existing.createdAt) {
-        buckets.set(bucketKey, v);
-      }
-    }
-
+    const retentionMs = SNAPSHOT_RETENTION_DAYS * DAY_MS;
     const toRemove = new Set<string>();
+
+    // 1. 超期清理:超过 30 天的快照全部移除(时间维度策略)
     for (const v of versions) {
-      const age = now - v.createdAt.getTime();
-      if (age <= DAY_MS) continue;
-      const windowMs = age <= WEEK_MS ? 2 * HOUR_MS : DAY_MS;
-      const bucketKey = `${windowMs}:${Math.floor(v.createdAt.getTime() / windowMs)}`;
-      if (buckets.get(bucketKey)?.id !== v.id) {
+      if (now - v.createdAt.getTime() > retentionMs) {
         toRemove.add(v.id);
       }
     }
 
-    // 硬性上限: 保留最新 MAX_VERSIONS 个,超出部分从最旧开始删
+    // 2. 兜底上限:保留最新 MAX_VERSIONS 个,超出部分从最旧开始删
     const kept = versions.filter((v) => !toRemove.has(v.id));
     const excess = kept.length - MAX_VERSIONS;
     if (excess > 0) {

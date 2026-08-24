@@ -107,6 +107,11 @@ function acquireDoc(docName: string, initialJson: unknown): DocEntry {
   if (token) {
     const websocket = new HocuspocusProviderWebsocket({
       url: buildWsUrl(docName),
+      // 断线重连指数退避:500ms 起步,1.6x 指数增长,30s 封顶。
+      // 服务器不可用期间避免高频重连轰炸(默认 maxDelay 仅 2.5s)。
+      delay: 500,
+      factor: 1.6,
+      maxDelay: 30_000,
     });
     const provider = new HocuspocusProvider({
       url: buildWsUrl(docName),

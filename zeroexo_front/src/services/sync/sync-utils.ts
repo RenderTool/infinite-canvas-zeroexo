@@ -10,6 +10,7 @@ import { getProject, loadProjectGraph } from '@zeroexo/plugin-persistence';
 import { listAssets } from '@/features/asset-picker/asset-store.js';
 import { listPrompts } from '@/features/prompt-library/prompt-store.js';
 import { isOnline, setTabInactive, notifyDirtyChanged } from './sync-store.js';
+import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 
 // ===== 调试函数 =====
 
@@ -193,28 +194,33 @@ function enqueuePush(projectId: string, fn: () => Promise<void>): void {
   });
 }
 
-// ===== 指数退避自动重试(429 限流 / 临时失败) =====
+// ===== 合批自动重试(429 限流 / 临时失败 / 断网重连) =====
 
 /**
- * 每个项目独立的退避重试调度器。
- * 当 push 因 429 限流或临时网络错误失败时,自动按指数退避重新推送,
- * 避免用户在"错误以为已同步"状态下丢失数据。
+ * 全局合批退避重试调度器。
  *
- * 设计要点:
- * - 每个项目维护独立的 timer 与 attempt 计数,互不干扰
- * - 指数退避:2s → 4s → 8s → ... 上限 60s,最多 MAX_RETRIES 次
- * - 重试成功或达到上限后,清空该项目的调度状态
- * - 用户手动操作(onProjectUpdated)会 reset 退避计数,从 2s 重新开始
+ * 旧实现:每个失败项目独立维护 timer + attempt,断网重连时 N 个项目各自退避重试,
+ * 造成「大量堆积任务一个一个重连」,网络恢复瞬间产生请求风暴。
+ *
+ * 新实现:所有待重试项目收拢进一个全局批次,共享单个退避定时器:
+ * - 网络连通后合批执行:一次性重试全部待推送项目(复用 enqueuePush 串行队列,不并发打爆)
+ * - 网络离线时:不消耗重试次数,按固定探测间隔等待连通,连通后再合批提交
+ * - 指数退避:2s → 4s → 8s → ... 上限 60s,最多 MAX_AUTO_RETRIES 次(仅对"在线但失败"累计)
+ * - 用户手动操作(onProjectUpdated)重新标记 dirty,失败项目会重新进入批次
  */
-const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const retryAttempts = new Map<string, number>();
+const pendingRetryFns = new Map<string, () => Promise<void>>();
+const pendingRetryDelays = new Map<string, number>();
+let batchRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let batchRetryAttempt = 0;
 
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const MAX_AUTO_RETRIES = 5;
+/** 离线探测间隔:离线时按此间隔轮询,等待网络恢复(不累计重试次数) */
+const OFFLINE_PROBE_INTERVAL_MS = 10_000;
 
 /**
- * 调度一次自动重试。
+ * 调度一次自动重试(加入全局合批)。
  * @param projectId 项目 id
  * @param fn 重试时要执行的回调(通常为再次调用 syncProjectToCloud)
  * @param preferredDelaySec 服务端建议的等待秒数(429 的 Retry-After),无则按指数退避
@@ -224,46 +230,86 @@ export function scheduleAutoRetry(
   fn: () => Promise<void>,
   preferredDelaySec?: number,
 ): void {
-  // 已有未完成的调度 → 直接跳过(避免重复调度)
-  if (retryTimers.has(projectId)) return;
+  pendingRetryFns.set(projectId, fn);
+  if (typeof preferredDelaySec === 'number' && Number.isFinite(preferredDelaySec) && preferredDelaySec >= 0) {
+    pendingRetryDelays.set(projectId, preferredDelaySec);
+  }
+  // 已有全局批次在排队 → 仅并入,不另开定时器
+  if (batchRetryTimer) return;
+  scheduleBatchRetry();
+}
 
-  const attempt = (retryAttempts.get(projectId) ?? 0) + 1;
-  if (attempt > MAX_AUTO_RETRIES) {
-    debugLog(`[sync] auto-retry exhausted for ${projectId} after ${MAX_AUTO_RETRIES} attempts. Manual sync required.`);
-    retryAttempts.delete(projectId);
+function scheduleBatchRetry(): void {
+  // 网络离线:按固定间隔探测,等待连通后再合批(不消耗重试次数,避免高频重连)
+  if (!isOnline()) {
+    debugLog(`[sync] offline, probing network in ${OFFLINE_PROBE_INTERVAL_MS}ms (pending=${pendingRetryFns.size})`);
+    batchRetryTimer = setTimeout(() => {
+      batchRetryTimer = null;
+      scheduleBatchRetry();
+    }, OFFLINE_PROBE_INTERVAL_MS);
     return;
   }
-  retryAttempts.set(projectId, attempt);
+
+  const attempt = batchRetryAttempt + 1;
+  if (attempt > MAX_AUTO_RETRIES) {
+    debugLog(`[sync] batch auto-retry exhausted after ${MAX_AUTO_RETRIES} attempts. Manual sync required.`);
+    batchRetryAttempt = 0;
+    pendingRetryFns.clear();
+    pendingRetryDelays.clear();
+    return;
+  }
+  batchRetryAttempt = attempt;
 
   // 延迟计算:
-  // - 有 Retry-After(秒)时优先采用,但要限制在 [BASE, MAX] 内(避免服务端提示过短/过长)
+  // - 批次内所有项目的 Retry-After 取最大,并限制在 [BASE, MAX] 内
   // - 无提示时按指数退避:2s → 4s → 8s → 16s → 32s(封顶 60s)
+  let maxPreferredDelay = 0;
+  for (const sec of pendingRetryDelays.values()) {
+    if (sec > maxPreferredDelay) maxPreferredDelay = sec;
+  }
   const exponential = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
   let delay = exponential;
-  if (typeof preferredDelaySec === 'number' && Number.isFinite(preferredDelaySec) && preferredDelaySec >= 0) {
+  if (maxPreferredDelay > 0) {
     delay = Math.min(
-      Math.max(preferredDelaySec * 1000, RETRY_BASE_DELAY_MS),
+      Math.max(maxPreferredDelay * 1000, RETRY_BASE_DELAY_MS),
       RETRY_MAX_DELAY_MS,
     );
   }
-  debugLog(`[sync] scheduling auto-retry #${attempt} for ${projectId} in ${delay}ms (rate-limit / transient failure)`);
+  debugLog(`[sync] scheduling batch auto-retry #${attempt} for ${pendingRetryFns.size} project(s) in ${delay}ms (rate-limit / transient failure)`);
 
-  const timer = setTimeout(async () => {
-    retryTimers.delete(projectId);
-    try {
-      await enqueuePush(projectId, fn);
-      // 重试成功 → 清空调度状态
-      retryAttempts.delete(projectId);
-    } catch {
-      // fn 内部处理失败,此处仅保留 attempts,等待下次调度
-    }
+  batchRetryTimer = setTimeout(() => {
+    batchRetryTimer = null;
+    void runBatchRetry();
   }, delay);
-  retryTimers.set(projectId, timer);
 }
 
-/** 重置某项目的退避计数(用户在编辑器内再次操作时调用) */
-export function resetAutoRetry(projectId: string): void {
-  retryAttempts.delete(projectId);
+/** 合批执行全部待重试任务(网络已连通) */
+async function runBatchRetry(): Promise<void> {
+  const tasks = Array.from(pendingRetryFns.entries());
+  pendingRetryFns.clear();
+  pendingRetryDelays.clear();
+
+  for (const [projectId, fn] of tasks) {
+    try {
+      // enqueuePush 保证同一项目串行;合批提交,避免并发打爆
+      await enqueuePush(projectId, fn);
+      // 重试成功 → 无额外清理(脏标记由 markProjectClean 处理)
+    } catch {
+      // fn 内部处理失败(如 409/500),失败项目由 syncProjectToCloud 内部重新 scheduleAutoRetry
+    }
+  }
+
+  // 批次执行完:若仍有项目失败并重新入队,已由新定时器接管;全部成功则清零重试计数
+  if (pendingRetryFns.size === 0) {
+    batchRetryAttempt = 0;
+  }
+}
+
+/** 重置全局合批计数(网络恢复/手动操作时调用) */
+export function resetAutoRetry(_projectId: string): void {
+  // 合批模式下按项目重置意义不大:网络连通后批次自动清零;
+  // 保留空实现以兼容旧调用方,避免破坏 exports 契约。
+  void _projectId;
 }
 
 // ===== CloudProject 接口(内部使用) =====
@@ -315,6 +361,38 @@ export function notifyProjectConflict(conflict: ProjectConflict): void {
 }
 
 /**
+ * 冲突自动解决快照信息(替代弹窗:已保存云端快照,提示用户可跳转历史)。
+ * direction 区分解决方向,提示条据此展示不同文案:
+ * - local-active: 本地为活跃版本,云端备份为快照,本地覆盖云端
+ * - local-stale:  本地为历史数据,本地旧图留档为快照,拉取云端覆盖本地
+ */
+export interface ConflictSnapshotInfo {
+  projectId: string;
+  title: string;
+  cloudDeleted?: boolean;
+  snapshotVersion?: number;
+  /** 冲突解决方向(不传 = 兼容旧逻辑,默认按云端较新处理) */
+  direction?: 'local-active' | 'local-stale';
+}
+
+const PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME = 'zeroexo:project-conflict-snapshot';
+
+/**
+ * 通知「冲突已自动解决并保存云端快照」。
+ * 云端版本较新或云端已删除时,系统自动按本地优先策略处理:
+ * - 云端较新:先保存云端版本为快照(还原点),再推送本地覆盖
+ * - 云端已删除:自动重新创建
+ * 前端顶部提示条监听此事件,提示用户可点击跳转历史快照查看还原点。
+ */
+export function notifyConflictSnapshot(info: ConflictSnapshotInfo): void {
+  debugLog(`[sync] notifyConflictSnapshot: projectId=${info.projectId}, cloudDeleted=${info.cloudDeleted}, snapshotVersion=${info.snapshotVersion}`);
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent(PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME, { detail: info }),
+  );
+}
+
+/**
  * 检测单项目冲突:云端版本是否高于本地 + 本地是否有未推送修改
  * @returns 冲突信息(版本不一致时),版本一致或未同步返回 null
  */
@@ -359,6 +437,25 @@ export async function checkProjectConflict(projectId: string): Promise<ProjectCo
     }
     debugError('[sync] checkProjectConflict failed:', err);
     return null;
+  }
+}
+
+// ===== 协作活跃检测(Yjs 实时同步期间的 HTTP 推送抑制) =====
+
+/**
+ * 判断指定项目当前是否处于活跃协作状态。
+ * 协作 active 期间由 Yjs CRDT 实时合并广播画布编辑,HTTP 全量推送(PATCH scene)
+ * 只会引入 409 冲突与「重连瞬间本地旧图顶掉远端合并结果」的覆盖风险,
+ * 因此 sync-service 在 onProjectUpdated 时抑制防抖推送,协作结束后推送自动恢复
+ * (dirty 标记仍保留,合并后的最终状态会补推云端落库)。
+ * @param projectId 项目 id(与协作房间 canvasId 对应)
+ */
+function isCollaborationActive(projectId: string): boolean {
+  try {
+    const s = useCollaborationStore.getState();
+    return s.active && s.canvasId === projectId;
+  } catch {
+    return false;
   }
 }
 
@@ -419,11 +516,13 @@ export {
   markProjectClean,
   isProjectDirty,
   hasLocalChanges,
+  isCollaborationActive,
   markPendingDelete,
   clearPendingDelete,
   pendingDeleteCloudIds,
   enqueuePush,
   PROJECT_CONFLICT_EVENT_NAME,
+  PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME,
   debugLog,
   debugError,
   markProjectSynced,

@@ -20,9 +20,9 @@ import { ProxyProvider } from '@zeroexo/plugin-ai-provider';
 import type { AIProvider } from '@zeroexo/plugin-ai-provider';
 import { apiFetch, ApiError, getToken } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
-import { onProjectUpdated, syncProjectFromCloud, markProjectDirty, markProjectClean, checkProjectConflict, forcePullProjectFromCloud, forcePushLocalToCloud, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud } from '@/services/sync/sync-service.js';
+import { onProjectUpdated, syncProjectFromCloud, syncProjectToCloud, markProjectDirty, checkProjectConflict, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud, notifyConflictSnapshot } from '@/services/sync/sync-service.js';
 import { markNodesDirty, debugLog } from '@/services/sync/sync-utils.js';
-import type { ProjectConflict } from '@/services/sync/sync-service.js';
+import type { ConflictSnapshotInfo } from '@/services/sync/sync-service.js';
 import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
 import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
 import { useCollaboration } from '@/features/collaboration/use-collaboration.js';
@@ -32,8 +32,8 @@ import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
 import { createProductionManagerExtensions } from '@/features/canvas-nodes/production-manager/production-manager-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
-import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT, PROJECT_CONFLICT_EVENT } from '@/services/sync/broadcast-channel-service.js';
-import { collectImageStorageKeys, getProject, loadProjectGraph, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
+import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT, PROJECT_CONFLICT_SNAPSHOT_EVENT } from '@/services/sync/broadcast-channel-service.js';
+import { collectImageStorageKeys, getProject, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
 
 export type InteractionMode = 'select' | 'pan';
@@ -122,10 +122,10 @@ export function useEditorState(canvasId: string): {
   reloadGraph: (graph: GraphModel) => void;
   cloudUpdateAvailable: boolean;
   clearCloudUpdateAvailable: () => void;
-  conflict: ProjectConflict | null;
-  onPullCloud: () => void;
-  onPushLocal: () => void;
-  onConflictClose: () => void;
+  /** 冲突自动解决提示(顶部提示条展示,可跳转历史快照还原点) */
+  snapshotHint: ConflictSnapshotInfo | null;
+  /** 关闭冲突提示条 */
+  onCloseSnapshotHint: () => void;
   collaboration: ReturnType<typeof useCollaboration> | null;
   awarenessStates: Map<number, AwarenessState>;
   collaborationActive: boolean;
@@ -145,6 +145,32 @@ export function useEditorState(canvasId: string): {
   // 直接引用 collaboration 会捕获首个渲染的旧值(此时 active=false,远端光标永远收不到本地广播)
   const collaborationRef = useRef(collaboration);
   collaborationRef.current = collaboration;
+
+  // 协作掉线警告去抖间隔:Yjs 断开后去抖 3s 仍断才提示,避免信号抖动频繁弹窗
+  const COLLAB_OFFLINE_WARN_DEBOUNCE_MS = 3000;
+  const collabOfflineWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 协作掉线警告(去抖):协作 active 期间 Yjs 画布连接断开 → 去抖后提示「正在重连」;
+  // 若在去抖窗口内恢复连接则取消提示,避免频繁掉线重连(信号不好)时警告风暴
+  useEffect(() => {
+    if (collaboration.active && canvasSync.status === 'disconnected') {
+      if (collabOfflineWarnTimerRef.current === null) {
+        collabOfflineWarnTimerRef.current = setTimeout(() => {
+          collabOfflineWarnTimerRef.current = null;
+          message.warning(t('sync.collabDisconnected'));
+        }, COLLAB_OFFLINE_WARN_DEBOUNCE_MS);
+      }
+    } else if (collabOfflineWarnTimerRef.current !== null) {
+      clearTimeout(collabOfflineWarnTimerRef.current);
+      collabOfflineWarnTimerRef.current = null;
+    }
+    return () => {
+      if (collabOfflineWarnTimerRef.current !== null) {
+        clearTimeout(collabOfflineWarnTimerRef.current);
+        collabOfflineWarnTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasSync.status, collaboration.active]);
   // tRef: 保存最新 t 供 useEffect 内部使用(避免把 t 加入 useEffect 依赖导致 editor 重建)
   const tRef = useRef(t);
   tRef.current = t;
@@ -170,10 +196,11 @@ export function useEditorState(canvasId: string): {
    */
   const [cloudUpdateAvailable, setCloudUpdateAvailable] = useState(false);
   /**
-   * 同步冲突:云端版本与本地版本不一致(或云端已删除)时由 PROJECT_CONFLICT_EVENT 触发。
-   * 由 SyncConflictDialog 展示,用户选择"拉取云端"或"推送本地"。
+   * 冲突自动解决提示:云端版本不一致 / 云端已删除时,系统按「本地优先」自动处理
+   * (保存云端快照 + 推送本地 / 自动重新创建),由顶部提示条 ConflictSnapshotHint 展示,
+   * 用户可点击跳转历史快照查看还原点。
    */
-  const [conflict, setConflict] = useState<ProjectConflict | null>(null);
+  const [snapshotHint, setSnapshotHint] = useState<ConflictSnapshotInfo | null>(null);
   /**
    * reloadGraph 函数 ref:冲突解决"拉取云端"后,用云端 graph 替换当前编辑器 graph
    * 通过 ref 暴露 useEffect 内部的闭包(需访问 suppressNextSync 标志避免拉取-推送循环)
@@ -262,22 +289,14 @@ export function useEditorState(canvasId: string): {
           if (err instanceof ApiError && err.status === 404) {
             const local = await getProject(canvasId);
             if (local?.cloudId) {
-              // 项目曾在云端但被删除 → 弹窗让用户选择"推送本地重新创建"或"取消"
-              // 不再直接删除本地数据,而是通过 SyncConflictDialog 让用户决定
-              if (!isMountedRef.current) return;
-              setConflict({
-                projectId: canvasId,
-                title: local.title,
-                localVersion: local.version ?? 0,
-                cloudVersion: 0,
-                localUpdatedAt: local.updatedAt,
-                cloudUpdatedAt: '',
-                localNodeCount: 0,
-                cloudNodeCount: 0,
-                hasLocalChanges: true,
-                cloudDeleted: true,
-              });
-              // 不再 return,允许继续加载本地数据
+              // 项目曾在云端但被删除 → 本地优先:自动重新创建为全新云端项目(不再弹窗)
+              // 先通知提示条(云端已删除场景),再异步重建,不阻塞本地数据加载
+              notifyConflictSnapshot({ projectId: canvasId, title: local.title, cloudDeleted: true });
+              try {
+                await repushLocalAsNewCloud(canvasId);
+              } catch (repushErr) {
+                console.warn('[use-editor-state] repush local as new cloud failed:', repushErr);
+              }
             } else if (!local) {
               // 本地与云端均无 → 项目不存在
               message.error(i18n.t('errors.PROJECT_NOT_FOUND'));
@@ -326,11 +345,14 @@ export function useEditorState(canvasId: string): {
 
         if (!isMountedRef.current) return;
 
-        // 刷新页面兜底:检测版本差异,若有冲突弹出 SyncConflictDialog
+        // 刷新页面兜底:检测版本差异,若有冲突按「本地优先」自动解决
+        // (syncProjectToCloud 内部先保存云端快照再推送本地覆盖,完成后通知提示条)
         try {
           const detected = await checkProjectConflict(canvasId);
           if (!isMountedRef.current) return;
-          if (detected) setConflict(detected);
+          if (detected) {
+            await syncProjectToCloud(canvasId);
+          }
         } catch (err) {
           console.warn('[use-editor-state] checkProjectConflict failed:', err);
         }
@@ -416,25 +438,15 @@ export function useEditorState(canvasId: string): {
     };
     window.addEventListener(PROJECT_DELETED_EVENT, handleProjectDeleted);
 
-    // 监听云端冲突事件:版本不一致或云端已删除时弹出 SyncConflictDialog
-    const handleProjectConflict = (e: Event): void => {
-      const detail = (e as CustomEvent<ProjectConflict>).detail;
+    // 监听冲突自动解决事件:云端冲突/已删除已按「本地优先」自动处理,
+    // 顶部提示条展示还原点信息,用户可点击跳转历史快照
+    const handleProjectConflictSnapshot = (e: Event): void => {
+      const detail = (e as CustomEvent<ConflictSnapshotInfo>).detail;
       if (!detail || detail.projectId !== canvasId) return;
-      console.log(`[sync] >> treating PROJECT_CONFLICT_EVENT as conflict for ${detail.projectId}`);
-      setConflict({
-        projectId: canvasId,
-        title: detail.title ?? '',
-        localVersion: detail.localVersion ?? 0,
-        cloudVersion: detail.cloudVersion ?? 0,
-        localUpdatedAt: detail.localUpdatedAt ?? '',
-        cloudUpdatedAt: detail.cloudUpdatedAt ?? '',
-        localNodeCount: detail.localNodeCount ?? 0,
-        cloudNodeCount: detail.cloudNodeCount ?? 0,
-        hasLocalChanges: detail.hasLocalChanges ?? false,
-        cloudDeleted: detail.cloudDeleted ?? false,
-      });
+      console.log(`[sync] >> treating PROJECT_CONFLICT_SNAPSHOT_EVENT as snapshot hint for ${detail.projectId}`);
+      setSnapshotHint(detail);
     };
-    window.addEventListener(PROJECT_CONFLICT_EVENT, handleProjectConflict);
+    window.addEventListener(PROJECT_CONFLICT_SNAPSHOT_EVENT, handleProjectConflictSnapshot);
 
     // 会话被抢占事件已废弃 — Yjs 实时协作允许多标签页共存
 
@@ -922,7 +934,7 @@ export function useEditorState(canvasId: string): {
       // 移除云端 diff(版本差异)事件监听
       window.removeEventListener(PROJECT_DIFF_EVENT, handleProjectDiff);
       window.removeEventListener(PROJECT_DELETED_EVENT, handleProjectDeleted);
-      window.removeEventListener(PROJECT_CONFLICT_EVENT, handleProjectConflict);
+      window.removeEventListener(PROJECT_CONFLICT_SNAPSHOT_EVENT, handleProjectConflictSnapshot);
       unsubGraph();
       unsubSelection();
       unsubViewport();
@@ -1146,52 +1158,9 @@ export function useEditorState(canvasId: string): {
     setCloudUpdateAvailable(false);
   }, []);
 
-  /**
-   * 冲突解决:"拉取云端" — 强制从云端拉取合并到本地,再用云端 graph 替换当前编辑器 graph。
-   * 云端 404(已删除)时 forcePullProjectFromCloud 会删除本地数据。
-   */
-  const onPullCloud = useCallback((): void => {
-    void (async () => {
-      try {
-        await forcePullProjectFromCloud(canvasId);
-        if (conflict?.cloudDeleted) {
-          // 云端已删除 → 本地也随之删除,返回首页
-          window.location.href = '/';
-          return;
-        }
-        const graph = await loadProjectGraph(canvasId);
-        if (graph) reloadGraph(graph);
-        setConflict(null);
-        markProjectClean(canvasId);
-      } catch (err) {
-        console.error('[use-editor-state] pull cloud failed:', err);
-        message.error(i18n.t('sync.error'));
-      }
-    })();
-  }, [canvasId, conflict, reloadGraph, message]);
-
-  /** 冲突解决:"推送本地" — 本地覆盖云端;云端已删除时重新创建为全新云端项目 */
-  const onPushLocal = useCallback((): void => {
-    const currentGraph = editor?.store.getGraph();
-    void (async () => {
-      try {
-        if (conflict?.cloudDeleted) {
-          await repushLocalAsNewCloud(canvasId);
-        } else {
-          await forcePushLocalToCloud(canvasId, currentGraph as GraphModel | undefined);
-        }
-        markProjectClean(canvasId);
-        setConflict(null);
-      } catch (err) {
-        console.error('[use-editor-state] push local failed:', err);
-        message.error(i18n.t('sync.error'));
-      }
-    })();
-  }, [canvasId, conflict, editor, message]);
-
-  /** 关闭冲突弹窗(用户放弃处理,保留当前本地状态) */
-  const onConflictClose = useCallback((): void => {
-    setConflict(null);
+  /** 关闭冲突提示条(用户主动关闭或已跳转历史快照) */
+  const onCloseSnapshotHint = useCallback((): void => {
+    setSnapshotHint(null);
   }, []);
 
   return {
@@ -1202,10 +1171,8 @@ export function useEditorState(canvasId: string): {
     reloadGraph,
     cloudUpdateAvailable,
     clearCloudUpdateAvailable,
-    conflict,
-    onPullCloud,
-    onPushLocal,
-    onConflictClose,
+    snapshotHint,
+    onCloseSnapshotHint,
     collaboration,
     awarenessStates: collaboration.awarenessStates,
     collaborationActive: collaboration.active,

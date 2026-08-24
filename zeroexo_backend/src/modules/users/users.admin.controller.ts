@@ -20,6 +20,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { ResourceService } from '../assets/resource.service';
 import { MinioService } from '../assets/minio.service';
 import { PlanService } from '../billing/plan.service';
+import { CollaborationService } from '../collaboration/collaboration.service';
 import {
   LongThrottle,
   MediumThrottle,
@@ -44,6 +45,7 @@ export class AdminUsersController {
     private readonly resourceService: ResourceService,
     private readonly minioService: MinioService,
     private readonly planService: PlanService,
+    private readonly collaborationService: CollaborationService,
   ) {}
 
   @Get()
@@ -418,6 +420,13 @@ export class AdminUsersController {
       where: { id },
       data: { deletedAt: new Date(), disabled: true },
     });
+
+    // 注销级联：发起者账户注销 → 其发起的协作房间置为"已失效"并广播 room_closed，
+    // 参与者前端据此显示失效闭环移除。级联失败不阻塞注销主流程，仅记录日志。
+    await this.collaborationService.expireRoomsByOwner(id).catch((err: unknown) => {
+      this.logger.warn(`[deleteUser] 级联失效协作房间失败 userId=${id}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
     return { message: '用户已移入回收站(保留30天)' };
   }
 

@@ -16,8 +16,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, Image as ImageIcon, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
-import { Dropdown, Tooltip } from 'antd';
+import { Check, Copy, Image as ImageIcon, MoreHorizontal, Pencil, Share2, Trash2 } from 'lucide-react';
+import { Dropdown, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { AuthorizedImage } from '@/shared/components/authorized-media.js';
@@ -29,7 +29,14 @@ export type ProjectCardAction =
   | { type: 'rename'; label?: string; onClick: () => void }
   | { type: 'delete'; label?: string; onClick: () => void }
   | { type: 'cover'; label?: string; onClick: () => void }
+  | { type: 'collab'; label?: string; onClick: () => void }
   | { type: 'custom'; label: string; icon?: ReactNode; danger?: boolean; onClick: () => void };
+
+/** 卡片右上角协作状态 Tag（tone 决定颜色） */
+export interface ProjectCardStatusTag {
+  label: string;
+  tone: 'success' | 'processing' | 'warning' | 'error';
+}
 
 export interface ProjectCardProps {
   /** 卡片变体: normal 普通项目 / create 空白创建 */
@@ -48,6 +55,10 @@ export interface ProjectCardProps {
   selected?: boolean;
   /** 切换选中回调（提供此 prop 会显示复选框） */
   onToggleSelect?: () => void;
+  /** 右上角状态 Tag（如"协作中/我参与的/已失效"） */
+  statusTag?: ProjectCardStatusTag;
+  /** 失效蒙层：封面置灰 + 中央"已失效"提示（失效协作画布） */
+  expiredOverlay?: boolean;
   /** 自定义类名 */
   className?: string;
   /** 自定义样式 */
@@ -65,6 +76,8 @@ export function ProjectCard({
   actions,
   selected = false,
   onToggleSelect,
+  statusTag,
+  expiredOverlay = false,
   className,
   style,
 }: ProjectCardProps): React.ReactElement {
@@ -95,6 +108,7 @@ export function ProjectCard({
     if (action.type === 'rename') return <Pencil size={ICON_SIZE} />;
     if (action.type === 'delete') return <Trash2 size={ICON_SIZE} />;
     if (action.type === 'cover') return <ImageIcon size={ICON_SIZE} />;
+    if (action.type === 'collab') return <Share2 size={ICON_SIZE} />;
     return action.icon ?? null;
   };
 
@@ -103,6 +117,7 @@ export function ProjectCard({
     if (action.type === 'rename') return action.label ?? t('projectCard.renameProject');
     if (action.type === 'delete') return action.label ?? t('projectCard.deleteProject');
     if (action.type === 'cover') return action.label ?? t('projectCard.setCover');
+    if (action.type === 'collab') return action.label ?? t('projectCard.collaboration');
     return action.label;
   };
 
@@ -110,6 +125,7 @@ export function ProjectCard({
     if (action.type === 'delete') return true;
     if (action.type === 'copy') return false;
     if (action.type === 'cover') return false;
+    if (action.type === 'collab') return false;
     if (action.type === 'custom') return !!action.danger;
     return false;
   };
@@ -202,6 +218,23 @@ export function ProjectCard({
             </div>
           </div>
         )}
+        {/* 右上角状态 Tag（协作中/我参与的/已失效） */}
+        {statusTag && !onToggleSelect && (
+          <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3 }}>
+            <Tag
+              color={statusTag.tone}
+              style={{
+                marginInlineEnd: 0,
+                fontSize: 11,
+                lineHeight: '18px',
+                borderRadius: 4,
+                border: 'none',
+              }}
+            >
+              {statusTag.label}
+            </Tag>
+          </div>
+        )}
         {isCreate ? (
           <div style={{
             position: 'absolute',
@@ -252,6 +285,31 @@ export function ProjectCard({
           transition: 'opacity 0.3s',
           pointerEvents: 'none',
         }} />
+        {/* 失效蒙层（失效协作画布：置灰 + 中央提示） */}
+        {expiredOverlay && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)',
+            backdropFilter: 'saturate(0.6)',
+            pointerEvents: 'none',
+          }}>
+            <span style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.65)',
+              padding: '4px 12px',
+              borderRadius: 6,
+              background: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.8)',
+            }}>
+              {t('projectCard.expired')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 底部信息 */}

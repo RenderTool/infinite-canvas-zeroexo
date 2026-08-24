@@ -19,6 +19,8 @@ import type {
   UpdateMemberRequest,
   SendMessageRequest,
   MyRoomItem,
+  MyCanvasItem,
+  ParticipatingCanvasItem,
   DeviceType,
   AgentSession,
   AgentSessionMessage,
@@ -59,6 +61,16 @@ export function closeRoom(canvasId: string): Promise<{ message: string }> {
 
 export function listMyRooms(): Promise<MyRoomItem[]> {
   return apiGet(`${COLLAB}/rooms/mine`);
+}
+
+/** 我拥有的画布 + 各画布协作状态（主页"发起协作"模式/协作 Tag） */
+export function listMyCanvases(): Promise<MyCanvasItem[]> {
+  return apiGet(`${COLLAB}/rooms/my-canvases`);
+}
+
+/** 我参与的协作画布列表（含已失效） */
+export function listParticipating(): Promise<ParticipatingCanvasItem[]> {
+  return apiGet(`${COLLAB}/rooms/participating`);
 }
 
 // ==================== 邀请码 ====================
@@ -104,6 +116,11 @@ export function autoJoinRoom(canvasId: string, deviceType?: DeviceType): Promise
 
 export function leaveRoom(canvasId: string): Promise<{ message: string; affected: number }> {
   return apiPost(`${COLLAB}/rooms/${canvasId}/leave`, {});
+}
+
+/** 参与者主动移除自己的成员身份（退出协作 / 失效画布移除） */
+export function removeSelfFromRoom(canvasId: string): Promise<{ message: string; removed: number }> {
+  return apiPost(`${COLLAB}/rooms/${canvasId}/remove-self`, {});
 }
 
 // ==================== 成员管理 ====================

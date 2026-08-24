@@ -1090,7 +1090,7 @@ model CollaborationRoom {
   mode          String   @default("invite-only")
   /// 最大成员数(null=无限制)
   maxMembers    Int?
-  /// 状态: active | closed
+  /// 状态: active | expired（closed 已废弃，关闭统一用 expired 软删除）
   status        String   @default("active")
   /// 邀请过期时间
   expiresAt     DateTime?

@@ -51,6 +51,8 @@ export interface UseCollaborationResult {
   awarenessStates: Map<number, AwarenessState>;
   /** 是否活跃 */
   active: boolean;
+  /** 协作状态: idle(未开启) | active(协作中) | expired(已失效) */
+  status: ReturnType<typeof useCollaborationStore.getState>['status'];
   /** 是否已初始化 */
   initialized: boolean;
   /** 是否正在加入 */
@@ -107,20 +109,21 @@ export function useCollaboration(
   const cursorPendingRef = useRef<Record<string, unknown> | undefined>(undefined);
   const cursorSendTimerRef = useRef<number | null>(null);
 
-  // 初始化协作（auto-join）
+  // 初始化协作（探测房间状态，不再自动创建房间；仅活跃协作建立 SSE 连接）
   const initCollaboration = useCallback(async (id: string) => {
     const deviceType = deviceTypeFromUA();
-    await store.getState().init(id, deviceType);
+    await store.getState().init(id, deviceType, user?.id);
+
+    // 仅当画布处于活跃协作状态时才建立实时事件连接（光标广播等协作功能依赖 active）
+    if (store.getState().status === 'active') {
+      connectCollaborationEvents(id, user?.id);
+    }
 
     // 加载成员列表
     try {
       const members = await listMembers(id);
       store.getState().setMembers(members);
     } catch { /* ignore */ }
-
-    // 建立实时事件连接（SSE），收到成员/消息/房间事件时自动刷新 store
-    // 传入 userId 用于检测自己被踢出（必须依赖 user?.id，避免闭包捕获过时值）
-    connectCollaborationEvents(id, user?.id);
   }, [store, user?.id]);
 
   // 组件挂载时自动加入
@@ -411,6 +414,7 @@ export function useCollaboration(
     members: state.members,
     awarenessStates: state.awarenessStates,
     active: state.active,
+    status: state.status,
     initialized: state.initialized,
     joining: state.joining,
     error: state.error,

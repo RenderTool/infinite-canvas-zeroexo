@@ -185,6 +185,7 @@ export class AgentWorkerService {
               taskId,
               (event.data as any)?.toolName ?? '',
               (event.data as any)?.arguments ?? {},
+              String((event.data as any)?.toolCallId ?? ''),
             );
             // R2-4: 生成类工具暂存参数，tool_result 成功后归档到产物档案库
             const toolNameStr = (event.data as any)?.toolName ?? '';

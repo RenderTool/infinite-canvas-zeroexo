@@ -45,6 +45,7 @@ const SOURCE_LABEL: Record<string, string> = {
   'auto-delete': 'autoDelete',
   'auto-ai': 'autoAi',
   'auto-timer': 'autoTimer',
+  rollback: 'rollback',
 };
 
 export interface VersionDialogsProps {
@@ -259,6 +260,21 @@ export function VersionDialogs({
           <Button size="small" onClick={() => void loadVersions()} disabled={loading}>
             {t('versions.refresh')}
           </Button>
+        </div>
+        <div
+          style={{
+            marginBottom: 8,
+            padding: '6px 10px',
+            borderRadius: 4,
+            fontSize: 12,
+            lineHeight: '18px',
+            color: theme.toolbar.text,
+            background: theme.toolbar.background,
+            border: `1px solid ${theme.toolbar.border}`,
+            opacity: 0.85,
+          }}
+        >
+          {t('versions.retentionHint')}
         </div>
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>

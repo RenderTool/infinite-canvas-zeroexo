@@ -14,7 +14,7 @@
 import { getProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { apiGet, apiDelete, ApiError } from '../api-client.js';
 import type { CloudProject } from './sync-projects.js';
-import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud } from './sync-projects.js';
+import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud, forcePullProjectFromCloud } from './sync-projects.js';
 import { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets } from './sync-resources.js';
 import { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted } from './sync-prompts.js';
 import { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted } from './sync-assets.js';
@@ -23,19 +23,21 @@ import {
   PROJECT_UPDATE_DEBOUNCE_MS, FULL_SYNC_DEBOUNCE_MS,
   markProjectDirty, markProjectClean, isProjectDirty,
   markPendingDelete, clearPendingDelete,
-  enqueuePush, checkProjectConflict,
+  enqueuePush, checkProjectConflict, notifyConflictSnapshot,
+  PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME,
   hasLocalChanges,
+  isCollaborationActive,
 } from './sync-utils.js';
-import type { ProjectConflict } from './sync-utils.js';
+import type { ProjectConflict, ConflictSnapshotInfo } from './sync-utils.js';
 import { isOnline, isTabActive, setSyncStatus, setLastSyncedAt } from './sync-store.js';
 
 // 重新导出子模块的公共 API，保持向后兼容
-export { syncProjectToCloud, forcePushLocalToCloud, pushLocalOverrideCloud, repushLocalAsNewCloud };
+export { syncProjectToCloud, forcePushLocalToCloud, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePullProjectFromCloud };
 export { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets };
 export { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted };
 export { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted };
-export { checkProjectConflict, markProjectDirty, markProjectClean, isProjectDirty };
-export type { ProjectConflict };
+export { checkProjectConflict, markProjectDirty, markProjectClean, isProjectDirty, notifyConflictSnapshot, PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME };
+export type { ProjectConflict, ConflictSnapshotInfo };
 
 // ===== 全量同步状态（本地变量，避免 ES 模块导入赋值错误）=====
 let isFullSyncing = false;
@@ -155,6 +157,13 @@ export async function onProjectUpdated(localId: string): Promise<void> {
     return;
   }
   if (!isOnline()) return;
+  // 协作 active(房间开启)时抑制 HTTP 防抖推送:Yjs 已实时合并广播画布编辑,
+  // HTTP 全量推送(PATCH scene)只会引入 409 与「重连瞬间本地旧图顶掉远端合并结果」的
+  // 覆盖风险。dirty 标记仍保留,协作结束后推送自动恢复,补推合并后的最终状态落库。
+  if (isCollaborationActive(localId)) {
+    debugLog(`[sync] collaboration active for ${localId}, suppress HTTP debounced push`);
+    return;
+  }
   // Yjs WebSocket 负责实时广播；云端版本检查在实际快照提交前统一处理。
   // 本地编辑不再先 GET 云端，避免高频协作把 HTTP 控制面打满。
   debouncedPush(localId);
@@ -209,23 +218,5 @@ export async function onProjectDeleted(localId: string, options?: { skipLocalDel
 }
 
 // ===== 强制拉取 =====
+// forcePullProjectFromCloud 已迁移至 sync-projects.ts(与 mergeCloudProjectToLocal 同模块,避免循环依赖)
 
-export async function forcePullProjectFromCloud(projectId: string): Promise<void> {
-  if (!isOnline()) return;
-  try {
-    const cloud: CloudProject = await apiGet<CloudProject>(`/projects/${projectId}`);
-    await mergeCloudProjectToLocal(cloud, true);
-    markProjectClean(projectId);
-    debugLog(`[sync] force pull project ${projectId} from cloud succeeded`);
-  } catch (err) {
-    // 云端 404 说明项目已被删除,本地也删除
-    if (err instanceof ApiError && err.status === 404) {
-      await deleteProjectGraph(projectId);
-      await deleteProject(projectId);
-      debugLog(`[sync] force pull project ${projectId}: cloud deleted, remove locally`);
-    } else {
-      debugError(`[sync] force pull project ${projectId} failed:`, err);
-      throw err;
-    }
-  }
-}

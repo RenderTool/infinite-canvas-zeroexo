@@ -51,6 +51,9 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
 
   const iconSvg = STEP_ICONS[step.icon] ?? STEP_ICONS.think ?? '';
 
+  // 无参数只读工具（如 canvas_get_state）Input 天然为 {}，隐藏避免误导为"空数据"
+  const hasInput = !!step.input && step.input.trim() !== '{}' && step.input.trim() !== '[]';
+
   return (
     <div style={{ display: 'flex', gap: 10, position: 'relative', paddingBottom: isLast ? 0 : 2 }}>
       {/* 连接线（层级面板子级竖线风格，无缩进） */}
@@ -181,7 +184,7 @@ function StepCapsuleItem({ step, isLast, theme: t }: StepCapsuleItemProps): Reac
           }}
         >
           <div style={{ overflow: 'hidden', width: '100%' }}>
-            {step.input && (
+            {hasInput && (
               <div style={detailBoxStyle}>
                 <div style={detailLabelStyle}>Input</div>
                 <pre style={detailPreStyle}>{step.input}</pre>

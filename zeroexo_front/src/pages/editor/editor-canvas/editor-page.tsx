@@ -44,7 +44,7 @@ import { GroupStyleDialog } from '@/features/tools-dock/group-style-dialog.js';
 import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-panel.js';
 import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
-import { SyncConflictDialog } from '@/features/sync-conflict-dialog/sync-conflict-dialog.js';
+import { ConflictSnapshotHint } from '@/features/sync-conflict-dialog/conflict-snapshot-hint.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
@@ -94,11 +94,11 @@ export interface EditorPageProps {
 }
 
 export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
-  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, conflict, onPullCloud, onPushLocal, onConflictClose } = useEditorState(canvasId);
+  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, snapshotHint, onCloseSnapshotHint } = useEditorState(canvasId);
     // 快捷键注册表(键盘插件实例;供快捷键弹窗自动映射,未安装插件时为 undefined)
     const keyboardShortcuts = state.editor?.core.plugins.get<KeyboardPlugin>('keyboard')?.listShortcuts();
   const { theme } = useTheme();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
   const { status } = useSyncStatus();
@@ -135,6 +135,24 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     // 仅首次进入时触发一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteCode, state.loading]);
+
+  // 参与者：发起者关闭协作(room_closed) → 弹出"协作已失效"提示，确认后返回主页
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ canvasId?: string } | undefined>).detail;
+      if (!detail || detail.canvasId !== canvasId) return;
+      modal.confirm({
+        title: t('collab.roomClosedByOwnerTitle'),
+        content: t('collab.roomClosedByOwnerContent'),
+        okText: t('collab.backToHome'),
+        cancelButtonProps: { style: { display: 'none' } },
+        centered: true,
+        onOk: () => onBack(),
+      });
+    };
+    window.addEventListener('zeroexo:collab-room-expired', handler);
+    return () => window.removeEventListener('zeroexo:collab-room-expired', handler);
+  }, [canvasId, modal, onBack, t]);
 
   // 素材库
   const { addAsset: addAssetToStore } = useAssets();
@@ -1059,14 +1077,13 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
       {/* 批量上传队列覆盖层 */}
       <UploadQueueOverlay onRetryFailed={processFiles} />
 
-      {/* 同步冲突弹窗(云端版本不一致 / 云端已删除时弹出,用户选择"拉取云端"或"推送本地") */}
-      {conflict ? (
-        <SyncConflictDialog
-          conflict={conflict}
+      {/* 同步冲突自动解决提示条(云端冲突时自动存快照+推送本地,点击可跳转历史快照还原点) */}
+      {snapshotHint ? (
+        <ConflictSnapshotHint
+          info={snapshotHint}
           theme={theme}
-          onPullCloud={onPullCloud}
-          onPushLocal={onPushLocal}
-          onClose={onConflictClose}
+          onOpenHistory={() => dialogs.setVersionHistoryOpen(true)}
+          onClose={onCloseSnapshotHint}
         />
       ) : null}
 

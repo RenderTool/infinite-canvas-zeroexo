@@ -86,11 +86,13 @@ export class CollaborationService {
 
   /**
    * 获取画布的协作房间信息
+   * 返回该画布最新房间(不限状态:active/expired 均返回,便于前端区分"未开启/协作中/已失效")
    * 仅房间成员(或房主)可查看,非成员抛 Forbidden
    */
   async getRoomByCanvas(userId: string, canvasId: string) {
     const room = await this.prisma.collaborationRoom.findFirst({
-      where: { canvasId, status: 'active' },
+      where: { canvasId },
+      orderBy: { createdAt: 'desc' },
       include: {
         members: {
           include: { user: { select: { id: true, nickname: true, avatarUrl: true, username: true } } },
@@ -161,7 +163,8 @@ export class CollaborationService {
   }
 
   /**
-   * 关闭协作房间（踢出所有人）
+   * 关闭协作房间（软删除：状态置为 expired，房间与成员记录保留，
+   * 参与者主页仍能看到该画布并标记为"已失效"）
    */
   async closeRoom(userId: string, canvasId: string) {
     const room = await this.prisma.collaborationRoom.findFirst({
@@ -177,15 +180,16 @@ export class CollaborationService {
       }),
       this.prisma.collaborationRoom.update({
         where: { id: room.id },
-        data: { status: 'closed' },
+        data: { status: 'expired' },
       }),
     ]);
 
-    this.logger.log(`协作房间已关闭: ${room.id}`);
+    this.logger.log(`协作房间已关闭(软删除): ${room.id}`);
     // 实时广播房间关闭事件
     this.eventsService.broadcastToRoom(canvasId, {
       type: 'room_closed',
       userId,
+      meta: { ownerId: room.ownerId },
     });
     return { message: '协作房间已关闭' };
   }
@@ -457,13 +461,14 @@ export class CollaborationService {
     if (ownerActiveCount === 0) {
       await this.prisma.collaborationRoom.update({
         where: { id: room.id },
-        data: { status: 'closed' },
+        data: { status: 'expired' },
       });
-      this.logger.log(`房主离开，关闭房间: ${room.id}`);
-      // 实时广播房间关闭事件（前端据此显示"协作房间已关闭"）
+      this.logger.log(`房主离开，关闭房间(软删除): ${room.id}`);
+      // 实时广播房间关闭事件（前端据此显示"协作已失效"）
       this.eventsService.broadcastToRoom(canvasId, {
         type: 'room_closed',
         userId,
+        meta: { ownerId: room.ownerId },
       });
     } else {
       // 实时广播成员离开事件
@@ -474,6 +479,67 @@ export class CollaborationService {
     }
 
     return { message: '已离开协作房间', affected: left.count };
+  }
+
+  /**
+   * 参与者主动移除自己的成员身份（退出协作 / 失效画布移除）
+   * 物理删除该用户在该画布**所有房间**内的成员记录，此后主页不再展示该协作画布。
+   * 注意：画布可能因"开启→关闭→再开启"存在多个历史房间，若只删最新房间会残留
+   * 旧房间成员记录，导致主页列表刷新后画布依然可见。
+   */
+  async removeSelfFromRoom(userId: string, canvasId: string) {
+    const rooms = await this.prisma.collaborationRoom.findMany({
+      where: { canvasId },
+      select: { id: true },
+    });
+    if (rooms.length === 0) return { message: 'ok', removed: 0 };
+
+    const removed = await this.prisma.collaborationMember.deleteMany({
+      where: { roomId: { in: rooms.map((r) => r.id) }, userId },
+    });
+
+    // 广播成员离开（供房主刷新成员列表）
+    this.eventsService.broadcastToRoom(canvasId, {
+      type: 'member_left',
+      userId,
+      meta: { removed: true },
+    });
+
+    return { message: '已退出协作', removed: removed.count };
+  }
+
+  /**
+   * 发起者账户注销(软删除)时级联失效其发起的全部协作房间。
+   * 仅失效 active 房间(状态置 expired + 在线成员 offline)，并向各房间广播 room_closed，
+   * 参与者前端据此显示"协作已失效"并闭环移除。禁用/临时封号不调用此方法(房间保持 active)。
+   */
+  async expireRoomsByOwner(userId: string) {
+    const rooms = await this.prisma.collaborationRoom.findMany({
+      where: { ownerId: userId, status: 'active' },
+      select: { id: true, canvasId: true },
+    });
+    if (rooms.length === 0) return { expired: 0 };
+
+    await this.prisma.$transaction([
+      this.prisma.collaborationMember.updateMany({
+        where: { roomId: { in: rooms.map((r) => r.id) }, status: 'online' },
+        data: { status: 'offline' },
+      }),
+      this.prisma.collaborationRoom.updateMany({
+        where: { id: { in: rooms.map((r) => r.id) } },
+        data: { status: 'expired' },
+      }),
+    ]);
+
+    for (const r of rooms) {
+      this.eventsService.broadcastToRoom(r.canvasId, {
+        type: 'room_closed',
+        userId,
+        meta: { ownerId: userId },
+      });
+    }
+    this.logger.log(`账户注销级联失效协作房间: userId=${userId}, count=${rooms.length}`);
+    return { expired: rooms.length };
   }
 
   /**
@@ -519,6 +585,122 @@ export class CollaborationService {
     }
 
     return Array.from(roomMap.values()).sort((a, b) => b.lastActiveAt.getTime() - a.lastActiveAt.getTime());
+  }
+
+  /**
+   * 我拥有的画布 + 各画布最新协作状态（供主页"发起协作"模式/协作状态 Tag 使用）
+   * 返回所有自有画布，并附带 collaborationStatus: idle(从未开启/已关闭) | active(协作中)
+   */
+  async listMyCanvases(userId: string) {
+    const projects = await this.prisma.project.findMany({
+      where: { ownerId: userId },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, title: true, thumbnailUrl: true, updatedAt: true },
+    });
+    if (projects.length === 0) return [];
+
+    const rooms = await this.prisma.collaborationRoom.findMany({
+      where: { canvasId: { in: projects.map((p) => p.id) } },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, canvasId: true, status: true, inviteCode: true,
+        members: { select: { id: true, status: true } },
+      },
+    });
+    const latestByCanvas = new Map<string, (typeof rooms)[number]>();
+    for (const r of rooms) {
+      if (!latestByCanvas.has(r.canvasId)) latestByCanvas.set(r.canvasId, r);
+    }
+
+    return projects.map((p) => {
+      const room = latestByCanvas.get(p.id);
+      const memberCount = room
+        ? room.members.filter((m) => m.status === 'online').length
+        : 0;
+      return {
+        canvasId: p.id,
+        title: p.title,
+        thumbnailUrl: p.thumbnailUrl,
+        updatedAt: p.updatedAt,
+        collaborationStatus: !room ? 'idle' : room.status === 'active' ? 'active' : 'expired',
+        roomId: room?.id ?? null,
+        inviteCode: room?.inviteCode ?? null,
+        memberCount,
+      };
+    });
+  }
+
+  /**
+   * 我参与的协作画布列表（含已失效，供主页展示"协作画布"卡片）
+   * 仅返回非房主身份的成员身份；活跃与失效房间均返回，由前端标记状态。
+   */
+  async listParticipating(userId: string) {
+    const memberships = await this.prisma.collaborationMember.findMany({
+      where: { userId, status: { not: 'banned' } },
+      include: {
+        room: {
+          include: {
+            members: {
+              where: { role: 'owner' },
+              include: { user: { select: { id: true, nickname: true, username: true, avatarUrl: true } } },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: { lastActiveAt: 'desc' },
+    });
+
+    const roomMap = new Map<string, {
+      roomId: string; canvasId: string; title: string; thumbnailUrl: string | null;
+      ownerName: string | null; roomStatus: string; memberCount: number; lastActiveAt: Date;
+    }>();
+
+    for (const m of memberships) {
+      const room = m.room;
+      if (!room || room.ownerId === userId) continue;
+      if (roomMap.has(room.id)) continue;
+
+      const ownerMember = room.members[0];
+      roomMap.set(room.id, {
+        roomId: room.id,
+        canvasId: room.canvasId,
+        title: '未命名画布',
+        thumbnailUrl: null,
+        ownerName: ownerMember?.user?.nickname ?? ownerMember?.user?.username ?? null,
+        roomStatus: room.status,
+        memberCount: 0,
+        lastActiveAt: m.lastActiveAt,
+      });
+    }
+
+    if (roomMap.size === 0) return [];
+
+    // 补充画布标题/封面 + 在线成员数
+    const canvasIds = Array.from(roomMap.values()).map((r) => r.canvasId);
+    const projects = await this.prisma.project.findMany({
+      where: { id: { in: canvasIds } },
+      select: { id: true, title: true, thumbnailUrl: true },
+    });
+    const projectMap = new Map(projects.map((p) => [p.id, p]));
+    const allRooms = await this.prisma.collaborationRoom.findMany({
+      where: { id: { in: Array.from(roomMap.keys()) } },
+      include: { members: { select: { status: true } } },
+    });
+    const onlineByRoom = new Map<string, number>();
+    for (const r of allRooms) {
+      onlineByRoom.set(r.id, r.members.filter((mm) => mm.status === 'online').length);
+    }
+
+    return Array.from(roomMap.values()).map((r) => {
+      const project = projectMap.get(r.canvasId);
+      return {
+        ...r,
+        title: project?.title ?? r.title,
+        thumbnailUrl: project?.thumbnailUrl ?? r.thumbnailUrl,
+        memberCount: onlineByRoom.get(r.roomId) ?? 0,
+      };
+    });
   }
 
   /**

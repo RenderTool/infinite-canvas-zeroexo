@@ -9,7 +9,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { VersionsService } from './versions.service';
@@ -20,6 +25,25 @@ export class CreateVersionDto {
   @IsString()
   @MaxLength(50)
   label?: string;
+
+  /** 内容去重:与最近一条快照内容相同则跳过(自动冲突快照防冗余) */
+  @IsOptional()
+  @IsBoolean()
+  skipIfIdentical?: boolean;
+
+  /** 快照来源标识(manual / local-stale / 等,用于追溯快照产生场景) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  source?: string;
+
+  /** 自定义快照内容(离线端旧图留档);不传则基于服务端 DB 当前 scene */
+  @IsOptional()
+  data?: {
+    scene?: unknown;
+    connections?: unknown;
+    viewport?: unknown;
+  };
 }
 
 /** 回退 DTO */
@@ -44,7 +68,12 @@ export class VersionsController {
     @Param('id') id: string,
     @Body() dto: CreateVersionDto,
   ) {
-    return this.versionsService.createVersion(userId, id, { label: dto.label });
+    return this.versionsService.createVersion(userId, id, {
+      label: dto.label,
+      skipIfIdentical: dto.skipIfIdentical,
+      source: dto.source,
+      data: dto.data,
+    });
   }
 
   @Get(':id/versions')

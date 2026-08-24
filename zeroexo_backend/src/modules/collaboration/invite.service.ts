@@ -99,7 +99,7 @@ export class InviteService {
     const now = new Date();
     const result = await this.prisma.collaborationRoom.updateMany({
       where: { status: 'active', expiresAt: { lt: now } },
-      data: { status: 'closed' },
+      data: { status: 'expired' },
     });
     if (result.count > 0) {
       this.logger.log(`清理过期协作房间 ${result.count} 个`);

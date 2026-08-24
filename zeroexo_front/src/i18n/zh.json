@@ -208,7 +208,17 @@
     "versionConflictTitle": "版本冲突",
     "versionConflictHint": "云端版本与本地版本不一致，请选择处理方式。",
     "pullCloud": "拉取云端",
-    "pushLocal": "推送本地"
+    "pushLocal": "推送本地",
+    "conflictSnapshotHint": "云端与本地版本不一致，已保存云端快照 v{{version}} 并按本地优先推送",
+    "conflictSnapshotHintNoVersion": "云端与本地版本不一致，已按本地优先处理",
+    "conflictSnapshotLocalActive": "本地为活跃版本，云端已备份快照 v{{version}}",
+    "conflictSnapshotLocalActiveNoVersion": "本地为活跃版本，已按本地优先推送",
+    "conflictSnapshotLocalStale": "本地是历史数据，已保存为快照 v{{version}}，已更新为云端最新",
+    "conflictSnapshotLocalStaleNoVersion": "本地是历史数据，已更新为云端最新",
+    "collabDisconnected": "协作连接已断开，正在自动重连…",
+    "conflictCloudDeletedHint": "云端项目已删除，已自动重新创建",
+    "viewHistory": "查看历史快照",
+    "unknownProject": "未命名项目"
   },
   "version": {
     "title": "版本历史",
@@ -222,7 +232,8 @@
     "nodeCount": "{{count}} 个节点",
     "loadFailed": "加载版本失败",
     "restoreFailed": "恢复版本失败",
-    "retry": "重试"
+    "retry": "重试",
+    "retentionHint": "快照保留 30 天，超期自动清理"
   },
   "auth": {
     "loginTitle": "登录",
@@ -317,6 +328,16 @@
     "importFailed": "导入失败,请选择有效的画布压缩包",
     "selectMode": "选择",
     "exitSelect": "退出选择",
+    "collabActive": "协作中",
+    "collabParticipating": "我参与的",
+    "collabExpired": "已失效",
+    "startCollaboration": "发起协作",
+    "exitCollaborationMode": "退出协作",
+    "collabFilterAll": "全部",
+    "collabFilterMine": "我发起的",
+    "collabFilterJoined": "我参与的",
+    "collabModeEmpty": "暂无可发起协作的画布",
+    "collabJoinedEmpty": "暂无参与的协作画布",
     "loading": "加载中...",
     "loadFailed": "加载失败",
     "updatedAt": "更新于",
@@ -1821,7 +1842,27 @@
     "myRoomsEmpty": "暂无协作房间",
     "searchRooms": "搜索房间名称或创建者",
     "membersCount": "位成员",
-    "enterRoom": "进入"
+    "enterRoom": "进入",
+    "notStarted": "协作未开启",
+    "notStartedHint": "开启协作后，分享邀请链接即可邀请他人一起创作。",
+    "startCollaboration": "开启协作",
+    "collabStarted": "协作已开启",
+    "startFailed": "开启协作失败",
+    "roomExpired": "协作已失效",
+    "roomExpiredHint": "发起者已关闭此协作，该画布将从你的列表中移除。",
+    "exitCollaboration": "退出本次协作",
+    "exitConfirmTitle": "确认退出协作",
+    "exitConfirmContent": "确定退出本次协作吗？退出后将无法继续查看该画布。",
+    "exitHint": "退出后将不再参与该画布的协作，画布将从你的列表中移除。",
+    "exitSuccess": "已退出协作",
+    "removeFromList": "从列表移除",
+    "removedSuccess": "已从列表移除",
+    "joinMoreCollaboration": "加入更多协作",
+    "expiredRemoveTitle": "协作已失效",
+    "expiredRemoveContent": "该协作已失效，此画布将从你的列表移除。",
+    "roomClosedByOwnerTitle": "协作已失效",
+    "roomClosedByOwnerContent": "发起者已关闭此协作，你将被移出协作画布。",
+    "backToHome": "返回主页"
   },
   "coverUpload": {
     "title": "上传项目封面",
@@ -1866,7 +1907,11 @@
     "newProject": "新建项目",
     "untitledProject": "未命名项目",
     "moreActions": "更多操作",
-    "noCover": "暂无封面"
+    "noCover": "暂无封面",
+    "collaboration": "协作/分享",
+    "collabDetail": "协作详情",
+    "removeFromList": "从列表移除",
+    "expired": "已失效"
   },
   "promptCard": {
     "generateSimilar": "收藏副本",
@@ -1950,7 +1995,8 @@
       "manual": "手动",
       "autoDelete": "批量删除",
       "autoAi": "AI 覆盖",
-      "autoTimer": "定时"
+      "autoTimer": "定时",
+      "rollback": "回退副本"
     },
     "rollback": "回退到此版本",
     "rollbackTitle": "确认回退",

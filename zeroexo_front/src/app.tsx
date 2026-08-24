@@ -31,7 +31,6 @@ import {
   type NavRouteItem,
 } from '@/shared/components/index.js';
 import { AppSidebar, AppTopBar } from '@/features/app-sidebar/index.js';
-import { HomeCollaborationModal } from '@/features/collaboration/index.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { HomePage } from '@/pages/home/home-page.js';
 import { EditorPage } from '@/pages/editor/editor-canvas/editor-page.js';
@@ -231,8 +230,6 @@ export function App(): React.ReactElement {
   const [changelogOpen, setChangelogOpen] = useState(false);
   // 语言设置弹窗(移动端抽屉触发)
   const [languageOpen, setLanguageOpen] = useState(false);
-  // 首页协作入口弹窗(主页按钮 + 移动端抽屉共用)
-  const [homeCollabOpen, setHomeCollabOpen] = useState(false);
 
   const { theme } = useTheme();
   const { t, i18n } = useTranslation();
@@ -378,7 +375,6 @@ export function App(): React.ReactElement {
               activeRoute={activeRoute}
               onRequestAppearance={() => setAppearanceOpen(true)}
               onRequestChangelog={() => setChangelogOpen(true)}
-              onOpenCollaboration={() => setHomeCollabOpen(true)}
             />
           ) : undefined}
           sidebar={showHeaderAndSidebar && !isMobile ? (
@@ -395,10 +391,6 @@ export function App(): React.ReactElement {
               navItems={navItems}
               activeKey={activeRoute}
               onNavigate={(key) => handleNavigate(key)}
-              onOpenCollaboration={() => {
-                setMobileNavOpen(false);
-                setHomeCollabOpen(true);
-              }}
               onOpenAppearance={() => setAppearanceOpen(true)}
               onOpenLanguage={() => setLanguageOpen(true)}
               isAuthenticated={isAuthenticated}
@@ -416,7 +408,6 @@ export function App(): React.ReactElement {
                 onOpenProject={(id) => setRoute({ name: 'editor', canvasId: id })}
                 onOpenCanvas={(id) => setRoute({ name: 'canvas', canvasId: id })}
                 onNavigate={handleNavigate}
-                onOpenCollaboration={() => setHomeCollabOpen(true)}
               />
             ) : route.name === 'canvas' ? (
               route.canvasId ? (
@@ -486,17 +477,6 @@ export function App(): React.ReactElement {
 
         {/* 更新日志弹窗(全局唯一) */}
         <ChangelogPanel open={changelogOpen} onClose={() => setChangelogOpen(false)} />
-
-        {/* 首页协作入口弹窗(全局唯一:主页按钮 + 移动端抽屉共用) */}
-        <HomeCollaborationModal
-          open={homeCollabOpen}
-          theme={theme}
-          onOpenCanvas={(id, inviteCode) => {
-            setHomeCollabOpen(false);
-            setRoute({ name: 'editor', canvasId: id, inviteCode });
-          }}
-          onClose={() => setHomeCollabOpen(false)}
-        />
       </AntdApp>
     </AntdThemeProvider>
   );

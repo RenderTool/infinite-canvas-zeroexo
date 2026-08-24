@@ -18,9 +18,9 @@ import type {
   AwarenessState,
   DeviceType,
   RoomResponse,
+  CollaborationStatus,
 } from './collaboration-types.js';
 import {
-  autoJoinRoom,
   getRoomByCanvas,
   leaveRoom,
 } from './collaboration-api.js';
@@ -29,15 +29,19 @@ import {
 export interface CollaborationState {
   /** 当前画布 ID */
   canvasId: string | null;
+  /** 当前用户 ID（用于区分房主/参与者视角） */
+  userId: string | null;
   /** 房间信息 */
   room: CollaborationRoom | null;
+  /** 协作状态: idle(未开启) | active(协作中) | expired(已失效) */
+  status: CollaborationStatus;
   /** 成员列表 */
   members: CollaborationMember[];
   /** Awareness 状态映射：clientId → AwarenessState */
   awarenessStates: Map<number, AwarenessState>;
   /** 聊天消息 */
   messages: CollaborationMessage[];
-  /** 是否已初始化（auto-join 完成） */
+  /** 是否已初始化（房间状态探测完成） */
   initialized: boolean;
   /** 协作是否活跃 */
   active: boolean;
@@ -59,12 +63,14 @@ export interface CollaborationState {
 
 /** 协作 actions */
 export interface CollaborationActions {
-  /** 初始化协作（auto-join + 加载房间信息） */
-  init: (canvasId: string, deviceType?: DeviceType) => Promise<void>;
+  /** 初始化协作（探测房间状态；不再自动创建房间） */
+  init: (canvasId: string, deviceType?: DeviceType, userId?: string) => Promise<void>;
   /** 清理协作状态 */
   cleanup: () => void;
-  /** 更新房间信息 */
+  /** 更新房间信息（status/active 随房间状态联动） */
   setRoom: (room: RoomResponse | null) => void;
+  /** 设置协作状态 */
+  setStatus: (status: CollaborationStatus) => void;
   /** 更新成员列表 */
   setMembers: (members: CollaborationMember[]) => void;
   /** 添加/更新 Awareness 状态 */
@@ -95,7 +101,9 @@ export type CollaborationStore = CollaborationState & CollaborationActions;
 
 const initialState: CollaborationState = {
   canvasId: null,
+  userId: null,
   room: null,
+  status: 'idle',
   members: [],
   awarenessStates: new Map(),
   messages: [],
@@ -116,42 +124,48 @@ export function createCollaborationStore() {
   return create<CollaborationStore>((set, get) => ({
     ...initialState,
 
-    init: async (canvasId: string, deviceType?: DeviceType) => {
-      set({ canvasId, joining: true, error: null });
+    init: async (canvasId: string, _deviceType?: DeviceType, userId?: string) => {
+      set({ canvasId, userId: userId ?? null, joining: true, error: null });
 
       try {
-        // 1. 先尝试 auto-join（若房间不存在，后端会自动创建）
-        const room = await autoJoinRoom(canvasId, deviceType);
+        // 探测画布房间状态（不自动创建房间；房间不存在 → 未开启）
+        const room = await getRoomByCanvas(canvasId);
 
         if (room) {
+          const isOwner = room.ownerId === String(userId ?? room.ownerId);
+          // 房主视角：已失效(expired)视同未开启(idle)，可重新发起协作
+          // 参与者视角：已失效(expired)标记为"协作已失效"
+          let status: CollaborationStatus = 'idle';
+          if (room.status === 'active') status = 'active';
+          else if (!isOwner) status = 'expired';
+
           set({
             room,
-            active: true,
+            status,
+            active: status === 'active',
             initialized: true,
             joining: false,
             members: (room as RoomResponse).members ?? [],
           });
-        }
-      } catch (err) {
-        // auto-join 失败（如网络问题），尝试直接获取房间信息
-        try {
-          const room = await getRoomByCanvas(canvasId);
-          if (room) {
-            set({
-              room,
-              active: true,
-              initialized: true,
-              joining: false,
-              members: (room as RoomResponse).members ?? [],
-            });
-          }
-        } catch {
-          // 完全失败
+        } else {
           set({
+            room: null,
+            status: 'idle',
+            active: false,
+            initialized: true,
             joining: false,
-            error: err instanceof Error ? err.message : '协作初始化失败',
           });
         }
+      } catch {
+        // 房间不存在/非成员/网络异常 → 一律按"未开启"处理（C 端不展示后端错误细节）
+        set({
+          room: null,
+          status: 'idle',
+          active: false,
+          initialized: true,
+          joining: false,
+          error: null,
+        });
       }
     },
 
@@ -165,7 +179,15 @@ export function createCollaborationStore() {
     },
 
     setRoom: (room) => {
-      set({ room, active: !!room });
+      set({
+        room,
+        active: !!room && room.status === 'active',
+        status: !room ? 'idle' : room.status === 'active' ? 'active' : 'expired',
+      });
+    },
+
+    setStatus: (status) => {
+      set({ status });
     },
 
     setMembers: (members) => {

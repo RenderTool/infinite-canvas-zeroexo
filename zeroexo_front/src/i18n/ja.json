@@ -209,7 +209,17 @@
     "conflictTitle": "同期競合",
     "conflictHint": "クラウドとローカルの両方に未同期の変更があります。保持するバージョンを選択してください",
     "cloudDeletedLabel": "削除済み",
-    "diffRepushLocal": "ローカルから再作成"
+    "diffRepushLocal": "ローカルから再作成",
+    "conflictSnapshotHint": "クラウドとローカルのバージョンが異なります。クラウドのスナップショット v{{version}} を保存し、ローカルを送信しました",
+    "conflictSnapshotHintNoVersion": "クラウドとローカルのバージョンが異なります。ローカル優先で処理しました",
+    "conflictSnapshotLocalActive": "ローカルがアクティブなバージョンです。クラウドのスナップショット v{{version}} を保存しました",
+    "conflictSnapshotLocalActiveNoVersion": "ローカルがアクティブなバージョンです。ローカル優先で送信しました",
+    "conflictSnapshotLocalStale": "ローカルデータは履歴です。スナップショット v{{version}} として保存し、クラウドの最新に更新しました",
+    "conflictSnapshotLocalStaleNoVersion": "ローカルデータは履歴です。クラウドの最新に更新しました",
+    "collabDisconnected": "コラボレーション接続が切断されました。自動的に再接続中…",
+    "conflictCloudDeletedHint": "クラウド上のプロジェクトが削除されました。自動的に再作成しました",
+    "viewHistory": "スナップショットを表示",
+    "unknownProject": "無題のプロジェクト"
   },
   "version": {
     "title": "バージョン履歴",
@@ -223,7 +233,8 @@
     "nodeCount": "{{count}} ノード",
     "loadFailed": "バージョンの読み込みに失敗",
     "restoreFailed": "バージョンの復元に失敗",
-    "retry": "再試行"
+    "retry": "再試行",
+    "retentionHint": "スナップショットは 30 日間保持され、その後自動クリーンアップされます"
   },
   "auth": {
     "loginTitle": "ログイン",
@@ -317,6 +328,16 @@
     "importFailed": "インポート失敗、有効なキャンバス ZIP ファイルを選択してください",
     "selectMode": "選択",
     "exitSelect": "選択を終了",
+    "collabActive": "コラボ中",
+    "collabParticipating": "参加中",
+    "collabExpired": "無効",
+    "startCollaboration": "コラボを開始",
+    "exitCollaborationMode": "コラボを終了",
+    "collabFilterAll": "すべて",
+    "collabFilterMine": "自分が開始",
+    "collabFilterJoined": "自分が参加",
+    "collabModeEmpty": "コラボを開始できるキャンバスがありません",
+    "collabJoinedEmpty": "参加中のコラボレーションはありません",
     "loading": "読み込み中...",
     "loadFailed": "読み込み失敗",
     "updatedAt": "更新日時",
@@ -1763,7 +1784,27 @@
     "myRoomsEmpty": "コラボルームはありません",
     "searchRooms": "ルーム名または作成者で検索",
     "membersCount": "人のメンバー",
-    "enterRoom": "入室"
+    "enterRoom": "入室",
+    "notStarted": "コラボレーション未開始",
+    "notStartedHint": "開始すると、招待リンクを共有して一緒に創作できます。",
+    "startCollaboration": "コラボレーションを開始",
+    "collabStarted": "コラボレーションを開始しました",
+    "startFailed": "コラボレーションの開始に失敗しました",
+    "roomExpired": "コラボレーションは期限切れです",
+    "roomExpiredHint": "発起者がこのコラボレーションを閉じました。このキャンバスはリストから削除されます。",
+    "exitCollaboration": "このコラボから退出",
+    "exitConfirmTitle": "コラボから退出",
+    "exitConfirmContent": "このコラボレーションから退出しますか？退出後はこのキャンバスを閲覧できなくなります。",
+    "exitHint": "退出後はこのキャンバスのコラボレーションに参加できなくなり、リストから削除されます。",
+    "exitSuccess": "退出しました",
+    "removeFromList": "リストから削除",
+    "removedSuccess": "リストから削除しました",
+    "joinMoreCollaboration": "他のコラボに参加",
+    "expiredRemoveTitle": "コラボレーション無効",
+    "expiredRemoveContent": "このコラボレーションは無効です。このキャンバスはリストから削除されます。",
+    "roomClosedByOwnerTitle": "コラボレーション終了",
+    "roomClosedByOwnerContent": "オーナーがこのコラボレーションを終了しました。このキャンバスから退出します。",
+    "backToHome": "ホームに戻る"
   },
   "scriptEditor": {
     "menuTitle": "ブロックタイプを選択",
@@ -1846,7 +1887,11 @@
     "newProject": "新規プロジェクト",
     "untitledProject": "名前なしプロジェクト",
     "moreActions": "その他の操作",
-    "noCover": "カバーなし"
+    "noCover": "カバーなし",
+    "collaboration": "コラボ / 共有",
+    "collabDetail": "コラボ詳細",
+    "removeFromList": "リストから削除",
+    "expired": "無効"
   },
   "promptCard": {
     "generateSimilar": "コピーを保存",
@@ -1930,7 +1975,8 @@
       "manual": "手動",
       "autoDelete": "一括削除",
       "autoAi": "AI 上書き",
-      "autoTimer": "定期"
+      "autoTimer": "定期",
+      "rollback": "ロールバックコピー"
     },
     "rollback": "このバージョンに戻す",
     "rollbackTitle": "ロールバック確認",

@@ -5,11 +5,11 @@
  * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。
  */
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload } from 'lucide-react';
-import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
+import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload, Users } from 'lucide-react';
+import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
 import type { ProjectCardAction } from '@/shared/components/index.js';
@@ -20,6 +20,9 @@ import { exportProjects } from './services/export-projects.js';
 import { importProjectsFromZip } from './services/import-projects.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { fullSync, onProjectUpdated } from '@/services/sync/sync-service.js';
+import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
+import { listMyCanvases, listParticipating, removeSelfFromRoom } from '@/features/collaboration/collaboration-api.js';
+import type { MyCanvasItem, ParticipatingCanvasItem } from '@/features/collaboration/collaboration-types.js';
 
 const { Text, Title } = Typography;
 
@@ -30,7 +33,7 @@ export interface CanvasPageProps {
 export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const isMobile = useIsMobile();
   const { projects, loading, error, createProject, copyProject, deleteProjects, renameProject, refresh } = useProjects();
 
@@ -39,6 +42,55 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // 协作入口（发起协作模式 + 我参与的协作画布 + 协作筛选）
+  const [collabMode, setCollabMode] = useState(false);
+  const [collabFilter, setCollabFilter] = useState<'all' | 'mine' | 'joined'>('all');
+  const [myCanvases, setMyCanvases] = useState<MyCanvasItem[]>([]);
+  const [participating, setParticipating] = useState<ParticipatingCanvasItem[]>([]);
+  const [collabModalOpen, setCollabModalOpen] = useState(false);
+  const [collabTargetId, setCollabTargetId] = useState<string | null>(null);
+
+  // 加载协作列表（自有画布协作状态 + 我参与的协作画布）；失败静默，C端不展示后端细节
+  const loadCollabLists = useCallback(async () => {
+    try {
+      const [mine, joined] = await Promise.all([listMyCanvases(), listParticipating()]);
+      setMyCanvases(mine);
+      setParticipating(joined);
+    } catch {
+      // 静默失败
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCollabLists();
+  }, [loadCollabLists]);
+
+  /** 失效协作：点击/更多操作 → 确认弹窗告知"已失效"后从列表移除（不打开协作设置页） */
+  const handleRemoveExpired = useCallback(
+    (item: ParticipatingCanvasItem) => {
+      modal.confirm({
+        title: t('collab.expiredRemoveTitle'),
+        content: t('collab.expiredRemoveContent'),
+        okText: t('collab.removeFromList'),
+        cancelText: t('common.cancel'),
+        okType: 'danger',
+        centered: true,
+        onOk: async () => {
+          try {
+            await removeSelfFromRoom(item.canvasId);
+            message.success(t('collab.removedSuccess'));
+            // 本地立即移除（即使后台刷新失败也保证列表即时更新），再后台刷新保持一致
+            setParticipating((prev) => prev.filter((p) => p.canvasId !== item.canvasId));
+            void loadCollabLists();
+          } catch {
+            message.error(t('collab.operationFailed'));
+          }
+        },
+      });
+    },
+    [modal, t, message, loadCollabLists],
+  );
 
   // 重命名弹窗
   const [renameModalOpen, setRenameModalOpen] = useState(false);
@@ -54,11 +106,51 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
 
   const allProjects = useMemo(() => projects, [projects]);
 
-  const filteredProjects = useMemo(() => {
+  /** 搜索过滤后的全部自有画布 */
+  const searchFilteredAll = useMemo(() => {
     if (!search.trim()) return allProjects;
     const keyword = search.toLowerCase();
     return allProjects.filter((p) => p.title.toLowerCase().includes(keyword));
   }, [allProjects, search]);
+
+  /** 自有画布 → 协作状态映射（来自 listMyCanvases） */
+  const myCanvasStatus = useMemo(() => {
+    const map = new Map<string, MyCanvasItem>();
+    myCanvases.forEach((m) => map.set(m.canvasId, m));
+    return map;
+  }, [myCanvases]);
+
+  /** 画布列表展示的自有画布（受协作模式 / 协作筛选影响） */
+  const displayOwnProjects = useMemo(() => {
+    if (collabMode) return searchFilteredAll;
+    if (collabFilter === 'joined') return [];
+    let list = searchFilteredAll;
+    if (collabFilter === 'mine') {
+      // 我发起的协作：自有画布且协作已开启/曾开启
+      list = list.filter((p) => {
+        const s = myCanvasStatus.get(p.id)?.collaborationStatus;
+        return s === 'active' || s === 'expired';
+      });
+    }
+    return list;
+  }, [collabMode, collabFilter, searchFilteredAll, myCanvasStatus]);
+
+  /** 我参与的协作画布（普通模式下展示；选择/发起协作模式下不展示） */
+  const displayParticipating = useMemo(() => {
+    if (collabMode || collabFilter === 'mine') return [];
+    let list = participating;
+    if (search.trim()) {
+      const keyword = search.toLowerCase();
+      list = list.filter((p) => p.title.toLowerCase().includes(keyword));
+    }
+    return list;
+  }, [collabMode, collabFilter, participating, search]);
+
+  /** 选择模式可批量操作的自有画布（参与的画布不可批量操作） */
+  const displayForSelect = searchFilteredAll;
+
+  const listForRender = selectMode ? displayForSelect : displayOwnProjects;
+  const isEmpty = listForRender.length === 0 && (selectMode || displayParticipating.length === 0);
 
   /** 自动递增命名：生成 "未命名项目", "未命名项目 2", "未命名项目 3"... */
   const getNextProjectName = useCallback((): string => {
@@ -111,6 +203,7 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
 
   const enterSelectMode = useCallback(() => {
     setSelectMode(true);
+    setCollabMode(false);
     setSelectedIds(new Set());
   }, []);
 
@@ -118,6 +211,28 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
     setSelectMode(false);
     setSelectedIds(new Set());
   }, []);
+
+  // 发起协作模式（与选择模式互斥）
+  const toggleCollabMode = useCallback(() => {
+    if (collabMode) {
+      setCollabMode(false);
+      return;
+    }
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setCollabMode(true);
+  }, [collabMode]);
+
+  const openCollabModal = useCallback((canvasId: string) => {
+    setCollabTargetId(canvasId);
+    setCollabModalOpen(true);
+  }, []);
+
+  // 关闭协作弹窗后刷新协作列表（开启/关闭/移除会改变画布协作状态）
+  const closeCollabModal = useCallback(() => {
+    setCollabModalOpen(false);
+    void loadCollabLists();
+  }, [loadCollabLists]);
 
   const handleDelete = useCallback((id: string) => {
     setPendingDeleteId(id);
@@ -299,6 +414,21 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               />
             </Tooltip>
 
+            {!collabMode && !selectMode && (
+              <Select
+                size="small"
+                value={collabFilter}
+                onChange={(v) => setCollabFilter((v ?? 'all') as 'all' | 'mine' | 'joined')}
+                allowClear
+                style={{ width: 140 }}
+                options={[
+                  { value: 'all', label: t('home.collabFilterAll') },
+                  { value: 'mine', label: t('home.collabFilterMine') },
+                  { value: 'joined', label: t('home.collabFilterJoined') },
+                ]}
+              />
+            )}
+
             {allProjects.length > 0 && (
               <Tooltip title={selectMode ? t('home.exitSelect') : t('home.selectMode')}>
                 <Button
@@ -309,18 +439,30 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               </Tooltip>
             )}
 
-            {selectMode && filteredProjects.length > 0 && (
+            {allProjects.length > 0 && (
+              <Tooltip title={collabMode ? t('home.exitCollaborationMode') : t('home.startCollaboration')}>
+                <Button
+                  icon={<Users size={14} />}
+                  size="small"
+                  type={collabMode ? 'primary' : 'default'}
+                  ghost={collabMode}
+                  onClick={toggleCollabMode}
+                />
+              </Tooltip>
+            )}
+
+            {selectMode && displayForSelect.length > 0 && (
               <Button
                 size="small"
                 onClick={() => {
-                  if (selectedIds.size === filteredProjects.length) {
+                  if (selectedIds.size === displayForSelect.length) {
                     setSelectedIds(new Set());
                   } else {
-                    setSelectedIds(new Set(filteredProjects.map((p) => p.id)));
+                    setSelectedIds(new Set(displayForSelect.map((p) => p.id)));
                   }
                 }}
               >
-                {selectedIds.size === filteredProjects.length ? '取消全选' : '全选'}
+                {selectedIds.size === displayForSelect.length ? '取消全选' : '全选'}
               </Button>
             )}
 
@@ -346,13 +488,17 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               </Tooltip>
             )}
 
-            <Tooltip title={t('home.importZip')}>
-              <Button icon={<Upload size={14} />} size="small" onClick={handleImportClick} disabled={busy} />
-            </Tooltip>
+            {!collabMode && (
+              <Tooltip title={t('home.importZip')}>
+                <Button icon={<Upload size={14} />} size="small" onClick={handleImportClick} disabled={busy} />
+              </Tooltip>
+            )}
 
-            <Tooltip title={t('home.newCanvas')}>
-              <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
-            </Tooltip>
+            {!collabMode && (
+              <Tooltip title={t('home.newCanvas')}>
+                <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
+              </Tooltip>
+            )}
           </Space>
         </div>
 
@@ -365,29 +511,52 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
         />
 
         <div style={contentScrollStyle}>
-          {filteredProjects.length === 0 ? (
-            <div style={emptyStyle()}>
-              <div
-                style={emptyIconStyle}
-                onClick={handleCreate}
-                title={t('home.newCanvas')}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleCreate(); }}
-              >
-                <Plus size={32} style={{ opacity: 0.3 }} />
+          {isEmpty ? (
+            collabMode ? (
+              <div style={emptyStyle()}>
+                <Text strong style={{ fontSize: 15, marginBottom: 4 }}>
+                  {t('home.collabModeEmpty')}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12, marginBottom: 16 }}>
+                  {t('home.collabModeEmpty')}
+                </Text>
               </div>
-              <Text strong style={{ fontSize: 15, marginBottom: 4 }}>
-                {search ? t('home.empty') : t('home.empty')}
-              </Text>
-              <Text type="secondary" style={{ fontSize: 12, marginBottom: 16 }}>
-                {search ? t('home.searchPlaceholder') : t('home.emptyHint')}
-              </Text>
-            </div>
+            ) : collabFilter === 'joined' ? (
+              <div style={emptyStyle()}>
+                <Text strong style={{ fontSize: 15, marginBottom: 4 }}>
+                  {t('home.collabJoinedEmpty')}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12, marginBottom: 16 }}>
+                  {t('home.collabFilterJoined')}
+                </Text>
+              </div>
+            ) : (
+              <div style={emptyStyle()}>
+                <div
+                  style={emptyIconStyle}
+                  onClick={handleCreate}
+                  title={t('home.newCanvas')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleCreate(); }}
+                >
+                  <Plus size={32} style={{ opacity: 0.3 }} />
+                </div>
+                <Text strong style={{ fontSize: 15, marginBottom: 4 }}>
+                  {search ? t('home.empty') : t('home.empty')}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12, marginBottom: 16 }}>
+                  {search ? t('home.searchPlaceholder') : t('home.emptyHint')}
+                </Text>
+              </div>
+            )
           ) : (
             <div style={gridStyle(isMobile)}>
-              <ProjectCard variant="create" onClick={handleCreate} />
-              {filteredProjects.map((project, index) => {
+              {!collabMode && !selectMode && collabFilter !== 'joined' && (
+                <ProjectCard variant="create" onClick={handleCreate} />
+              )}
+              {listForRender.map((project, index) => {
+                const collabStatus = myCanvasStatus.get(project.id)?.collaborationStatus;
                 const actions: ProjectCardAction[] = [
                   {
                     type: 'cover',
@@ -402,6 +571,7 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                     onClick: () => handleRenameOpen(project.id, project.title),
                   },
                   { type: 'delete', onClick: () => handleDelete(project.id) },
+                  { type: 'collab', onClick: () => openCollabModal(project.id) },
                 ];
                 return (
                   <div
@@ -415,10 +585,44 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                       title={project.title}
                       cover={project.thumbnailUrl ?? undefined}
                       updateTime={`${t('home.updatedAt')} ${new Date(project.updatedAt).toLocaleDateString()}`}
-                      onClick={() => selectMode ? handleToggleSelect(project.id) : onOpen(project.id)}
+                      onClick={() => {
+                        if (collabMode) { openCollabModal(project.id); return; }
+                        if (selectMode) { handleToggleSelect(project.id); return; }
+                        onOpen(project.id);
+                      }}
                       actions={actions}
                       selected={selectedIds.has(project.id)}
                       onToggleSelect={selectMode ? () => handleToggleSelect(project.id) : undefined}
+                      statusTag={collabStatus === 'active'
+                        ? { label: t('home.collabActive'), tone: 'success' }
+                        : undefined}
+                    />
+                  </div>
+                );
+              })}
+              {!selectMode && displayParticipating.map((item) => {
+                const expired = item.roomStatus === 'expired' || item.roomStatus === 'closed';
+                // 失效协作 → 仅"从列表移除"（点击与更多操作都不再打开协作设置页）
+                const actions: ProjectCardAction[] = expired
+                  ? [{ type: 'collab', label: t('projectCard.removeFromList'), onClick: () => handleRemoveExpired(item) }]
+                  : [{ type: 'collab', label: t('projectCard.collabDetail'), onClick: () => openCollabModal(item.canvasId) }];
+                return (
+                  <div
+                    key={`collab-${item.canvasId}`}
+                    style={{
+                      animation: 'zeroexo-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both',
+                    }}
+                  >
+                    <ProjectCard
+                      title={item.title}
+                      cover={item.thumbnailUrl ?? undefined}
+                      updateTime={`${t('home.updatedAt')} ${new Date(item.lastActiveAt).toLocaleDateString()}`}
+                      onClick={expired ? () => handleRemoveExpired(item) : () => onOpen(item.canvasId)}
+                      actions={actions}
+                      statusTag={expired
+                        ? { label: t('home.collabExpired'), tone: 'error' }
+                        : { label: t('home.collabParticipating'), tone: 'processing' }}
+                      expiredOverlay={expired}
                     />
                   </div>
                 );
@@ -496,6 +700,17 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             onCancel={closeCoverUpload}
             onConfirm={handleCoverConfirm}
             initialCover={coverState.target.thumbnailUrl ?? undefined}
+          />
+        )}
+
+        {/* 协作设置弹窗（发起协作 / 协作详情，与画布内共用同一组件） */}
+        {collabTargetId && (
+          <CollaborationModal
+            open={collabModalOpen}
+            canvasId={collabTargetId}
+            onClose={closeCollabModal}
+            theme={theme}
+            onNavigateToCanvas={(id) => onOpen(id)}
           />
         )}
       </div>

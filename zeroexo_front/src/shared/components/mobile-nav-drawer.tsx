@@ -20,7 +20,6 @@ import {
   Keyboard,
   Settings2,
   Bot,
-  Users,
   X as XIcon,
   LogIn,
   LogOut,
@@ -81,8 +80,6 @@ export interface MobileNavDrawerProps {
   onToggleAgent?: () => void;
   onOpenShortcuts?: () => void;
   onOpenSettings?: () => void;
-  /** 打开首页协作入口弹窗 */
-  onOpenCollaboration?: () => void;
 
   /** 设置组固定回调 */
   onOpenAppearance?: () => void;
@@ -107,7 +104,6 @@ export function MobileNavDrawer({
   onToggleAgent,
   onOpenShortcuts,
   onOpenSettings,
-  onOpenCollaboration,
   onOpenAppearance,
   onOpenLanguage,
   syncNode,
@@ -171,10 +167,9 @@ export function MobileNavDrawer({
   }
 
   // 2. 工具组
-  const hasTools = onOpenShortcuts || onOpenSettings || onToggleAgent || onOpenCollaboration;
+  const hasTools = onOpenShortcuts || onOpenSettings || onToggleAgent;
   if (hasTools) {
     if (menuItems.length > 0) menuItems.push({ type: 'divider' });
-    if (onOpenCollaboration) menuItems.push({ key: 'collaboration', icon: DrawerIcon(<Users size={18} />), label: t('collab.title'), onClick: () => closeThen(onOpenCollaboration) });
     if (onOpenShortcuts) menuItems.push({ key: 'shortcuts', icon: DrawerIcon(<Keyboard size={18} />), label: t('menu.shortcuts'), onClick: () => closeThen(onOpenShortcuts) });
     if (onOpenSettings) menuItems.push({ key: 'settings', icon: DrawerIcon(<Settings2 size={18} />), label: t('settings.title'), onClick: () => closeThen(onOpenSettings) });
     if (onToggleAgent) menuItems.push({ key: 'agent', icon: DrawerIcon(<Bot size={18} />), label: t('topbar.toggleAgent'), onClick: () => closeThen(onToggleAgent) });

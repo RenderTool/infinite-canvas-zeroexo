@@ -6,7 +6,10 @@
 export type CollaborationMode = 'invite-only' | 'public' | 'auto-self';
 
 /** 房间状态 */
-export type RoomStatus = 'active' | 'closed';
+export type RoomStatus = 'active' | 'closed' | 'expired';
+
+/** 画布协作状态（对外语义：未开启/协作中/已失效） */
+export type CollaborationStatus = 'idle' | 'active' | 'expired';
 
 /** 成员角色 */
 export type MemberRole = 'owner' | 'editor' | 'viewer';
@@ -179,6 +182,30 @@ export interface MyRoomItem {
   status: RoomStatus;
   ownerId: string;
   ownerName: string | null;
+  memberCount: number;
+  lastActiveAt: string;
+}
+
+/** API 响应：我拥有的画布 + 协作状态（主页"发起协作"模式/协作 Tag） */
+export interface MyCanvasItem {
+  canvasId: string;
+  title: string;
+  thumbnailUrl: string | null;
+  updatedAt: string;
+  collaborationStatus: CollaborationStatus;
+  roomId: string | null;
+  inviteCode: string | null;
+  memberCount: number;
+}
+
+/** API 响应：我参与的协作画布列表项（含已失效） */
+export interface ParticipatingCanvasItem {
+  roomId: string;
+  canvasId: string;
+  title: string;
+  thumbnailUrl: string | null;
+  ownerName: string | null;
+  roomStatus: RoomStatus;
   memberCount: number;
   lastActiveAt: string;
 }

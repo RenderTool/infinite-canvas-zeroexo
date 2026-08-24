@@ -21,7 +21,7 @@
 import { useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Github, LogIn, FileText, Users } from 'lucide-react';
+import { Github, LogIn, FileText } from 'lucide-react';
 import { Button, Tooltip } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useAuth } from '@/features/auth/auth-store.js';
@@ -36,15 +36,12 @@ export interface AppTopBarProps {
   onRequestAppearance?: () => void;
   /** 打开更新日志 */
   onRequestChangelog?: () => void;
-  /** 打开首页协作入口弹窗 */
-  onOpenCollaboration?: () => void;
 }
 
 export function AppTopBar({
   onNavigate,
   onRequestAppearance,
   onRequestChangelog,
-  onOpenCollaboration,
 }: AppTopBarProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -55,15 +52,6 @@ export function AppTopBar({
     await logout();
     onNavigate({ name: 'auth', mode: 'login' });
   }, [logout, onNavigate]);
-
-  /** 打开首页协作入口(未登录时先引导登录) */
-  const handleOpenCollaboration = useCallback(() => {
-    if (!isAuthenticated) {
-      onNavigate({ name: 'auth', mode: 'login' });
-      return;
-    }
-    onOpenCollaboration?.();
-  }, [isAuthenticated, onNavigate, onOpenCollaboration]);
 
   /** 移动端不再渲染本组件(由 AppLayout 的统一 MobileNavButton 替代) */
   if (isMobile) return null;
@@ -113,19 +101,6 @@ export function AppTopBar({
               style={iconBtnStyle(textColor)}
             />
           </Tooltip>
-
-          {/* 协作入口 */}
-          {onOpenCollaboration && (
-            <Tooltip title={t('collab.title')}>
-              <Button
-                type="text"
-                icon={<Users size={16} />}
-                onClick={handleOpenCollaboration}
-                className="zeroexo-icon-btn"
-                style={iconBtnStyle(textColor)}
-              />
-            </Tooltip>
-          )}
 
           {/* 用户菜单 */}
           {isAuthenticated && user ? (

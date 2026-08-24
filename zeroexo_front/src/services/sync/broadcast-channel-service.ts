@@ -20,13 +20,13 @@ import {
   debouncedFullSync,
   onProjectCreated,
 } from './sync-service.js';
-import type { ProjectConflict } from './sync-service.js';
+import type { ConflictSnapshotInfo } from './sync-service.js';
 import { setSyncStatus } from './sync-store.js';
 
 // ─── Re-export window event names (same as sse-service, for backward compat) ───
 
 export const PROJECT_RELOAD_EVENT = 'zeroexo:project-reload';
-export const PROJECT_CONFLICT_EVENT = 'zeroexo:project-conflict';
+export const PROJECT_CONFLICT_SNAPSHOT_EVENT = 'zeroexo:project-conflict-snapshot';
 export const PROJECT_DIFF_EVENT = 'zeroexo:project-diff';
 export const PROJECT_DELETED_EVENT = 'zeroexo:project-deleted';
 export const BROADCAST_LOGOUT_EVENT = 'zeroexo:bc-logout';
@@ -125,17 +125,11 @@ function handleMessage(msg: MessageEvent<BcMessage>): void {
     case 'project_updated': {
       const updPid = data.payload.projectId as string;
       if (data.payload.hasConflict) {
-        notifyProjectConflict({
+        notifyProjectConflictSnapshot({
           projectId: updPid,
-          title: '',
-          localVersion: 0,
-          cloudVersion: 0,
-          localUpdatedAt: '',
-          cloudUpdatedAt: '',
-          localNodeCount: 0,
-          cloudNodeCount: 0,
-          hasLocalChanges: true,
+          title: (data.payload.title as string) ?? '',
           cloudDeleted: data.payload.cloudDeleted as boolean,
+          snapshotVersion: data.payload.snapshotVersion as number | undefined,
         });
       } else {
         notifyProjectReload(updPid, data.payload.changedNodeIds as string[] | undefined);
@@ -148,7 +142,7 @@ function handleMessage(msg: MessageEvent<BcMessage>): void {
       break;
 
     case 'project_conflict':
-      notifyProjectConflict(data.payload as unknown as ProjectConflict);
+      notifyProjectConflictSnapshot(data.payload as unknown as ConflictSnapshotInfo);
       break;
 
     case 'project_diff':
@@ -236,9 +230,11 @@ function stopBcPolling(): void {
 
 // ─── Notification dispatchers (same window events as sse-service) ───
 
-function notifyProjectConflict(conflict: ProjectConflict): void {
+function notifyProjectConflictSnapshot(info: ConflictSnapshotInfo): void {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(PROJECT_CONFLICT_EVENT, { detail: conflict }));
+  window.dispatchEvent(
+    new CustomEvent(PROJECT_CONFLICT_SNAPSHOT_EVENT, { detail: info }),
+  );
 }
 
 function notifyProjectReload(projectId: string, changedNodeIds?: string[]): void {
@@ -272,10 +268,10 @@ export function broadcastProjectUpdated(projectId: string, changedNodeIds?: stri
 }
 
 /**
- * 广播项目冲突
+ * 广播项目冲突快照(冲突自动解决后,通知其他标签页展示提示条)
  */
-export function broadcastProjectConflict(conflict: ProjectConflict): void {
-  postMessage('project_conflict', conflict as unknown as Record<string, unknown>);
+export function broadcastProjectConflict(info: ConflictSnapshotInfo): void {
+  postMessage('project_conflict', info as unknown as Record<string, unknown>);
 }
 
 /**

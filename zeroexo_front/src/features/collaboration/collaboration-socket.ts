@@ -28,13 +28,22 @@ interface ActiveConnection {
   canvasId: string;
   userId: string;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  /** 连续重连尝试次数(指数退避用,连接成功后重置为 0) */
+  reconnectAttempt: number;
 }
 
 /** 已建立的连接（按 canvasId 索引，避免重复连接） */
 const activeConnections = new Map<string, ActiveConnection>();
 
-/** 断线重连延迟 */
-const RECONNECT_DELAY_MS = 3000;
+/** 断线重连基础延迟(指数退避起点) */
+const BASE_RECONNECT_DELAY_MS = 3000;
+/** 断线重连最大延迟(封顶,避免服务器不可用时持续高频请求) */
+const MAX_RECONNECT_DELAY_MS = 60000;
+
+/** 指数退避:3s → 6s → 12s → 24s → 48s → 60s(封顶) */
+function getReconnectDelay(attempt: number): number {
+  return Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+}
 
 /**
  * 建立画布协作房间的实时事件连接
@@ -52,6 +61,7 @@ export function connectCollaborationEvents(canvasId: string, userId?: string): C
     canvasId,
     userId: userId ?? '',
     reconnectTimer: null,
+    reconnectAttempt: 0,
   };
   activeConnections.set(canvasId, conn);
   void openStream(conn);
@@ -85,7 +95,8 @@ async function openStream(conn: ActiveConnection): Promise<void> {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    // 连接建立（含重连成功后）→ 刷新房间信息与成员列表
+    // 连接建立（含重连成功后）→ 重置退避计数,刷新房间信息与成员列表
+    conn.reconnectAttempt = 0;
     void refreshRoomState(canvasId);
 
     const reader = response.body?.getReader();
@@ -130,12 +141,14 @@ async function openStream(conn: ActiveConnection): Promise<void> {
   }
 }
 
-/** 延迟重连 */
+/** 延迟重连(指数退避:连续失败逐次放大延迟,封顶 60s) */
 function scheduleReconnect(conn: ActiveConnection): void {
+  const delay = getReconnectDelay(conn.reconnectAttempt);
+  conn.reconnectAttempt += 1;
   conn.reconnectTimer = setTimeout(() => {
     if (!activeConnections.has(conn.canvasId)) return;
     void openStream(conn);
-  }, RECONNECT_DELAY_MS);
+  }, delay);
 }
 
 /** 关闭指定画布的事件连接 */
@@ -209,12 +222,21 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       void refreshRoom(canvasId);
       break;
     case 'room_closed':
-      // 房间已关闭 → 断开当前用户的 SSE 连接，停止所有同步
+      // 房间已关闭(软删除) → 断开当前用户的 SSE 连接，停止所有同步
+      // 房主关闭 → 回到"未开启"；参与者 → 标记"协作已失效"并派发事件让编辑器弹出提示后返回主页
       closeConnection(canvasId);
-      store.getState().setRoom(null);
-      store.getState().setActive(false);
-      store.getState().setAgentStatus(null);
-      store.getState().setError('协作房间已关闭');
+      {
+        const ownerId = store.getState().room?.ownerId;
+        store.getState().setRoom(null);
+        store.getState().setAgentStatus(null);
+        if (ownerId === store.getState().userId) {
+          store.getState().setStatus('idle');
+        } else {
+          store.getState().setStatus('expired');
+          window.dispatchEvent(new CustomEvent('zeroexo:collab-room-expired', { detail: { canvasId } }));
+        }
+        store.getState().setActive(false);
+      }
       break;
     case 'agent_thinking': {
       // Agent 开始思考

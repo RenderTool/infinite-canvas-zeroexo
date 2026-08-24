@@ -209,7 +209,17 @@
     "versionConflictTitle": "Version Conflict",
     "versionConflictHint": "Cloud version differs from local version. Please choose an action.",
     "pullCloud": "Pull from Cloud",
-    "pushLocal": "Push Local"
+    "pushLocal": "Push Local",
+    "conflictSnapshotHint": "Cloud version differs from local. Cloud snapshot v{{version}} saved, local changes pushed",
+    "conflictSnapshotHintNoVersion": "Cloud version differs from local. Resolved with local-first",
+    "conflictSnapshotLocalActive": "Local is the active version. Cloud snapshot v{{version}} saved",
+    "conflictSnapshotLocalActiveNoVersion": "Local is the active version. Pushed with local-first",
+    "conflictSnapshotLocalStale": "Local data is historical. Saved as snapshot v{{version}}, updated to latest cloud version",
+    "conflictSnapshotLocalStaleNoVersion": "Local data is historical. Updated to latest cloud version",
+    "collabDisconnected": "Collaboration connection lost. Reconnecting…",
+    "conflictCloudDeletedHint": "Cloud project was deleted. Automatically re-created",
+    "viewHistory": "View Snapshot",
+    "unknownProject": "Untitled Project"
   },
   "version": {
     "title": "Version History",
@@ -223,7 +233,8 @@
     "nodeCount": "{{count}} nodes",
     "loadFailed": "Failed to load versions",
     "restoreFailed": "Failed to restore version",
-    "retry": "Retry"
+    "retry": "Retry",
+    "retentionHint": "Snapshots are kept for 30 days, then auto-cleaned"
   },
   "auth": {
     "loginTitle": "Login",
@@ -318,6 +329,16 @@
     "importFailed": "Import failed, please select a valid canvas ZIP file",
     "selectMode": "Select",
     "exitSelect": "Exit Select",
+    "collabActive": "Collaborating",
+    "collabParticipating": "Joined",
+    "collabExpired": "Expired",
+    "startCollaboration": "Start Collaboration",
+    "exitCollaborationMode": "Exit Collaboration",
+    "collabFilterAll": "All",
+    "collabFilterMine": "Started by Me",
+    "collabFilterJoined": "Joined by Me",
+    "collabModeEmpty": "No canvases available to start collaboration",
+    "collabJoinedEmpty": "No participating collaborations yet",
     "loading": "Loading...",
     "loadFailed": "Load failed",
     "updatedAt": "Updated",
@@ -1822,7 +1843,27 @@
     "myRoomsEmpty": "No collaboration rooms yet",
     "searchRooms": "Search by room name or owner",
     "membersCount": "members",
-    "enterRoom": "Enter"
+    "enterRoom": "Enter",
+    "notStarted": "Collaboration not started",
+    "notStartedHint": "Once started, share the invite link to collaborate with others.",
+    "startCollaboration": "Start Collaboration",
+    "collabStarted": "Collaboration started",
+    "startFailed": "Failed to start collaboration",
+    "roomExpired": "Collaboration expired",
+    "roomExpiredHint": "The owner has closed this collaboration. This canvas will be removed from your list.",
+    "exitCollaboration": "Leave This Collaboration",
+    "exitConfirmTitle": "Leave Collaboration",
+    "exitConfirmContent": "Are you sure you want to leave this collaboration? You will no longer be able to view this canvas.",
+    "exitHint": "After leaving, you will no longer participate in this collaboration and the canvas will be removed from your list.",
+    "exitSuccess": "Left the collaboration",
+    "removeFromList": "Remove from List",
+    "removedSuccess": "Removed from list",
+    "joinMoreCollaboration": "Join More Collaborations",
+    "expiredRemoveTitle": "Collaboration Expired",
+    "expiredRemoveContent": "This collaboration has expired. This canvas will be removed from your list.",
+    "roomClosedByOwnerTitle": "Collaboration Closed",
+    "roomClosedByOwnerContent": "The owner has closed this collaboration. You will be removed from this canvas.",
+    "backToHome": "Back to Home"
   },
   "coverUpload": {
     "title": "Upload Project Cover",
@@ -1867,7 +1908,11 @@
     "newProject": "New Project",
     "untitledProject": "Untitled Project",
     "moreActions": "More Actions",
-    "noCover": "No cover yet"
+    "noCover": "No cover yet",
+    "collaboration": "Collaborate / Share",
+    "collabDetail": "Collaboration Details",
+    "removeFromList": "Remove from List",
+    "expired": "Expired"
   },
   "promptCard": {
     "generateSimilar": "Save a Copy",
@@ -1951,7 +1996,8 @@
       "manual": "Manual",
       "autoDelete": "Batch Delete",
       "autoAi": "AI Overwrite",
-      "autoTimer": "Scheduled"
+      "autoTimer": "Scheduled",
+      "rollback": "Rollback Copy"
     },
     "rollback": "Rollback to this version",
     "rollbackTitle": "Confirm Rollback",

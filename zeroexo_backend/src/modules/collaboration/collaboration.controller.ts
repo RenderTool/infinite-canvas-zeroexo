@@ -35,6 +35,7 @@ interface AuthedRequest extends Request {
  *   POST   /api/collaboration/rooms/:canvasId/join         通过邀请码加入
  *   POST   /api/collaboration/rooms/:canvasId/auto-join    同账户多设备自动加入
  *   POST   /api/collaboration/rooms/:canvasId/leave       离开房间
+ *   POST   /api/collaboration/rooms/:canvasId/remove-self 参与者主动退出协作(移除成员身份)
  *
  * 成员管理:
  *   GET    /api/collaboration/rooms/:canvasId/members       成员列表
@@ -74,6 +75,18 @@ export class CollaborationController {
   @Get('rooms/mine')
   async listMyRooms(@Req() req: AuthedRequest) {
     return this.collaborationService.listMyRooms(req.user.id);
+  }
+
+  /** 我拥有的画布 + 各画布协作状态（主页"发起协作"模式/协作 Tag） */
+  @Get('rooms/my-canvases')
+  async listMyCanvases(@Req() req: AuthedRequest) {
+    return this.collaborationService.listMyCanvases(req.user.id);
+  }
+
+  /** 我参与的协作画布列表（含已失效） */
+  @Get('rooms/participating')
+  async listParticipating(@Req() req: AuthedRequest) {
+    return this.collaborationService.listParticipating(req.user.id);
   }
 
   @Get('rooms/:canvasId')
@@ -136,6 +149,12 @@ export class CollaborationController {
   @Post('rooms/:canvasId/leave')
   async leaveRoom(@Req() req: AuthedRequest, @Param('canvasId') canvasId: string) {
     return this.collaborationService.leaveRoom(req.user.id, canvasId);
+  }
+
+  /** 参与者主动移除自己的成员身份（退出协作 / 失效画布移除） */
+  @Post('rooms/:canvasId/remove-self')
+  async removeSelf(@Req() req: AuthedRequest, @Param('canvasId') canvasId: string) {
+    return this.collaborationService.removeSelfFromRoom(req.user.id, canvasId);
   }
 
   // ==================== 成员管理 ====================

@@ -98,9 +98,13 @@ export class AgentSSEService {
 
   /**
    * 便捷方法：推送 tool_call 事件
+   * toolCallId 必须透传：前端据此把 tool_result 关联到对应步骤胶囊（缺失会导致 Result 永不渲染）
    */
-  emitToolCall(taskId: string, toolName: string, args: unknown): void {
-    this.emit(taskId, { type: 'agent:tool_call', data: { toolName, arguments: args } });
+  emitToolCall(taskId: string, toolName: string, args: unknown, toolCallId?: string): void {
+    this.emit(taskId, {
+      type: 'agent:tool_call',
+      data: { toolName, arguments: args, ...(toolCallId ? { toolCallId } : {}) },
+    });
   }
 
   /**

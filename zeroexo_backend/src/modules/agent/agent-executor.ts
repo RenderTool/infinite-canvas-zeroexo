@@ -805,8 +805,11 @@ export class AgentExecutor {
           };
         }
 
-        // 4. 处理文本响应(最终输出)
-        if (responseMessage.content) {
+        // 4. 处理文本响应(最终输出)：仅当本轮没有 tool_calls 时才视为最终输出。
+        // 模型常在 tool_call 前附带一句过渡文本（如"我先读取画布状态"），
+        // 若此时直接 break，会执行完工具却把过渡文本当最终答复，造成"卡在读画布"假象。
+        const hasToolCalls = Array.isArray(responseMessage.tool_calls) && responseMessage.tool_calls.length > 0;
+        if (responseMessage.content && !hasToolCalls) {
           finalOutput = responseMessage.content;
 
           // R2-5: 交付阶段（无 emit_brief 时也保证收尾面板态）

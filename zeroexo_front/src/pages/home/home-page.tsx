@@ -28,8 +28,6 @@ export interface HomePageProps {
   onOpenProject: (id: string) => void;
   onOpenCanvas: (id: string) => void;
   onNavigate: (route: 'canvas' | 'home' | 'assets' | 'publicPrompts' | { name: 'auth'; mode: 'login' }) => void;
-  /** 打开首页协作入口弹窗(由 app.tsx 全局挂载) */
-  onOpenCollaboration?: () => void;
 }
 
 export function HomePage({ onOpenProject, onNavigate }: HomePageProps): React.ReactElement {

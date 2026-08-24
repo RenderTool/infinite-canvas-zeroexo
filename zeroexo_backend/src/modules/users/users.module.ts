@@ -8,9 +8,10 @@ import { UserCleanupService } from './user-cleanup.service';
 import { LogsModule } from '../logs/logs.module';
 import { AssetsModule } from '../assets/assets.module';
 import { BillingModule } from '../billing/billing.module';
+import { CollaborationModule } from '../collaboration/collaboration.module';
 
 @Module({
-  imports: [LogsModule, AssetsModule, BillingModule],
+  imports: [LogsModule, AssetsModule, BillingModule, CollaborationModule],
   providers: [UsersService, UserApplicationService, UserCleanupService],
   controllers: [UsersController, AdminUsersController, UserApplicationController],
   exports: [UsersService, UserCleanupService],

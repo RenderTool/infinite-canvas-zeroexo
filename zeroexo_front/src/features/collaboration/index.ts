@@ -12,6 +12,7 @@
 export type {
   CollaborationMode,
   RoomStatus,
+  CollaborationStatus,
   MemberRole,
   MemberStatus,
   DeviceType,
@@ -31,6 +32,8 @@ export type {
   SendMessageRequest,
   RoomResponse,
   MyRoomItem,
+  MyCanvasItem,
+  ParticipatingCanvasItem,
 } from './collaboration-types.js';
 
 // API 客户端
@@ -40,11 +43,14 @@ export {
   updateRoom,
   closeRoom,
   listMyRooms,
+  listMyCanvases,
+  listParticipating,
   regenerateInvite,
   verifyInvite,
   joinRoom,
   autoJoinRoom,
   leaveRoom,
+  removeSelfFromRoom,
   listMembers,
   updateMember,
   kickMember,
@@ -90,10 +96,6 @@ export type { CollaborationChatProps, MentionInputProps } from './collaboration-
 // 协作管理弹窗(画布内)
 export { CollaborationModal } from './collaboration-modal.js';
 export type { CollaborationModalProps } from './collaboration-modal.js';
-
-// 首页协作入口弹窗
-export { HomeCollaborationModal } from './home-collaboration-modal.js';
-export type { HomeCollaborationModalProps } from './home-collaboration-modal.js';
 
 // 画布远端协作覆盖层(远端光标 + 选中高亮)
 export { CollabOverlay } from './collab-overlay.js';
