@@ -229,8 +229,13 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       // 房间已关闭(软删除) → 断开当前用户的 SSE 连接，停止所有同步
       // 房主关闭 → 回到"未开启"；参与者 → 标记"协作已失效"并派发事件让编辑器弹出提示后返回主页
       closeConnection(canvasId);
+      // 幂等守卫:非 active 说明已处理过(防 Redis 回环/重连重放导致重复弹窗)
+      if (store.getState().status !== 'active') return;
       {
-        const ownerId = store.getState().room?.ownerId;
+        // 优先用事件携带的 ownerId(closeRoom 广播带 meta.ownerId);
+        // store.room 可能已被调用方 setRoom(null) 清空,此时取不到 ownerId 会误判发起者为参与者
+        const ownerId =
+          (event.meta?.ownerId as string | undefined) ?? store.getState().room?.ownerId;
         store.getState().setRoom(null);
         store.getState().setAgentStatus(null);
         if (ownerId === store.getState().userId) {

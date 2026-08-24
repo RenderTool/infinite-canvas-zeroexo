@@ -14,6 +14,8 @@ export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private client: Redis | null = null;
   private isEnabled = false;
+  /** 本实例唯一标识(用于 Pub/Sub 消息过滤自身回环,避免双送达) */
+  private readonly instanceId: string = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   constructor(private readonly configService: ConfigService) {
     const redisUrl = this.configService.get<string>('REDIS_URL');
@@ -42,6 +44,11 @@ export class RedisService implements OnModuleDestroy {
   /** 是否启用 Redis */
   get enabled(): boolean {
     return this.isEnabled && this.client !== null;
+  }
+
+  /** 本实例唯一标识 */
+  get id(): string {
+    return this.instanceId;
   }
 
   // ─── Generic Operations ───

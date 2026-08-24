@@ -64,7 +64,10 @@ export class CollaborationEventsService implements OnModuleDestroy {
     const pattern = `${this.REDIS_CHANNEL_PREFIX}*`;
     this.redisService.psubscribe(pattern, (message, channel) => {
       try {
-        const event: CollaborationEvent = JSON.parse(message);
+        const parsed = JSON.parse(message) as CollaborationEvent & { __src?: string };
+        // 过滤本实例发布的消息(Redis Pub/Sub 会回环给发布者,否则本地连接双送达)
+        if (parsed.__src === this.redisService.id) return;
+        const { __src: _src, ...event } = parsed;
         const canvasId = channel.replace(this.REDIS_CHANNEL_PREFIX, '');
         if (event.canvasId !== canvasId) return;
 
@@ -136,7 +139,8 @@ export class CollaborationEventsService implements OnModuleDestroy {
     // 跨实例广播（Redis Pub/Sub）
     if (this.redisService.enabled) {
       const channel = `${this.REDIS_CHANNEL_PREFIX}${canvasId}`;
-      this.redisService.publish(channel, JSON.stringify(full)).catch((err) => {
+      // 携带 __src 实例标识,供订阅端过滤自身回环(Redis Pub/Sub 会发给发布者自己)
+      this.redisService.publish(channel, JSON.stringify({ ...full, __src: this.redisService.id })).catch((err) => {
         this.logger.warn(`Redis Pub/Sub 发布失败: ${err}`);
       });
     }
