@@ -16,8 +16,7 @@ import {
 } from '@zeroexo/plugin-persistence';
 import type { CanvasProjectMeta } from '@zeroexo/plugin-persistence';
 import {
-  onProjectCreated,
-  onProjectUpdated,
+  pushProjectMeta,
   onProjectDeleted,
   fullSync,
 } from '@/services/sync/sync-service.js';
@@ -63,8 +62,7 @@ export function useProjects(): UseProjectsResult {
           next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           return next;
         });
-        // 触发云同步(防抖推送)
-        onProjectCreated(project.id);
+        // 云端记录由首次编辑触发 Yjs upsert 自动创建(Phase3:HTTP 创建路径已退役)
         return project;
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to create project');
@@ -101,8 +99,8 @@ export function useProjects(): UseProjectsResult {
         setProjects((prev) =>
           prev.map((p) => (p.id === id ? updated : p)),
         );
-        // 触发云同步(防抖推送)
-        onProjectUpdated(id);
+        // 重命名上云走轻量元数据 PATCH(Phase3 保留通道,画布数据写已移交 Yjs)
+        pushProjectMeta(id);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rename project');
@@ -119,8 +117,7 @@ export function useProjects(): UseProjectsResult {
             next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             return next;
           });
-          // 触发云同步(防抖推送)
-          onProjectCreated(project.id);
+          // 云端记录由首次编辑触发 Yjs upsert 自动创建(Phase3:HTTP 创建路径已退役)
         }
         return project;
       } catch (err) {

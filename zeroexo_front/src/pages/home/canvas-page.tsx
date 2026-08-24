@@ -19,7 +19,7 @@ import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plug
 import { exportProjects } from './services/export-projects.js';
 import { importProjectsFromZip } from './services/import-projects.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
-import { fullSync, onProjectUpdated } from '@/services/sync/sync-service.js';
+import { fullSync, pushProjectMeta } from '@/services/sync/sync-service.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { listMyCanvases, listParticipating, removeSelfFromRoom } from '@/features/collaboration/collaboration-api.js';
 import type { MyCanvasItem, ParticipatingCanvasItem } from '@/features/collaboration/collaboration-types.js';
@@ -336,7 +336,7 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
     }
 
     await updateProject(coverId, { thumbnailUrl: cloudUrl });
-    onProjectUpdated(coverId);
+    pushProjectMeta(coverId);
 
     message.success('封面设置成功');
     closeCoverUpload();

@@ -10,6 +10,7 @@ import { AddNodeCommand } from '@zeroexo/core';
 import { createAssetNode } from '@zeroexo/plugin-nodes';
 import { getProject, loadProjectGraph, saveProjectGraph, createProject, updateProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { loadCanvasConfig, saveCanvasConfig } from '@/features/top-bar/index.js';
+import { pushProjectMeta } from '@/services/sync/sync-service.js';
 import type { CanvasConfig } from '@/features/top-bar/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import { toInsertPayload } from '@/features/asset-picker/components/picker-card.js';
@@ -25,9 +26,7 @@ export function useEditorDialogs({
   canvasId,
   onBack,
   onOpenProject,
-  onProjectCreated,
   onProjectDeleted,
-  onProjectUpdated,
   setRenamingGroupId,
   refs,
   state,
@@ -39,9 +38,7 @@ export function useEditorDialogs({
   canvasId: string;
   onBack: () => void;
   onOpenProject: (id: string) => void;
-  onProjectCreated: (id: string) => void;
   onProjectDeleted: (id: string, opts?: { skipLocalDelete?: boolean }) => Promise<void>;
-  onProjectUpdated: (id: string) => void;
   setRenamingGroupId: React.Dispatch<React.SetStateAction<string | null>>;
   refs: EditorRefs;
   state: { containerSize: { width: number; height: number } };
@@ -218,13 +215,14 @@ export function useEditorDialogs({
     void (async () => {
       try {
         await updateProject(canvasId, { title: trimmed });
-        onProjectUpdated(canvasId);
+        // 标题保存上云走轻量元数据 PATCH(Phase3 保留通道)
+        pushProjectMeta(canvasId);
         message.success(i18n.t('editorDialogs.titleUpdated'));
       } catch {
         message.error(i18n.t('errors.BAD_REQUEST'));
       }
     })();
-  }, [titleDraft, t, canvasId, onProjectUpdated, message]);
+  }, [titleDraft, t, canvasId, message]);
 
   // 素材插入画布（资产/提示词/剧本 三类型，FIX-4/5）
   const handleAssetInsert = useCallback(
@@ -345,10 +343,9 @@ export function useEditorDialogs({
     }
     const project = await createProject({ title: baseTitle });
     if (project) {
-      onProjectCreated(project.id);
       onOpenProject(project.id);
     }
-  }, [t, onOpenProject, onProjectCreated]);
+  }, [t, onOpenProject]);
 
   // 拷贝项目
   const handleCopyProject = useCallback(async () => {
@@ -366,10 +363,10 @@ export function useEditorDialogs({
         await saveProjectGraph(project.id, { nodes: [], edges: [], viewport: { x: 0, y: 0, k: 1 }, metadata: {} });
         await updateProject(project.id, { nodeCount: 0 });
       }
-      onProjectCreated(project.id);
+      // 拷贝项目:云端记录由首次编辑触发 Yjs upsert 自动创建(Phase3)
       onOpenProject(project.id);
     }
-  }, [canvasId, t, onOpenProject, onProjectCreated, refs.store]);
+  }, [canvasId, t, onOpenProject, refs.store]);
 
   // 移动端导航操作列表
   const mobileNavProjectActions = useMemo<NavProjectAction[]>(

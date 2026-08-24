@@ -571,6 +571,28 @@ export async function forcePushLocalToCloud(projectId: string, graph?: GraphMode
   }
 }
 
+/**
+ * 轻量元数据推送(Phase3 保留通道):title/thumbnailUrl/tags 走 PATCH,不含
+ * scene/connections/viewport/version(画布数据写路径已移交 Yjs storeCanvasDocument
+ * upsert)。服务重命名/封面设置等元数据场景,无 cloudId 时后端 upsert 兜底创建。
+ */
+export async function pushProjectMeta(projectId: string): Promise<void> {
+  if (!isOnline()) return;
+  const local = await getProject(projectId);
+  if (!local) return;
+  try {
+    await apiPatch<CloudProject>(`/projects/${local.cloudId ?? projectId}`, {
+      id: local.id,
+      title: local.title,
+      thumbnailUrl: local.thumbnailUrl,
+      tags: local.tags,
+    });
+    debugLog(`[sync-service] pushProjectMeta ${projectId} ok`);
+  } catch (err) {
+    debugLog(`[sync-service] pushProjectMeta ${projectId} failed:`, err);
+  }
+}
+
 export async function mergeCloudProjectToLocal(cloud: CloudProject, _force = false): Promise<void> {
   const local = await getProject(cloud.id);
 

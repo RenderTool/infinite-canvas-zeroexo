@@ -20,9 +20,8 @@ import { ProxyProvider } from '@zeroexo/plugin-ai-provider';
 import type { AIProvider } from '@zeroexo/plugin-ai-provider';
 import { apiFetch, ApiError, getToken } from '@/services/api-client.js';
 import i18n from '@/i18n/config';
-import { syncProjectFromCloud, repushLocalAsNewCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud, notifyConflictSnapshot } from '@/services/sync/sync-service.js';
-import { markNodesDirty, debugLog } from '@/services/sync/sync-utils.js';
-import type { ConflictSnapshotInfo } from '@/services/sync/sync-service.js';
+import { syncProjectFromCloud, syncProjectResourcesFromCloud, syncProjectResourcesToCloud } from '@/services/sync/sync-service.js';
+import { debugLog } from '@/services/sync/sync-utils.js';
 import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
 import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
 import { useCollaboration } from '@/features/collaboration/use-collaboration.js';
@@ -33,7 +32,7 @@ import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
 import { createProductionManagerExtensions } from '@/features/canvas-nodes/production-manager/production-manager-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
-import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT, PROJECT_CONFLICT_SNAPSHOT_EVENT } from '@/services/sync/broadcast-channel-service.js';
+import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT } from '@/services/sync/broadcast-channel-service.js';
 import { collectImageStorageKeys, getProject, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
 
@@ -123,10 +122,6 @@ export function useEditorState(canvasId: string): {
   reloadGraph: (graph: GraphModel) => void;
   cloudUpdateAvailable: boolean;
   clearCloudUpdateAvailable: () => void;
-  /** 冲突自动解决提示(顶部提示条展示,可跳转历史快照还原点) */
-  snapshotHint: ConflictSnapshotInfo | null;
-  /** 关闭冲突提示条 */
-  onCloseSnapshotHint: () => void;
   collaboration: ReturnType<typeof useCollaboration> | null;
   awarenessStates: Map<number, AwarenessState>;
   collaborationActive: boolean;
@@ -200,12 +195,6 @@ export function useEditorState(canvasId: string): {
    * 非侵入式:不自动拉取(避免突然改变画布)
    */
   const [cloudUpdateAvailable, setCloudUpdateAvailable] = useState(false);
-  /**
-   * 冲突自动解决提示:云端版本不一致 / 云端已删除时,系统按「本地优先」自动处理
-   * (保存云端快照 + 推送本地 / 自动重新创建),由顶部提示条 ConflictSnapshotHint 展示,
-   * 用户可点击跳转历史快照查看还原点。
-   */
-  const [snapshotHint, setSnapshotHint] = useState<ConflictSnapshotInfo | null>(null);
   /**
    * reloadGraph 函数 ref:冲突解决"拉取云端"后,用云端 graph 替换当前编辑器 graph
    * 通过 ref 暴露 useEffect 内部的闭包(需访问 suppressNextSync 标志避免拉取-推送循环)
@@ -306,21 +295,14 @@ export function useEditorState(canvasId: string): {
               // ignore: 非成员或房间不存在，落入下方原有分支
             }
             const local = await getProject(canvasId);
-            if (local?.cloudId) {
-              // 项目曾在云端但被删除 → 本地优先:自动重新创建为全新云端项目(不再弹窗)
-              // 先通知提示条(云端已删除场景),再异步重建,不阻塞本地数据加载
-              notifyConflictSnapshot({ projectId: canvasId, title: local.title, cloudDeleted: true });
-              try {
-                await repushLocalAsNewCloud(canvasId);
-              } catch (repushErr) {
-                console.warn('[use-editor-state] repush local as new cloud failed:', repushErr);
-              }
-            } else if (!local) {
+            if (!local) {
               // 本地与云端均无 → 项目不存在
               message.error(i18n.t('errors.PROJECT_NOT_FOUND'));
               window.location.hash = '#/canvas';
               return;
             }
+            // 云端已删除但本地有数据 → 继续加载本地数据;Yjs 播种后首次编辑由服务端
+            // storeCanvasDocument upsert 自动重建云端记录(Phase3:HTTP 重建路径已退役)
           }
           // 其他错误:忽略,继续用本地数据
         }
@@ -483,16 +465,6 @@ export function useEditorState(canvasId: string): {
     };
     window.addEventListener(PROJECT_DELETED_EVENT, handleProjectDeleted);
 
-    // 监听冲突自动解决事件:云端冲突/已删除已按「本地优先」自动处理,
-    // 顶部提示条展示还原点信息,用户可点击跳转历史快照
-    const handleProjectConflictSnapshot = (e: Event): void => {
-      const detail = (e as CustomEvent<ConflictSnapshotInfo>).detail;
-      if (!detail || detail.projectId !== canvasId) return;
-      console.log(`[sync] >> treating PROJECT_CONFLICT_SNAPSHOT_EVENT as snapshot hint for ${detail.projectId}`);
-      setSnapshotHint(detail);
-    };
-    window.addEventListener(PROJECT_CONFLICT_SNAPSHOT_EVENT, handleProjectConflictSnapshot);
-
     // 会话被抢占事件已废弃 — Yjs 实时协作允许多标签页共存
 
     // 注入节点尺寸访问器给 group / layout 插件
@@ -602,65 +574,11 @@ export function useEditorState(canvasId: string): {
         }
       }
     };
-    // 上一帧的节点内容指纹(用于 FastArray 式增量同步)。
-    // 对每个节点单独计算轻量指纹,从而捕获"新增/删除/内容或位置修改"三类变更。
-    // 相比全图 JSON 序列化,这里仅序列化关键字段,且截断大字符串(如 base64 图片),
-    // 避免 500+ 节点下全量序列化大二进制造成卡顿。
-    let prevNodeFingerprints = new Map<string, string>();
-    const fingerprintReplacer = (_k: string, v: unknown): unknown => {
-      // 截断超长字符串(如 base64 图片/音频数据),避免生成巨大指纹字符串
-      if (typeof v === 'string' && v.length > 256) {
-        return `${v.slice(0, 256)}…${v.length}`;
-      }
-      return v;
-    };
-    const nodeFingerprint = (n: unknown): string => {
-      try {
-        // 只对发生变化的字段序列化;大字符串被截断,开销可控
-        return JSON.stringify(n, fingerprintReplacer);
-      } catch {
-        return (n as { id?: string }).id ?? 'unknown';
-      }
-    };
-
-    /** graph 变更时：更新 UI + 先上传资源到云端再用 cloud key 推送 Yjs + 云同步 */
+    /** graph 变更时：更新 UI + 推送 Yjs(增量广播 + 服务端落库) */
     const onGraphChanged = () => {
       updateUIState();
       if (isInitialized && !suppressNextSync) {
-        const graph = store.getGraph();
-        const nodes = graph.nodes;
-
-        // ==== FastArray 增量同步:diff 前后节点指纹,标记新增/删除/修改的节点 ====
-        const changedIds: string[] = [];
-        const curFingerprints = new Map<string, string>();
-        for (const n of nodes) {
-          const id = (n as { id: string }).id;
-          curFingerprints.set(id, nodeFingerprint(n));
-        }
-
-        if (prevNodeFingerprints.size > 0) {
-          for (const id of curFingerprints.keys()) {
-            // 新增节点
-            if (!prevNodeFingerprints.has(id)) changedIds.push(id);
-            // 已存在但内容/位置变化
-            else if (prevNodeFingerprints.get(id) !== curFingerprints.get(id)) changedIds.push(id);
-          }
-          // 已删除节点(记录为 "__deleted__" 由 sync-projects 处理)
-          for (const id of prevNodeFingerprints.keys()) {
-            if (!curFingerprints.has(id)) changedIds.push(id);
-          }
-        }
-        // 首次(prevNodeFingerprints 为空)不标记,避免首次加载触发全量误标
-        prevNodeFingerprints = curFingerprints;
-        if (changedIds.length > 0) {
-          markNodesDirty(canvasId, changedIds);
-          if (changedIds.length <= 20) {
-            debugLog(`[canvas] incremental dirty: +${changedIds.length} nodes`, changedIds);
-          }
-        }
-
-        // 拖拽/resize 期间:Yjs 广播限频(见下方节流器),HTTP 快照仍跳过(避免每帧 rawFetch)
-        // 释放(pointerup)时 flush 补发最终位置,与 HTTP 快照"拖拽中不推"策略对齐
+        // 拖拽/resize 期间:Yjs 广播限频(见下方节流器),释放(pointerup)时 flush 补发最终位置
         const trans = ic.getTransient();
         if (trans.draggingNode || trans.resizing) {
           scheduleDragYjsPush();
@@ -1000,7 +918,6 @@ export function useEditorState(canvasId: string): {
       // 移除云端 diff(版本差异)事件监听
       window.removeEventListener(PROJECT_DIFF_EVENT, handleProjectDiff);
       window.removeEventListener(PROJECT_DELETED_EVENT, handleProjectDeleted);
-      window.removeEventListener(PROJECT_CONFLICT_SNAPSHOT_EVENT, handleProjectConflictSnapshot);
       unsubGraph();
       unsubSelection();
       unsubViewport();
@@ -1229,11 +1146,6 @@ export function useEditorState(canvasId: string): {
     setCloudUpdateAvailable(false);
   }, []);
 
-  /** 关闭冲突提示条(用户主动关闭或已跳转历史快照) */
-  const onCloseSnapshotHint = useCallback((): void => {
-    setSnapshotHint(null);
-  }, []);
-
   return {
     state,
     actions,
@@ -1242,8 +1154,6 @@ export function useEditorState(canvasId: string): {
     reloadGraph,
     cloudUpdateAvailable,
     clearCloudUpdateAvailable,
-    snapshotHint,
-    onCloseSnapshotHint,
     collaboration,
     awarenessStates: collaboration.awarenessStates,
     collaborationActive: collaboration.active,

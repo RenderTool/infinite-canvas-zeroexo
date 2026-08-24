@@ -31,7 +31,7 @@ import { CanvasView, PinDefaultsProvider, NodeDefaultsProvider } from '@zeroexo/
 import { MinimapView } from '@zeroexo/plugin-minimap';
 import { GroupLayer, GroupDefaultsProvider, getGroupBoundsWithEmptyFallback } from '@zeroexo/plugin-group';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { fullSync, onProjectCreated, onProjectUpdated, onProjectDeleted } from '@/services/sync/sync-service.js';
+import { fullSync, onProjectDeleted } from '@/services/sync/sync-service.js';
 import { useSyncStatus } from '@/services/sync/sync-store.js';
 import type { NodeRecord, EdgeRecord } from '@zeroexo/core';
 import { TopBar, ConfigDialog, VersionDialogs } from '@/features/top-bar/index.js';
@@ -44,7 +44,6 @@ import { GroupStyleDialog } from '@/features/tools-dock/group-style-dialog.js';
 import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-panel.js';
 import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
-import { ConflictSnapshotHint } from '@/features/sync-conflict-dialog/conflict-snapshot-hint.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
@@ -93,7 +92,7 @@ export interface EditorPageProps {
 }
 
 export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
-  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, snapshotHint, onCloseSnapshotHint } = useEditorState(canvasId);
+  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable } = useEditorState(canvasId);
     // 快捷键注册表(键盘插件实例;供快捷键弹窗自动映射,未安装插件时为 undefined)
     const keyboardShortcuts = state.editor?.core.plugins.get<KeyboardPlugin>('keyboard')?.listShortcuts();
   const { theme } = useTheme();
@@ -121,7 +120,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // 弹窗状态管理
   const dialogs = useEditorDialogs({
     canvasId, onBack, onOpenProject,
-    onProjectCreated, onProjectDeleted, onProjectUpdated,
+    onProjectDeleted,
     setRenamingGroupId,
     refs, state, actions, message, t, isMobile,
   });
@@ -1096,16 +1095,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
       {/* 批量上传队列覆盖层 */}
       <UploadQueueOverlay onRetryFailed={processFiles} />
-
-      {/* 同步冲突自动解决提示条(云端冲突时自动存快照+推送本地,点击可跳转历史快照还原点) */}
-      {snapshotHint ? (
-        <ConflictSnapshotHint
-          info={snapshotHint}
-          theme={theme}
-          onOpenHistory={() => dialogs.setVersionHistoryOpen(true)}
-          onClose={onCloseSnapshotHint}
-        />
-      ) : null}
 
       {/* 协作管理弹窗(邀请码/成员/权限管理,由 TopBar 协作按钮触发) */}
       {!state.loading && (

@@ -18,15 +18,12 @@
 
 import {
   debouncedFullSync,
-  onProjectCreated,
 } from './sync-service.js';
-import type { ConflictSnapshotInfo } from './sync-service.js';
 import { setSyncStatus } from './sync-store.js';
 
 // ─── Re-export window event names (same as sse-service, for backward compat) ───
 
 export const PROJECT_RELOAD_EVENT = 'zeroexo:project-reload';
-export const PROJECT_CONFLICT_SNAPSHOT_EVENT = 'zeroexo:project-conflict-snapshot';
 export const PROJECT_DIFF_EVENT = 'zeroexo:project-diff';
 export const PROJECT_DELETED_EVENT = 'zeroexo:project-deleted';
 export const BROADCAST_LOGOUT_EVENT = 'zeroexo:bc-logout';
@@ -38,10 +35,8 @@ const BC_CHANNEL_NAME = 'zeroexo:sync';
 type BcEventType =
   | 'leader_heartbeat'
   | 'leader_elected'
-  | 'project_created'
   | 'project_updated'
   | 'project_deleted'
-  | 'project_conflict'
   | 'project_diff'
   | 'logout';
 
@@ -116,33 +111,14 @@ function handleMessage(msg: MessageEvent<BcMessage>): void {
       break;
     }
 
-    case 'project_created': {
-      const pid = data.payload.projectId as string;
-      void onProjectCreated(pid);
-      break;
-    }
-
     case 'project_updated': {
       const updPid = data.payload.projectId as string;
-      if (data.payload.hasConflict) {
-        notifyProjectConflictSnapshot({
-          projectId: updPid,
-          title: (data.payload.title as string) ?? '',
-          cloudDeleted: data.payload.cloudDeleted as boolean,
-          snapshotVersion: data.payload.snapshotVersion as number | undefined,
-        });
-      } else {
-        notifyProjectReload(updPid, data.payload.changedNodeIds as string[] | undefined);
-      }
+      notifyProjectReload(updPid, data.payload.changedNodeIds as string[] | undefined);
       break;
     }
 
     case 'project_deleted':
       notifyProjectDeleted(data.payload.projectId as string);
-      break;
-
-    case 'project_conflict':
-      notifyProjectConflictSnapshot(data.payload as unknown as ConflictSnapshotInfo);
       break;
 
     case 'project_diff':
@@ -230,13 +206,6 @@ function stopBcPolling(): void {
 
 // ─── Notification dispatchers (same window events as sse-service) ───
 
-function notifyProjectConflictSnapshot(info: ConflictSnapshotInfo): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(
-    new CustomEvent(PROJECT_CONFLICT_SNAPSHOT_EVENT, { detail: info }),
-  );
-}
-
 function notifyProjectReload(projectId: string, changedNodeIds?: string[]): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
@@ -265,13 +234,6 @@ function notifyProjectDiff(projectId: string): void {
  */
 export function broadcastProjectUpdated(projectId: string, changedNodeIds?: string[]): void {
   postMessage('project_updated', { projectId, changedNodeIds });
-}
-
-/**
- * 广播项目冲突快照(冲突自动解决后,通知其他标签页展示提示条)
- */
-export function broadcastProjectConflict(info: ConflictSnapshotInfo): void {
-  postMessage('project_conflict', info as unknown as Record<string, unknown>);
 }
 
 /**

@@ -14,7 +14,7 @@
 import { getProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { apiGet, apiDelete, ApiError } from '../api-client.js';
 import type { CloudProject } from './sync-projects.js';
-import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud, forcePullProjectFromCloud } from './sync-projects.js';
+import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud, forcePullProjectFromCloud, pushProjectMeta } from './sync-projects.js';
 import { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets } from './sync-resources.js';
 import { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted } from './sync-prompts.js';
 import { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted } from './sync-assets.js';
@@ -32,7 +32,7 @@ import type { ProjectConflict, ConflictSnapshotInfo } from './sync-utils.js';
 import { isOnline, isTabActive, setSyncStatus, setLastSyncedAt } from './sync-store.js';
 
 // 重新导出子模块的公共 API，保持向后兼容
-export { syncProjectToCloud, forcePushLocalToCloud, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePullProjectFromCloud };
+export { syncProjectToCloud, forcePushLocalToCloud, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePullProjectFromCloud, pushProjectMeta };
 export { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets };
 export { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted };
 export { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted };

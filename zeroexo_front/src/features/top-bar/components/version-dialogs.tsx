@@ -14,7 +14,6 @@ import { History, RotateCcw, Trash2 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { apiGet, apiPost, apiDelete, ApiError } from '@/services/api-client.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
-import { markProjectClean } from '@/services/sync/sync-service.js';
 import type { GraphModel } from '@zeroexo/core';
 
 interface VersionRecord {
@@ -180,8 +179,6 @@ export function VersionDialogs({
                 nodeCount: nodes.length,
               });
             }
-            // ② 清除脏标记,避免 reload 前残留 dirty 触发旧数据推送
-            markProjectClean(canvasId);
             if (warnings.length > 0) {
               modal.warning({
                 title: t('versions.missingResourcesTitle'),
