@@ -67,7 +67,10 @@ export class CollaborationSseGuard implements CanActivate {
       if (!room) throw unauthorized('UNAUTHORIZED', 'collaboration room not found');
 
       const member = await this.prisma.collaborationMember.findFirst({
-        where: { roomId: room.id, userId, status: { notIn: ['offline', 'banned', 'pending'] } },
+        // offline=离屏≠退出（Plan#38 验收热修）：重进画布的成员必须允许重建 SSE，
+        // 否则协作活性永远无法恢复（SSE 403 → active=false → 无光标/无协作态）；
+        // 与 getRoomByCanvas/canvas.service/listMembers 的放行口径对齐（banned/pending 除外）
+        where: { roomId: room.id, userId, status: { notIn: ['banned', 'pending'] } },
       });
       if (!member) {
         throw forbidden('FORBIDDEN', 'You are not an active member of this room');

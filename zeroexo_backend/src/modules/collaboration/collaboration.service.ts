@@ -286,11 +286,16 @@ export class CollaborationService {
       return { pending: true, canvasId, roomId: verification.id };
     }
 
-    // 检查是否已在房间中
-    const activeMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: verification.id, userId, status: 'online' },
+    // 检查是否已在房间中（offline=离屏≠退出，复用既有记录并恢复在线；
+    // Plan#38 验收热修：原实现只查 online，offline 成员再次 join 会重复创建 session 记录）
+    const joinedMember = await this.prisma.collaborationMember.findFirst({
+      where: { roomId: verification.id, userId, status: { notIn: ['banned', 'pending'] } },
     });
-    if (activeMember) {
+    if (joinedMember) {
+      await this.prisma.collaborationMember.updateMany({
+        where: { id: joinedMember.id },
+        data: { status: 'online', lastActiveAt: new Date() },
+      });
       // 已在房间中，直接返回
       return this.getRoomByCanvas(userId, canvasId);
     }
