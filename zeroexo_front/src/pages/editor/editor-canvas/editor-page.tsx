@@ -23,7 +23,7 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { App, Layout, Tooltip } from 'antd';
-import { ClipboardPaste } from 'lucide-react';
+import { ClipboardPaste, Eye } from 'lucide-react';
 import { EDITOR_ICONS } from './icons.js';
 import { hasClipboardContent, pasteClipboard } from '@zeroexo/preset-default';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
@@ -46,6 +46,7 @@ import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { ConflictSnapshotHint } from '@/features/sync-conflict-dialog/conflict-snapshot-hint.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
+import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
 import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
@@ -87,13 +88,11 @@ const STACK_TOAST_BATCH_THRESHOLD = 10;
 
 export interface EditorPageProps {
   canvasId: string;
-  /** 协作邀请码(来自 /c/<code> 邀请链接解析,用于自动申请加入房间) */
-  inviteCode?: string;
   onBack: () => void;
   onOpenProject: (id: string) => void;
 }
 
-export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
+export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
   const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, snapshotHint, onCloseSnapshotHint } = useEditorState(canvasId);
     // 快捷键注册表(键盘插件实例;供快捷键弹窗自动映射,未安装插件时为 undefined)
     const keyboardShortcuts = state.editor?.core.plugins.get<KeyboardPlugin>('keyboard')?.listShortcuts();
@@ -127,15 +126,6 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     refs, state, actions, message, t, isMobile,
   });
 
-  // 通过邀请链接(/c/<code>)进入时,自动打开协作弹窗并申请加入房间
-  useEffect(() => {
-    if (inviteCode && !state.loading) {
-      dialogs.setCollaborationOpen(true);
-    }
-    // 仅首次进入时触发一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inviteCode, state.loading]);
-
   // 参与者：发起者关闭协作(room_closed) → 弹出"协作已失效"提示，确认后返回主页
   useEffect(() => {
     const handler = (e: Event) => {
@@ -153,6 +143,14 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
     window.addEventListener('zeroexo:collab-room-expired', handler);
     return () => window.removeEventListener('zeroexo:collab-room-expired', handler);
   }, [canvasId, modal, onBack, t]);
+
+  // 只读保护（Plan#38 Phase 7.4）：协作中自己是无 edit 权限的成员（viewer）时，
+  // 透明遮罩拦截画布全部指针交互（仅保留浏览），并展示「只读模式」徽标；
+  // 房主/可编辑成员不受影响。服务端写校验为已知缺口（版本接口已按 role 拦截）。
+  const collabActive = useCollaborationStore((s) => s.active);
+  const collabMembers = useCollaborationStore((s) => s.members);
+  const selfMember = collabMembers.find((m) => m.isSelf) ?? null;
+  const isReadOnlyViewer = collabActive && !!selfMember && !selfMember.permissions.includes('edit');
 
   // 素材库
   const { addAsset: addAssetToStore } = useAssets();
@@ -653,6 +651,28 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         <div style={flexContainerStyle}>
           {/* 画布区域(flex-1 自适应) */}
           <div ref={containerRef} style={canvasAreaStyle}>
+            {/* 只读保护遮罩（Plan#38 Phase 7.4）：viewer 成员拦截画布指针交互，仅保留浏览；不影响顶栏/弹窗 */}
+            {isReadOnlyViewer && !state.loading && (
+              <div
+                style={{ position: 'absolute', inset: 0, zIndex: 45, touchAction: 'none' }}
+                onWheel={(e) => e.preventDefault()}
+              >
+                <div
+                  style={{
+                    position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '4px 12px', borderRadius: 999,
+                    background: theme.toolbar.panel,
+                    border: `1px solid ${theme.toolbar.border}`,
+                    color: theme.toolbar.textMuted, fontSize: 12,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <Eye size={13} />
+                  {t('collab.readOnlyBadge')}
+                </div>
+              </div>
+            )}
             {state.loading ? (
               <LoadingOverlay background={theme.canvas.background} logoSize={48} onBackToHome={onBack} />
             ) : state.editor ? (
@@ -1092,10 +1112,8 @@ export function EditorPage({ canvasId, inviteCode, onBack, onOpenProject }: Edit
         <CollaborationModal
           open={dialogs.collaborationOpen}
           canvasId={canvasId}
-          pendingInviteCode={inviteCode}
           onClose={() => dialogs.setCollaborationOpen(false)}
           theme={theme}
-          onNavigateToCanvas={onOpenProject}
         />
       )}
 

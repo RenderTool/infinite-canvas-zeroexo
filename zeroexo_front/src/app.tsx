@@ -42,7 +42,7 @@ import { PolicyPage } from '@/pages/legal/index.js';
 import { AuthPage } from '@/features/auth/auth-page.js';
 import type { AuthMode } from '@/features/auth/auth-page.js';
 import { useAuth } from '@/features/auth/auth-store.js';
-import { verifyInvite } from '@/features/collaboration/collaboration-api.js';
+import { InvitePage } from '@/features/collaboration/invite-page.js';
 import { ErrorBoundary } from '@/shared/components/index.js';
 
 import { CanvasPage } from '@/pages/home/canvas-page.js';
@@ -52,13 +52,13 @@ import { AppearanceDialog, LanguageDialog } from '@/shared/components/index.js';
 type Route =
   | { name: 'home' }
   | { name: 'canvas'; canvasId?: string }
-  | { name: 'editor'; canvasId: string; inviteCode?: string }
+  | { name: 'editor'; canvasId: string }
   | { name: 'canvasV2' }
   | { name: 'assets'; defaultGroup?: string; defaultChild?: string; focusId?: string }
   | { name: 'publicPrompts' }
   | { name: 'auth'; mode: AuthMode }
   | { name: 'legal'; page: 'policies'; policyKey?: string }
-  | { name: 'invite'; inviteCode: string }
+  | { name: 'invite'; inviteCode: string; autoJoin?: boolean }
   ;
 
 /**
@@ -170,57 +170,14 @@ function FullScreenLoading(): React.ReactElement {
   );
 }
 
-/**
- * InviteResolver - 协作邀请码解析
- *
- * 打开 /c/<inviteCode> 链接时,在 AntdApp 上下文内解析邀请码:
- * 1. 调 verifyInvite 获取目标画布
- * 2. 成功后跳转到对应画布编辑器,并携带 inviteCode 用于自动申请加入
- * 3. 失败时提示并返回首页
- */
-function InviteResolver({
-  inviteCode,
-  onResolved,
-  onFailed,
-}: {
-  inviteCode: string | null;
-  onResolved: (canvasId: string, code: string) => void;
-  onFailed: () => void;
-}): React.ReactElement | null {
-  const { message } = AntdApp.useApp();
-  const { t } = useTranslation();
-
-  useEffect(() => {
-    if (!inviteCode) return;
-    let cancelled = false;
-    void verifyInvite(inviteCode)
-      .then((info) => {
-        if (cancelled) return;
-        if (!info) {
-          message.error(t('collab.inviteCodeInvalid'));
-          onFailed();
-          return;
-        }
-        onResolved(info.canvasId, inviteCode);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        message.error(t('collab.inviteCodeInvalid'));
-        onFailed();
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [inviteCode, onResolved, onFailed, message, t]);
-
-  return null;
-}
-
 export function App(): React.ReactElement {
   const { loading, isAuthenticated, logout } = useAuth();
   const isMobile = useIsMobile();
   // 初始化时从 URL hash 恢复路由,解决刷新后跳回主页的问题
   const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
+  // Plan#38 Phase 9: 未登录点击邀请页「加入」跳登录前暂存邀请码,
+  // 登录/注册成功后回流到邀请页并自动加入（不再丢失）
+  const pendingInviteCodeRef = useRef<string | null>(null);
 
   // 移动端导航抽屉状态(主页/创作/画布/素材/提示词 共享)
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -236,9 +193,11 @@ export function App(): React.ReactElement {
 
   // 路由守卫:
   // - 已登录用户访问 auth 自动跳转主页
-  // - 未登录时仅允许访问公开路由(home/auth/legal/publicPrompts),
+  // - 未登录时仅允许访问公开路由(home/auth/legal/publicPrompts/invite),
   //   其他路由(编辑器/画布/资产等)一律重定向到登录页,
   //   避免未登录即可打开他人画布链接造成越权访问。
+  // - invite 为公开路由(腾讯云文档式邀请体验,Plan#38 Phase 9):
+  //   未登录可浏览邀请落地页,点击加入时再引导登录并回流自动加入。
   useEffect(() => {
     if (loading) return;
     if (isAuthenticated && route.name === 'auth') {
@@ -246,7 +205,7 @@ export function App(): React.ReactElement {
       return;
     }
     if (!isAuthenticated) {
-      const publicRoutes = new Set(['home', 'auth', 'legal', 'publicPrompts']);
+      const publicRoutes = new Set(['home', 'auth', 'legal', 'publicPrompts', 'invite']);
       if (!publicRoutes.has(route.name)) {
         setRoute({ name: 'auth', mode: 'login' });
       }
@@ -361,12 +320,6 @@ export function App(): React.ReactElement {
             }
           }
         `}</style>
-        {/* 协作邀请码解析(打开 /c/<code> 链接时解析并跳转目标画布) */}
-        <InviteResolver
-          inviteCode={route.name === 'invite' ? route.inviteCode : null}
-          onResolved={(canvasId, code) => setRoute({ name: 'editor', canvasId, inviteCode: code })}
-          onFailed={() => setRoute({ name: 'home' })}
-        />
         <AppLayout
           isMobile={isMobile}
           header={showHeaderAndSidebar && !isMobile ? (
@@ -426,15 +379,25 @@ export function App(): React.ReactElement {
               <EditorPage
                 key={route.canvasId}
                 canvasId={route.canvasId}
-                inviteCode={route.inviteCode}
                 onBack={() => setRoute({ name: 'canvas' })}
                 onOpenProject={(id) => setRoute({ name: 'editor', canvasId: id })}
               />
             ) : route.name === 'canvasV2' ? (
               <CanvasV2Page onBack={() => setRoute({ name: 'home' })} />
             ) : route.name === 'invite' ? (
-              // 邀请码解析中(InviteResolver 完成后自动跳转 editor)
-              <FullScreenLoading />
+              // 邀请落地页（腾讯云文档式：展示邀请者信息 + 加入；未登录可浏览，
+              // 加入时引导登录并回流自动加入；失效链接展示失效页）
+              <InvitePage
+                inviteCode={route.inviteCode}
+                autoJoin={!!route.autoJoin}
+                isAuthenticated={isAuthenticated}
+                onJoined={(canvasId) => setRoute({ name: 'editor', canvasId })}
+                onGoHome={() => setRoute({ name: 'home' })}
+                onGoLogin={() => {
+                  pendingInviteCodeRef.current = route.inviteCode;
+                  setRoute({ name: 'auth', mode: 'login' });
+                }}
+              />
             ) : route.name === 'assets' ? (
               <AssetLibraryPage
                 defaultGroup={route.defaultGroup}
@@ -449,7 +412,12 @@ export function App(): React.ReactElement {
             ) : (
               <AuthPage
                 mode={route.mode}
-                onSuccess={() => setRoute({ name: 'home' })}
+                onSuccess={() => {
+                  // 登录前来自邀请页 → 回流到邀请页并自动加入；否则回主页
+                  const code = pendingInviteCodeRef.current;
+                  pendingInviteCodeRef.current = null;
+                  setRoute(code ? { name: 'invite', inviteCode: code, autoJoin: true } : { name: 'home' });
+                }}
                 onSwitchMode={(mode) => setRoute({ name: 'auth', mode })}
                 onClose={() => setRoute({ name: 'home' })}
               />

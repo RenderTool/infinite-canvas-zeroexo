@@ -3,6 +3,7 @@ import {
   UseGuards, Req, ValidationPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { CollaborationService } from './collaboration.service';
 import { CollaborationMemberService } from './collaboration-member.service';
 import { CollaborationAgentService } from './collaboration-agent.service';
@@ -114,11 +115,21 @@ export class CollaborationController {
   async regenerateInvite(
     @Req() req: AuthedRequest,
     @Param('canvasId') canvasId: string,
-    @Body('expiresInHours') expiresInHours?: number,
+    // Plan#38 Phase 6.2：前端以 query 传参（?expiresInHours=），改从 @Query 读取，
+    // 修复原 @Body 永远收不到导致有效期恒落默认值的问题；0/缺省 = 永不过期（后端置 null）
+    @Query('expiresInHours') expiresInHours?: string,
   ) {
-    return this.collaborationService.regenerateInvite(req.user.id, canvasId, expiresInHours);
+    const parsed = expiresInHours !== undefined && expiresInHours !== '' ? Number(expiresInHours) : undefined;
+    return this.collaborationService.regenerateInvite(
+      req.user.id, canvasId, Number.isFinite(parsed) ? parsed : undefined,
+    );
   }
 
+  /**
+   * 验证邀请码（@Public：未登录可访问，供邀请落地页展示邀请者信息；
+   * 仅返回公开展示所需字段，不泄露房间设置/成员等敏感信息）
+   */
+  @Public()
   @Get('invite/:code')
   async verifyInvite(@Param('code') code: string) {
     return this.collaborationService.verifyInvite(code);
@@ -155,6 +166,34 @@ export class CollaborationController {
   @Post('rooms/:canvasId/remove-self')
   async removeSelf(@Req() req: AuthedRequest, @Param('canvasId') canvasId: string) {
     return this.collaborationService.removeSelfFromRoom(req.user.id, canvasId);
+  }
+
+  // ==================== 加入审核（Phase 8：需要审核/无需审核两档） ====================
+
+  /** 待审加入申请列表（仅房主） */
+  @Get('rooms/:canvasId/applications')
+  async listApplications(@Req() req: AuthedRequest, @Param('canvasId') canvasId: string) {
+    return this.collaborationService.listApplications(req.user.id, canvasId);
+  }
+
+  /** 批准加入申请（仅房主） */
+  @Post('rooms/:canvasId/applications/:userId/approve')
+  async approveApplication(
+    @Req() req: AuthedRequest,
+    @Param('canvasId') canvasId: string,
+    @Param('userId') applicantUserId: string,
+  ) {
+    return this.collaborationService.approveApplication(req.user.id, canvasId, applicantUserId);
+  }
+
+  /** 拒绝加入申请（仅房主） */
+  @Post('rooms/:canvasId/applications/:userId/reject')
+  async rejectApplication(
+    @Req() req: AuthedRequest,
+    @Param('canvasId') canvasId: string,
+    @Param('userId') applicantUserId: string,
+  ) {
+    return this.collaborationService.rejectApplication(req.user.id, canvasId, applicantUserId);
   }
 
   // ==================== 成员管理 ====================

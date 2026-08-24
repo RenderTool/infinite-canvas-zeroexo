@@ -202,6 +202,10 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
     case 'member_joined':
       void refreshMembers(canvasId);
       break;
+    case 'join_application':
+      // Phase 8：新的待审加入申请 → 通知房主端刷新待审列表并提示（弹窗打开时自行拉取）
+      window.dispatchEvent(new CustomEvent('zeroexo:collab-join-application', { detail: { canvasId, userId: event.userId } }));
+      break;
     case 'member_left':
       // 检测是否自己被踢出
       if (event.meta?.kicked === true && event.userId) {

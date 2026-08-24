@@ -101,28 +101,30 @@ export class CollaborationService {
     });
     if (!room) return null;
 
-    // 越权防护: 请求者必须是房间成员(未被封禁);房主在创建房间时已自动成为成员
+    // 越权防护: 请求者必须是房间成员(未被封禁且非待审申请; pending 不算已入房);房主在创建房间时已自动成为成员
     const requesterMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: room.id, userId, status: { not: 'banned' } },
+      where: { roomId: room.id, userId, status: { notIn: ['banned', 'pending'] } },
       select: { id: true },
     });
     if (!requesterMember) throw forbidden('FORBIDDEN', 'You are not a member of this room');
 
     return {
       ...this.toResponse(room, userId),
-      members: room.members.map((m) => ({
-        id: m.id,
-        userId: m.userId,
-        nickname: m.nickname ?? (m.user?.nickname || m.user?.username || '用户'),
-        avatarUrl: m.user?.avatarUrl ?? null,
-        role: m.role,
-        permissions: m.permissions.split(','),
-        status: m.status,
-        deviceType: m.deviceType,
-        sessionIndex: m.sessionIndex,
-        lastActiveAt: m.lastActiveAt,
-      })),
-      memberCount: room.members.length,
+      members: room.members
+        .filter((m) => m.status !== 'pending') // 待审申请不混入成员列表（房主走 applications 接口）
+        .map((m) => ({
+          id: m.id,
+          userId: m.userId,
+          nickname: m.nickname ?? (m.user?.nickname || m.user?.username || '用户'),
+          avatarUrl: m.user?.avatarUrl ?? null,
+          role: m.role,
+          permissions: m.permissions.split(','),
+          status: m.status,
+          deviceType: m.deviceType,
+          sessionIndex: m.sessionIndex,
+          lastActiveAt: m.lastActiveAt,
+        })),
+      memberCount: room.members.filter((m) => m.status !== 'pending').length,
     };
   }
 
@@ -143,6 +145,7 @@ export class CollaborationService {
     if (dto.allowAgentChat !== undefined) updateData.allowAgentChat = dto.allowAgentChat;
     if (dto.allowEdit !== undefined) updateData.allowEdit = dto.allowEdit;
     if (dto.allowDownload !== undefined) updateData.allowDownload = dto.allowDownload;
+    if (dto.requiresApproval !== undefined) updateData.requiresApproval = dto.requiresApproval;
     if (dto.expiresInHours !== undefined) {
       updateData.expiresAt = this.inviteService.calculateExpiresAt(dto.expiresInHours);
     }
@@ -222,12 +225,33 @@ export class CollaborationService {
   }
 
   /**
-   * 验证邀请码
+   * 验证邀请码（公开端点，Plan#38 Phase 9）
+   * 附带邀请落地页展示所需的公开信息：邀请者昵称/头像 + 画布标题。
+   * 不返回房间设置/成员列表等敏感字段。
    */
   async verifyInvite(inviteCode: string) {
     const result = await this.inviteService.verifyCode(inviteCode);
     if (!result) throw badRequest('COLLAB_INVITE_INVALID', 'Invalid, expired, or closed invite code');
-    return result;
+    const [owner, project] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: result.ownerId },
+        select: { nickname: true, username: true, avatarUrl: true },
+      }),
+      this.prisma.project.findUnique({
+        where: { id: result.canvasId },
+        select: { title: true },
+      }),
+    ]);
+    return {
+      id: result.id,
+      canvasId: result.canvasId,
+      mode: result.mode,
+      status: result.status,
+      ownerId: result.ownerId,
+      ownerName: owner?.nickname || owner?.username || '用户',
+      ownerAvatarUrl: owner?.avatarUrl ?? null,
+      canvasTitle: project?.title ?? null,
+    };
   }
 
   /**
@@ -254,6 +278,14 @@ export class CollaborationService {
     });
     if (existingMember) throw forbidden('COLLAB_MEMBER_BANNED', 'You are banned and cannot join');
 
+    // Phase 8 审核制：已有待审申请 → 幂等返回 pending（不重复创建）
+    const pendingApplication = await this.prisma.collaborationMember.findFirst({
+      where: { roomId: verification.id, userId, status: 'pending' },
+    });
+    if (pendingApplication) {
+      return { pending: true, canvasId, roomId: verification.id };
+    }
+
     // 检查是否已在房间中
     const activeMember = await this.prisma.collaborationMember.findFirst({
       where: { roomId: verification.id, userId, status: 'online' },
@@ -263,14 +295,43 @@ export class CollaborationService {
       return this.getRoomByCanvas(userId, canvasId);
     }
 
-    // 确定权限 - 根据房间模式
+    // 确定权限 - 房间两档权限模型（Plan#38 Phase 7.2）：
+    // 「允许编辑」= editor 角色 + edit + download 捆绑；「只读」= viewer 仅 view；
+    // chat 按房间 allowChat 动态组装（替换原死代码：allowEdit 恒不生效）
     const isOwner = verification.ownerId === userId;
-    const role = isOwner ? 'owner' : 'viewer';
-    const permissions = isOwner ? 'view,chat,edit,agent,download' : 'view,chat';
+    const allowChat = room?.allowChat ?? true;
+    const role = isOwner ? 'owner' : room?.allowEdit ? 'editor' : 'viewer';
+    const permParts = isOwner
+      ? ['view', 'chat', 'edit', 'agent', 'download']
+      : [
+          'view',
+          ...(allowChat ? ['chat'] : []),
+          ...(room?.allowEdit ? ['edit', 'download'] : []),
+        ];
+    const permissions = permParts.join(',');
 
-    // 如果房主允许编辑
-    if (room?.allowEdit && !isOwner) {
-      // invite-only 模式下默认 viewer，房主可在成员管理中升级
+    // Phase 8 审核制（用户拍板）：房间开启审核且非房主 → 创建待审申请，不入房；
+    // 权限预计算随申请落库，批准时直接生效，无需二次计算
+    if (room?.requiresApproval && !isOwner) {
+      await this.prisma.collaborationMember.create({
+        data: {
+          roomId: verification.id,
+          userId,
+          nickname: nickname ?? undefined,
+          role,
+          permissions,
+          status: 'pending',
+          deviceType: deviceType ?? 'desktop',
+          sessionIndex: 0,
+        },
+      });
+      this.logger.log(`用户 ${userId} 提交加入申请(待审核), 房间 ${verification.id}`);
+      this.eventsService.broadcastToRoom(canvasId, {
+        type: 'join_application',
+        userId,
+        meta: { roomId: verification.id },
+      });
+      return { pending: true, canvasId, roomId: verification.id };
     }
 
     // 计算 sessionIndex（同账户多设备）
@@ -379,9 +440,17 @@ export class CollaborationService {
 
     if (existingMembers.length === 0) {
       // 账户不在房间中（可能是邀请加入，也可能是房主的新设备）
+      // 权限模型与 joinByInvite 对齐（Plan#38 Phase 7.2）：allowEdit → editor + edit/download 捆绑
       const isOwner = room.ownerId === userId;
-      const role = isOwner ? 'owner' : 'viewer';
-      const permissions = isOwner ? 'view,chat,edit,agent,download' : 'view,chat';
+      const role = isOwner ? 'owner' : room.allowEdit ? 'editor' : 'viewer';
+      const permParts = isOwner
+        ? ['view', 'chat', 'edit', 'agent', 'download']
+        : [
+            'view',
+            ...(room.allowChat ? ['chat'] : []),
+            ...(room.allowEdit ? ['edit', 'download'] : []),
+          ];
+      const permissions = permParts.join(',');
       const sessionIndex = isOwner ? 0 : existingMembers.length;
 
       await this.prisma.collaborationMember.create({
@@ -454,31 +523,86 @@ export class CollaborationService {
       data: { status: 'offline' },
     });
 
-    // 如果房主的最后一个会话离开，关闭房间（自清理机制：房间关闭 = 邀请码失效）
-    const ownerActiveCount = await this.prisma.collaborationMember.count({
-      where: { roomId: room.id, userId: room.ownerId, status: 'online' },
+    // Plan#38 Phase 6.1（用户拍板）：房主离开不再自动关闭房间，邀请链接保持有效；
+    // 房间失效仅限三种情况：房主显式关闭(closeRoom) / expiresAt 到期(定时清理) / 注销级联。
+    // 实时广播成员离开事件（房主关闭房间的 room_closed 由 closeRoom 负责）
+    this.eventsService.broadcastToRoom(canvasId, {
+      type: 'member_left',
+      userId,
     });
-    if (ownerActiveCount === 0) {
-      await this.prisma.collaborationRoom.update({
-        where: { id: room.id },
-        data: { status: 'expired' },
-      });
-      this.logger.log(`房主离开，关闭房间(软删除): ${room.id}`);
-      // 实时广播房间关闭事件（前端据此显示"协作已失效"）
-      this.eventsService.broadcastToRoom(canvasId, {
-        type: 'room_closed',
-        userId,
-        meta: { ownerId: room.ownerId },
-      });
-    } else {
-      // 实时广播成员离开事件
-      this.eventsService.broadcastToRoom(canvasId, {
-        type: 'member_left',
-        userId,
-      });
-    }
 
     return { message: '已离开协作房间', affected: left.count };
+  }
+
+  // ==================== 加入审核（Phase 8，用户拍板：需要审核/无需审核两档） ====================
+
+  /**
+   * 待审加入申请列表（仅房主）
+   */
+  async listApplications(userId: string, canvasId: string) {
+    const room = await this.prisma.collaborationRoom.findFirst({
+      where: { canvasId, status: 'active' },
+    });
+    if (!room) throw notFound('COLLAB_ROOM_NOT_FOUND', 'Collaboration room not found');
+    if (room.ownerId !== userId) throw forbidden('COLLAB_ROOM_OWNER_REQUIRED', 'Only the room owner can view applications');
+
+    const apps = await this.prisma.collaborationMember.findMany({
+      where: { roomId: room.id, status: 'pending' },
+      include: { user: { select: { id: true, nickname: true, avatarUrl: true, username: true } } },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return apps.map((a) => ({
+      userId: a.userId,
+      nickname: a.nickname ?? (a.user?.nickname || a.user?.username || '用户'),
+      avatarUrl: a.user?.avatarUrl ?? null,
+      appliedAt: a.joinedAt,
+    }));
+  }
+
+  /**
+   * 批准加入申请（仅房主）：pending → online，权限随申请时预计算值直接生效
+   */
+  async approveApplication(userId: string, canvasId: string, applicantUserId: string) {
+    const room = await this.prisma.collaborationRoom.findFirst({
+      where: { canvasId, status: 'active' },
+    });
+    if (!room) throw notFound('COLLAB_ROOM_NOT_FOUND', 'Collaboration room not found');
+    if (room.ownerId !== userId) throw forbidden('COLLAB_ROOM_OWNER_REQUIRED', 'Only the room owner can approve applications');
+
+    const application = await this.prisma.collaborationMember.findFirst({
+      where: { roomId: room.id, userId: applicantUserId, status: 'pending' },
+    });
+    if (!application) throw notFound('COLLAB_APPLICATION_NOT_FOUND', 'Application not found or already handled');
+
+    await this.prisma.collaborationMember.update({
+      where: { id: application.id },
+      data: { status: 'online' },
+    });
+    this.logger.log(`房主 ${userId} 批准用户 ${applicantUserId} 加入房间 ${room.id}`);
+    this.eventsService.broadcastToRoom(canvasId, {
+      type: 'member_joined',
+      userId: applicantUserId,
+      meta: { role: application.role, sessionIndex: application.sessionIndex },
+    });
+    return { message: '已批准加入' };
+  }
+
+  /**
+   * 拒绝加入申请（仅房主）：物理删除待审记录（用户可再次申请）
+   */
+  async rejectApplication(userId: string, canvasId: string, applicantUserId: string) {
+    const room = await this.prisma.collaborationRoom.findFirst({
+      where: { canvasId, status: 'active' },
+    });
+    if (!room) throw notFound('COLLAB_ROOM_NOT_FOUND', 'Collaboration room not found');
+    if (room.ownerId !== userId) throw forbidden('COLLAB_ROOM_OWNER_REQUIRED', 'Only the room owner can reject applications');
+
+    const removed = await this.prisma.collaborationMember.deleteMany({
+      where: { roomId: room.id, userId: applicantUserId, status: 'pending' },
+    });
+    if (removed.count === 0) throw notFound('COLLAB_APPLICATION_NOT_FOUND', 'Application not found or already handled');
+    this.logger.log(`房主 ${userId} 拒绝用户 ${applicantUserId} 的加入申请`);
+    return { message: '已拒绝申请' };
   }
 
   /**
@@ -710,6 +834,7 @@ export class CollaborationService {
     id: string; canvasId: string; ownerId: string; inviteCode: string; inviteLink: string;
     mode: string; status: string; expiresAt: Date | null;
     allowChat: boolean; allowAgentChat: boolean; allowEdit: boolean; allowDownload: boolean;
+    requiresApproval?: boolean;
   }, userId: string) {
     return {
       id: room.id,
@@ -724,6 +849,7 @@ export class CollaborationService {
       allowAgentChat: room.allowAgentChat,
       allowEdit: room.allowEdit,
       allowDownload: room.allowDownload,
+      requiresApproval: room.requiresApproval ?? false,
       isOwner: room.ownerId === userId,
     };
   }

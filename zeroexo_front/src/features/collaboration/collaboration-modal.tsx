@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { App, Modal, Button, Select, Checkbox, Tabs, Input, Switch } from 'antd';
+import { App, Modal, Button, Select, Tabs, Switch, Radio } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -31,22 +31,21 @@ import {
   banMember,
   muteMember,
   unmuteMember,
-  joinRoom,
-  verifyInvite,
   removeSelfFromRoom,
+  listApplications,
+  approveApplication,
+  rejectApplication,
 } from './collaboration-api';
+import type { JoinApplication } from './collaboration-types';
 import { useCollaborationStore } from './use-collaboration-store';
 import { useAuth } from '@/features/auth/auth-store';
+import { ApiError } from '@/services/api-client';
 
 export interface CollaborationModalProps {
   open: boolean;
   canvasId: string;
-  /** 待处理邀请码(来自 /c/<code> 邀请链接,打开后自动申请加入) */
-  pendingInviteCode?: string;
   onClose: () => void;
   theme: ThemeConfig;
-  /** 加入非同画布房间时，跳转到目标画布编辑器 */
-  onNavigateToCanvas?: (canvasId: string, inviteCode?: string) => void;
 }
 
 const EXPIRY_OPTIONS = [
@@ -60,10 +59,8 @@ const EXPIRY_OPTIONS = [
 export function CollaborationModal({
   open,
   canvasId,
-  pendingInviteCode,
   onClose,
   theme,
-  onNavigateToCanvas,
 }: CollaborationModalProps): React.ReactElement {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -73,11 +70,10 @@ export function CollaborationModal({
   const [inviteCode, setInviteCode] = useState('');
   const [expiresInHours, setExpiresInHours] = useState<number>(0);
   const [allowChat, setAllowChat] = useState(true);
-  const [allowAgentChat, setAllowAgentChat] = useState(true);
   const [allowEdit, setAllowEdit] = useState(true);
-  const [allowDownload, setAllowDownload] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
-  const [joinLoading, setJoinLoading] = useState(false);
+  // Phase 8：加入方式（无需审核/需要审核）+ 待审申请列表（房主侧）
+  const [requiresApproval, setRequiresApproval] = useState(false);
+  const [applications, setApplications] = useState<JoinApplication[]>([]);
   const [activeTab, setActiveTab] = useState<string>('manage');
 
   // 单一事实源：store 中的房间信息与协作状态
@@ -88,10 +84,11 @@ export function CollaborationModal({
   // 房间不存在(未开启)时能打开协作弹窗者必为画布所有者（非所有者需通过邀请码进入，此时房间必然存在）
   const isOwner = storeRoom ? storeRoom.ownerId === String(user?.id) : true;
 
-  // 初始化 tab: 房主默认"发起协作"(含未开启面板)，参与者默认"加入协作"
+  // 初始化 tab: 房主默认"发起协作"(含未开启面板)，参与者默认"退出本次协作"
+  // （Phase 9：加入入口已收敛到邀请落地页，弹窗不再提供输码加入）
   useEffect(() => {
     if (open) {
-      setActiveTab(isOwner ? 'manage' : 'join');
+      setActiveTab(isOwner ? 'manage' : 'exit');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -100,13 +97,22 @@ export function CollaborationModal({
   const resetState = useCallback(() => {
     setInviteCode('');
     setMembers([]);
-    setJoinCode('');
     setExpiresInHours(0);
     setAllowChat(true);
-    setAllowAgentChat(true);
     setAllowEdit(true);
-    setAllowDownload(false);
+    setRequiresApproval(false);
+    setApplications([]);
   }, []);
+
+  // 拉取待审申请列表（仅房主可见；非房主调用会被后端 403 拦截，静默处理）
+  const loadApplications = useCallback(async () => {
+    try {
+      const list = await listApplications(canvasId);
+      setApplications(list);
+    } catch {
+      // 非房主或房间不存在：静默（待审区仅房主可见）
+    }
+  }, [canvasId]);
 
   // 加载房间信息（不自动创建；房间不存在 → 显示"未开启"状态）
   const loadRoom = useCallback(async () => {
@@ -122,9 +128,9 @@ export function CollaborationModal({
       }
       setInviteCode(data.inviteCode);
       setAllowChat(data.allowChat);
-      setAllowAgentChat(data.allowAgentChat);
       setAllowEdit(data.allowEdit);
-      setAllowDownload(data.allowDownload);
+      setRequiresApproval(data.requiresApproval ?? false);
+      // 精确档位不可从绝对时间戳反推，仅区分「永不过期/有过期」作展示近似（后端有效期已修通）
       setExpiresInHours(data.expiresAt ? 24 : 0);
       if (data.status === 'active') {
         try {
@@ -134,12 +140,18 @@ export function CollaborationModal({
         } catch {
           setMembers([]);
         }
+        // 房主侧同步拉取待审申请（非房主静默失败）
+        if (data.ownerId === String(user?.id)) void loadApplications();
       } else {
         setMembers([]);
       }
     } catch (err) {
-      console.error('[CollaborationModal] load room failed:', err);
-      message.error(t('collab.loadFailed'));
+      // Plan#38 Phase 6.4：受邀者尚未入房时后端返回 403，属正常态，静默处理不弹错误；
+      // 其余异常才提示（加入流程由 doJoin 独立完成，不受此处影响）
+      if (!(err instanceof ApiError && err.status === 403)) {
+        console.error('[CollaborationModal] load room failed:', err);
+        message.error(t('collab.loadFailed'));
+      }
     } finally {
       setLoading(false);
     }
@@ -161,9 +173,7 @@ export function CollaborationModal({
       useCollaborationStore.getState().setRoom(data);
       setInviteCode(data.inviteCode);
       setAllowChat(data.allowChat);
-      setAllowAgentChat(data.allowAgentChat);
       setAllowEdit(data.allowEdit);
-      setAllowDownload(data.allowDownload);
       setExpiresInHours(data.expiresAt ? 24 : 0);
       const memberList = await listMembers(canvasId);
       setMembers(memberList);
@@ -203,76 +213,17 @@ export function CollaborationModal({
     }
   };
 
-  /** 从完整邀请链接中提取 6 位邀请码 */
-  const extractInviteCode = (raw: string): string => {
-    const match = raw.match(/\/c\/([A-Za-z0-9]{6})$/);
-    return match ? match[1]! : raw.trim();
-  };
-
-  // 通过邀请码加入协作(核心逻辑,供手动申请与邀请链接自动申请共用)
-  const doJoin = async (raw: string) => {
-    const code = extractInviteCode(raw);
-    if (!code) return;
-    setJoinLoading(true);
-    try {
-      // 先验证邀请码，获取正确的 canvasId（避免手动输入时 canvasId 不匹配）
-      const roomInfo = await verifyInvite(code);
-      if (!roomInfo) {
-        message.error(t('collab.inviteCodeInvalid'));
-        return;
-      }
-      const targetCanvasId = roomInfo.canvasId;
-      await joinRoom(targetCanvasId, code);
-      // 加入成功后重新加载房间与成员
-      const roomData = await getRoomByCanvas(targetCanvasId);
-      useCollaborationStore.getState().setRoom(roomData);
-      setInviteCode(roomData.inviteCode);
-      const memberList = await listMembers(targetCanvasId);
-      setMembers(memberList);
-      useCollaborationStore.getState().setMembers(memberList);
-      message.success(t('collab.applyJoinSuccess'));
-      // 如果加入的是非同画布房间，跳转到目标画布编辑器
-      if (targetCanvasId !== canvasId) {
-        onClose();
-        onNavigateToCanvas?.(targetCanvasId, code);
-      }
-    } catch (err) {
-      console.error('[CollaborationModal] apply join failed:', err);
-      message.error(t('collab.inviteCodeInvalid'));
-    } finally {
-      setJoinLoading(false);
-    }
-  };
-
-  // 通过邀请码加入协作(手动输入)
-  const handleApplyJoin = async () => {
-    const code = joinCode.trim();
-    if (!code) {
-      message.warning(t('collab.applyJoinCodeRequired'));
-      return;
-    }
-    await doJoin(code);
-  };
-
-  // 通过邀请链接(/c/<code>)进入时:预填邀请码、切到"加入协作"Tab 并自动申请
-  useEffect(() => {
-    if (open && pendingInviteCode) {
-      setJoinCode(pendingInviteCode);
-      setActiveTab('join');
-      void doJoin(pendingInviteCode);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pendingInviteCode]);
-
-  // 更新房间设置
+  // 更新房间设置（两档权限模型：download 随 edit 捆绑、agentChat 随 chat 联动）
   const handleUpdateSettings = async () => {
     if (!isOwner) return;
     try {
+      // 两档权限模型（更新时 download 随 edit 捆绑）+ 加入方式（审核制）
       await updateRoom(canvasId, {
         allowChat,
-        allowAgentChat,
+        allowAgentChat: allowChat,
         allowEdit,
-        allowDownload,
+        allowDownload: allowEdit,
+        requiresApproval,
       });
       message.success(t('collab.settingsUpdated'));
     } catch (err) {
@@ -401,6 +352,46 @@ export function CollaborationModal({
     }
   };
 
+  // 批准待审申请（房主）：批准后同步刷新成员列表
+  const handleApproveApplication = async (applicantUserId: string) => {
+    try {
+      await approveApplication(canvasId, applicantUserId);
+      await loadApplications();
+      const updated = await listMembers(canvasId);
+      setMembers(updated);
+      useCollaborationStore.getState().setMembers(updated);
+      message.success(t('collab.approveSuccess'));
+    } catch (err) {
+      console.error('[CollaborationModal] approve application failed:', err);
+      message.error(t('collab.operationFailed'));
+    }
+  };
+
+  // 拒绝待审申请（房主）
+  const handleRejectApplication = async (applicantUserId: string) => {
+    try {
+      await rejectApplication(canvasId, applicantUserId);
+      await loadApplications();
+      message.success(t('collab.rejectSuccess'));
+    } catch (err) {
+      console.error('[CollaborationModal] reject application failed:', err);
+      message.error(t('collab.operationFailed'));
+    }
+  };
+
+  // SSE 新申请到达（房主端）：刷新待审列表 + 轻提示（仅弹窗打开时）
+  useEffect(() => {
+    if (!open || !isOwner) return;
+    const handler = (e: Event): void => {
+      const detail = (e as CustomEvent<{ canvasId?: string } | undefined>).detail;
+      if (!detail || detail.canvasId !== canvasId) return;
+      void loadApplications();
+      message.info(t('collab.joinApplicationReceived'));
+    };
+    window.addEventListener('zeroexo:collab-join-application', handler);
+    return () => window.removeEventListener('zeroexo:collab-join-application', handler);
+  }, [open, isOwner, canvasId, loadApplications, message, t]);
+
   const cardStyle: CSSProperties = {
     marginBottom: 16,
     padding: 16,
@@ -518,21 +509,7 @@ export function CollaborationModal({
           />
         </div>
 
-        <div style={rowStyle}>
-          <span style={labelStyle}>{t('collab.inviteCode')}</span>
-          <div style={valueContainerStyle}>
-            <span style={codeTextStyle}>{inviteCode || '-'}</span>
-            <Button
-              size="small"
-              icon={<Copy size={14} />}
-              onClick={() => inviteCode && handleCopy(inviteCode)}
-              disabled={!inviteCode}
-            >
-              {t('common.copy')}
-            </Button>
-          </div>
-        </div>
-
+        {/* Phase 9：邀请码降级为链接内部标识，UI 仅展示邀请链接 */}
         <div style={rowStyle}>
           <span style={labelStyle}>{t('collab.inviteLink')}</span>
           <div style={valueContainerStyle}>
@@ -576,31 +553,54 @@ export function CollaborationModal({
         </div>
       </div>
 
-      {/* 权限设置卡片 */}
+      {/* 权限设置卡片（Plan#38 Phase 7.3：收敛为「只读/允许编辑」两档 + 聊天开关；
+          允许编辑 = 编辑 + 下载捆绑（用户拍板），下载不再独立设置） */}
       <div style={cardStyle}>
         <div style={cardTitleStyle}>{t('collab.permissions')}</div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Checkbox checked={allowChat} onChange={(e) => setAllowChat(e.target.checked)}>
-            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-              {t('collab.allowChat')}
-            </span>
-          </Checkbox>
-          <Checkbox checked={allowAgentChat} onChange={(e) => setAllowAgentChat(e.target.checked)}>
-            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-              {t('collab.allowAgentChat')}
-            </span>
-          </Checkbox>
-          <Checkbox checked={allowEdit} onChange={(e) => setAllowEdit(e.target.checked)}>
-            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-              {t('collab.allowEdit')}
-            </span>
-          </Checkbox>
-          <Checkbox checked={allowDownload} onChange={(e) => setAllowDownload(e.target.checked)}>
-            <span style={{ color: theme.toolbar.text, fontSize: 13 }}>
-              {t('collab.allowDownload')}
-            </span>
-          </Checkbox>
+        <div style={rowStyle}>
+          <span style={labelStyle}>{t('collab.participantPermission')}</span>
+          <Select
+            size="small"
+            style={{ width: 160 }}
+            value={allowEdit ? 'edit' : 'view'}
+            onChange={(v) => {
+              // 两档权限：允许编辑时后端同步授予 download（编辑捆绑下载）
+              setAllowEdit(v === 'edit');
+            }}
+            options={[
+              { label: t('collab.permissionReadOnly'), value: 'view' },
+              { label: t('collab.permissionEditable'), value: 'edit' },
+            ]}
+          />
+        </div>
+        <div style={{ color: theme.toolbar.textMuted, fontSize: 12, marginBottom: 12 }}>
+          {allowEdit ? t('collab.permissionEditableHint') : t('collab.permissionReadOnlyHint')}
+        </div>
+
+        <div style={rowStyle}>
+          <span style={labelStyle}>{t('collab.allowChat')}</span>
+          <Switch
+            size="small"
+            checked={allowChat}
+            onChange={(checked) => setAllowChat(checked)}
+          />
+        </div>
+
+        {/* Phase 8：加入方式（需要审核/无需审核，用户拍板） */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ ...labelStyle, marginBottom: 8 }}>{t('collab.joinMethod')}</div>
+          <Radio.Group
+            value={requiresApproval}
+            onChange={(e) => setRequiresApproval(e.target.value as boolean)}
+          >
+            <Radio value={false}>
+              <span style={{ color: theme.toolbar.text, fontSize: 13 }}>{t('collab.joinMethodDirect')}</span>
+            </Radio>
+            <Radio value>
+              <span style={{ color: theme.toolbar.text, fontSize: 13 }}>{t('collab.joinMethodReview')}</span>
+            </Radio>
+          </Radio.Group>
         </div>
 
         <div style={{ textAlign: 'right', marginTop: 12 }}>
@@ -614,6 +614,30 @@ export function CollaborationModal({
           </Button>
         </div>
       </div>
+
+      {/* 待审加入申请（房主侧，Phase 8；仅有申请时显示） */}
+      {applications.length > 0 && (
+        <div style={cardStyle}>
+          <div style={cardTitleStyle}>
+            {t('collab.pendingApplications')} ({applications.length})
+          </div>
+          {applications.map((app) => (
+            <div key={app.userId} style={memberItemStyle(false)}>
+              <div style={memberInfoStyle}>
+                <span style={memberNameStyle}>{app.nickname || t('collab.unnamed')}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button size="small" type="primary" onClick={() => void handleApproveApplication(app.userId)}>
+                  {t('collab.approveJoin')}
+                </Button>
+                <Button size="small" danger onClick={() => void handleRejectApplication(app.userId)}>
+                  {t('collab.rejectJoin')}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 当前成员列表 */}
       <div style={cardStyle}>
@@ -666,31 +690,6 @@ export function CollaborationModal({
     </>
   );
 
-  /** 加入协作卡片（房主/参与者共用） */
-  const renderJoinCard = (label: string) => (
-    <div style={cardStyle}>
-      <div style={cardTitleStyle}>{label}</div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Input
-          size="small"
-          placeholder={t('collab.applyJoinPlaceholder')}
-          value={joinCode}
-          onChange={(e) => setJoinCode(e.target.value)}
-          onPressEnter={() => void handleApplyJoin()}
-          style={{ flex: 1 }}
-        />
-        <Button
-          type="primary"
-          size="small"
-          loading={joinLoading}
-          onClick={() => void handleApplyJoin()}
-        >
-          {t('collab.applyJoin')}
-        </Button>
-      </div>
-    </div>
-  );
-
   /** 参与者退出本次协作卡片 */
   const renderExitCard = () => (
     <div style={cardStyle}>
@@ -726,7 +725,8 @@ export function CollaborationModal({
     </div>
   );
 
-  // 参与者视角（房间存在且非房主）：失效 → 失效视图；协作中 → 加入更多/退出 双 Tab
+  // 参与者视角（房间存在且非房主）：失效 → 失效视图；协作中 → 仅退出 Tab
+  // （Phase 9：加入入口全部收敛到邀请落地页，弹窗不再提供输码加入）
   const isGuestExpired = status === 'expired' && !isOwner;
 
   const tabs = isOwner
@@ -736,18 +736,8 @@ export function CollaborationModal({
           label: t('collab.createRoom'),
           children: status === 'active' ? renderManagePanel() : renderStartPanel(),
         },
-        {
-          key: 'join',
-          label: t('collab.joinRoom'),
-          children: renderJoinCard(t('collab.applyJoinSection')),
-        },
       ]
     : [
-        {
-          key: 'join',
-          label: t('collab.joinMoreCollaboration'),
-          children: renderJoinCard(t('collab.joinMoreCollaboration')),
-        },
         {
           key: 'exit',
           label: t('collab.exitCollaboration'),

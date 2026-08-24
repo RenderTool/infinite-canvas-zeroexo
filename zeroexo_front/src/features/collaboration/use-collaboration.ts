@@ -18,6 +18,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useCollaborationStore } from './use-collaboration-store.js';
 import { connectCollaborationEvents, closeAllCollaborationConnections } from './collaboration-socket.js';
 import type { AwarenessState, DeviceType, CollaborationMessage } from './collaboration-types.js';
+import { isPendingJoinResult } from './collaboration-types.js';
 import {
   joinRoom,
   leaveRoom,
@@ -313,6 +314,8 @@ export function useCollaboration(
   const joinWithInvite = useCallback(async (id: string, inviteCode: string, nickname?: string) => {
     const deviceType = deviceTypeFromUA();
     const result = await joinRoom(id, inviteCode, nickname, deviceType);
+    // Phase 8 审核制：返回待审标记时不入房，等房主批准后重新进入
+    if (isPendingJoinResult(result)) return;
     store.getState().setRoom(result);
 
     try {

@@ -4,9 +4,6 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 /** 排除易混淆字符（O/0, I/1, l 等）- 已在 CHARSET 中排除 */
 const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
 
-/** 邀请码默认有效期（小时） */
-const DEFAULT_EXPIRE_HOURS = 24;
-
 /**
  * 邀请码服务 - 生成与验证 6 位邀请码，处理过期逻辑。
  */
@@ -61,10 +58,12 @@ export class InviteService {
 
   /**
    * 计算过期时间
+   * 语义（Plan#38 Phase 6.2）：undefined 或 <=0 表示「永不过期」返回 null，
+   * 不再静默回落 24h（修复 UI「永不过期」与实际 24h 过期的矛盾）。
    */
-  calculateExpiresAt(expireHours?: number): Date {
-    const hours = expireHours ?? DEFAULT_EXPIRE_HOURS;
-    return new Date(Date.now() + hours * 60 * 60 * 1000);
+  calculateExpiresAt(expireHours?: number): Date | null {
+    if (expireHours === undefined || expireHours <= 0) return null;
+    return new Date(Date.now() + expireHours * 60 * 60 * 1000);
   }
 
   /**

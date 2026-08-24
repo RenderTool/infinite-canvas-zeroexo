@@ -37,6 +37,8 @@ export interface CollaborationRoom {
   allowAgentChat: boolean;
   allowEdit: boolean;
   allowDownload: boolean;
+  /** 加入方式（Plan#38 Phase 8）：true=需要房主审核 | false=凭码直接加入 */
+  requiresApproval?: boolean;
   isOwner: boolean;
   memberCount: number;
 }
@@ -79,6 +81,7 @@ export interface CollaborationMessage {
 export type CollaborationEventType =
   | 'member_joined'
   | 'member_left'
+  | 'join_application'
   | 'room_updated'
   | 'member_updated'
   | 'message'
@@ -141,6 +144,7 @@ export interface CreateRoomRequest {
   allowAgentChat?: boolean;
   allowEdit?: boolean;
   allowDownload?: boolean;
+  requiresApproval?: boolean;
   expiresInHours?: number;
 }
 
@@ -152,7 +156,24 @@ export interface UpdateRoomRequest {
   allowAgentChat?: boolean;
   allowEdit?: boolean;
   allowDownload?: boolean;
+  requiresApproval?: boolean;
   expiresInHours?: number;
+}
+
+/** 待审加入申请（房主视角，Plan#38 Phase 8） */
+export interface JoinApplication {
+  userId: string;
+  nickname: string;
+  avatarUrl: string | null;
+  appliedAt: string;
+}
+
+/** join 接口结果：直接入房返回房间信息；需审核时返回待审标记 */
+export type JoinRoomResult = RoomResponse | { pending: true; canvasId: string; roomId: string };
+
+/** 类型守卫：join 结果是否为「待审申请」（审核制房间） */
+export function isPendingJoinResult(result: JoinRoomResult): result is Extract<JoinRoomResult, { pending: true }> {
+  return (result as { pending?: boolean }).pending === true;
 }
 
 /** 成员角色更新请求 */

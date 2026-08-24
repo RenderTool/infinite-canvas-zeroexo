@@ -447,7 +447,8 @@ export class VersionsService extends BaseProjectService {
       where: {
         room: { canvasId: projectId, status: 'active' },
         userId,
-        status: { not: 'banned' },
+        // 待审申请（pending）不算已入房，无版本读写权（Plan#38 Phase 8）
+        status: { notIn: ['banned', 'pending'] },
       },
       select: { role: true },
     });

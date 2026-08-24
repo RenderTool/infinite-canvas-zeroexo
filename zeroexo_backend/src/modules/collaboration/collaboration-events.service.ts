@@ -24,6 +24,7 @@ import { RedisService } from '../../common/redis/redis.service';
 export type CollaborationEventType =
   | 'member_joined'
   | 'member_left'
+  | 'join_application' // Phase 8：新的待审加入申请到达（房主端提示）
   | 'room_updated'
   | 'member_updated'
   | 'message'

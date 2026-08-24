@@ -67,7 +67,7 @@ export class CollaborationSseGuard implements CanActivate {
       if (!room) throw unauthorized('UNAUTHORIZED', 'collaboration room not found');
 
       const member = await this.prisma.collaborationMember.findFirst({
-        where: { roomId: room.id, userId, status: { notIn: ['offline', 'banned'] } },
+        where: { roomId: room.id, userId, status: { notIn: ['offline', 'banned', 'pending'] } },
       });
       if (!member) {
         throw forbidden('FORBIDDEN', 'You are not an active member of this room');

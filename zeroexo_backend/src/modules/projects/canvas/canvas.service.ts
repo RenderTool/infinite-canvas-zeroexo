@@ -144,7 +144,8 @@ export class CanvasService extends BaseProjectService {
     });
     if (room) {
       const member = await this.prisma.collaborationMember.findFirst({
-        where: { roomId: room.id, userId: ownerId, status: { notIn: ['offline', 'banned'] } },
+        // 待审申请（pending）不算已入房，不能读画布（Plan#38 Phase 8）
+        where: { roomId: room.id, userId: ownerId, status: { notIn: ['offline', 'banned', 'pending'] } },
         select: { id: true },
       });
       if (member) {

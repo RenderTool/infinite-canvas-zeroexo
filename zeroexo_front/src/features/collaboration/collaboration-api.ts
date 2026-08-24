@@ -26,6 +26,8 @@ import type {
   AgentSessionMessage,
   AgentExecuteRequest,
   AgentExecuteResponse,
+  JoinApplication,
+  JoinRoomResult,
 } from './collaboration-types.js';
 
 function deviceTypeFromUA(): DeviceType {
@@ -84,24 +86,48 @@ export function regenerateInvite(canvasId: string, expiresInHours?: number): Pro
   return apiPost(`${COLLAB}/rooms/${canvasId}/invite${params}`);
 }
 
+/**
+ * 验证邀请码（公开端点，未登录可访问，Plan#38 Phase 9）
+ * 附带邀请落地页展示所需的公开信息：邀请者昵称/头像 + 画布标题。
+ */
 export function verifyInvite(inviteCode: string): Promise<{
   id: string;
   canvasId: string;
   mode: string;
   status: string;
   ownerId: string;
+  ownerName: string;
+  ownerAvatarUrl: string | null;
+  canvasTitle: string | null;
 }> {
   return apiGet(`${COLLAB}/invite/${inviteCode}`);
 }
 
 // ==================== 加入/离开 ====================
 
-export function joinRoom(canvasId: string, inviteCode: string, nickname?: string, deviceType?: DeviceType): Promise<RoomResponse> {
+export function joinRoom(canvasId: string, inviteCode: string, nickname?: string, deviceType?: DeviceType): Promise<JoinRoomResult> {
   return apiPost(`${COLLAB}/rooms/${canvasId}/join`, {
     inviteCode,
     nickname,
     deviceType: deviceType ?? deviceTypeFromUA(),
   });
+}
+
+// ==================== 加入审核（Phase 8：需要审核/无需审核两档） ====================
+
+/** 待审加入申请列表（仅房主） */
+export function listApplications(canvasId: string): Promise<JoinApplication[]> {
+  return apiGet(`${COLLAB}/rooms/${canvasId}/applications`);
+}
+
+/** 批准加入申请（仅房主） */
+export function approveApplication(canvasId: string, applicantUserId: string): Promise<{ message: string }> {
+  return apiPost(`${COLLAB}/rooms/${canvasId}/applications/${applicantUserId}/approve`, {});
+}
+
+/** 拒绝加入申请（仅房主） */
+export function rejectApplication(canvasId: string, applicantUserId: string): Promise<{ message: string }> {
+  return apiPost(`${COLLAB}/rooms/${canvasId}/applications/${applicantUserId}/reject`, {});
 }
 
 /**

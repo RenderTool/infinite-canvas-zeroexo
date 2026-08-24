@@ -1103,6 +1103,9 @@ model CollaborationRoom {
   allowEdit      Boolean  @default(true)
   allowDownload  Boolean  @default(false)
 
+  /// 加入方式（Plan#38 Phase 8）：false=无需审核凭码直进 | true=需要房主审核（复用既有迁移 add_collab_requires_approval）
+  requiresApproval Boolean @default(false)
+
   members       CollaborationMember[]
   messages      CollaborationMessage[]
   agentSessions AgentSession[]

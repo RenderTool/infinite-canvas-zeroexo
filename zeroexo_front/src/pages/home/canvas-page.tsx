@@ -8,7 +8,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload, Users } from 'lucide-react';
+import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload, Users, LogOut } from 'lucide-react';
 import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
@@ -81,6 +81,31 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             await removeSelfFromRoom(item.canvasId);
             message.success(t('collab.removedSuccess'));
             // 本地立即移除（即使后台刷新失败也保证列表即时更新），再后台刷新保持一致
+            setParticipating((prev) => prev.filter((p) => p.canvasId !== item.canvasId));
+            void loadCollabLists();
+          } catch {
+            message.error(t('collab.operationFailed'));
+          }
+        },
+      });
+    },
+    [modal, t, message, loadCollabLists],
+  );
+
+  /** 我参与的活跃协作：更多菜单「退出协作」→ 书面化确认后移除成员身份并从列表移除（Plan#38 Phase 9.6） */
+  const handleExitParticipating = useCallback(
+    (item: ParticipatingCanvasItem) => {
+      modal.confirm({
+        title: t('collab.exitConfirmTitle'),
+        content: t('collab.exitConfirmContent'),
+        okText: t('collab.exitCollaboration'),
+        cancelText: t('common.cancel'),
+        okType: 'danger',
+        centered: true,
+        onOk: async () => {
+          try {
+            await removeSelfFromRoom(item.canvasId);
+            message.success(t('collab.exitSuccess'));
             setParticipating((prev) => prev.filter((p) => p.canvasId !== item.canvasId));
             void loadCollabLists();
           } catch {
@@ -447,8 +472,18 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                   type={collabMode ? 'primary' : 'default'}
                   ghost={collabMode}
                   onClick={toggleCollabMode}
+                  // Phase 9.7：激活态呼吸闪烁，提醒用户仍处于发起协作模式（再次点击可退出）
+                  style={collabMode ? { animation: 'zeroexo-collab-pulse 1.5s ease-in-out infinite' } : undefined}
                 />
               </Tooltip>
+            )}
+            {collabMode && (
+              <>
+                <style>{`@keyframes zeroexo-collab-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(22,119,255,0.6); opacity: 1; } 50% { box-shadow: 0 0 0 7px rgba(22,119,255,0); opacity: 0.75; } }`}</style>
+                <span style={{ fontSize: 12, color: theme.toolbar.textMuted, marginLeft: 2 }}>
+                  {t('home.collabModeHint')}
+                </span>
+              </>
             )}
 
             {selectMode && displayForSelect.length > 0 && (
@@ -602,10 +637,13 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               })}
               {!selectMode && displayParticipating.map((item) => {
                 const expired = item.roomStatus === 'expired' || item.roomStatus === 'closed';
-                // 失效协作 → 仅"从列表移除"（点击与更多操作都不再打开协作设置页）
+                // 失效协作 → 仅"从列表移除"；活跃协作 → 协作详情 + 退出协作（Phase 9.6）
                 const actions: ProjectCardAction[] = expired
                   ? [{ type: 'collab', label: t('projectCard.removeFromList'), onClick: () => handleRemoveExpired(item) }]
-                  : [{ type: 'collab', label: t('projectCard.collabDetail'), onClick: () => openCollabModal(item.canvasId) }];
+                  : [
+                      { type: 'collab', label: t('projectCard.collabDetail'), onClick: () => openCollabModal(item.canvasId) },
+                      { type: 'custom', label: t('collab.exitCollaboration'), icon: <LogOut size={14} />, danger: true, onClick: () => handleExitParticipating(item) },
+                    ];
                 return (
                   <div
                     key={`collab-${item.canvasId}`}
@@ -710,7 +748,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             canvasId={collabTargetId}
             onClose={closeCollabModal}
             theme={theme}
-            onNavigateToCanvas={(id) => onOpen(id)}
           />
         )}
       </div>

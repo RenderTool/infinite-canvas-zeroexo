@@ -41,15 +41,15 @@ export class CollaborationMemberService implements OnModuleDestroy {
     });
     if (!room) throw notFound('COLLAB_ROOM_NOT_FOUND', 'Collaboration room not found');
 
-    // 越权防护: 请求者必须是房间成员(未被封禁)
+    // 越权防护: 请求者必须是房间成员(未被封禁且非待审申请)
     const requesterMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: room.id, userId: requesterId, status: { not: 'banned' } },
+      where: { roomId: room.id, userId: requesterId, status: { notIn: ['banned', 'pending'] } },
       select: { id: true },
     });
     if (!requesterMember) throw forbidden('FORBIDDEN', 'You are not a member of this room');
 
     const members = await this.prisma.collaborationMember.findMany({
-      where: { roomId: room.id },
+      where: { roomId: room.id, status: { not: 'pending' } }, // 待审申请走 applications 接口
       include: {
         // 不暴露 email,仅返回成员协作所需字段
         user: { select: { id: true, nickname: true, avatarUrl: true, username: true } },
@@ -323,7 +323,7 @@ export class CollaborationMemberService implements OnModuleDestroy {
 
     // 确认用户是房间成员
     const isMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: room.id, userId: requesterId, status: { not: 'offline' } },
+      where: { roomId: room.id, userId: requesterId, status: { notIn: ['offline', 'pending'] } },
     });
     if (!isMember) throw forbidden('FORBIDDEN', 'You are not a member of this room');
 

@@ -59,6 +59,10 @@ export class UpdateRoomDto {
   allowDownload?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
+
+  @IsOptional()
   @IsInt()
   expiresInHours?: number;
 }
