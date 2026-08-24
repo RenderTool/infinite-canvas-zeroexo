@@ -33,9 +33,13 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
   const [selected, setSelected] = useState<string | null>(null);
   const [customText, setCustomText] = useState('');
   const [showCustom, setShowCustom] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  // 优先使用消息的 answered 状态（历史还原），否则使用本地 submitted 状态
+  const [localSubmitted, setLocalSubmitted] = useState(false);
+  const submitted = !!message.answered || localSubmitted;
   /** R2：提交完毕后折叠为摘要行 */
   const [folded, setFolded] = useState(false);
+  // 历史已回答的消息默认折叠
+  const shouldFold = !!message.answered || folded;
   const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
 
   const data = message.question;
@@ -52,7 +56,7 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
 
   const submitAnswer = (value: string) => {
     if (submitted) return;
-    setSubmitted(true);
+    setLocalSubmitted(true);
     setFolded(true); // R2：提交完毕折叠
     if (onSelect) {
       onSelect(value);
@@ -85,8 +89,8 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
     }
   };
 
-  // ===== 折叠摘要行（提交后） =====
-  if (folded && submitted) {
+  // ===== 折叠摘要行（提交后或历史已回答） =====
+  if (shouldFold) {
     return (
       <button
         type="button"

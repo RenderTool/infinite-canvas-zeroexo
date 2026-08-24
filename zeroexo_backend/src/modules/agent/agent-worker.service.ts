@@ -262,6 +262,18 @@ export class AgentWorkerService {
               });
             }
             break;
+          case 'agent:params_request':
+            // 交互协议：写入 params_request 消息到历史，供回执时 LLM 理解上下文
+            if (task.conversationId) {
+              const params = (event.data as any)?.params;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[参数表单请求] ${params?.title ?? '请配置参数'}，等待用户提交`,
+                toolName: 'request_params',
+                toolArguments: JSON.stringify(params ?? {}),
+              });
+            }
+            break;
           case 'agent:md':
             this.sseService.emitMd(taskId, (event.data as any)?.md ?? '');
             break;
@@ -276,14 +288,44 @@ export class AgentWorkerService {
           case 'agent:plan':
             // R2-5: 结构化执行计划 → PlanBlock
             this.sseService.emitPlan(taskId, (event.data as any)?.plan ?? event.data);
+            // 写入 plan_present 消息到历史
+            if (task.conversationId) {
+              const plan = (event.data as any)?.plan;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[执行计划] ${plan?.goal ?? '执行计划'}，等待用户确认`,
+                toolName: 'plan_present',
+                toolArguments: JSON.stringify(plan ?? {}),
+              });
+            }
             break;
           case 'agent:upload_request':
             // R2-5: 对话内上传卡 → UploadBlock
             this.sseService.emitUploadRequest(taskId, (event.data as any)?.upload ?? {});
+            // 写入 request_upload 消息到历史
+            if (task.conversationId) {
+              const upload = (event.data as any)?.upload;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[上传请求] ${upload?.guideText ?? '请上传'}，等待用户操作`,
+                toolName: 'request_upload',
+                toolArguments: JSON.stringify(upload ?? {}),
+              });
+            }
             break;
           case 'agent:brief':
             // R2-5: 任务简报 → BriefBlock
             this.sseService.emitBrief(taskId, (event.data as any)?.brief ?? event.data);
+            // 写入 emit_brief 消息到历史
+            if (task.conversationId) {
+              const brief = (event.data as any)?.brief;
+              void this.writeMessage(task, {
+                role: 'assistant',
+                content: `[任务简报] ${brief?.summary ?? ''}`,
+                toolName: 'emit_brief',
+                toolArguments: JSON.stringify(brief ?? {}),
+              });
+            }
             break;
           case 'agent:complete': {
             const completeData = event.data as any;

@@ -32,7 +32,7 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
     );
   }
 
-  const locked = planCard.status === 'confirmed' || planCard.status === 'modified';
+  const locked = planCard.status === 'confirmed' || planCard.status === 'modified' || !!message.answered;
 
   const handleConfirm = () => {
     if (locked) return;

@@ -133,6 +133,9 @@ export function CollaborationModal({
       setAllowEdit(data.allowEdit);
       setAllowDownload(data.allowDownload);
       setExpiresInHours(data.expiresAt ? 24 : 0);
+      // 同步到全局 store，确保 collaborationActive 为 true，光标广播等协作功能正常
+      useCollaborationStore.getState().setRoom(data);
+      useCollaborationStore.getState().setActive(true);
       // 加载成员列表
       const memberList = await listMembers(canvasId);
       setMembers(memberList);

@@ -29,7 +29,17 @@ import {
   type ConversationSummary,
   type ConversationMessageDto,
 } from './session/agent-session.js';
-import type { AttachmentCard, CanvasAgentMessage } from './types.js';
+import type {
+  AttachmentCard,
+  CanvasAgentMessage,
+  CanvasAgentMessageType,
+  QuestionData,
+  StepData,
+  AgentPlanData,
+  UploadCardData,
+  ParamsRequestData,
+  BriefCardData,
+} from './types.js';
 import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import {
@@ -39,6 +49,18 @@ import {
   unmuteMember,
 } from '@/features/collaboration/collaboration-api.js';
 import type { CollaborationMember } from '@/features/collaboration/collaboration-types.js';
+
+/**
+ * 交互工具名 → 消息类型映射
+ */
+const INTERACTION_TOOL_TYPE_MAP: Record<string, string> = {
+  request_question: 'question',
+  request_step: 'step',
+  request_params: 'params',
+  request_upload: 'upload',
+  plan_present: 'plan',
+  emit_brief: 'brief',
+};
 
 /**
  * 后端消息 → store 消息（跳过记忆压缩摘要等 system 消息）
@@ -90,6 +112,48 @@ function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | nu
   if (dto.role === 'system') {
     // 记忆压缩摘要等系统消息不渲染为普通消息
     return null;
+  }
+  // 检测交互工具消息（后端存储为 role=assistant + toolName + toolArguments）
+  if (dto.toolName && INTERACTION_TOOL_TYPE_MAP[dto.toolName]) {
+    const msgType = INTERACTION_TOOL_TYPE_MAP[dto.toolName] as CanvasAgentMessageType;
+    let parsedData: unknown;
+    try {
+      if (dto.toolArguments) {
+        parsedData = JSON.parse(dto.toolArguments);
+      }
+    } catch {
+      /* 解析失败则 data 为 undefined */
+    }
+    
+    const baseMessage: CanvasAgentMessage = {
+      id: dto.id,
+      role: 'agent' as const,
+      type: msgType,
+      text: dto.content,
+      timestamp: ts,
+      answered: false,
+    };
+    
+    // 根据类型设置对应的数据字段
+    if (parsedData && typeof parsedData === 'object') {
+      // 转换数据结构以匹配前端期望的类型
+      if (msgType === 'question') {
+        baseMessage.question = parsedData as QuestionData;
+      } else if (msgType === 'step') {
+        baseMessage.step = parsedData as StepData;
+      } else if (msgType === 'plan') {
+        baseMessage.planCard = parsedData as AgentPlanData;
+      } else if (msgType === 'upload') {
+        baseMessage.upload = { ...(parsedData as UploadCardData), status: 'pending' };
+      } else if (msgType === 'params') {
+        baseMessage.params = parsedData as ParamsRequestData;
+        baseMessage.paramsAnswered = false;
+      } else if (msgType === 'brief') {
+        baseMessage.brief = parsedData as BriefCardData;
+      }
+    }
+    
+    return baseMessage;
   }
   return {
     id: dto.id,
@@ -156,9 +220,22 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         const msgs = await loadConversationMessages(target.id);
         if (cancelled) return;
         store.clearMessages();
-        for (const dto of msgs) {
+        // 遍历消息列表，交互消息需检测下一条是否为用户消息以判断 answered 状态
+        for (let i = 0; i < msgs.length; i++) {
+          const dto = msgs[i]!;
           const m = dtoToStoreMessage(dto);
           if (m) store.addMessage(m);
+        }
+        // 第二遍：标记交互消息的 answered 状态（下一条为用户消息则视为已回答）
+        const allMsgs = store.messages;
+        for (let i = 0; i < allMsgs.length; i++) {
+          const cur = allMsgs[i];
+          if (cur && (cur.type === 'question' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief')) {
+            const next = allMsgs[i + 1];
+            if (next && next.role === 'user') {
+              store.updateMessage(cur.id, { answered: true });
+            }
+          }
         }
       } catch {
         // 未登录/无会话时静默，保持空态欢迎页
@@ -233,9 +310,21 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     store.clearMessages();
     try {
       const msgs = await loadConversationMessages(id);
-      for (const dto of msgs) {
+      for (let i = 0; i < msgs.length; i++) {
+        const dto = msgs[i]!;
         const m = dtoToStoreMessage(dto);
         if (m) store.addMessage(m);
+      }
+      // 标记交互消息的 answered 状态
+      const allMsgs = store.messages;
+      for (let i = 0; i < allMsgs.length; i++) {
+        const cur = allMsgs[i];
+        if (cur && (cur.type === 'question' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief')) {
+          const next = allMsgs[i + 1];
+          if (next && next.role === 'user') {
+            store.updateMessage(cur.id, { answered: true });
+          }
+        }
       }
     } catch {
       // 历史加载失败时保持空会话

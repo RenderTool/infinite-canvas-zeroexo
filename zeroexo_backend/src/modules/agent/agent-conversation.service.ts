@@ -184,6 +184,7 @@ export class AgentConversationService {
         'request_params',
         'request_upload',
         'plan_present',
+        'emit_brief',
       ]);
       for (const row of rows) {
         if (excludeTaskId && row.taskId === excludeTaskId) continue;

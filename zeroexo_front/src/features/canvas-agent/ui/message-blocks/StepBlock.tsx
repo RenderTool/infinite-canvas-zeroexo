@@ -14,7 +14,9 @@ import { sendAnswer } from '../session/agent-session.js';
 export function StepBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
   const step = message.step;
-  const [submitted, setSubmitted] = useState(false);
+  // 优先使用消息的 answered 状态（历史还原），否则使用本地 submitted 状态
+  const [localSubmitted, setLocalSubmitted] = useState(false);
+  const submitted = !!message.answered || localSubmitted;
   /** 用户备注（R2-5：noteEnabled 时随回执上送） */
   const [note, setNote] = useState('');
 
@@ -25,7 +27,7 @@ export function StepBlock(props: { message: CanvasAgentMessage }): React.ReactEl
 
   const submit = (value: string) => {
     if (submitted) return;
-    setSubmitted(true);
+    setLocalSubmitted(true);
     const trimmedNote = note.trim();
     void sendAnswer(trimmedNote ? `${value}｜备注: ${trimmedNote}` : value);
   };

@@ -206,6 +206,8 @@ export interface CanvasAgentMessage {
   timestamp: number;
   /** 业务扩展字段 */
   meta?: Record<string, unknown>;
+  /** 交互消息是否已被用户回答（历史还原时检测） */
+  answered?: boolean;
 }
 
 // ===== step 接口（StepBlock 契约 UI, Plan#33 D1/D2） =====
