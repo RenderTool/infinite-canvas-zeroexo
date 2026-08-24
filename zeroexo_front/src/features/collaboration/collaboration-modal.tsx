@@ -19,7 +19,7 @@ import { App, Modal, Button, Select, Tabs, Switch, Radio } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
-import type { CollaborationMember } from './collaboration-types';
+import type { CollaborationMember, CollaborationStatus, RoomResponse } from './collaboration-types';
 import {
   createRoom,
   getRoomByCanvas,
@@ -66,6 +66,10 @@ export function CollaborationModal({
   const { user } = useAuth();
   const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
+  // 弹窗视角的房间状态（本地 state，与全局协作 store 隔离）：
+  // 全局 store 是跨画布单例且由 editor 的 use-collaboration init 写入，若 loadRoom 失败
+  // （如 403）会残留其他画布的房间 → isOwner 误判 false → 发起者被误显示“协作已失效”。
+  const [roomState, setRoomState] = useState<RoomResponse | null>(null);
   const [members, setMembers] = useState<CollaborationMember[]>([]);
   const [inviteCode, setInviteCode] = useState('');
   const [expiresInHours, setExpiresInHours] = useState<number>(0);
@@ -76,13 +80,19 @@ export function CollaborationModal({
   const [applications, setApplications] = useState<JoinApplication[]>([]);
   const [activeTab, setActiveTab] = useState<string>('manage');
 
-  // 单一事实源：store 中的房间信息与协作状态
-  const storeRoom = useCollaborationStore((s) => s.room);
-  const status = useCollaborationStore((s) => s.status);
+  // 本地派生状态：发起者视角 expired 视同 idle（可重新开启协作），参与者才标记 expired
+  // （与 use-collaboration init 的派生逻辑对齐；全局 store 的 setRoom 对发起者无此特判）
+  const status: CollaborationStatus = roomState
+    ? roomState.status === 'active'
+      ? 'active'
+      : roomState.ownerId === String(user?.id)
+        ? 'idle'
+        : 'expired'
+    : 'idle';
 
   // 角色判定：房间存在时按 ownerId 判断；
   // 房间不存在(未开启)时能打开协作弹窗者必为画布所有者（非所有者需通过邀请码进入，此时房间必然存在）
-  const isOwner = storeRoom ? storeRoom.ownerId === String(user?.id) : true;
+  const isOwner = roomState ? roomState.ownerId === String(user?.id) : true;
 
   // 初始化 tab: 房主默认"发起协作"(含未开启面板)，参与者默认"退出本次协作"
   // （Phase 9：加入入口已收敛到邀请落地页，弹窗不再提供输码加入）
@@ -119,6 +129,8 @@ export function CollaborationModal({
     setLoading(true);
     try {
       const data = await getRoomByCanvas(canvasId);
+      // 弹窗视角本地状态：任何结果（含 null）都立即刷新，避免残留上一画布的房间
+      setRoomState(data);
       useCollaborationStore.getState().setRoom(data); // null → status idle
       if (!data) {
         setInviteCode('');
@@ -146,6 +158,8 @@ export function CollaborationModal({
         setMembers([]);
       }
     } catch (err) {
+      // 本地同样清空：失败（含 403）时按"未开启"展示，不残留任何旧房间状态
+      setRoomState(null);
       // Plan#38 Phase 6.4：受邀者尚未入房时后端返回 403，属正常态，静默处理不弹错误；
       // 其余异常才提示（加入流程由 doJoin 独立完成，不受此处影响）
       if (!(err instanceof ApiError && err.status === 403)) {
@@ -155,7 +169,7 @@ export function CollaborationModal({
     } finally {
       setLoading(false);
     }
-  }, [canvasId, message, t]);
+  }, [canvasId, message, t, loadApplications, user?.id]);
 
   useEffect(() => {
     if (open) {
@@ -170,6 +184,7 @@ export function CollaborationModal({
     setLoading(true);
     try {
       const data = await createRoom({ canvasId, mode: 'invite-only' });
+      setRoomState(data);
       useCollaborationStore.getState().setRoom(data);
       setInviteCode(data.inviteCode);
       setAllowChat(data.allowChat);
@@ -304,6 +319,7 @@ export function CollaborationModal({
       onOk: async () => {
         try {
           await closeRoom(canvasId);
+          setRoomState(null);
           useCollaborationStore.getState().setRoom(null);
           message.success(t('collab.roomClosed'));
         } catch (err) {
@@ -326,6 +342,7 @@ export function CollaborationModal({
       onOk: async () => {
         try {
           await removeSelfFromRoom(canvasId);
+          setRoomState(null);
           useCollaborationStore.getState().setRoom(null);
           message.success(t('collab.exitSuccess'));
           onClose();
@@ -342,6 +359,7 @@ export function CollaborationModal({
     setLoading(true);
     try {
       await removeSelfFromRoom(canvasId);
+      setRoomState(null);
       useCollaborationStore.getState().setRoom(null);
       message.success(t('collab.removedSuccess'));
       onClose();

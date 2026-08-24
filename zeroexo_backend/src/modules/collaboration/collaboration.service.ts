@@ -623,6 +623,8 @@ export class CollaborationService {
    * 物理删除该用户在该画布**所有房间**内的成员记录，此后主页不再展示该协作画布。
    * 注意：画布可能因"开启→关闭→再开启"存在多个历史房间，若只删最新房间会残留
    * 旧房间成员记录，导致主页列表刷新后画布依然可见。
+   * 守卫：房间 owner 的成员记录不可删除——owner 记录是房间的组成部分，删后
+   * getRoomByCanvas 将 403（成员校验失败），协作无法重新开启（曾实测复现）。
    */
   async removeSelfFromRoom(userId: string, canvasId: string) {
     const rooms = await this.prisma.collaborationRoom.findMany({
@@ -632,7 +634,11 @@ export class CollaborationService {
     if (rooms.length === 0) return { message: 'ok', removed: 0 };
 
     const removed = await this.prisma.collaborationMember.deleteMany({
-      where: { roomId: { in: rooms.map((r) => r.id) }, userId },
+      where: {
+        roomId: { in: rooms.map((r) => r.id) },
+        userId,
+        role: { not: 'owner' }, // owner 成员记录不可自删（见上方守卫说明）
+      },
     });
 
     // 广播成员离开（供房主刷新成员列表）
