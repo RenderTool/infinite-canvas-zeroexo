@@ -9,7 +9,7 @@
 <h1 align="center">ZeroExo Platform</h1>
 
 <p align="center">
-  An open-source, AI-driven canvas + auto film-out pipeline. From idea to storyboard, from shots to a finished short film — one platform, end to end.
+  A full-stack, AI-driven canvas platform. From idea to storyboard, from shots to a finished short film — one platform, end to end.
 </p>
 
 <p align="center">
@@ -27,6 +27,12 @@
 - **Real-time collaboration** — Yjs CRDT + Hocuspocus, offline-first, timestamp-based conflict rebasing
 
 ## Product Modules
+
+| Frontend Canvas | Admin Console |
+|---|---|
+| ![Frontend Canvas](docs/screenshots/frontend/前端首页.webp) | ![Admin Console](docs/screenshots/admin/后台首页.webp) |
+
+ZeroExo is a **full-stack** project. The React canvas frontend is the core product, and the NestJS-backed admin console provides operational control — all in one platform.
 
 ### Home Page
 

@@ -9,7 +9,7 @@
 <h1 align="center">ZeroExo Platform</h1>
 
 <p align="center">
-  开源 AI 驱动画布 + 智能出片全链路平台：从创意到分镜、从镜头到成片，一个平台端到端完成。
+  全栈、AI 驱动的画布平台。从创意到分镜、从镜头到成片，一个平台端到端完成。
 </p>
 
 <p align="center">
@@ -27,6 +27,12 @@
 - **实时协作** — Yjs CRDT + Hocuspocus，离线优先、时间戳冲突变基
 
 ## 产品模块
+
+| 前端画布 | 管理后台 |
+|---|---|
+| ![前端画布](docs/screenshots/frontend/前端首页.webp) | ![管理后台](docs/screenshots/admin/后台首页.webp) |
+
+ZeroExo 是一个**全栈项目**。前端 React 画布是核心产品，后端 NestJS 驱动的管理后台提供运营控制能力 — 前后端分离，一体部署。
 
 ### 首页
 
