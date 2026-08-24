@@ -1,4 +1,3 @@
-import { conflict } from '../../../common/errors/app-exception.js';
 import { LogsService } from '../../logs/logs.service';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -8,12 +7,10 @@ import * as path from 'node:path';
  *
  * 子类需实现:
  * - storageModule: 存储子目录名 ('canvases')
- * - versionStrategy: 乐观锁比较策略 ('lt' | 'neq')
  * - storageRoot: 存储根路径
  */
 export abstract class BaseProjectService {
   protected abstract get storageModule(): string;
-  protected abstract get versionStrategy(): 'lt' | 'neq';
   protected abstract get storageRoot(): string;
 
   /**
@@ -45,29 +42,6 @@ export abstract class BaseProjectService {
     const filePath = path.join(dir, fileName);
     await fs.unlink(filePath);
     await fs.rmdir(dir).catch(() => {});
-  }
-
-  /**
-   * 乐观锁版本检查
-   * @param existing - 数据库中的现有记录
-   * @param expectedVersion - 客户端期望的版本号
-   * @throws AppException(CONFLICT) 版本冲突时抛出
-   */
-  protected checkVersion(
-    existing: { version: number },
-    expectedVersion?: number,
-  ): void {
-    if (expectedVersion === undefined) return;
-
-    if (this.versionStrategy === 'lt') {
-      if (expectedVersion < existing.version) {
-        throw conflict('CONFLICT', 'Version conflict: your local version is based on an outdated cloud version');
-      }
-    } else if (this.versionStrategy === 'neq') {
-      if (existing.version !== expectedVersion) {
-        throw conflict('CONFLICT', 'The project has been modified by another operation. Please refresh and try again.');
-      }
-    }
   }
 
   /**

@@ -6,7 +6,6 @@ import { MinioService } from '../../assets/minio.service';
 import { LogsService } from '../../logs/logs.service';
 import { BaseProjectService } from '../common/base-project.service';
 import { notFound } from '../../../common/errors/app-exception.js';
-import { VersionsService } from './versions.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/canvas.dto';
 
 /** 默认每页条数 */
@@ -24,7 +23,6 @@ const MAX_LIMIT = 100;
 @Injectable()
 export class CanvasService extends BaseProjectService {
   protected get storageModule(): string { return 'canvases'; }
-  protected get versionStrategy(): 'lt' | 'neq' { return 'lt'; }
   protected get storageRoot(): string { return this.minioService.getStorageRoot(); }
 
   constructor(
@@ -32,7 +30,6 @@ export class CanvasService extends BaseProjectService {
     private readonly resourceService: ResourceService,
     private readonly minioService: MinioService,
     private readonly logsService: LogsService,
-    private readonly versionsService: VersionsService,
   ) {
     super();
   }
@@ -219,54 +216,18 @@ export class CanvasService extends BaseProjectService {
       return created;
     }
 
-    // scene 变更时:diff 旧/新 storageKey,调整引用计数
+    // scene 变更时:diff 旧/新 storageKey,调整引用计数。
+    // （Phase3:增量合并通道已退役,scene 一律全量替换;画布写路径由 Yjs 落库承担,
+    // 此分支仅为历史遗留的 HTTP 快照/元数据通道保留幂等写语义）
     if (dto.scene !== undefined) {
       const oldKeys = this.resourceService.extractStorageKeysFromScene(existing.scene);
-
-      // 当 changedNodeIds 存在时,scene 不是全量替换而是增量合并
-      let resolvedScene: unknown;
-      if (dto.changedNodeIds !== undefined && Array.isArray(dto.scene)) {
-        resolvedScene = this.mergeIncrementalScene(existing.scene, dto.scene, dto.changedNodeIds);
-      } else {
-        resolvedScene = dto.scene;
-      }
-
-      const newKeys = this.resourceService.extractStorageKeysFromScene(resolvedScene);
+      const newKeys = this.resourceService.extractStorageKeysFromScene(dto.scene);
       const added = new Set([...newKeys].filter((k) => !oldKeys.has(k)));
       const removed = new Set([...oldKeys].filter((k) => !newKeys.has(k)));
       if (added.size > 0 || removed.size > 0) {
         await this.resourceService.adjustRefs(added, removed);
       }
-
-      // 用合并后的 scene 替换 dto.scene,供后续 update 使用
-      dto.scene = resolvedScene;
     }
-
-    // 批量删除 ≥10 节点时自动创建快照(捕获删除前的画布状态)
-    if (dto.scene !== undefined && Array.isArray(dto.scene)) {
-      const deletedCount = (dto.scene as Record<string, unknown>[]).filter(
-        (n) => n.type === '__deleted__',
-      ).length;
-      if (deletedCount >= 10) {
-        try {
-          await this.versionsService.createVersion(ownerId, id, {
-            label: `自动快照 - 批量删除 ${deletedCount} 个节点`,
-            source: 'auto-delete',
-          });
-        } catch (err) {
-          this.logsService.log('project', `批量删除自动快照失败: ${id}`, {
-            level: 'warn',
-            userId: ownerId,
-            meta: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }
-      }
-    }
-
-    // 乐观锁版本检查:前端传入 expectedVersion 小于当前云端版本时,
-    // 说明本地基于旧版本,直接覆盖会让其他端的修改丢失(如删除节点复活)。
-    // 抛 409 并返回当前云端完整数据,由前端弹窗让用户决策推送本地或拉取云端。
-    this.checkVersion(existing, dto.expectedVersion);
 
     const project = await this.prisma.project.update({
       where: { id },
@@ -312,57 +273,6 @@ export class CanvasService extends BaseProjectService {
     }
 
     return project;
-  }
-
-  /**
-   * 增量合并 scene:将客户端传入的变化节点合并到当前云端 scene 中。
-   * 仅替换/删除 changedNodeIds 指定的节点,其余节点保持不变。
-   */
-  private mergeIncrementalScene(
-    currentScene: unknown,
-    changedNodes: unknown[],
-    changedNodeIds: string[],
-  ): unknown {
-    const current = Array.isArray(currentScene) ? (currentScene as Record<string, unknown>[]) : [];
-    const changedSet = new Set(changedNodeIds);
-
-    // 分离删除标记节点和普通变化节点
-    const deleteIds = new Set<string>();
-    const updateNodes: Record<string, unknown>[] = [];
-    for (const node of changedNodes) {
-      const n = node as Record<string, unknown>;
-      if (n.type === '__deleted__') {
-        deleteIds.add(n.id as string);
-      } else {
-        updateNodes.push(n);
-      }
-    }
-    const updateMap = new Map(updateNodes.map((n) => [n.id as string, n]));
-
-    // 合并:保留不在 changedSet 中的所有节点
-    // - changedSet 中且在 updateMap → 被替换,从 current 移除后从 updateMap 追加
-    // - changedSet 中但不在 updateMap → 被删除(前端标记了 changedNodeIds 但 scene 中没有该节点)
-    const merged = current.filter((n) => {
-      const id = n.id as string;
-      if (deleteIds.has(id)) return false;
-      if (changedSet.has(id)) {
-        // 在 changedNodeIds 中 → 该节点被前端处理了(替换或删除)
-        return false;
-      }
-      return true;
-    });
-
-    // 追加/替换 updateNodes
-    for (const [id, node] of updateMap) {
-      const existingIdx = merged.findIndex((n) => (n.id as string) === id);
-      if (existingIdx >= 0) {
-        merged[existingIdx] = node;
-      } else {
-        merged.push(node);
-      }
-    }
-
-    return merged;
   }
 
   // 删除项目 - 仅删除画布数据,不删除底层资源文件

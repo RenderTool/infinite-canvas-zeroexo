@@ -2,7 +2,7 @@
  * sync-service - 简化版云同步服务（核心编排模块）
  *
  * 已拆分为以下模块:
- * - sync-utils.ts: 工具函数(脏标志、队列、待删除追踪、冲突检测)
+ * - sync-utils.ts: 工具函数(待删除追踪、本地未推送检查、防抖常量)
  * - sync-resources.ts: 资源上传(CAS 去重、blob 上传)
  * - sync-projects.ts: 项目同步(推送、合并、冲突处理)
  * - sync-prompts.ts: 提示词同步
@@ -14,30 +14,24 @@
 import { getProject, deleteProject, deleteProjectGraph } from '@zeroexo/plugin-persistence';
 import { apiGet, apiDelete, ApiError } from '../api-client.js';
 import type { CloudProject } from './sync-projects.js';
-import { syncProjectToCloud, mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePushLocalToCloud, forcePullProjectFromCloud, pushProjectMeta } from './sync-projects.js';
+import { mergeCloudProjectToLocal, pullCloudProjects, pushLocalProjects, pushProjectMeta } from './sync-projects.js';
 import { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets } from './sync-resources.js';
 import { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted } from './sync-prompts.js';
 import { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted } from './sync-assets.js';
 import {
   debugLog, debugError,
-  PROJECT_UPDATE_DEBOUNCE_MS, FULL_SYNC_DEBOUNCE_MS,
-  markProjectDirty, markProjectClean, isProjectDirty,
+  FULL_SYNC_DEBOUNCE_MS,
   markPendingDelete, clearPendingDelete,
-  enqueuePush, checkProjectConflict, notifyConflictSnapshot,
-  PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME,
   hasLocalChanges,
-  isCollaborationActive,
 } from './sync-utils.js';
-import type { ProjectConflict, ConflictSnapshotInfo } from './sync-utils.js';
 import { isOnline, isTabActive, setSyncStatus, setLastSyncedAt } from './sync-store.js';
 
 // 重新导出子模块的公共 API，保持向后兼容
-export { syncProjectToCloud, forcePushLocalToCloud, pushLocalOverrideCloud, repushLocalAsNewCloud, forcePullProjectFromCloud, pushProjectMeta };
+// Phase3 后仅保留存活通道;旧 HTTP 写函数与脏标记/冲突机制不再 re-export
+export { pushProjectMeta };
 export { syncProjectResourcesFromCloud, computeBlobHash, uploadBlobContentToCloud, syncProjectResourcesToCloud, saveCanvasResourceToAssets };
 export { pullCloudPrompts, mergeCloudPromptToLocal, pushLocalPrompts, onPromptCreated, onPromptUpdated, onPromptDeleted };
 export { pullCloudAssets, mergeCloudAssetToLocal, pushLocalAssets, pushAssetToCloud, onAssetCreated, onAssetUpdated, onAssetDeleted };
-export { checkProjectConflict, markProjectDirty, markProjectClean, isProjectDirty, notifyConflictSnapshot, PROJECT_CONFLICT_SNAPSHOT_EVENT_NAME };
-export type { ProjectConflict, ConflictSnapshotInfo };
 
 // ===== 全量同步状态（本地变量，避免 ES 模块导入赋值错误）=====
 let isFullSyncing = false;
@@ -50,7 +44,6 @@ export async function syncProjectFromCloud(projectId: string, force = false): Pr
   try {
     const cloud: CloudProject = await apiGet<CloudProject>(`/projects/${projectId}`);
     await mergeCloudProjectToLocal(cloud, force);
-    markProjectClean(projectId);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       // 仅当本地项目曾有 cloudId(之前同步过)时才删除本地数据
@@ -137,51 +130,9 @@ async function pushAllToCloud(): Promise<void> {
 
 // ===== 项目事件处理 =====
 
-export async function onProjectCreated(localId: string): Promise<void> {
-  if (isOnline()) {
-    enqueuePush(localId, async () => {
-      try {
-        await syncProjectToCloud(localId);
-      } catch (err) {
-        debugError(`[sync] onProjectCreated ${localId} failed:`, err);
-      }
-    });
-  }
-}
-
-export async function onProjectUpdated(localId: string): Promise<void> {
-  markProjectDirty(localId);
-
-  if (!isTabActive()) {
-    debugLog(`[sync] tab inactive, skip onProjectUpdated for ${localId}`);
-    return;
-  }
-  if (!isOnline()) return;
-  // 协作 active(房间开启)时抑制 HTTP 防抖推送:Yjs 已实时合并广播画布编辑,
-  // HTTP 全量推送(PATCH scene)只会引入 409 与「重连瞬间本地旧图顶掉远端合并结果」的
-  // 覆盖风险。dirty 标记仍保留,协作结束后推送自动恢复,补推合并后的最终状态落库。
-  if (isCollaborationActive(localId)) {
-    debugLog(`[sync] collaboration active for ${localId}, suppress HTTP debounced push`);
-    return;
-  }
-  // Yjs WebSocket 负责实时广播；云端版本检查在实际快照提交前统一处理。
-  // 本地编辑不再先 GET 云端，避免高频协作把 HTTP 控制面打满。
-  debouncedPush(localId);
-}
-
-/** 防抖推送(内部辅助,避免重复代码) */
-const updateTimers = new Map<string, ReturnType<typeof setTimeout>>();
-function debouncedPush(localId: string): void {
-  const existing = updateTimers.get(localId);
-  if (existing) clearTimeout(existing);
-  const timer = setTimeout(async () => {
-    updateTimers.delete(localId);
-    enqueuePush(localId, async () => {
-      await syncProjectToCloud(localId);
-    });
-  }, PROJECT_UPDATE_DEBOUNCE_MS);
-  updateTimers.set(localId, timer);
-}
+// Phase3(Yjs 单主干):onProjectCreated / onProjectUpdated / 防抖推送已整体退役。
+// 画布数据写路径由 Y.Doc 承担(服务端 storeCanvasDocument 防抖落库),
+// 元数据(title/thumbnailUrl/tags)走 pushProjectMeta 轻量通道;删除走 onProjectDeleted。
 
 export async function onProjectDeleted(localId: string, options?: { skipLocalDelete?: boolean }): Promise<void> {
   const local = await getProject(localId);

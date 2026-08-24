@@ -2,7 +2,9 @@
  * sync-projects - 项目同步模块
  *
  * 从 sync-service 中提取的项目同步相关功能。
- * 包含项目推送、拉取、冲突检测、合并等操作。
+ * Phase3(Yjs 单主干)后仅保留:云端列表拉取、本地合并、删除重试、轻量元数据推送。
+ * 旧 HTTP 写路径(syncProjectToCloud/冲突自动解决/409 重试/强制覆盖)已随
+ * mergeIncrementalScene 与乐观锁一并退役,画布数据写主权收敛至 Y.Doc。
  */
 
 import type { GraphModel } from '@zeroexo/core';
@@ -11,27 +13,17 @@ import {
   getProject,
   upsertProject,
   deleteProject,
-  loadProjectGraph,
   saveProjectGraph,
   deleteProjectGraph,
 } from '@zeroexo/plugin-persistence';
-import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from '../api-client.js';
-import { setSyncStatus, isOnline, isTabActive } from './sync-store.js';
+import { apiGet, apiPatch, apiDelete, ApiError } from '../api-client.js';
+import { isOnline } from './sync-store.js';
 import {
   debugLog,
   debugError,
-  markProjectClean,
-  isProjectDirty,
-  markProjectSynced,
   clearPendingDelete,
   pendingDeleteCloudIds,
-  checkProjectConflict,
-  notifyConflictSnapshot,
-  takeChangedNodeIds,
-  scheduleAutoRetry,
 } from './sync-utils.js';
-import type { ProjectConflict } from './sync-utils.js';
-import { syncProjectResourcesToCloud } from './sync-resources.js';
 
 export interface CloudProject {
   id: string;
@@ -56,519 +48,6 @@ export interface CloudProject {
 interface CloudProjectList {
   items: CloudProject[];
   nextCursor: string | null;
-}
-
-export async function syncProjectToCloud(
-  projectId: string,
-  options?: { reason?: 'manual' | 'debounced' | 'rate-limit-retry' | 'transient-error-retry' },
-): Promise<void> {
-  void options; // 保留用于调试/日志,当前无需分支逻辑
-  if (!isOnline()) return;
-  if (!isTabActive()) {
-    debugLog(`[sync-service] tab inactive, skip syncProjectToCloud for ${projectId}`);
-    return;
-  }
-
-  const local = await getProject(projectId);
-  if (!local) return;
-
-  try {
-    // 推送前检测云端版本:若云端有更新(cloudVersion > localVersion)或云端项目已删除,
-    // 不再弹窗让用户决策,而是自动按「本地优先」解决:
-    // - 云端已删除 → 自动推送本地重新创建
-    // - 云端较新 → 先保存云端版本为快照(还原点),再推送本地覆盖
-    // 处理完成后通知前端顶部提示条(可点击跳转历史快照)。
-    if (local.cloudId) {
-      const conflict = await checkProjectConflict(projectId);
-      if (conflict && (conflict.cloudDeleted || conflict.cloudVersion > conflict.localVersion)) {
-        debugLog(
-          `[sync-service] ${conflict.cloudDeleted ? 'cloud deleted' : `cloud newer (cloud=${conflict.cloudVersion} > local=${conflict.localVersion})`}, auto-resolve with local priority`,
-        );
-        await autoResolveConflict(projectId, conflict);
-        return;
-      }
-    }
-
-    // 预检通过,开始实际推送
-    setSyncStatus('syncing');
-    const graph = await loadProjectGraph(projectId);
-    const nodes = graph?.nodes ?? [];
-
-    // 获取节点级变更 ID 列表(FastArray DirtyMask)
-    const changedIds = takeChangedNodeIds(projectId);
-
-    debugLog(`[sync-service] syncProjectToCloud ${projectId}: total=${nodes.length}, delta=${changedIds.length} nodes`);
-
-    await syncProjectResourcesToCloud(nodes);
-
-    // 持久化 storageKey 更新: syncProjectResourcesToCloud 可能为 blob URL 节点
-    // 设置了 data.storageKey(cloud key), 保存回 localforage 避免下次推送重复上传
-    // 注意: 保存失败时阻止推送, 避免向云端推送带 local storageKey 的 graph(其他浏览器无法解析)
-    if (graph) {
-      try {
-        await saveProjectGraph(projectId, graph);
-      } catch (err) {
-        debugLog(`[sync-service] save graph after resource upload failed for ${projectId}:`, err);
-        debugLog('[sync-service] abort push to avoid pushing local storageKeys to cloud');
-        return;
-      }
-    }
-
-    /**
-     * 增量同步策略(类似 UE5 FastArray):
-     *
-     * - 有 changedIds → 只发送变更节点 + deleted 标记,后端 mergeIncrementalScene 合并
-     * - 无 changedIds(首次同步/全量回退) → 发送完整 scene
-     *
-     * 性能对比(500 节点画布):
-     *   拖拽 1 个节点:   ~200B delta vs ~500KB full scene  ← 2500x 压缩
-     *   删除 10 个节点: ~300B delta vs ~500KB full scene  ← 1600x 压缩
-     *   批量粘贴 50 个: ~50KB  delta vs ~600KB full scene  ← 12x 压缩
-     */
-    let scenePayload: unknown;
-    let changedNodeIdsPayload: string[] | undefined;
-
-    if (changedIds.length > 0 && local.cloudId) {
-      // 增量模式:只提取变更的节点。
-      // 用 Map 索引避免对每个 changedId 做 O(n) find(500+ 节点下避免 O(n²))
-      const nodeById = new Map(
-        (nodes as unknown as Record<string, unknown>[]).map((n) => [n.id as string, n] as const),
-      );
-      const deltaNodes: unknown[] = [];
-      let deletedCount = 0;
-
-      for (const nodeId of changedIds) {
-        const node = nodeById.get(nodeId);
-        if (node) {
-          deltaNodes.push(node);
-        } else {
-          // 节点在 changedIds 中但不在当前 nodes 中 → 已被删除
-          deltaNodes.push({ type: '__deleted__', id: nodeId });
-          deletedCount++;
-        }
-      }
-
-      scenePayload = deltaNodes;
-      changedNodeIdsPayload = changedIds;
-      debugLog(`[sync-service] delta sync: ${deltaNodes.length} changed nodes (${deletedCount} deleted)`);
-    } else {
-      // 全量模式:首次同步或无变更追踪时发送完整 scene
-      scenePayload = nodes;
-      changedNodeIdsPayload = undefined;
-    }
-
-    const payload: Record<string, unknown> = {
-      id: local.id,
-      title: local.title,
-      thumbnailUrl: local.thumbnailUrl,
-      tags: local.tags,
-      scene: scenePayload,
-      connections: graph?.edges ?? [],
-      viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-      metadata: graph?.metadata ?? {},
-      // 乐观锁:后端检查 expectedVersion < existing.version 时返回 409
-      expectedVersion: local.version,
-      // 增量同步关键字段:存在时后端走 mergeIncrementalScene 而非全量替换
-      ...(changedNodeIdsPayload !== undefined ? { changedNodeIds: changedNodeIdsPayload } : {}),
-    };
-
-    let cloud: CloudProject;
-    if (!local.cloudId) {
-      cloud = await apiPost<CloudProject>('/projects', payload);
-    } else {
-      try {
-        cloud = await apiPatch<CloudProject>(`/projects/${local.cloudId}`, payload);
-      } catch (err) {
-        // 后端 409:并发推送导致版本冲突(乐观锁).
-        // 不再直接弹窗,而是自动重试:重新读取最新的本地 version 并重新推送.
-        // 最多重试 MAX_409_RETRIES 次,全部耗尽仍冲突才通知用户.
-        // 注意:后端错误消息可能为英文"Version conflict:"或中文"版本冲突"等,
-        // 使用 err.status === 409 判断更可靠,避免大小写/翻译差异导致的漏匹配.
-        if (err instanceof ApiError && err.status === 409) {
-          debugLog('[sync-service] push conflict (409), auto-retrying with latest version');
-          const retried = await retryPushOnConflict(projectId, 1);
-          if (!retried) {
-            // 自动重试耗尽 → 按本地优先自动解决:云端存快照 + 推送本地
-            const latest = await checkProjectConflict(projectId);
-            if (latest) {
-              await autoResolveConflict(projectId, latest);
-            }
-          }
-          // 409 处理完成,无论是否重试成功都返回(冲突已自动解决)
-          return;
-        }
-
-        // ★ 429 限流:保留节点变更记录,标记同步失败,并调度指数退避自动重试。
-        //   这样即使客户端被限流,数据最终也会自动同步到云端,用户不会在
-        //   "误以为已同步"的状态下丢失数据。
-        if (err instanceof ApiError && err.status === 429) {
-          debugLog(`[sync-service] push rate-limited (429) for ${projectId}, marking sync error + scheduling auto-retry.`);
-          setSyncStatus('error');
-          // 自动退避重试;优先采用服务端 Retry-After,无提示时按指数退避(2s→4s→8s→...→60s,最多 5 次)
-          scheduleAutoRetry(projectId, async () => {
-            await syncProjectToCloud(projectId, { reason: 'rate-limit-retry' });
-          }, err.retryAfter);
-          return;
-        }
-
-        // 其他错误(500/网络):同样保留变更 + dirty,标记失败,并调度自动重试
-        debugLog(`[sync-service] push failed for ${projectId}: ${err instanceof Error ? err.message : String(err)}`);
-        setSyncStatus('error');
-        scheduleAutoRetry(projectId, async () => {
-          await syncProjectToCloud(projectId, { reason: 'transient-error-retry' });
-        });
-        return;
-      }
-    }
-    if (cloud) {
-      await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-      // 推送成功,清除脏标志 + 节点级变更记录
-      markProjectClean(projectId);
-      // 只有真正成功才显示空闲状态
-      setSyncStatus('idle');
-    }
-  } catch (err) {
-    // 外层兜底:资源上传/快照等环节异常,保留 dirty + 节点变更,标记失败
-    debugError(`[sync-service] syncProjectToCloud ${projectId} failed:`, err);
-    setSyncStatus('error');
-  }
-}
-
-/** 409 自动重试的最大次数 */
-const MAX_409_RETRIES = 3;
-
-/**
- * 自动解决推送前检测到的版本冲突(分情况,替代弹窗)。
- *
- * 心智模型(非协作状态,以本地为主动,不丢弃任何可能有价值的数据):
- * - 云端已删除 → 自动 `repushLocalAsNewCloud` 重新创建
- * - 本地活跃(hasLocalChanges,有未推送修改) → 云端备份快照(内容去重),
- *   再 `pushLocalOverrideCloud` 推送本地覆盖云端
- * - 本地旧(无未推送修改,时间落后云端) → 本地旧图上传留档为快照(不丢弃历史数据),
- *   再拉取云端覆盖本地,提示「本地是历史数据,已保存为快照」
- *
- * 判定依据说明:本地 meta.updatedAt 会在每次成功同步时被 markProjectSynced 刷新为
- * 同步时刻,离线编辑期间并不更新,因此「本地活跃」不能单看时间戳,必须以
- * hasLocalChanges(内存脏标记 + localStorage 持久化)为硬判据。
- *
- * 处理完成后通过 `notifyConflictSnapshot` 通知前端顶部提示条(带 direction 方向),
- * 用户可点击跳转历史快照查看还原点。
- */
-async function autoResolveConflict(projectId: string, conflict: ProjectConflict): Promise<void> {
-  const local = await getProject(projectId);
-  if (!local) return;
-
-  if (conflict.cloudDeleted) {
-    debugLog(`[sync-service] autoResolveConflict: cloud deleted, re-creating ${projectId}`);
-    await repushLocalAsNewCloud(projectId);
-    notifyConflictSnapshot({
-      projectId,
-      title: local.title,
-      cloudDeleted: true,
-    });
-    return;
-  }
-
-  // 本地有未推送修改 → 本地是活跃版本(即使时间戳看起来落后,也是离线期间的编辑)
-  const isLocalActive = conflict.hasLocalChanges;
-  const localTime = conflict.localUpdatedAt ? new Date(conflict.localUpdatedAt).getTime() : 0;
-  const cloudTime = conflict.cloudUpdatedAt ? new Date(conflict.cloudUpdatedAt).getTime() : 0;
-
-  if (isLocalActive) {
-    // 本地活跃:云端备份快照(内容去重),再推送本地覆盖云端
-    let snapshotVersion: number | undefined;
-    if (local.cloudId) {
-      try {
-        const snap = await apiPost<{ version: number }>(`/projects/${local.cloudId}/versions`, {
-          label: '云端版本快照',
-          skipIfIdentical: true,
-        });
-        snapshotVersion = snap?.version;
-        debugLog(`[sync-service] autoResolveConflict(local-active): saved cloud snapshot v${snapshotVersion} for ${projectId}`);
-      } catch (err) {
-        // 快照保存失败不阻塞推送:推送仍按本地优先执行,提示条省略版本号
-        debugLog(`[sync-service] autoResolveConflict(local-active): save cloud snapshot failed for ${projectId}:`, err);
-      }
-    }
-    await pushLocalOverrideCloud(projectId, conflict.cloudVersion);
-    notifyConflictSnapshot({
-      projectId,
-      title: local.title,
-      snapshotVersion,
-      direction: 'local-active',
-    });
-    return;
-  }
-
-  // 本地旧:本地旧图上传留档为快照(不丢弃历史数据),再拉取云端覆盖本地
-  debugLog(
-    `[sync-service] autoResolveConflict(local-stale): localTime=${localTime} <= cloudTime=${cloudTime}, archiving local snapshot + pulling cloud`,
-  );
-  let snapshotVersion: number | undefined;
-  if (local.cloudId) {
-    try {
-      const graph = await loadProjectGraph(projectId);
-      const snap = await apiPost<{ version: number }>(`/projects/${local.cloudId}/versions`, {
-        label: '本地历史版本留档',
-        source: 'local-stale',
-        data: {
-          scene: graph?.nodes ?? [],
-          connections: graph?.edges ?? [],
-          viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-        },
-      });
-      snapshotVersion = snap?.version;
-      debugLog(`[sync-service] autoResolveConflict(local-stale): archived local snapshot v${snapshotVersion} for ${projectId}`);
-    } catch (err) {
-      debugLog(`[sync-service] autoResolveConflict(local-stale): archive local snapshot failed for ${projectId}:`, err);
-    }
-  }
-  // 拉取云端最新版本覆盖本地(force 模式)
-  await forcePullProjectFromCloud(projectId);
-  notifyConflictSnapshot({
-    projectId,
-    title: local.title,
-    snapshotVersion,
-    direction: 'local-stale',
-  });
-}
-
-/**
- * 强制拉取云端最新版本覆盖本地(冲突「本地旧」方向的处置)。
- * 云端 404 时本地同步删除;其他错误抛出由调用方处理。
- * @param projectId 项目 id
- */
-export async function forcePullProjectFromCloud(projectId: string): Promise<void> {
-  if (!isOnline()) return;
-  try {
-    const cloud: CloudProject = await apiGet<CloudProject>(`/projects/${projectId}`);
-    await mergeCloudProjectToLocal(cloud, true);
-    markProjectClean(projectId);
-    debugLog(`[sync] force pull project ${projectId} from cloud succeeded`);
-  } catch (err) {
-    // 云端 404 说明项目已被删除,本地也删除
-    if (err instanceof ApiError && err.status === 404) {
-      await deleteProjectGraph(projectId);
-      await deleteProject(projectId);
-      debugLog(`[sync] force pull project ${projectId}: cloud deleted, remove locally`);
-    } else {
-      debugError(`[sync] force pull project ${projectId} failed:`, err);
-      throw err;
-    }
-  }
-}
-
-/**
- * 自动重试推送:409 发生后,重新读取最新本地 version,并重新推送。
- * 如果重试期间本地 version 已更新(前一个推送成功写入),重新推送大概率成功。
- * 如果云端版本持续高于本地(真正的多设备冲突),降级到外部处理(弹窗)。
- * @param projectId 项目 ID
- * @param attemptCount 已尝试次数
- * @returns true=自动重试成功, false=冲突依然存在,需要弹窗
- */
-async function retryPushOnConflict(projectId: string, attemptCount: number): Promise<boolean> {
-  if (attemptCount > MAX_409_RETRIES) {
-    debugLog(`[sync-service] retryPushOnConflict exhausted (${MAX_409_RETRIES} retries) for ${projectId}`);
-    return false;
-  }
-
-  // 读取最新的本地项目和云端项目
-  const local = await getProject(projectId);
-  if (!local) return false;
-
-  try {
-    const conflict = await checkProjectConflict(projectId);
-    // 无冲突(版本一致) → 说明前一个推送已经成功更新了本地版本,无需重试
-    if (!conflict) return true;
-
-    // 云端仍高于本地 → 自动重试(读取最新 scene 重新推送)
-    if (conflict.cloudVersion > conflict.localVersion) {
-      debugLog(`[sync-service] retryPushOnConflict attempt ${attemptCount}: cloud=${conflict.cloudVersion} > local=${conflict.localVersion}, re-pushing`);
-
-      const graph = await loadProjectGraph(projectId);
-      const nodes = graph?.nodes ?? [];
-      // 注意:不再调用 syncProjectResourcesToCloud — 父函数 syncProjectToCloud
-      // 已经上传了资产,retry 只需重新推送 scene 数据(版本差异,资产已就绪)
-
-      const payload: Record<string, unknown> = {
-        id: local.id,
-        title: local.title,
-        thumbnailUrl: local.thumbnailUrl,
-        tags: local.tags,
-        scene: nodes,
-        connections: graph?.edges ?? [],
-        viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-        metadata: graph?.metadata ?? {},
-        expectedVersion: local.version,
-      };
-
-      const cloud = await apiPatch<CloudProject>(`/projects/${local.cloudId!}`, payload);
-      await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-      markProjectClean(projectId);
-      debugLog(`[sync-service] retryPushOnConflict attempt ${attemptCount} succeeded`);
-      return true;
-    }
-  } catch (err) {
-    // 重试时又是 409 → 继续递归重试
-    if (err instanceof ApiError && err.status === 409) {
-      debugLog(`[sync-service] retryPushOnConflict attempt ${attemptCount} got 409 again, retrying...`);
-      return retryPushOnConflict(projectId, attemptCount + 1);
-    }
-    // 其他错误:降级到弹窗处理
-    debugError(`[sync-service] retryPushOnConflict attempt ${attemptCount} failed with non-409 error:`, err);
-  }
-
-  return false;
-}
-
-/**
- * 强制推送本地版本覆盖云端(用户在冲突对话框选择"推送本地"后调用)。
- * 跳过冲突检测(用户已主动决策),带 expectedVersion 触发后端 409 兜底保护。
- * 后端返回 409 时(用户决策期间云端又被更新),抛错给调用方处理。
- * @param projectId 项目 id
- * @param expectedVersion 用户决策时的云端版本号(用于后端乐观锁检查)
- */
-export async function pushLocalOverrideCloud(
-  projectId: string,
-  expectedVersion: number,
-): Promise<void> {
-  if (!isOnline()) return;
-
-  const local = await getProject(projectId);
-  if (!local || !local.cloudId) return;
-
-  try {
-    const graph = await loadProjectGraph(projectId);
-    const nodes = graph?.nodes ?? [];
-
-    await syncProjectResourcesToCloud(nodes);
-
-    const payload = {
-      id: local.id,
-      title: local.title,
-      thumbnailUrl: local.thumbnailUrl,
-      tags: local.tags,
-      scene: nodes,
-      connections: graph?.edges ?? [],
-      viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-      metadata: graph?.metadata ?? {},
-      expectedVersion,
-    };
-
-    const cloud = await apiPatch<CloudProject>(`/projects/${local.cloudId}`, payload);
-    await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-    markProjectClean(projectId);
-  } catch {}
-}
-
-/**
- * 强制推送本地版本作为新的云端项目(用户在冲突对话框选择"推送本地重新创建"后调用)。
- * 用于云端项目已被删除(404)的场景:走 apiPost 创建而非 apiPatch 更新,
- * 以相同 id 重新创建云端项目(本地 id = 云端 id 策略保证 id 一致)。
- * @param projectId 项目 id
- */
-export async function repushLocalAsNewCloud(projectId: string): Promise<void> {
-  if (!isOnline()) return;
-
-  const local = await getProject(projectId);
-  if (!local) return;
-
-  try {
-    const graph = await loadProjectGraph(projectId);
-    const nodes = graph?.nodes ?? [];
-
-    await syncProjectResourcesToCloud(nodes);
-
-    const payload = {
-      id: local.id,
-      title: local.title,
-      thumbnailUrl: local.thumbnailUrl,
-      tags: local.tags,
-      scene: nodes,
-      connections: graph?.edges ?? [],
-      viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-      metadata: graph?.metadata ?? {},
-    };
-
-    // 强制走 create(apiPost)而非 update(apiPatch),重新创建已删除的云端项目
-    const cloud = await apiPost<CloudProject>('/projects', payload);
-    await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-    markProjectClean(projectId);
-  } catch {}
-}
-
-/**
- * 强制推送本地数据到云端(覆盖云端版本)。
- * 专用于会话被抢占时的数据兜底:跳过冲突检测,直接推送本地最新数据,
- * 确保标签页失效前用户的最新编辑不丢失。
- * 支持传入 graph 参数(从编辑器内存读取),避免读取 localforage 过期数据。
- * 在 handleSessionTakenOver 中调用。
- */
-export async function forcePushLocalToCloud(projectId: string, graph?: GraphModel): Promise<void> {
-  if (!isOnline()) return;
-
-  const local = await getProject(projectId);
-  if (!local) return;
-
-  // 优先使用传入的 graph(编辑器内存中最新数据),否则从 localforage 加载
-  const resolvedGraph = graph ?? (await loadProjectGraph(projectId)) ?? undefined;
-  const nodes = resolvedGraph?.nodes ?? [];
-
-  // 上传节点中引用的资源(图片/视频/音频)
-  await syncProjectResourcesToCloud(nodes);
-
-  const payload: Record<string, unknown> = {
-    id: local.id,
-    title: local.title,
-    thumbnailUrl: local.thumbnailUrl,
-    tags: local.tags,
-    scene: nodes,
-    connections: graph?.edges ?? [],
-    viewport: graph?.viewport ?? { x: 0, y: 0, k: 1 },
-    metadata: graph?.metadata ?? {},
-    expectedVersion: local.version,
-  };
-
-  try {
-    let cloud: CloudProject;
-    if (!local.cloudId) {
-      // 新项目:创建
-      cloud = await apiPost<CloudProject>('/projects', payload);
-    } else {
-      // 更新:带 expectedVersion 乐观锁,后端 409 时重试
-      cloud = await apiPatch<CloudProject>(`/projects/${local.cloudId}`, payload);
-    }
-    await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-    markProjectClean(projectId);
-  } catch (err) {
-    // 409 版本冲突:另一标签页并发推送了更新,重新读取本地后重试一次
-    if (err instanceof ApiError && err.status === 409) {
-      const latest = await getProject(projectId);
-      if (!latest) return;
-      const latestGraph = await loadProjectGraph(projectId);
-      const latestNodes = latestGraph?.nodes ?? [];
-      await syncProjectResourcesToCloud(latestNodes);
-      try {
-        const cloud = await apiPatch<CloudProject>(`/projects/${latest.cloudId!}`, {
-          ...payload,
-          id: latest.id,
-          title: latest.title,
-          thumbnailUrl: latest.thumbnailUrl,
-          tags: latest.tags,
-          scene: latestNodes,
-          connections: latestGraph?.edges ?? [],
-          viewport: latestGraph?.viewport ?? { x: 0, y: 0, k: 1 },
-          metadata: latestGraph?.metadata ?? {},
-          expectedVersion: latest.version,
-        });
-        await markProjectSynced(projectId, cloud.id, cloud.version, cloud.lastSyncedAt ?? undefined);
-        markProjectClean(projectId);
-      } catch {
-        // 第二次 409:静默失败(不影响后续流程)
-      }
-    }
-    // 网络等其他错误:静默忽略
-  }
 }
 
 /**
@@ -624,12 +103,6 @@ export async function mergeCloudProjectToLocal(cloud: CloudProject, _force = fal
     };
     await upsertProject(meta);
     await saveProjectGraph(cloud.id, graph);
-
-    if (isOnline()) {
-      await syncProjectToCloud(cloud.id).catch((err) =>
-        debugLog(`[sync-service] push cleanup for new project ${cloud.id} failed:`, err),
-      );
-    }
     return;
   }
 
@@ -657,15 +130,6 @@ export async function mergeCloudProjectToLocal(cloud: CloudProject, _force = fal
     };
     await upsertProject(updated);
     await saveProjectGraph(cloud.id, graph);
-
-    // 覆盖后标记为"干净"(已同步到云端最新版本)
-    markProjectClean(cloud.id);
-
-    if (isOnline()) {
-      await syncProjectToCloud(cloud.id).catch((err) =>
-        debugLog(`[sync-service] push cleanup for project ${cloud.id} failed:`, err),
-      );
-    }
   }
 }
 
@@ -732,14 +196,18 @@ export async function retryPendingDelete(cloudId: string): Promise<void> {
   }
 }
 
+/**
+ * 全量推送项目(仅兜底「从未编辑过、无云端记录」的新项目):
+ * Phase3 后画布数据写主权收敛至 Y.Doc,服务端 storeCanvasDocument upsert 自动创建
+ * 云端记录并落库;此处只需为从未打开过编辑器的项目(无 cloudId)发起轻量元数据
+ * 创建兜底(pushProjectMeta 的 PATCH 后端 upsert)。脏标记机制已随 HTTP 写路径退役。
+ */
 export async function pushLocalProjects(): Promise<void> {
   const localProjects = await listLocalProjects();
   for (const local of localProjects) {
-    // 无 cloudId（全新项目）或 有脏标记（未推送修改）→ 尝试推送
-    // 推送前 syncProjectToCloud 会做云端版本预检，有冲突时弹窗让用户决策
-    if (!local.cloudId || isProjectDirty(local.id)) {
+    if (!local.cloudId) {
       try {
-        await syncProjectToCloud(local.id);
+        await pushProjectMeta(local.id);
       } catch (err) {
         debugError(`[sync-service] push project ${local.id} failed:`, err);
       }
@@ -751,7 +219,3 @@ async function listLocalProjects(): Promise<CanvasProjectMeta[]> {
   const { listProjects } = await import('@zeroexo/plugin-persistence');
   return listProjects();
 }
-
-export {
-  retryPushOnConflict,
-};

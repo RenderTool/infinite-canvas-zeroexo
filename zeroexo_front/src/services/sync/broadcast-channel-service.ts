@@ -113,7 +113,7 @@ function handleMessage(msg: MessageEvent<BcMessage>): void {
 
     case 'project_updated': {
       const updPid = data.payload.projectId as string;
-      notifyProjectReload(updPid, data.payload.changedNodeIds as string[] | undefined);
+      notifyProjectReload(updPid);
       break;
     }
 
@@ -206,10 +206,10 @@ function stopBcPolling(): void {
 
 // ─── Notification dispatchers (same window events as sse-service) ───
 
-function notifyProjectReload(projectId: string, changedNodeIds?: string[]): void {
+function notifyProjectReload(projectId: string): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
-    new CustomEvent(PROJECT_RELOAD_EVENT, { detail: { projectId, changedNodeIds } }),
+    new CustomEvent(PROJECT_RELOAD_EVENT, { detail: { projectId } }),
   );
 }
 
@@ -232,8 +232,8 @@ function notifyProjectDiff(projectId: string): void {
 /**
  * 广播项目已更新(Leader 轮询到云端变更时调用)
  */
-export function broadcastProjectUpdated(projectId: string, changedNodeIds?: string[]): void {
-  postMessage('project_updated', { projectId, changedNodeIds });
+export function broadcastProjectUpdated(projectId: string): void {
+  postMessage('project_updated', { projectId });
 }
 
 /**

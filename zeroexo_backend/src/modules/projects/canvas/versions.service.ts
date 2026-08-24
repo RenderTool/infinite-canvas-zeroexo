@@ -43,7 +43,6 @@ export class VersionsService extends BaseProjectService {
   private readonly logger = new Logger(VersionsService.name);
 
   protected get storageModule(): string { return 'canvases'; }
-  protected get versionStrategy(): 'lt' | 'neq' { return 'lt'; }
   protected get storageRoot(): string { return this.minioService.getStorageRoot(); }
 
   constructor(

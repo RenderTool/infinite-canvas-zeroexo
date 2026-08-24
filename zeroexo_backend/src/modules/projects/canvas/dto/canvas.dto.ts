@@ -1,7 +1,6 @@
 import {
   IsArray,
   IsBoolean,
-  IsInt,
   IsOptional,
   IsString,
   MinLength,
@@ -95,26 +94,4 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsBoolean()
   isPublic?: boolean;
-
-  @ApiPropertyOptional({
-    description: '期望的云端版本号(乐观锁),小于当前云端版本时返回 409',
-  })
-  @IsOptional()
-  @IsInt()
-  expectedVersion?: number;
-
-  /**
-   * 增量更新的节点 ID 列表。
-   * 当此字段存在时,scene 不再是全量替换,而是与当前云端 scene 合并:
-   * - scene 中在 changedNodeIds 列表内的节点 → 替换为新版本
-   * - scene 中不在 changedNodeIds 列表内的节点 → 保留云端现有版本
-   * - 被标记为 "__deleted__" 类型的节点 → 从云端 scene 中移除
-   * 此字段为 [] 时表示 scene 没有任何变化(仅更新项目属性)。
-   * 不传此字段时保持原有全量替换行为(向后兼容)。
-   */
-  @ApiPropertyOptional({ type: [String], description: '增量更新的节点 ID 列表' })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  changedNodeIds?: string[];
 }
