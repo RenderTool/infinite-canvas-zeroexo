@@ -449,6 +449,22 @@
     "typeFix": "Fix"
   },
   "changelogEntries": {
+    "v1_1_0": {
+      "title": "Sync Channel Revolution: Yjs Single Write Backbone + Approval-Based Collaboration",
+      "body": "The canvas sync channel is fully converged: edits now write through Yjs as the single write backbone with the dual-write coordination removed — smoother collaboration with far less bandwidth. The join flow is upgraded with two-tier permissions and approval-based joining.",
+      "items": [
+        "Core channel improvement: edit writes converged to Yjs single backbone; HTTP full push / version optimistic lock / collaboration throttle removed",
+        "No more full-scene PATCH when Yjs is healthy; only a lightweight metadata channel (title/cover/tags) remains",
+        "Presence cursor broadcast throttled via rAF (one broadcast per frame), cutting collab broadcast volume by 90%+",
+        "New canvases persist edits instantly (upsert semantics); reconnect & seeding hotfixes",
+        "Two-tier permissions: read-only / editable (edit+download bundled), read-only overlay blocks editing",
+        "Approval-based joining: pending applications / approve / reject, owner pending badge, offline members must re-apply",
+        "Invite landing page: /c/<code> path routing, browsable while logged out, auto-join on login return",
+        "Approval UX loop: auto-enter canvas after approval, concurrency-safe approve without duplicate toasts",
+        "Member semantics rework: removal is final (permission wall), banned-stale deadlock eliminated",
+        "Agent message rendering rework, node read/write contract tools, flat model picker"
+      ]
+    },
     "v1_0_0": {
       "title": "ZeroExo 1.0 Official Release",
       "body": "First official release: an AI-driven end-to-end content creation platform covering script, storyboard, production management, and video export.",
