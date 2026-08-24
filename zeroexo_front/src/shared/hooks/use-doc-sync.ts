@@ -297,6 +297,8 @@ export interface CanvasSyncResult {
   /**
    * 等待 Y.Doc 首次出现非空内容（本地 idb 恢复或服务端播种）。
    * timeoutMs 内未到达则 resolve(false)，调用方自行降级。
+   * 默认 5000ms 仅为兜底超时：调用方应按场景显式传参
+   * （本地快照窗口短暂等待 / 云端播种窗口长等待）。
    */
   waitForInitialContent: (timeoutMs?: number) => Promise<boolean>;
   /** 设置本地 Awareness 字段（光标/视口/选中状态） */
@@ -445,7 +447,11 @@ export function useCanvasSync(canvasId: string | undefined): CanvasSyncResult {
   const waitForInitialContent = useCallback((timeoutMs = 5000): Promise<boolean> => {
     const entry = entryRef.current;
     if (!entry) return Promise.resolve(false);
-    if (entry.contentArrived) return Promise.resolve(true);
+    // 语义边界:contentArrived 标记一次置位后永久有效,但 doc 内容可能被 replace/clear 清空,
+    // 必须按实际内容实时判定,避免清空后误报"已有内容"导致调用方读到空图。
+    // 注意:内容清空后 update 监听已随 contentArrived 移除,后续内容不会再次通知,
+    // 等待者将等到 timeoutMs 后 resolve(false),由调用方自行降级。
+    if (entry.contentArrived && entry.doc.getMap().size > 0) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const settle = (v: boolean) => {

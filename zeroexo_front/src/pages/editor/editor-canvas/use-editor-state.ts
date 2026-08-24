@@ -149,6 +149,10 @@ export function useEditorState(canvasId: string): {
 
   // 协作掉线警告去抖间隔:Yjs 断开后去抖 3s 仍断才提示,避免信号抖动频繁弹窗
   const COLLAB_OFFLINE_WARN_DEBOUNCE_MS = 3000;
+  // 播种等待窗口:本地有快照时给 Y.Doc 短暂窗口(弱网下服务端播种来不及就降级本地快照);
+  // 本地无快照时等云端播种;纯本地新项目在 seedFromYDoc 内提前短路,不会空等
+  const SEED_WAIT_LOCAL_MS = 300;
+  const SEED_WAIT_CLOUD_MS = 3000;
   const collabOfflineWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 协作掉线警告(去抖):协作 active 期间 Yjs 画布连接断开 → 去抖后提示「正在重连」;
   // 若在去抖窗口内恢复连接则取消提示,避免频繁掉线重连(信号不好)时警告风暴
@@ -335,7 +339,7 @@ export function useEditorState(canvasId: string): {
           } catch {
             // 读取失败不阻断，照常等待
           }
-          const arrived = await waitForInitialContent(hasLocalSaved ? 300 : 3000);
+          const arrived = await waitForInitialContent(hasLocalSaved ? SEED_WAIT_LOCAL_MS : SEED_WAIT_CLOUD_MS);
           if (!arrived || !isMountedRef.current) return false;
           const g = readRemote();
           if (!g || g.nodes.length === 0) return false;
@@ -757,6 +761,27 @@ export function useEditorState(canvasId: string): {
         pushGraph({ nodes: store.getGraph().nodes, edges: store.getGraph().edges });
       })();
     };
+    // 光标 Awareness 广播 rAF 节流:pointermove 60Hz+ 高频触发,每帧最多广播一次
+    // (远端感知无差,多人协作时广播量降 90%+);pointerup/卸载时补发最后一帧
+    let cursorFrame = 0;
+    let pendingCursor: { x: number; y: number } | null = null;
+    let pendingViewport: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+    let pendingSelection: string[] = [];
+    const broadcastCursor = () => {
+      cursorFrame = 0;
+      if (!collaborationRef.current.active) return;
+      collaborationRef.current.setLocalCursor(pendingCursor, pendingViewport, pendingSelection);
+    };
+    const scheduleCursorBroadcast = () => {
+      if (cursorFrame) return;
+      cursorFrame = requestAnimationFrame(broadcastCursor);
+    };
+    const flushCursorBroadcast = () => {
+      if (!cursorFrame) return;
+      cancelAnimationFrame(cursorFrame);
+      cursorFrame = 0;
+      broadcastCursor();
+    };
     /** 拖拽中:合并连续 tick 为一次限频广播,丢弃中间帧 */
     const scheduleDragYjsPush = () => {
       dragPushPending = true;
@@ -790,11 +815,11 @@ export function useEditorState(canvasId: string): {
           const selection = store.getSelection();
           // 调试埋点仅 DEV 构建生效,生产构建整块剔除(连同 collab-debug 模块)
           if (import.meta.env.DEV) collabDebug.recordPointerEvent({ x: worldX, y: worldY });
-          collaborationRef.current.setLocalCursor(
-            { x: worldX, y: worldY },
-            { x: vp.x, y: vp.y, width: rect.width, height: rect.height, scale: vp.k },
-            Array.from(selection.selectedNodeIds),
-          );
+          // rAF 节流:仅记录最新值,由 scheduleCursorBroadcast 每帧广播一次
+          pendingCursor = { x: worldX, y: worldY };
+          pendingViewport = { x: vp.x, y: vp.y, width: rect.width, height: rect.height, scale: vp.k };
+          pendingSelection = Array.from(selection.selectedNodeIds);
+          scheduleCursorBroadcast();
         }
       }
     };
@@ -813,6 +838,8 @@ export function useEditorState(canvasId: string): {
         onProjectUpdated(canvasId);
         markProjectDirty(canvasId);
       }
+      // 补发光标最后一帧(rAF 节流下 pointerup 时可能仍有一帧未广播)
+      flushCursorBroadcast();
     };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
@@ -997,6 +1024,11 @@ export function useEditorState(canvasId: string): {
       if (dragPushTimer) clearTimeout(dragPushTimer);
       dragPushTimer = null;
       dragPushPending = false;
+      // 清理光标广播 rAF 节流挂起帧
+      if (cursorFrame) {
+        cancelAnimationFrame(cursorFrame);
+        cursorFrame = 0;
+      }
       containerRef.current?.removeEventListener('wheel', onWheel);
       containerRef.current?.removeEventListener('touchstart', onTouchStart);
       containerRef.current?.removeEventListener('touchmove', onTouchMove);
