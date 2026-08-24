@@ -26,6 +26,7 @@ import type { ConflictSnapshotInfo } from '@/services/sync/sync-service.js';
 import { useCanvasSync } from '@/shared/hooks/use-doc-sync.js';
 import type { CanvasGraphPayload } from '@/shared/hooks/use-doc-sync.js';
 import { useCollaboration } from '@/features/collaboration/use-collaboration.js';
+import { getRoomByCanvas } from '@/features/collaboration/collaboration-api.js';
 import type { AwarenessState } from '@/features/collaboration/collaboration-types.js';
 // 光标链路调试埋点(左上角调试面板数据总线,O(1) 计数)
 import { collabDebug } from '@/features/dev-performance/collab-debug.js';
@@ -287,6 +288,19 @@ export function useEditorState(canvasId: string): {
         } catch (err) {
           // 404 处理:项目从未同步到云端(新项目)或已被删除
           if (err instanceof ApiError && err.status === 404) {
+            // 协作画布统一失效页（Plan#38 验收热修）：房间存在但已失效且当前用户是参与者 →
+            // 提示「协作已失效」并回主页，不再误报「项目不存在」；
+            // 非成员/无房间（含接口 403）→ 走原有项目不存在逻辑，不泄露房间存在性。
+            try {
+              const room = await getRoomByCanvas(canvasId);
+              if (room && room.status !== 'active' && !room.isOwner) {
+                message.error(i18n.t('collab.roomExpired'));
+                window.location.hash = '#/';
+                return;
+              }
+            } catch {
+              // ignore: 非成员或房间不存在，落入下方原有分支
+            }
             const local = await getProject(canvasId);
             if (local?.cloudId) {
               // 项目曾在云端但被删除 → 本地优先:自动重新创建为全新云端项目(不再弹窗)

@@ -649,13 +649,10 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
               })}
               {!selectMode && displayParticipating.map((item) => {
                 const expired = item.roomStatus === 'expired' || item.roomStatus === 'closed';
-                // 失效协作 → 仅"从列表移除"；活跃协作 → 协作详情 + 退出协作（Phase 9.6）
+                // 失效协作 → 仅"从列表移除"；活跃协作 → 仅"退出协作"（用户拍板：无需协作详情入口）
                 const actions: ProjectCardAction[] = expired
                   ? [{ type: 'collab', label: t('projectCard.removeFromList'), onClick: () => handleRemoveExpired(item) }]
-                  : [
-                      { type: 'collab', label: t('projectCard.collabDetail'), onClick: () => openCollabModal(item.canvasId) },
-                      { type: 'custom', label: t('collab.exitCollaboration'), icon: <LogOut size={14} />, danger: true, onClick: () => handleExitParticipating(item) },
-                    ];
+                  : [{ type: 'custom', label: t('collab.exitCollaboration'), icon: <LogOut size={14} />, danger: true, onClick: () => handleExitParticipating(item) }];
                 return (
                   <div
                     key={`collab-${item.canvasId}`}
