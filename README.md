@@ -13,47 +13,18 @@
 </p>
 
 <p align="center">
-  <a href="README.zh-CN.md">简体中文</a> · <a href="#who-its-for">Who It's For</a> · <a href="#product-modules">Modules</a> · <a href="#roadmap">Roadmap</a> · <a href="#quick-start">Quick Start</a>
+  <a href="README.zh-CN.md">简体中文</a> · <a href="#product-modules">Modules</a> · <a href="#roadmap">Roadmap</a> · <a href="#quick-start">Quick Start</a>
 </p>
 
 ---
 
-## Early Development Notice
+> **Early development** — APIs, UI, and data models change frequently. Contributions and feedback are welcome.
 
-> **This project is in EARLY development.** APIs, UI, and data models change
-> frequently as the product evolves. We ship fast and sometimes rough —
-> expect breaking changes, expect me pushing commits at 3 AM. If you can
-> live with that, welcome aboard; if you need a stable 1.0, star us and
-> come back later. Contributions and feedback are very welcome.
+### Highlights
 
-## Who It's For
-
-ZeroExo is built **by and for short-video creators, film/TV self-media
-operators, and storyboard artists**. It centers on the canvas + AI
-production workflow, supports self-hosted deployment with full data
-control, and ships an open, transparent tech stack for teams that want
-to extend and maintain it long-term.
-
-## Highlights
-
-- **Plugin-based infinite canvas** — a self-built React DOM canvas engine
-  (no ReactFlow): viewport transforms, grid spatial index, multi-level LOD,
-  per-node subscription, merged non-active edges. Extended through
-  `@zeroexo/*` workspace plugins.
-- **AI film-out workflow** — agents for script writing, storyboard breaking,
-  shot design, and canvas operations; every node can chat with AI to pull
-  research, comparisons, and real data.
-- **Real-time collaboration** — Hocuspocus (Yjs) document sync plus
-  JWT-protected SSE event channels, with offline-first sync and conflict
-  rebasing by timestamp.
-- **Asset & prompt library** — local/object-storage asset management and a
-  shared, license-aware prompt library.
-- **Admin console** — API provider management, user onboarding approval,
-  prompt library, branding, multi-language policies, and ECharts analytics.
-- **Billing & credit** — plans, subscriptions, credit accounting,
-  reconciliation, and daily reports.
-- **Security by default** — fail-fast secrets, storage key validation,
-  throttling whitelist, and a signed update chain for the desktop launcher.
+- **Infinite canvas** — Self-built React DOM engine, node orchestration, multi-level LOD, grid spatial index
+- **AI film-out pipeline** — Script → storyboard → shots → finished film; every node can chat with AI
+- **Real-time collaboration** — Yjs CRDT + Hocuspocus, offline-first, timestamp-based conflict rebasing
 
 ## Product Modules
 
