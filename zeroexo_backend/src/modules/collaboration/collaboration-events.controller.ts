@@ -39,19 +39,34 @@ export class CollaborationEventsController {
 
     // Plan#38 验收热修：SSE 建立 = 进入协作，把该用户 offline 成员置回 online
     // （离屏≠退出：离开/刷新画布页时 cleanup 会置 offline，重进必须能恢复活性）
+    // 审核制（2026-08-25 审核制漏洞修复）：非 owner 的 offline 成员重连 = 重新进入，
+    // 须转 pending 重新申请——原实现直接置 online 绕过 requiresApproval
+    // （"先协作后开审核"旧成员重进不触发审核，与 joinByInvite/autoJoin 三入口对齐）
+    let becamePending = false;
     try {
       const room = await this.prisma.collaborationRoom.findFirst({
         where: { canvasId, status: 'active' },
-        select: { id: true },
+        select: { id: true, ownerId: true, requiresApproval: true },
       });
       if (room) {
-        await this.prisma.collaborationMember.updateMany({
+        const requireReapproval = room.requiresApproval && user.id !== room.ownerId;
+        const updated = await this.prisma.collaborationMember.updateMany({
           where: { roomId: room.id, userId: user.id, status: 'offline' },
-          data: { status: 'online', lastActiveAt: new Date() },
+          data: { status: requireReapproval ? 'pending' : 'online', lastActiveAt: new Date() },
         });
+        becamePending = updated.count > 0 && requireReapproval;
+        if (becamePending) {
+          this.logger.log(`[SSE] 审核制房间 ${room.id} 中用户 ${user.id} 重连被转为待审(曾离屏)`);
+          // 通知房主刷新待审列表（申请人自己的连接尚未订阅，由下方 membership_pending 单独送达）
+          this.eventsService.broadcastToRoom(canvasId, {
+            type: 'join_application',
+            userId: user.id,
+            meta: { roomId: room.id },
+          });
+        }
       }
     } catch {
-      // 置 online 失败不阻断 SSE 连接（仅影响在线状态展示）
+      // 状态变更失败不阻断 SSE 连接（仅影响在线状态展示）
     }
 
     const events = this.eventsService.subscribe(canvasId);
@@ -65,6 +80,15 @@ export class CollaborationEventsController {
         timestamp: Date.now(),
         meta: { connectedAt: Date.now() },
       });
+      if (becamePending) {
+        // 告知申请人自己：已被转为待审，等待房主批准（前端据此显示"等待审核"覆盖层）
+        subscriber.next({
+          type: 'membership_pending',
+          canvasId,
+          userId: user.id,
+          timestamp: Date.now(),
+        });
+      }
       return () => {
         sub.unsubscribe();
         // 连接关闭时注销计数

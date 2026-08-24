@@ -7,8 +7,8 @@
  * - 提交完毕后折叠为一行摘要（已选项），点击可展开只读回看
  */
 
-import { useState } from 'react';
-import { Bot, ChevronRight } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Bot } from 'lucide-react';
 import type { CanvasAgentMessage } from '../types.js';
 import { sendAnswer } from '../session/agent-session.js';
 
@@ -17,10 +17,11 @@ export interface QuestionBlockProps {
   onSelect?: (value: string) => void;
 }
 
-/** 投影风格卡片容器样式（无边线） */
+/** 投影风格卡片容器样式（无边线，居中显示） */
 const cardStyle: React.CSSProperties = {
   width: '100%',
-  margin: '6px 0',
+  maxWidth: 480,
+  margin: '6px auto',
   padding: 12,
   background: 'linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2))',
   border: 'none',
@@ -30,34 +31,41 @@ const cardStyle: React.CSSProperties = {
 };
 
 export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.ReactElement {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [customText, setCustomText] = useState('');
-  const [showCustom, setShowCustom] = useState(false);
+  const data = message.question;
+
+  // 历史还原：从 restoredAnswer 解析出之前的选择
+  const restored = useMemo(() => {
+    if (!message.answered || !message.restoredAnswer || !data) return null;
+    const answer = message.restoredAnswer;
+    const isMulti = data.multi ?? false;
+    if (isMulti) {
+      const values = answer.split(',').map((s) => s.trim()).filter(Boolean);
+      return { multiValues: new Set(values) };
+    } else {
+      // 单选：检查是否匹配某个选项值，否则视为自定义文本
+      const matchItem = data.items.find((it) => it.value === answer);
+      if (matchItem) return { selectedValue: answer };
+      return { customText: answer };
+    }
+  }, [message.answered, message.restoredAnswer, data]);
+
+  const [selected, setSelected] = useState<string | null>(restored?.selectedValue ?? null);
+  const [customText, setCustomText] = useState(restored?.customText ?? '');
+  const [showCustom, setShowCustom] = useState(!!restored?.customText);
   // 优先使用消息的 answered 状态（历史还原），否则使用本地 submitted 状态
   const [localSubmitted, setLocalSubmitted] = useState(false);
   const submitted = !!message.answered || localSubmitted;
-  /** R2：提交完毕后折叠为摘要行 */
-  const [folded, setFolded] = useState(false);
-  // 历史已回答的消息默认折叠
-  const shouldFold = !!message.answered || folded;
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(restored?.multiValues ?? new Set());
 
-  const data = message.question;
   if (!data) return <></>;
 
   const isMulti = data.multi ?? false;
   const total = data.items.length;
   const answered = isMulti ? multiSelected.size : selected ? 1 : 0;
 
-  /** 已选内容的展示标签（折叠摘要用） */
-  const answeredLabels = isMulti
-    ? data.items.filter((it) => multiSelected.has(it.value)).map((it) => it.label).join('、')
-    : customText.trim() || data.items.find((it) => it.value === selected)?.label || '';
-
   const submitAnswer = (value: string) => {
     if (submitted) return;
     setLocalSubmitted(true);
-    setFolded(true); // R2：提交完毕折叠
     if (onSelect) {
       onSelect(value);
     } else {
@@ -89,47 +97,8 @@ export function QuestionBlock({ message, onSelect }: QuestionBlockProps): React.
     }
   };
 
-  // ===== 折叠摘要行（提交后或历史已回答） =====
-  if (shouldFold) {
-    return (
-      <button
-        type="button"
-        onClick={() => setFolded(false)}
-        style={{
-          ...cardStyle,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          textAlign: 'left',
-        }}
-      >
-        <Bot size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--agent-muted)', flexShrink: 0 }}>
-          征集表单
-        </span>
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 12,
-            color: 'var(--agent-text)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          已选：{answeredLabels || '—'}
-        </span>
-        <ChevronRight size={12} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
-      </button>
-    );
-  }
-
   return (
-    <div style={cardStyle}>
+    <div style={{ ...cardStyle, opacity: submitted ? 0.6 : 1, pointerEvents: submitted ? 'none' : 'auto' }}>
       {/* 表单头：纯 icon（无颜色）+ 征集表单 + 引导文案 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <Bot size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />

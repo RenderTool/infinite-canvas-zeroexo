@@ -101,7 +101,7 @@ function isVisible(entry: HintEntry, ctx: HintContext): boolean {
     // 空画布:提示创建首个节点(新手最迷茫时刻)
     case 'empty-canvas-create':
       return !ctx.canvasHasNodes && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
-    // 滚轮平移画布:无选中时低优先级常驻(导航教育通道;性能考量默认滚轮平移而非缩放)
+    // 滚轮缩放画布:无选中时低优先级常驻(导航教育通道;2026-08-25 起滚轮=缩放,与 3D 版一致)
     case 'scroll-pan':
       return ctx.canvasHasNodes && !ctx.singleSelected && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
     // Space 平移:仅按住时实时提示(取消常驻展示,避免与滚轮提示叠加信息过载)
@@ -290,9 +290,8 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
       data-contextual-shortcuts-panel
       style={{
         position: 'absolute',
-        right: 16,
-        top: '50%',
-        transform: 'translateY(-50%)',
+        left: 16,
+        bottom: 16,
         pointerEvents: 'none',
         zIndex: 40,
         userSelect: 'none',
@@ -313,7 +312,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           border: `1px solid ${panelBorder}`,
           boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
           opacity: collapsed ? 0 : 1,
-          transform: collapsed ? 'translateX(14px)' : 'translateX(0)',
+          transform: collapsed ? 'translateX(-14px)' : 'translateX(0)',
           transition: 'opacity 160ms ease, transform 160ms ease',
         }}
       >
@@ -346,7 +345,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
         </div>
       ))}
       </div>
-      {/* 收纳/展开三角把手:贴屏幕右缘常驻;收纳态 ◀(点击展开)/展开态 ▶(点击收纳),
+      {/* 收纳/展开三角把手:贴屏幕左缘常驻;收纳态 ▶(点击展开)/收纳态 ◀(点击收纳),
           旋转 180° 过渡;事件阻断冒泡,防止误触画布交互 */}
       <div
         role="button"
@@ -362,7 +361,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
         onWheel={(e) => e.stopPropagation()}
         style={{
           position: 'absolute',
-          right: -16,
+          left: -16,
           top: '50%',
           transform: `translateY(-50%) scale(${tabHovered ? 1.2 : 1})`,
           transition: 'transform 140ms ease',
@@ -385,7 +384,7 @@ export const ContextualShortcutsPanel = React.memo(function ContextualShortcutsP
           }}
         >
           <polygon
-            points="10,1 10,17 1,9"
+            points="1,1 1,17 10,9"
             fill={tabHovered ? accent : iconStroke}
             style={{ transition: 'fill 140ms ease' }}
           />

@@ -28,6 +28,7 @@ import { MentionPopover } from './MentionPopover.js';
 import type { AttachmentCard, Reference } from '../types.js';
 import { apiPost } from '@/services/api-client.js';
 import { addAssets, updateAsset } from '@/features/asset-picker/asset-store.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 /** 输入框字数上限（防超出上下文） */
 const INPUT_MAX_CHARS = 8000;
@@ -79,8 +80,12 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function ComposerInput(): React.ReactElement {
+export function ComposerInput(): React.ReactElement | null {
   const { message } = AntdApp.useApp();
+  // 只读纵深防护（2026-08-25 系统性只读防护）：DockContent 已条件隐藏，此处兜底——
+  // 万一未来有其它挂载点，readOnly 下不渲染任何输入/附件/发送能力
+  const readOnly = useReadOnly();
+  if (readOnly) return null;
   const inputText = useCanvasAgentStore((s) => s.inputText);
   const setInputText = useCanvasAgentStore((s) => s.setInputText);
   const references = useCanvasAgentStore((s) => s.references);
@@ -450,7 +455,7 @@ export function ComposerInput(): React.ReactElement {
             value={inputText}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Message VideoForge Agent…（@ 可引用画布节点，Enter 发送）"
+            placeholder="Message ZeroExo Agent…（@ 可引用画布节点，Enter 发送）"
             rows={1}
             className="composer-input"
           />

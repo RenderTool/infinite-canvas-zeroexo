@@ -101,17 +101,28 @@ export class CollaborationService {
     });
     if (!room) return null;
 
-    // 越权防护: 请求者必须是房间成员(未被封禁且非待审申请; pending 不算已入房);房主在创建房间时已自动成为成员
+    // 越权防护: 请求者必须是房间成员(未被封禁/未退出; pending 待审成员返回待审标记而非 403——
+    // 画布页内重进被 SSE 转 pending 后,前端据此展示"等待审核"态(2026-08-25 审核制漏洞修复))
     const requesterMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: room.id, userId, status: { notIn: ['banned', 'pending'] } },
-      select: { id: true },
+      where: { roomId: room.id, userId, status: { notIn: ['banned', 'left'] } },
+      select: { id: true, status: true },
     });
     if (!requesterMember) throw forbidden('FORBIDDEN', 'You are not a member of this room');
+    if (requesterMember.status === 'pending') {
+      return { pending: true, canvasId, roomId: room.id };
+    }
+
+    // 画布标题:参与者本地无 project 元数据,编辑页标题需服务端下发(否则显示"未命名")
+    const project = await this.prisma.project.findUnique({
+      where: { id: canvasId },
+      select: { title: true },
+    });
 
     return {
       ...this.toResponse(room, userId),
+      canvasTitle: project?.title ?? null,
       members: room.members
-        .filter((m) => m.status !== 'pending') // 待审申请不混入成员列表（房主走 applications 接口）
+        .filter((m) => m.status !== 'pending' && m.status !== 'left') // 待审申请/已退出不混入成员列表
         .map((m) => ({
           id: m.id,
           userId: m.userId,
@@ -123,8 +134,10 @@ export class CollaborationService {
           deviceType: m.deviceType,
           sessionIndex: m.sessionIndex,
           lastActiveAt: m.lastActiveAt,
+          // 对齐 listMembers：前端编辑页只读判定依赖 isSelf 定位自己
+          isSelf: m.userId === userId,
         })),
-      memberCount: room.members.filter((m) => m.status !== 'pending').length,
+      memberCount: room.members.filter((m) => m.status !== 'pending' && m.status !== 'left').length,
     };
   }
 
@@ -177,8 +190,14 @@ export class CollaborationService {
     if (room.ownerId !== userId) throw forbidden('COLLAB_ROOM_OWNER_REQUIRED', 'Only the room owner can close the room');
 
     await this.prisma.$transaction([
+      // 待审申请随房间关闭作废：pending 记录挂在旧房间(roomId)上，重开会新建房间，
+      // 若不删会残留"假申请"——房主重开后点通过查无此申请 → 404（2026-08-25 审核制漏洞修复）
+      this.prisma.collaborationMember.deleteMany({
+        where: { roomId: room.id, status: 'pending' },
+      }),
       this.prisma.collaborationMember.updateMany({
-        where: { roomId: room.id },
+        // 关闭房间不得抹掉封禁标记(封禁是画布级最高优先级状态,closeRoom 仅下线正常成员)
+        where: { roomId: room.id, status: { not: 'banned' } },
         data: { status: 'offline' },
       }),
       this.prisma.collaborationRoom.update({
@@ -263,18 +282,18 @@ export class CollaborationService {
       throw badRequest('COLLAB_INVITE_INVALID', 'Invite code does not match the current canvas');
     }
 
-    // 检查人数限制
+    // 检查人数限制(left 已退出不占名额)
     const memberCount = await this.prisma.collaborationMember.count({
-      where: { roomId: verification.id, status: { not: 'banned' } },
+      where: { roomId: verification.id, status: { notIn: ['banned', 'left'] } },
     });
     const room = await this.prisma.collaborationRoom.findUnique({ where: { id: verification.id } });
     if (room?.maxMembers && memberCount >= room.maxMembers) {
       throw badRequest('COLLAB_ROOM_FULL', 'Room is already full');
     }
 
-    // 检查是否已被封禁
+    // 检查是否已被封禁（画布级：房间可能随"开启→关闭→再开启"重建，须跨房间查同一画布的 banned 记录）
     const existingMember = await this.prisma.collaborationMember.findFirst({
-      where: { roomId: verification.id, userId, status: 'banned' },
+      where: { userId, status: 'banned', room: { canvasId } },
     });
     if (existingMember) throw forbidden('COLLAB_MEMBER_BANNED', 'You are banned and cannot join');
 
@@ -287,14 +306,35 @@ export class CollaborationService {
     }
 
     // 检查是否已在房间中（offline=离屏≠退出，复用既有记录并恢复在线；
+    // left=曾退出（软删除标记），重进同样走恢复分支；
     // Plan#38 验收热修：原实现只查 online，offline 成员再次 join 会重复创建 session 记录）
     const joinedMember = await this.prisma.collaborationMember.findFirst({
       where: { roomId: verification.id, userId, status: { notIn: ['banned', 'pending'] } },
     });
     if (joinedMember) {
+      // 审核制房间：曾退出协作(left)或离屏(offline)的成员重进必须重新申请——
+      // 原实现只对 left 审核，offline 直接恢复 online，导致「先协作后开审核」时
+      // 旧成员重进绕过审核（2026-08-25 审核制漏洞修复）；复用记录转 pending，
+      // 房主批准后 pending→online 直接生效，禁言等权限信息随记录保留
+      if ((joinedMember.status === 'left' || joinedMember.status === 'offline') && room?.requiresApproval) {
+        await this.prisma.collaborationMember.updateMany({
+          where: { id: joinedMember.id },
+          data: { status: 'pending', lastActiveAt: new Date() },
+        });
+        this.logger.log(`用户 ${userId} 重新提交加入申请(${joinedMember.status}, 审核制房间 ${verification.id})`);
+        this.eventsService.broadcastToRoom(canvasId, {
+          type: 'join_application',
+          userId,
+          meta: { roomId: verification.id },
+        });
+        return { pending: true, canvasId, roomId: verification.id };
+      }
+      // 禁言持久化：禁言 = permissions 移除 chat。退出重进后 status 恢复为
+      // muted（无 chat 权限）而非 online，房主端的禁言不会被退出重进绕过
+      const canChat = joinedMember.permissions.split(',').includes('chat');
       await this.prisma.collaborationMember.updateMany({
         where: { id: joinedMember.id },
-        data: { status: 'online', lastActiveAt: new Date() },
+        data: { status: canChat ? 'online' : 'muted', lastActiveAt: new Date() },
       });
       // 已在房间中，直接返回
       return this.getRoomByCanvas(userId, canvasId);
@@ -318,18 +358,27 @@ export class CollaborationService {
     // Phase 8 审核制（用户拍板）：房间开启审核且非房主 → 创建待审申请，不入房；
     // 权限预计算随申请落库，批准时直接生效，无需二次计算
     if (room?.requiresApproval && !isOwner) {
-      await this.prisma.collaborationMember.create({
-        data: {
-          roomId: verification.id,
-          userId,
-          nickname: nickname ?? undefined,
-          role,
-          permissions,
-          status: 'pending',
-          deviceType: deviceType ?? 'desktop',
-          sessionIndex: 0,
-        },
-      });
+      try {
+        await this.prisma.collaborationMember.create({
+          data: {
+            roomId: verification.id,
+            userId,
+            nickname: nickname ?? undefined,
+            role,
+            permissions,
+            status: 'pending',
+            deviceType: deviceType ?? 'desktop',
+            sessionIndex: 0,
+          },
+        });
+      } catch (err) {
+        // 并发重复提交（连点/多标签页）：唯一约束 (roomId,userId,sessionIndex) 兜底 → 幂等返回 pending
+        // （2026-08-25 修复：不捕获会抛 500/冲突，前端误报"邀请码无效"）
+        if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002') {
+          return { pending: true, canvasId, roomId: verification.id };
+        }
+        throw err;
+      }
       this.logger.log(`用户 ${userId} 提交加入申请(待审核), 房间 ${verification.id}`);
       this.eventsService.broadcastToRoom(canvasId, {
         type: 'join_application',
@@ -443,15 +492,70 @@ export class CollaborationService {
       orderBy: { sessionIndex: 'asc' },
     });
 
-    if (existingMembers.length === 0) {
-      // 封禁拦截：被踢出是删除记录（可重加），封禁是 banned（禁止重入）——
-      // 两者都表现为"无 active 记录"，这里必须显式拦截 banned，否则封禁用户
-      // 经邀请链接 autoJoin 会重建成员记录直接入房（封禁失效漏洞）
-      const banned = await this.prisma.collaborationMember.findFirst({
-        where: { roomId: room.id, userId, status: 'banned' },
-        select: { id: true },
+    // 封禁拦截（画布级,必须提前于所有分支）：banned 记录存在时若走下方"已有记录"分支
+    // 会重建 online session 直接入房（封禁绕过漏洞——banned 是最高优先级状态）;
+    // 跨房间查询:房间重建后新房间无 banned 记录,须查同一画布的全部房间
+    const bannedMember = await this.prisma.collaborationMember.findFirst({
+      where: { userId, status: 'banned', room: { canvasId } },
+    });
+    if (bannedMember) throw forbidden('COLLAB_MEMBER_BANNED', 'You are banned and cannot join');
+
+    // 审核制拦截：待审申请未批准前禁止通过 auto-join 入房——否则下方多设备分支会
+    // 复用 pending 记录的 permissions 创建 online session 直接绕过审核（前端未调用
+    // autoJoin，但该端点可直接请求，必须服务端兑底）
+    const pendingMember = existingMembers.find((m) => m.status === 'pending');
+    if (pendingMember) {
+      throw forbidden('COLLAB_JOIN_PENDING', 'Your join application is pending approval');
+    }
+
+    // 曾退出协作（left 软删除标记）重进：恢复记录而非新建 session——
+    // 否则退出→重进会绕过禁言（permissions 无 chat 的成员恢复为 muted 而非 online）
+    const leftMember = existingMembers.find((m) => m.status === 'left');
+    if (leftMember) {
+      // 审核制房间：曾退出成员重进必须重新申请（原实现直接恢复 online 绕过审核）；
+      // 复用 left 记录转 pending，批准后 pending→online 直接生效
+      if (room.requiresApproval) {
+        await this.prisma.collaborationMember.updateMany({
+          where: { id: leftMember.id },
+          data: { status: 'pending', lastActiveAt: new Date() },
+        });
+        this.logger.log(`[autoJoin] 审核制房间 ${room.id} 中用户 ${userId} 重新申请(曾退出)`);
+        throw forbidden('COLLAB_JOIN_PENDING', 'Your join application is pending approval');
+      }
+      const canChat = leftMember.permissions.split(',').includes('chat');
+      await this.prisma.collaborationMember.updateMany({
+        where: { id: leftMember.id },
+        data: { status: canChat ? 'online' : 'muted', lastActiveAt: new Date() },
       });
-      if (banned) throw forbidden('COLLAB_MEMBER_BANNED', 'You are banned and cannot join');
+      this.logger.log(`[autoJoin] 退出成员 ${userId} 重新加入房间 ${room.id}`);
+      // 广播成员加入（重新加入）
+      this.eventsService.broadcastToRoom(canvasId, {
+        type: 'member_joined',
+        userId,
+        meta: { role: leftMember.role, sessionIndex: leftMember.sessionIndex },
+      });
+      return this.getRoomByCanvas(userId, canvasId);
+    }
+
+    // 审核制房间：offline 成员(曾离开画布)重进必须重新申请——否则下方多设备分支会
+    // 复用 offline 记录的 role/permissions 创建 online session 直接入房绕过审核
+    // （"先协作后开审核"旧成员重进不审核漏洞,与 joinByInvite/SSE 三入口对齐；2026-08-25 审核制漏洞修复）
+    const offlineMember = existingMembers.find((m) => m.status === 'offline');
+    if (offlineMember && room.requiresApproval && room.ownerId !== userId) {
+      await this.prisma.collaborationMember.updateMany({
+        where: { id: offlineMember.id },
+        data: { status: 'pending', lastActiveAt: new Date() },
+      });
+      this.logger.log(`[autoJoin] 审核制房间 ${room.id} 中用户 ${userId} 重新申请(曾离屏)`);
+      this.eventsService.broadcastToRoom(canvasId, {
+        type: 'join_application',
+        userId,
+        meta: { roomId: room.id },
+      });
+      throw forbidden('COLLAB_JOIN_PENDING', 'Your join application is pending approval');
+    }
+
+    if (existingMembers.length === 0) {
       // 账户不在房间中（可能是邀请加入，也可能是房主的新设备）
       // 权限模型与 joinByInvite 对齐（Plan#38 Phase 7.2）：allowEdit → editor + edit/download 捆绑
       const isOwner = room.ownerId === userId;
@@ -550,6 +654,19 @@ export class CollaborationService {
   // ==================== 加入审核（Phase 8，用户拍板：需要审核/无需审核两档） ====================
 
   /**
+   * 当前用户所有协作房间的待审申请总数（主页 NAV 红点轮询；仅统计自己为房主的 active 房间）
+   */
+  async countPendingApplications(userId: string) {
+    const count = await this.prisma.collaborationMember.count({
+      where: {
+        status: 'pending',
+        room: { ownerId: userId, status: 'active' },
+      },
+    });
+    return { count };
+  }
+
+  /**
    * 待审加入申请列表（仅房主）
    */
   async listApplications(userId: string, canvasId: string) {
@@ -587,10 +704,15 @@ export class CollaborationService {
     });
     if (!application) throw notFound('COLLAB_APPLICATION_NOT_FOUND', 'Application not found or already handled');
 
-    await this.prisma.collaborationMember.update({
-      where: { id: application.id },
-      data: { status: 'online' },
+    // 原子翻转（2026-08-25 修复）：findFirst 与 update 分离导致并发/连点批准全部成功——
+    // 多次广播 member_joined + 多次成功 toast（用户实测"重复收到 3 次已加入"）。
+    // updateMany 带 status='pending' 条件：并发下仅一个请求翻转成功，其余 count=0 → 404
+    const flipped = await this.prisma.collaborationMember.updateMany({
+      where: { id: application.id, status: 'pending' },
+      data: { status: 'online', lastActiveAt: new Date() },
     });
+    if (flipped.count === 0) throw notFound('COLLAB_APPLICATION_NOT_FOUND', 'Application not found or already handled');
+
     this.logger.log(`房主 ${userId} 批准用户 ${applicantUserId} 加入房间 ${room.id}`);
     this.eventsService.broadcastToRoom(canvasId, {
       type: 'member_joined',
@@ -620,7 +742,8 @@ export class CollaborationService {
 
   /**
    * 参与者主动移除自己的成员身份（退出协作 / 失效画布移除）
-   * 物理删除该用户在该画布**所有房间**内的成员记录，此后主页不再展示该协作画布。
+   * 软删除（status 置 left）而非物理删除：退出后保留成员记录与禁言/权限信息，
+   * 重新加入时走恢复分支（禁言不因退出重进而失效）；主页/成员列表按 left 过滤。
    * 注意：画布可能因"开启→关闭→再开启"存在多个历史房间，若只删最新房间会残留
    * 旧房间成员记录，导致主页列表刷新后画布依然可见。
    * 守卫：房间 owner 的成员记录不可删除——owner 记录是房间的组成部分，删后
@@ -633,12 +756,14 @@ export class CollaborationService {
     });
     if (rooms.length === 0) return { message: 'ok', removed: 0 };
 
-    const removed = await this.prisma.collaborationMember.deleteMany({
+    const removed = await this.prisma.collaborationMember.updateMany({
       where: {
         roomId: { in: rooms.map((r) => r.id) },
         userId,
         role: { not: 'owner' }, // owner 成员记录不可自删（见上方守卫说明）
+        status: { notIn: ['banned', 'left'] }, // banned 最高优先级不可被覆盖;已退出不重复标记
       },
+      data: { status: 'left', lastActiveAt: new Date() },
     });
 
     // 广播成员离开（供房主刷新成员列表）
@@ -689,9 +814,10 @@ export class CollaborationService {
    * 获取用户已加入的所有协作房间列表
    */
   async listMyRooms(userId: string) {
-    // 查询用户所有房间（包括 offline 状态），避免用户感觉房间"刷新不出来"
+    // 查询用户所有房间（包括 offline 状态），避免用户感觉房间"刷新不出来"；
+    // left=已退出协作，不再展示
     const memberships = await this.prisma.collaborationMember.findMany({
-      where: { userId, status: { notIn: ['banned'] } },
+      where: { userId, status: { notIn: ['banned', 'left'] } },
       include: {
         room: {
           include: {
@@ -779,7 +905,7 @@ export class CollaborationService {
    */
   async listParticipating(userId: string) {
     const memberships = await this.prisma.collaborationMember.findMany({
-      where: { userId, status: { not: 'banned' } },
+      where: { userId, status: { notIn: ['banned', 'left'] } }, // left=已退出协作,主页不再展示
       include: {
         room: {
           include: {

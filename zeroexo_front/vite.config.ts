@@ -34,6 +34,9 @@ export default defineConfig({
   server: {
     port: 5180,
     host: true,
+    // 允许任意 Host 访问:Cloudflare 公网隧道(trycloudflare.com 随机域名)测试用,
+    // 默认只放行 localhost,公网访问会 403 Blocked request
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
@@ -57,6 +60,7 @@ export default defineConfig({
   },
   preview: {
     host: true,
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

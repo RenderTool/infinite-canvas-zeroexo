@@ -1,13 +1,14 @@
 /**
- * VersionDialogs - 画布版本快照弹窗(保存版本 + 版本历史 + 回退)
+ * VersionDialogs - 画布版本快照面板(保存版本 + 版本历史 + 回退)
  *
- * 保存版本: 输入自定义名称(可选),显示当前节点数,POST /projects/:id/versions
- * 版本历史: Drawer 列表(版本号/时间/节点数/来源/名称),选中后支持回退/删除
+ * 单页面合并版:Drawer 顶部为保存区(节点数提示 + 版本名称 + 保存按钮),
+ * 下方为历史列表(版本号/时间/节点数/来源/名称),选中后支持回退/删除。
+ * 保存成功后自动刷新列表,不关闭面板。
  * 回退: 确认弹窗(M.confirm danger),成功后自动刷新页面加载指定版本数据
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { App, Drawer, Input, Modal, Button, Empty, Tag, Tooltip, Spin } from 'antd';
+import { App, Drawer, Input, Button, Empty, Tag, Tooltip, Spin } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTranslation } from 'react-i18next';
 import { History, RotateCcw, Trash2 } from 'lucide-react';
@@ -15,6 +16,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { apiGet, apiPost, apiDelete, ApiError } from '@/services/api-client.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 interface VersionRecord {
   id: string;
@@ -49,27 +51,25 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export interface VersionDialogsProps {
   canvasId: string;
-  /** 实时节点数(用于保存弹窗提示) */
+  /** 实时节点数(用于保存区提示) */
   nodeCount: number;
-  saveOpen: boolean;
-  historyOpen: boolean;
-  onSaveClose: () => void;
-  onHistoryClose: () => void;
+  open: boolean;
+  onClose: () => void;
   theme: ThemeConfig;
 }
 
 export function VersionDialogs({
   canvasId,
   nodeCount,
-  saveOpen,
-  historyOpen,
-  onSaveClose,
-  onHistoryClose,
+  open,
+  onClose,
   theme,
 }: VersionDialogsProps): React.ReactElement {
   const { t } = useTranslation();
   // App.useApp() 的 message/modal 实例可消费 ConfigProvider 动态主题(静态函数无法消费)
   const { message, modal } = App.useApp();
+  // 只读防护（2026-08-25 系统性只读防护）：保存/回退/删除版本均为写操作，viewer 只能浏览历史
+  const readOnly = useReadOnly();
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [versions, setVersions] = useState<VersionRecord[]>([]);
@@ -89,22 +89,23 @@ export function VersionDialogs({
     }
   }, [canvasId]);
 
-  // 打开历史面板时加载列表
+  // 打开面板时加载列表
   useEffect(() => {
-    if (historyOpen) {
+    if (open) {
       void loadVersions();
     }
-  }, [historyOpen, loadVersions]);
+  }, [open, loadVersions]);
 
-  /** 保存版本 */
+  /** 保存版本(成功后刷新列表,面板不关闭;只读早退) */
   const handleSave = useCallback(async () => {
+    if (readOnly) return;
     setSaving(true);
     try {
       await apiPost(`/projects/${canvasId}/versions`, {
         label: label.trim() || undefined,
       });
       setLabel('');
-      onSaveClose();
+      void loadVersions();
       message.success(t('versions.saveSuccessTitle'));
     } catch (err) {
       // 新画布尚未同步到云端时版本接口返回 404,给出明确提示而非笼统失败
@@ -113,11 +114,12 @@ export function VersionDialogs({
     } finally {
       setSaving(false);
     }
-  }, [canvasId, label, onSaveClose, t]);
+  }, [canvasId, label, loadVersions, t, readOnly]);
 
-  /** 删除版本 */
+  /** 删除版本(只读早退) */
   const handleDelete = useCallback(
     (version: number) => {
+      if (readOnly) return;
       modal.confirm({
         title: t('versions.deleteTitle'),
         content: t('versions.deleteMessage', { version }),
@@ -135,12 +137,13 @@ export function VersionDialogs({
         },
       });
     },
-    [canvasId, loadVersions, t],
+    [canvasId, loadVersions, t, readOnly],
   );
 
-  /** 回退到指定版本 */
+  /** 回退到指定版本(只读早退) */
   const handleRollback = useCallback(
     (version: number) => {
+      if (readOnly) return;
       modal.confirm({
         title: t('versions.rollbackTitle'),
         content: t('versions.rollbackMessage', { version }),
@@ -209,71 +212,60 @@ export function VersionDialogs({
         },
       });
     },
-    [canvasId, t],
+    [canvasId, t, readOnly],
   );
 
   return (
-    <>
-      {/* 保存版本弹窗 */}
-      <Modal
-        open={saveOpen}
-        onCancel={onSaveClose}
-        onOk={() => void handleSave()}
-        confirmLoading={saving}
-        title={t('versions.saveTitle')}
-        okText={t('versions.saveConfirm')}
-        cancelText={t('common.cancel')}
-        centered
-        width={440}
-      >
-        <div style={{ marginBottom: 12, fontSize: 13, color: theme.toolbar.text }}>
-          {t('versions.nodeCountTip', { count: nodeCount })}
-        </div>
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <History size={16} />
+          {t('versions.historyTitle')}
+        </span>
+      }
+      size={360}
+      placement="right"
+      styles={{ body: { padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 } }}
+    >
+      {/* 保存区(合并自原保存弹窗):节点数提示 + 版本名称 + 保存 + 刷新 */}
+      <div style={{ marginBottom: 8, fontSize: 13, color: theme.toolbar.text }}>
+        {t('versions.nodeCountTip', { count: nodeCount })}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <Input
           placeholder={t('versions.labelPlaceholder')}
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           maxLength={50}
           allowClear
-          onPressEnter={() => void handleSave()}
+          disabled={readOnly}
+          onPressEnter={() => { if (!readOnly) void handleSave(); }}
         />
-      </Modal>
-
-      {/* 版本历史面板 */}
-      <Drawer
-        open={historyOpen}
-        onClose={onHistoryClose}
-        title={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <History size={16} />
-            {t('versions.historyTitle')}
-          </span>
-        }
-        size={360}
-        placement="right"
-        styles={{ body: { padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 } }}
+        <Button type="primary" loading={saving} disabled={readOnly} onClick={() => void handleSave()}>
+          {t('versions.saveConfirm')}
+        </Button>
+        <Button onClick={() => void loadVersions()} disabled={loading}>
+          {t('versions.refresh')}
+        </Button>
+      </div>
+      <div
+        style={{
+          marginBottom: 8,
+          padding: '6px 10px',
+          borderRadius: 4,
+          fontSize: 12,
+          lineHeight: '18px',
+          color: theme.toolbar.text,
+          background: theme.toolbar.background,
+          border: `1px solid ${theme.toolbar.border}`,
+          opacity: 0.85,
+        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <Button size="small" onClick={() => void loadVersions()} disabled={loading}>
-            {t('versions.refresh')}
-          </Button>
-        </div>
-        <div
-          style={{
-            marginBottom: 8,
-            padding: '6px 10px',
-            borderRadius: 4,
-            fontSize: 12,
-            lineHeight: '18px',
-            color: theme.toolbar.text,
-            background: theme.toolbar.background,
-            border: `1px solid ${theme.toolbar.border}`,
-            opacity: 0.85,
-          }}
-        >
-          {t('versions.retentionHint')}
-        </div>
-        {loading ? (
+        {t('versions.retentionHint')}
+      </div>
+      {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
             <Spin />
           </div>
@@ -322,6 +314,7 @@ export function VersionDialogs({
                     size="small"
                     icon={<RotateCcw size={14} />}
                     loading={rollbacking === v.version}
+                    disabled={readOnly}
                     onClick={() => handleRollback(v.version)}
                   />
                 </Tooltip>
@@ -330,6 +323,7 @@ export function VersionDialogs({
                     type="text"
                     size="small"
                     icon={<Trash2 size={14} />}
+                    disabled={readOnly}
                     onClick={() => handleDelete(v.version)}
                   />
                 </Tooltip>
@@ -337,7 +331,6 @@ export function VersionDialogs({
             )}
           />
         )}
-      </Drawer>
-    </>
+    </Drawer>
   );
 }

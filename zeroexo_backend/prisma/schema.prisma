@@ -810,6 +810,10 @@ model AgentMessage {
   taskId         String?
   toolName       String?
   toolArguments  String?
+  /// 工具调用 ID（tool_result 回填关联，历史胶囊忠实还原）
+  toolCallId     String?
+  /// 工具结果摘要（刷新后历史胶囊 Result 可展开，与聊天时一致）
+  toolResult     String?
   createdAt      DateTime @default(now())
   conversation   AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

@@ -253,6 +253,14 @@ export class InteractionController {
     }
     if (event.button !== 0) return;
 
+    // 移动端:单指拖空白 = 平移画布(触屏无 Ctrl/Shift 修饰键,框选/临时平移不可达;
+    // 与主流画布一致:单指浏览平移,双指缩放,节点直接拖拽)
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+      this.beginPan(event.clientX, event.clientY);
+      return;
+    }
+
     // 左键: 根据模式判断是平移还是框选
     if (this.shouldPanOnLeftClick(event)) {
       event.preventDefault();
@@ -285,9 +293,9 @@ export class InteractionController {
     if (event.button !== 0) return;
     // 清除文本选中范围,避免拖拽节点时浏览器误触发文本拖拽
     window.getSelection()?.removeAllRanges();
-    // pan 模式: 普通左键先选中节点,再开始平移(让节点单选/取消与选择模式一致)
-    // 选中后拖拽 = 平移画布,纯点击 = 选中节点,胶囊体菜单正常显示
-    if (this.shouldPanOnLeftClick(event)) {
+    // 移动端:触摸节点永远优先拖拽节点(触屏无空格键,pan 模式只影响空白处;
+    // 避免用户想拖节点时画布被平移——移动端交互反馈)
+    if (event.pointerType !== 'touch' && this.shouldPanOnLeftClick(event)) {
       event.stopPropagation();
       // 在 pan 模式下,点击节点时先选中它(与选择模式一致)
       if (this.mode === 'pan') {
@@ -385,8 +393,9 @@ export class InteractionController {
     handle: ResizeHandleType,
   ): void => {
     if (event.button !== 0) return;
-    // pan 模式普通左键 / select 模式 Space+左键 → 不启动 resize(让用户先切模式)
-    if (this.shouldPanOnLeftClick(event)) return;
+    // pan 模式普通左键 / select 模式 Space+左键 → 不启动 resize(让用户先切模式);
+    // 移动端触摸例外:直接 resize(触屏无模式切换需求)
+    if (event.pointerType !== 'touch' && this.shouldPanOnLeftClick(event)) return;
     event.stopPropagation();
 
     // 生成中节点锁定:禁止缩放
@@ -546,8 +555,9 @@ export class InteractionController {
 
   /**
    * 滚轮交互:
-   * - 普通滚轮: 上下平移画布(类似主流画布 Figma/Excalidraw)
-   * - Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放
+   * - 普通滚轮: 以鼠标位置为中心缩放(白板惯例,与 canvas-v2 3D 版滚轮远近一致;
+   *   2026-08-25 用户反馈:滚动滚轮期待缩放,原设计普通滚轮=平移导致「无法缩放」)
+   * - Ctrl/Cmd + 滚轮: 上下平移画布(原普通滚轮行为,保留老习惯通道)
    * - Shift + 滚轮: 水平平移画布
    */
   handleWheel = (event: WheelEvent): void => {
@@ -560,8 +570,8 @@ export class InteractionController {
     const mouseY = event.clientY - rect.top;
     const viewport = this.store.getViewport();
 
-    // Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放
-    if (event.ctrlKey || event.metaKey) {
+    // 普通滚轮: 以鼠标位置为中心缩放
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
       const delta = -event.deltaY;
       const factor = Math.pow(1.1, delta / 100);
       const newK = Math.min(Math.max(viewport.k * factor, 0.05), 5);
@@ -577,6 +587,16 @@ export class InteractionController {
       return;
     }
 
+    // Ctrl/Cmd + 滚轮: 上下平移
+    if (event.ctrlKey || event.metaKey) {
+      const speed = 1.5;
+      this.store.setViewport({
+        ...viewport,
+        y: viewport.y - event.deltaY * speed,
+      });
+      return;
+    }
+
     // Shift + 滚轮: 水平平移
     if (event.shiftKey) {
       const speed = 1.5;
@@ -586,13 +606,6 @@ export class InteractionController {
       });
       return;
     }
-
-    // 普通滚轮: 上下平移
-    const speed = 1.5;
-    this.store.setViewport({
-      ...viewport,
-      y: viewport.y - event.deltaY * speed,
-    });
   };
 
   // ===== 内部方法 =====

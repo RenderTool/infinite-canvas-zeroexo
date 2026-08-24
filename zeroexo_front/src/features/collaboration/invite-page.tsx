@@ -11,10 +11,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { App, Button } from 'antd';
-import { Link2Off, Loader2, Users } from 'lucide-react';
+import { Link2Off, Loader2, RefreshCw, Users, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { verifyInvite, joinRoom } from './collaboration-api';
+import { verifyInvite, joinRoom, getRoomByCanvas } from './collaboration-api';
+import { ApiError } from '@/services/api-client';
 import { isPendingJoinResult } from './collaboration-types';
 
 type VerifyInfo = Awaited<ReturnType<typeof verifyInvite>>;
@@ -47,7 +48,10 @@ export function InvitePage({
   const [info, setInfo] = useState<VerifyInfo | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [pendingApplied, setPendingApplied] = useState(false);
+  // 加入失败原因（页内持久展示，不能只靠一闪而过的 toast——用户需要知道下一步怎么办）
+  const [joinFailedReason, setJoinFailedReason] = useState('');
   const [avatarBroken, setAvatarBroken] = useState(false);
   // 防止 autoJoin effect 与手动点击重复加入
   const joinedRef = useRef(false);
@@ -78,20 +82,78 @@ export function InvitePage({
     setJoining(true);
     try {
       const result = await joinRoom(info.canvasId, inviteCode);
-      joinedRef.current = true;
       // 审核制房间：不进入画布，页内展示等待审核态
+      // （不置 joinedRef——待审态轮询依赖它探测批准；若提前置 true 轮询永不启动，2026-08-25 修复）
       if (isPendingJoinResult(result)) {
         setPendingApplied(true);
         return;
       }
+      joinedRef.current = true;
       onJoined(info.canvasId);
     } catch (err) {
       console.error('[InvitePage] join failed:', err);
-      message.error(t('collab.inviteCodeInvalid'));
+      // 按错误码区分原因：被封禁/房间已满要有明确提示，不能一律"邀请码无效"误导用户
+      let reason = t('collab.inviteCodeInvalid');
+      if (err instanceof ApiError && err.code === 'COLLAB_MEMBER_BANNED') {
+        reason = t('collab.joinBanned');
+      } else if (err instanceof ApiError && err.code === 'COLLAB_ROOM_FULL') {
+        reason = t('collab.joinRoomFull');
+      }
+      setJoinFailedReason(reason);
+      message.error(reason);
     } finally {
       setJoining(false);
     }
   }, [info, inviteCode, isAuthenticated, message, onGoLogin, onJoined, t]);
+
+  // 待审态自动检测（2026-08-25 体验闭环）：房主批准后自动进入画布，无需手动点刷新
+  // 用 getRoomByCanvas 而非 joinRoom 探测：被拒绝时记录已删，joinRoom 会重建新申请造成"拒后自动重申"；
+  // getRoomByCanvas 返回 403 则停止轮询（手动刷新可看到明确原因）
+  useEffect(() => {
+    if (!pendingApplied || !info || joinedRef.current) return;
+    let failCount = 0;
+    const timer = window.setInterval(async () => {
+      try {
+        const room = await getRoomByCanvas(info.canvasId);
+        if (!room || isPendingJoinResult(room)) return; // 仍待审，继续等
+        joinedRef.current = true;
+        window.clearInterval(timer);
+        onJoined(info.canvasId);
+      } catch {
+        failCount += 1;
+        // 连续失败（被拒绝/房间关闭/链接失效）→ 停止轮询，交还手动刷新展示原因
+        if (failCount >= 3) window.clearInterval(timer);
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [pendingApplied, info, onJoined]);
+
+  // 待审页刷新检查：发起者审核通过后点左上角刷新——已批准则直接入画布；仍待审则提示
+  const handleRefresh = useCallback(async () => {
+    if (!info || refreshing) return;
+    setRefreshing(true);
+    try {
+      const result = await joinRoom(info.canvasId, inviteCode);
+      if (isPendingJoinResult(result)) {
+        message.info(t('collab.invite.stillPending'));
+        return;
+      }
+      joinedRef.current = true;
+      onJoined(info.canvasId);
+    } catch (err) {
+      console.error('[InvitePage] refresh join failed:', err);
+      let reason = t('collab.inviteCodeInvalid');
+      if (err instanceof ApiError && err.code === 'COLLAB_MEMBER_BANNED') {
+        reason = t('collab.joinBanned');
+      } else if (err instanceof ApiError && err.code === 'COLLAB_ROOM_FULL') {
+        reason = t('collab.joinRoomFull');
+      }
+      setJoinFailedReason(reason);
+      message.error(reason);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [info, inviteCode, onJoined, message, t, refreshing]);
 
   // 登录/注册回流后自动加入
   useEffect(() => {
@@ -109,6 +171,7 @@ export function InvitePage({
   };
 
   const cardStyle: CSSProperties = {
+    position: 'relative',
     width: '100%',
     maxWidth: 380,
     padding: '40px 32px',
@@ -158,11 +221,53 @@ export function InvitePage({
     );
   }
 
+  // 加入失败：页内持久引导（原实现只剩 toast，用户停留在无效页不知下一步）
+  if (joinFailedReason) {
+    return (
+      <div style={pageStyle}>
+        <div style={cardStyle}>
+          <div style={{
+            width: 64, height: 64, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+          }}>
+            <XCircle size={28} style={{ color: theme.toolbar.textMuted }} />
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 600, color: theme.toolbar.text, marginTop: 8 }}>
+            {t('collab.joinFailedTitle')}
+          </div>
+          <div style={{ fontSize: 13, color: theme.toolbar.textMuted, lineHeight: 1.7 }}>
+            {joinFailedReason}
+          </div>
+          <div style={{ fontSize: 12, color: theme.toolbar.textMuted, lineHeight: 1.6, marginTop: 4 }}>
+            {t('collab.joinFailedHint')}
+          </div>
+          <Button type="primary" style={{ marginTop: 16, minWidth: 160 }} onClick={onGoHome}>
+            {t('collab.backToHome')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // 已提交申请等待审核（审核制房间）
   if (pendingApplied) {
     return (
       <div style={pageStyle}>
         <div style={cardStyle}>
+          {/* 卡片右上角刷新：审核通过后一键检查并进入画布（无需重新打开链接） */}
+          <Button
+            type="text"
+            loading={refreshing}
+            icon={<RefreshCw size={16} />}
+            onClick={() => void handleRefresh()}
+            style={{
+              position: 'absolute', top: 12, right: 12,
+              color: theme.toolbar.textMuted,
+            }}
+          >
+            {t('collab.invite.refreshStatus')}
+          </Button>
           <div style={{
             width: 64, height: 64, borderRadius: '50%',
             display: 'flex', alignItems: 'center', justifyContent: 'center',

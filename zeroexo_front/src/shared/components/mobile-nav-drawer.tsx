@@ -242,6 +242,11 @@ export function MobileNavDrawer({
           display: inline-flex !important;
           align-items: center !important;
           line-height: 18px !important;
+          flex: 1 !important;
+          min-width: 0 !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
         }
         .zeroexo-nav-drawer-items .ant-menu-item-divider {
           margin: 8px 12px !important;

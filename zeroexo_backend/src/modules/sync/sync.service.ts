@@ -193,7 +193,8 @@ export class SyncService implements OnModuleDestroy {
     const membership = await this.prisma.collaborationMember.findFirst({
       where: {
         userId,
-        status: { not: 'pending' },
+        // banned(封禁)/left(退出/被踢)不得读写画布——状态优先级: banned > left > muted/offline/online
+        status: { notIn: ['banned', 'left', 'pending'] },
         room: { canvasId, status: 'active' },
       },
       select: { id: true, role: true, permissions: true },

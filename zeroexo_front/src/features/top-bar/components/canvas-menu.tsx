@@ -19,6 +19,7 @@ import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useAuth } from '../../auth/auth-store.js';
 import { LogoIcon } from '@/assets/ico/index.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 export interface CanvasMenuProps {
   theme: ThemeConfig;
@@ -37,6 +38,7 @@ export function CanvasMenu({
 }: CanvasMenuProps): React.ReactElement {
   const { t } = useTranslation();
   const { user, isAuthenticated, logout } = useAuth();
+  const readOnly = useReadOnly();
   const [open, setOpen] = useState(false);
 
   const handleHome = useCallback(() => { setOpen(false); onHome(); }, [onHome]);
@@ -51,8 +53,13 @@ export function CanvasMenu({
   const items: MenuProps['items'] = [
     { key: 'home', label: t('menu.backHome'), icon: <Home size={14} />, onClick: handleHome },
     { key: 'new', label: t('menu.newProject'), icon: <Plus size={14} />, onClick: handleNew },
-    { key: 'copy', label: t('menu.copyProject'), icon: <Copy size={14} />, onClick: handleCopy },
-    { key: 'delete', label: t('menu.deleteCanvas'), icon: <Trash2 size={14} />, danger: true, onClick: handleDelete },
+    // 只读隐藏拷贝/删除（2026-08-25 系统性只读防护）：拷贝项目=创建副本、删除=销毁画布，均属项目级写操作
+    ...(!readOnly
+      ? [
+          { key: 'copy', label: t('menu.copyProject'), icon: <Copy size={14} />, onClick: handleCopy },
+          { key: 'delete', label: t('menu.deleteCanvas'), icon: <Trash2 size={14} />, danger: true, onClick: handleDelete },
+        ]
+      : []),
     // 底部区域: 登录态显示账号信息与退出登录
     ...(isAuthenticated && user
       ? [

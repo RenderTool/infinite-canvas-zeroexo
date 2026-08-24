@@ -8,11 +8,11 @@
  */
 
 import ReactMarkdown from 'react-markdown';
-import { useState, type CSSProperties } from 'react';
+import { useState, Fragment, type CSSProperties } from 'react';
 import { FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import type { AttachmentCard, CanvasAgentMessage } from '../types.js';
 import { executeCanvasOp } from '../canvas-op-bridge.js';
-import { parseQuestionForm } from './form-utils.js';
+import { parseAllQuestionForms } from './form-utils.js';
 import { FormBlock } from './FormBlock.js';
 import { mdComponents } from './MarkdownBlock.js';
 
@@ -154,17 +154,30 @@ export function TextBlock({ message }: TextBlockProps): React.ReactElement {
     );
   }
 
-  // 内联澄清表单：解析正文中的 <question-form> 块，拆为「文本 + 表单 + 文本」
-  const parsed = parseQuestionForm(message.text ?? '');
-  if (parsed) {
+  // 内联澄清表单：解析正文中的所有 <question-form> 块
+  const forms = parseAllQuestionForms(message.text ?? '');
+  if (forms.length > 0) {
     return (
       <div style={agentTextStyle}>
-        {parsed.before && (
-          <ReactMarkdown components={mdComponents as never}>{parsed.before}</ReactMarkdown>
+        {/* 第一个表单之前的文本 */}
+        {forms[0]!.before && (
+          <ReactMarkdown components={mdComponents as never}>{forms[0]!.before}</ReactMarkdown>
         )}
-        <FormBlock form={parsed.form} />
-        {parsed.after && (
-          <ReactMarkdown components={mdComponents as never}>{parsed.after}</ReactMarkdown>
+        {forms.map((f, i) => {
+          const prevEnd = i === 0 ? 0 : forms[i - 1]!.startIndex + forms[i - 1]!.rawLength;
+          const gapText = message.text!.slice(prevEnd, f.startIndex);
+          return (
+            <Fragment key={i}>
+              {gapText && (
+                <ReactMarkdown components={mdComponents as never}>{gapText}</ReactMarkdown>
+              )}
+              <FormBlock form={f.form} answered={!!message.answered} restoredAnswer={message.restoredAnswer} />
+            </Fragment>
+          );
+        })}
+        {/* 最后一个表单之后的文本 */}
+        {forms[forms.length - 1]!.after && (
+          <ReactMarkdown components={mdComponents as never}>{forms[forms.length - 1]!.after}</ReactMarkdown>
         )}
       </div>
     );

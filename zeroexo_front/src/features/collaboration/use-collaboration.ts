@@ -40,8 +40,9 @@ import { publishCursorBc, subscribeCursorBc, type CursorBcMessage } from './coll
 import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { fastLocalCursor } from './use-collaboration-store.js';
 
-/** 光标广播节流间隔(ms):pointermove 可达 60~120Hz,合并到该间隔发送,减少 WS/BC 消息量 */
-const CURSOR_THROTTLE_MS = 40;
+/** 光标广播节流间隔(ms):pointermove 可达 60~120Hz,合并到该间隔发送,减少 WS/BC 消息量。
+ * 80ms ≈ 12.5Hz:远端光标感知仍流畅,配合 BC+Yjs 双通道,双页签场景广播量相比 40ms 减半 */
+const CURSOR_THROTTLE_MS = 80;
 
 export interface UseCollaborationResult {
   /** 房间信息 */
@@ -52,6 +53,8 @@ export interface UseCollaborationResult {
   awarenessStates: Map<number, AwarenessState>;
   /** 是否活跃 */
   active: boolean;
+  /** 会话级协作激活标记(本次会话中协作曾开启):光标广播门控用,关协作后保持 true */
+  collabSessionActive: boolean;
   /** 协作状态: idle(未开启) | active(协作中) | expired(已失效) */
   status: ReturnType<typeof useCollaborationStore.getState>['status'];
   /** 是否已初始化 */
@@ -138,12 +141,27 @@ export function useCollaboration(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId, user?.id]);
 
+  // 监听房间状态变化：当房间变为 active 时建立 SSE 连接
+  // （解决房间在页面加载后才激活的场景，比如用户发起协作后其他成员才加入）
+  const status = store.getState().status;
+  useEffect(() => {
+    // 仅当房间变为 active 时才连接（避免重复连接）
+    if (status === 'active' && canvasId && user) {
+      connectCollaborationEvents(canvasId, user.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, canvasId, user?.id]);
+
   // 订阅同源标签页的光标直连频道(绕过服务器,按 clientId 去重)
   useEffect(() => {
     if (!canvasId || !canvasSync) return;
     const unsubBc = subscribeCursorBc(canvasId, (msg) => {
       const localClientId = canvasSync.getAwarenessClientId();
       if (localClientId !== null && msg.clientId === localClientId) return;
+      // 双通道去重:同一次广播经 BC(直达)与 Yjs WS(中转)各到达一次,lastUpdated 相同则跳过,
+      // 避免每次移动触发两次 setState → 双页签场景重渲染翻倍卡顿
+      const existing = store.getState().awarenessStates.get(msg.clientId);
+      if (existing && existing.lastUpdated >= msg.lastUpdated) return;
       store.getState().updateAwareness({
         clientId: msg.clientId,
         userId: msg.userId,
@@ -154,6 +172,7 @@ export function useCollaboration(
         selectedNodeIds: msg.selectedNodeIds ?? [],
         online: true,
         lastUpdated: msg.lastUpdated,
+        receivedAt: Date.now(),
       });
     });
     return unsubBc;
@@ -198,6 +217,7 @@ export function useCollaboration(
       selectedNodeIds: (state.selectedNodeIds as string[]) ?? [],
       online: true,
       lastUpdated: (state.lastUpdated as number) ?? Date.now(),
+      receivedAt: Date.now(),
     });
 
     // 同源标签页直连(不走服务器)
@@ -285,19 +305,25 @@ export function useCollaboration(
           selectedNodeIds: (cursorData?.selectedNodeIds as string[]) ?? [],
           online: (cursorData?.online as boolean) ?? true,
           lastUpdated: (cursorData?.lastUpdated as number) ?? Date.now(),
+          receivedAt: Date.now(),
         };
 
-        // 超时移除（30 秒无更新视为离线）
-        if (Date.now() - awareness.lastUpdated > 30000) {
+        // 双通道去重:BC 直达通常先到,Yjs WS 后到(同 lastUpdated),跳过避免重复 setState
+        const existing = next.get(s.clientId);
+        if (existing && existing.lastUpdated >= awareness.lastUpdated) continue;
+
+        // 超时移除（30 秒无更新视为离线）——用接收端本地时间判定：
+        // 发送端 lastUpdated 受两端时钟差影响，差 >30s 时远端光标刚到即被误判离线（已修复）
+        if (Date.now() - awareness.receivedAt > 30000) {
           next.delete(s.clientId);
         } else {
           next.set(s.clientId, awareness);
         }
       }
 
-      // 清理已离线的
+      // 清理已离线的（同上：接收端时间）
       for (const [clientId, state] of next) {
-        if (Date.now() - state.lastUpdated > 30000) {
+        if (Date.now() - state.receivedAt > 30000) {
           next.delete(clientId);
         }
       }
@@ -417,6 +443,7 @@ export function useCollaboration(
     members: state.members,
     awarenessStates: state.awarenessStates,
     active: state.active,
+    collabSessionActive: state.collabSessionActive,
     status: state.status,
     initialized: state.initialized,
     joining: state.joining,

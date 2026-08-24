@@ -126,6 +126,54 @@ export function serializeScriptLines(lines: ScriptLine[]): string {
     .join('');
 }
 
+/**
+ * 纯文本 → 剧本结构化 HTML（Agent 生成剧本落地用）
+ *
+ * 启发式识别好莱坞格式：INT./EXT./内景/外景 → 场景标题；"角色: 对白" → 角色+对白两行；
+ * 全大写短行 → 角色名；切至/淡入/淡出 → 转场；其余 → 动作段落。
+ * 无法识别的行统一按 action 保留，保证内容不丢。
+ */
+export function plainTextToScriptHtml(text: string): string {
+  if (!text) return '';
+  const lines: ScriptLine[] = [];
+  const rawLines = text.split(/\r?\n/);
+  for (const raw of rawLines) {
+    const lineText = raw.trim();
+    if (!lineText) continue;
+    // 场景标题:INT./EXT./内景/外景 前缀
+    if (/^(INT\.|EXT\.|内景|外景)/i.test(lineText)) {
+      const { location, rest } = parseSceneLocation(lineText);
+      const isChinese = /^(内景|外景)/.test(lineText);
+      const restText = isChinese ? lineText.replace(/^(内景|外景)\s*/i, '') : rest;
+      lines.push({
+        ...createScriptLine('scene-heading', restText.trim()),
+        location: isChinese ? (lineText.startsWith('外') ? 'exterior' : 'interior') : (location ?? 'interior'),
+      });
+      continue;
+    }
+    // 转场
+    if (/^(切至|淡入|淡出|CUT TO|FADE IN|FADE OUT)[:：]?$/i.test(lineText)) {
+      lines.push(createScriptLine('transition', lineText.replace(/[:：]$/, '')));
+      continue;
+    }
+    // 对白:"角色名: 对白"
+    const dialogueMatch = lineText.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
+    if (dialogueMatch && dialogueMatch[2]) {
+      lines.push(createScriptLine('character', dialogueMatch[1]!.trim()));
+      lines.push(createScriptLine('dialogue', dialogueMatch[2]!.trim()));
+      continue;
+    }
+    // 独立全大写短行 → 角色名(好莱坞约定)
+    if (/^[A-Z][A-Z0-9\s·]{1,24}$/.test(lineText) && lineText === lineText.toUpperCase()) {
+      lines.push(createScriptLine('character', lineText));
+      continue;
+    }
+    // 其余 → 动作段落
+    lines.push(createScriptLine('action', lineText));
+  }
+  return serializeScriptLines(lines);
+}
+
 /** HTML → ScriptLine[]（还原编辑态） */
 export function parseScriptHtml(html: string): ScriptLine[] {
   if (!html) return [];

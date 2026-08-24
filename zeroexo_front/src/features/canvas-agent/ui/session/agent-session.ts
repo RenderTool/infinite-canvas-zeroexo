@@ -133,6 +133,8 @@ export interface ConversationMessageDto {
   taskId: string | null;
   toolName: string | null;
   toolArguments: string | null;
+  /** 工具结果摘要（tool_result 回填，历史胶囊 Result 展开） */
+  toolResult: string | null;
   createdAt: string;
 }
 

@@ -212,7 +212,7 @@ export function NodeDetailPanel({
           )}
           <InfoRow
             label="位置"
-            value={`(${Math.round(node.position.x)}, ${Math.round(node.position.y)})`}
+            value={`(${Math.round(node.position?.x ?? 0)}, ${Math.round(node.position?.y ?? 0)})`}
             muted={pt.textMuted}
             text={pt.text}
           />

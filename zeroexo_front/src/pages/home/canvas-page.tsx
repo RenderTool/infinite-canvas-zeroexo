@@ -9,7 +9,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload, Users, LogOut } from 'lucide-react';
-import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip, Select } from 'antd';
+import { App, Badge, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip, Select } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
 import type { ProjectCardAction } from '@/shared/components/index.js';
@@ -21,7 +21,8 @@ import { importProjectsFromZip } from './services/import-projects.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { fullSync, pushProjectMeta } from '@/services/sync/sync-service.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
-import { listMyCanvases, listParticipating, removeSelfFromRoom } from '@/features/collaboration/collaboration-api.js';
+import { listMyCanvases, listParticipating, removeSelfFromRoom, countPendingApplications } from '@/features/collaboration/collaboration-api.js';
+import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import type { MyCanvasItem, ParticipatingCanvasItem } from '@/features/collaboration/collaboration-types.js';
 
 const { Text, Title } = Typography;
@@ -36,6 +37,26 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const { message, modal } = App.useApp();
   const isMobile = useIsMobile();
   const { projects, loading, error, createProject, copyProject, deleteProjects, renameProject, refresh } = useProjects();
+
+  // 待审申请红点（NAV 协作按钮）：主页无 SSE，轮询汇总接口；编辑器内由 SSE bump + modal 覆盖，双源同一 store 保持一致
+  const pendingApprovals = useCollaborationStore((s) => s.pendingApprovals);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshPendingCount = async (): Promise<void> => {
+      try {
+        const { count } = await countPendingApplications();
+        if (!cancelled) useCollaborationStore.getState().setPendingApprovals(count);
+      } catch {
+        // 静默：未登录/网络异常不打扰列表页
+      }
+    };
+    void refreshPendingCount();
+    const timer = setInterval(() => void refreshPendingCount(), 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const [search, setSearch] = useState('');
   const [selectMode, setSelectMode] = useState(false);
@@ -177,15 +198,15 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const listForRender = selectMode ? displayForSelect : displayOwnProjects;
   const isEmpty = listForRender.length === 0 && (selectMode || displayParticipating.length === 0);
 
-  /** 自动递增命名：生成 "未命名项目", "未命名项目 2", "未命名项目 3"... */
+  /** 自动递增命名：生成 "未命名画布", "未命名画布 2", "未命名画布 3"... */
   const getNextProjectName = useCallback((): string => {
-    const baseName = '未命名项目';
+    const baseName = t('home.untitledProject');
     const existingNames = projects.map((p) => p.title);
     if (!existingNames.includes(baseName)) return baseName;
     let i = 2;
     while (existingNames.includes(`${baseName} ${i}`)) i++;
     return `${baseName} ${i}`;
-  }, [projects]);
+  }, [projects, t]);
 
   const handleCreate = useCallback(() => {
     form.resetFields();
@@ -477,15 +498,17 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
 
             {allProjects.length > 0 && (
               <Tooltip title={collabMode ? t('home.exitCollaborationMode') : t('home.startCollaboration')}>
-                <Button
-                  icon={<Users size={14} />}
-                  size="small"
-                  type={collabMode ? 'primary' : 'default'}
-                  ghost={collabMode}
-                  onClick={toggleCollabMode}
-                  // Phase 9.7：激活态呼吸闪烁，提醒用户仍处于发起协作模式（再次点击可退出）
-                  style={collabMode ? { animation: 'zeroexo-collab-pulse 1.5s ease-in-out infinite' } : undefined}
-                />
+                <Badge count={pendingApprovals} size="small" overflowCount={99} offset={[2, -2]}>
+                  <Button
+                    icon={<Users size={14} />}
+                    size="small"
+                    type={collabMode ? 'primary' : 'default'}
+                    ghost={collabMode}
+                    onClick={toggleCollabMode}
+                    // Phase 9.7：激活态呼吸闪烁，提醒用户仍处于发起协作模式（再次点击可退出）
+                    style={collabMode ? { animation: 'zeroexo-collab-pulse 1.5s ease-in-out infinite' } : undefined}
+                  />
+                </Badge>
               </Tooltip>
             )}
             {collabMode && (

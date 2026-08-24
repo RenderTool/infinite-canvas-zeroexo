@@ -45,6 +45,8 @@ export interface CanvasAgentState {
   messages: CanvasAgentMessage[];
   addMessage: (msg: CanvasAgentMessage) => void;
   updateMessage: (id: string, patch: Partial<CanvasAgentMessage>) => void;
+  /** 批量设置消息（历史加载用，一次性写入避免多次渲染） */
+  batchSetMessages: (msgs: CanvasAgentMessage[]) => void;
   clearMessages: () => void;
 
   // ---- 思考态 ----
@@ -71,6 +73,9 @@ export interface CanvasAgentState {
   // ---- 生成状态 ----
   isGenerating: boolean;
   setIsGenerating: (v: boolean) => void;
+  /** 对话页签未读提醒数（Agent 本轮回复/提问完成且不在对话页签时 +1；切到对话页签清零） */
+  agentUnread: number;
+  clearAgentUnread: () => void;
 
   // ---- 执行阶段（Plan#36 R2-5，Codex 式 phase） ----
   phase: AgentPhase | null;
@@ -127,6 +132,7 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     })),
+  batchSetMessages: (msgs) => set({ messages: msgs }),
   clearMessages: () => set({ messages: [] }),
 
   // 思考态
@@ -159,7 +165,18 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
 
   // 生成状态
   isGenerating: false,
-  setIsGenerating: (v) => set({ isGenerating: v }),
+  setIsGenerating: (v) =>
+    set((s) => {
+      // 未读对话提醒：生成结束（true→false）且当前不在对话页签 → 计数 +1
+      // （真连层 onDone/onError/onClose 与模拟器 clarify/confirm 挂起都走这里 = 产生了新的聊天内容；
+      //   正在对话页签看时由 DockContent 兜底清零，避免页签已激活仍残留红点）
+      if (!v && s.isGenerating && s.dockTab !== 'chat') {
+        return { isGenerating: v, agentUnread: s.agentUnread + 1 };
+      }
+      return { isGenerating: v };
+    }),
+  agentUnread: 0,
+  clearAgentUnread: () => set({ agentUnread: 0 }),
 
   // 执行阶段（R2-5）
   phase: null,
@@ -201,6 +218,7 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
       pendingConfirm: null,
       pendingClarify: [],
       isGenerating: false,
+      agentUnread: 0,
       inputText: '',
       strategy: 'confirm_each',
       references: [],

@@ -89,6 +89,8 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* R3: 内容横向溢出防护——长串(如 @ 引用 node id)不可换行会撑宽消息区,造成右侧大块空白 */
+  overflow-x: hidden;
   padding: 16px 16px 10px;
   display: flex;
   flex-direction: column;
@@ -105,7 +107,8 @@
   animation: msg-enter 200ms var(--agent-ease) both;
 }
 .msg.user {
-  align-self: flex-end;
+  /* R4：回合外层是块级 div，align-self 失效导致无法贴右；改用 margin-left:auto 保证右对齐 */
+  margin-left: auto;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -121,6 +124,25 @@
 }
 /* R2：Agent 头像（纯 icon 无底色，主题文字色配套；22px 永远大于子动作图标 18px） */
 .agent-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--agent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+/* R4：用户消息行 = 气泡 + 头像（头像在最右侧） */
+.msg.user .user-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+}
+/* R4：用户头像（与 Agent 头像同尺寸同风格，User 线性图标） */
+.user-avatar {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -150,6 +172,10 @@
 }
 .msg.user .user-text {
   white-space: pre-wrap;
+  /* R3: 长 node id / 超长单词必须换行,否则撑宽消息流(右缘空白 bug) */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
   color: var(--agent-text);
   background: var(--agent-user-bubble);
   border: none;
@@ -161,6 +187,9 @@
 .msg.assistant .ai-body {
   flex: 1;
   min-width: 0;
+  align-self: stretch; /* 撑满全宽，让卡片卡片 maxWidth+margin:auto 居中生效 */
+  /* R3: 同 user-text,超长串(URL/node id)不换行会撑宽消息流 */
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.7;
   color: var(--agent-text); /* R2 返工：正文用主文本色，弱化色只做辅助信息（此前整体偏灰显得廉价） */

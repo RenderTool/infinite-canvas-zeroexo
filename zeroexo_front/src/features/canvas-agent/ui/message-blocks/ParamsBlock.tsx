@@ -20,15 +20,16 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Settings2, Wand2, ChevronRight, ChevronDown, X, Link, Unlink, Paperclip } from 'lucide-react';
+import { Settings2, Wand2, ChevronDown, X, Link, Unlink, Paperclip } from 'lucide-react';
 import type { CanvasAgentMessage, ParamFieldData } from '../types.js';
 import { useCanvasAgentStore } from '../store.js';
 import { sendAnswer } from '../session/agent-session.js';
 
-/** 投影风格卡片容器样式（无边线，对齐 QuestionBlock） */
+/** 投影风格卡片容器样式（无边线，对齐 QuestionBlock 居中） */
 const cardStyle: React.CSSProperties = {
   width: '100%',
-  margin: '6px 0',
+  maxWidth: 480,
+  margin: '6px auto',
   padding: 12,
   background: 'linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2))',
   border: 'none',
@@ -468,23 +469,43 @@ export function ParamsBlock(props: { message: CanvasAgentMessage }): React.React
   const { message } = props;
   const data = message.params;
   const updateMessage = useCanvasAgentStore((s) => s.updateMessage);
+
+  // 历史还原：从 restoredAnswer 解析出之前提交的参数值
+  const restored = useMemo(() => {
+    if (!message.answered || !message.restoredAnswer) return null;
+    const text = message.restoredAnswer;
+    // 格式："参数表单确认: {JSON}"
+    const jsonStart = text.indexOf('{');
+    if (jsonStart < 0) return null;
+    try {
+      const payload = JSON.parse(text.slice(jsonStart));
+      return {
+        values: (payload.values ?? {}) as FieldValues,
+        preset: (payload.preset as string) || null,
+        note: (payload.note as string) || '',
+      };
+    } catch {
+      return null;
+    }
+  }, [message.answered, message.restoredAnswer]);
+
   const [values, setValues] = useState<FieldValues>(() => {
+    if (restored) return restored.values;
     const init: FieldValues = {};
     for (const f of data?.fields ?? []) {
       if (f.default !== undefined) init[f.name ?? (f as any).key] = f.default;
     }
     return init;
   });
-  const [activePreset, setActivePreset] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [folded, setFolded] = useState(false);
+  const [activePreset, setActivePreset] = useState<string | null>(restored?.preset ?? null);
+  const [note, setNote] = useState(restored?.note ?? '');
+  const [submitted, setSubmitted] = useState(!!message.answered);
 
   const fields = useMemo(() => (data?.fields ?? []).map(normalizeField), [data?.fields]);
 
   if (!data) return <></>;
 
-  const answered = message.paramsAnswered === true || submitted;
+  const answered = message.paramsAnswered === true || !!message.answered || submitted;
   const presets = data.presets ?? [];
   const filledCount = fields.filter((f) => isFieldFilled(values[f.name])).length;
   const missingRequired = fields.some((f) => f.required && !isFieldFilled(values[f.name]));
@@ -504,7 +525,6 @@ export function ParamsBlock(props: { message: CanvasAgentMessage }): React.React
   const handleSubmit = () => {
     if (answered) return;
     setSubmitted(true);
-    setFolded(true);
     const payload: Record<string, unknown> = {
       nodeType: data.nodeType,
       values,
@@ -515,50 +535,8 @@ export function ParamsBlock(props: { message: CanvasAgentMessage }): React.React
     void sendAnswer(`参数表单确认: ${JSON.stringify(payload)}`);
   };
 
-  // ===== 折叠摘要行（提交后，对齐 QuestionBlock R2） =====
-  if (folded && answered) {
-    const summary = activePreset
-      ? `${activePreset}${note.trim() ? ' · 备注已附' : ''}`
-      : `${filledCount} 项参数${note.trim() ? ' · 备注已附' : ''}`;
-    return (
-      <button
-        type="button"
-        onClick={() => setFolded(false)}
-        style={{
-          ...cardStyle,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          textAlign: 'left',
-        }}
-      >
-        <Settings2 size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--agent-muted)', flexShrink: 0 }}>
-          参数表单
-        </span>
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 12,
-            color: 'var(--agent-text)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          已提交：{summary || '—'}
-        </span>
-        <ChevronRight size={12} color="var(--agent-muted)" style={{ flexShrink: 0 }} />
-      </button>
-    );
-  }
-
   return (
-    <div style={cardStyle}>
+    <div style={{ ...cardStyle, opacity: answered ? 0.6 : 1, pointerEvents: answered ? 'none' : 'auto' }}>
       {/* 表单头：icon + 参数表单 + 标题 + 节点类型徽标 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <Settings2 size={13} color="var(--agent-muted)" style={{ flexShrink: 0 }} />

@@ -149,7 +149,7 @@ export function TvcAgentShell(): React.ReactElement {
     row.className = 'msg-row ai-row';
     let avatarHtml = '';
     if (firstAIMessage) {
-      avatarHtml = `<div class="avatar ai-avatar" title="VideoForge Agent">
+      avatarHtml = `<div class="avatar ai-avatar" title="ZeroExo Agent">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2l2.4 5.6L20 9l-5.6 2.4L12 17l-2.4-5.6L4 9l5.6-1.4z"/></svg>
       </div>`;
     }
@@ -436,7 +436,7 @@ export function TvcAgentShell(): React.ReactElement {
 
   // ===== 导出报告 =====
   const exportReport = useCallback(() => {
-    const text = `VideoForge Agent — TVC Report
+    const text = `ZeroExo Agent — TVC Report
 ================================
 Direction: ${stepData.direction || 'N/A'}
 Variant: ${stepData.variant || 'N/A'}
@@ -830,7 +830,7 @@ Handing off to Storyboard Agent...`);
     updatePipeline(4);
 
     const renderAgent = createSubAgent('Render Agent', icon(Settings), `Initializing render pipeline...
-Engine: VideoForge Ultra v2.1
+Engine: ZeroExo Ultra v2.1
 Model: vf-u-2.1
 Target: 4K · 24fps · 15s`);
     const ind5a = document.createElement('div');
@@ -870,7 +870,7 @@ Target: 4K · 24fps · 15s`);
     });
 
     const stages = [
-      { label: 'Initializing render pipeline…', dur: 700, cfg: '{"engine":"VideoForge Ultra","model":"vf-u-2.1","resolution":"4K","fps":24}' },
+      { label: 'Initializing render pipeline…', dur: 700, cfg: '{"engine":"ZeroExo Ultra","model":"vf-u-2.1","resolution":"4K","fps":24}' },
       { label: 'Generating keyframes from storyboard…', dur: 1000, cfg: `{"shots":5,"style":"${chosenVar.name}","seed":42817}` },
       { label: 'Rendering frames (24fps × 15s = 360 frames)…', dur: 1300, cfg: '{"frame":0,"total":360,"vram":"98%","gpu":"A100×4"}' },
       { label: 'Applying color grading & VFX…', dur: 900, cfg: '{"lut":"cinematic-warm","bloom":0.3,"film_grain":0.05}' },
@@ -1057,7 +1057,7 @@ Auto-filling all fields from session data...`);
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2l2.4 5.6L20 9l-5.6 2.4L12 17l-2.4-5.6L4 9l5.6-1.4z" /></svg>
           </div>
           <div>
-            <div className="agent-brand-name">VideoForge Agent</div>
+            <div className="agent-brand-name">ZeroExo Agent</div>
             <div className="agent-brand-sub" id="top-status-sub">
               <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#4ade80', marginRight: 4, verticalAlign: 'middle' }}></span>
               Idle — waiting for brief
@@ -1128,7 +1128,7 @@ Auto-filling all fields from session data...`);
           ref={inputRef}
           className="composer-input"
           rows={1}
-          placeholder="Message VideoForge Agent…  (Enter to send)"
+          placeholder="Message ZeroExo Agent…  (Enter to send)"
           onKeyDown={handleKey}
           onChange={(e) => {
             e.target.style.height = 'auto';

@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { App, Layout, Tooltip } from 'antd';
+import { App, Layout, Tooltip, Modal } from 'antd';
 import { ClipboardPaste, Eye } from 'lucide-react';
 import { EDITOR_ICONS } from './icons.js';
 import { hasClipboardContent, pasteClipboard } from '@zeroexo/preset-default';
@@ -43,6 +43,7 @@ import { NodeCapsuleToolbar } from '@/features/tools-dock/node-capsule-toolbar.j
 import { GroupStyleDialog } from '@/features/tools-dock/group-style-dialog.js';
 import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-panel.js';
 import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
+import { ReadOnlyProvider } from '@/shared/readonly-context.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
@@ -50,8 +51,8 @@ import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
 import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
 import { AssetLibraryModal } from '@/features/asset-library/index.js';
-import { AgentDock, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
-import { setCanvasOpBridge, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
+import { AgentDock, MobileAgentDrawer, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
+import { setCanvasOpBridge, setAgentReadOnly, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
 import { saveCanvasConfig } from '@/features/top-bar/index.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js';
@@ -61,6 +62,7 @@ import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
+import { getRoomByCanvas } from '@/features/collaboration/collaboration-api.js';
 import { ConfirmDialog, NodeCreateMenu, AppearanceDialog, ShortcutsDialog, MobileNavDrawer, MobileNavButton, MobileNavFloatingWrapper, LanguageDialog, AssetDetailViewer, LoadingOverlay } from '@/shared/components/index.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ImageDialogRenderer } from '@/features/image-editor/image-dialog-renderer.js';
@@ -92,7 +94,7 @@ export interface EditorPageProps {
 }
 
 export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps): React.ReactElement {
-  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable } = useEditorState(canvasId);
+  const { state, actions, refs, containerRef, cloudUpdateAvailable, clearCloudUpdateAvailable, onAgentBatchEnd } = useEditorState(canvasId);
     // 快捷键注册表(键盘插件实例;供快捷键弹窗自动映射,未安装插件时为 undefined)
     const keyboardShortcuts = state.editor?.core.plugins.get<KeyboardPlugin>('keyboard')?.listShortcuts();
   const { theme } = useTheme();
@@ -162,13 +164,80 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     return () => window.removeEventListener('zeroexo:collab-kicked', handler);
   }, [canvasId, modal, onBack, t]);
 
+  // 被封禁：发起者封禁成员(member_updated + banned) → 弹窗提示，确认后返回主页
+  // 与踢出同等级：封禁是禁止重新加入的最高权限处置，当前会话必须立刻退出
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ canvasId?: string } | undefined>).detail;
+      if (!detail || detail.canvasId !== canvasId) return;
+      modal.confirm({
+        title: t('collab.bannedByOwnerTitle'),
+        content: t('collab.bannedByOwnerContent'),
+        okText: t('collab.backToHome'),
+        cancelButtonProps: { style: { display: 'none' } },
+        centered: true,
+        onOk: () => onBack(),
+      });
+    };
+    window.addEventListener('zeroexo:collab-banned', handler);
+    return () => window.removeEventListener('zeroexo:collab-banned', handler);
+  }, [canvasId, modal, onBack, t]);
+
   // 只读保护（Plan#38 Phase 7.4）：协作中自己是无 edit 权限的成员（viewer）时，
   // 透明遮罩拦截画布全部指针交互（仅保留浏览），并展示「只读模式」徽标；
   // 房主/可编辑成员不受影响。服务端写校验为已知缺口（版本接口已按 role 拦截）。
   const collabActive = useCollaborationStore((s) => s.active);
   const collabMembers = useCollaborationStore((s) => s.members);
-  const selfMember = collabMembers.find((m) => m.isSelf) ?? null;
-  const isReadOnlyViewer = collabActive && !!selfMember && !selfMember.permissions.includes('edit');
+  const collabUserId = useCollaborationStore((s) => s.userId);
+  const collabRoom = useCollaborationStore((s) => s.room);
+  const collabStatus = useCollaborationStore((s) => s.status);
+
+  // 审核制待审（2026-08-25 审核制漏洞修复）：画布页内重进被 SSE 转 pending /
+  // 刷新后 init 返回待审标记 → 展示"等待审核"Modal（遮罩阻断画布交互）
+  // 状态驱动而非 modal.confirm：房主批准后 member_joined → setRoom 恢复 active → Modal 自动关闭，
+  // 无需返回主页再重进（体验闭环）
+  // 用 userId 匹配自己而非 isSelf 字段：getRoomByCanvas 的 members 映射不含 isSelf，
+  // 依赖该字段会导致 selfMember 永远匹配不到 → 只读遮罩不渲染 → viewer 可操作画布（已修复）
+  const selfMember = collabMembers.find((m) => m.userId === collabUserId) ?? null;
+  // 只读判定双保险：①权限不含 edit（正常路径）；②房间档位兑底——只读房间（allowEdit=false）的
+  // 非 owner 成员即使权限数据被污染含 edit（updateMember API 直调等），仍按只读拦截（2026-08-25 实测暴露）
+  const isReadOnlyViewer = collabActive && !!selfMember && (
+    !selfMember.permissions.includes('edit') ||
+    (!!collabRoom && !collabRoom.allowEdit && selfMember.role !== 'owner')
+  );
+
+  // 只读模式拦截编辑类快捷键（2026-08-25 系统性只读防护）：键盘事件走 window 级监听，
+  // 画布遮罩拦不住（Delete 删除 / Ctrl+D 原位复制 / Ctrl+Z 撤销 / Ctrl+C/V 复制粘贴均会改画布数据）。
+  // capture 阶段抢在 keyboard 插件分发前拦截；输入框内放行（搜索框等浏览输入不受影响）。
+  useEffect(() => {
+    if (!isReadOnlyViewer) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (el && (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      const blocked =
+        e.key === 'Delete' || e.key === 'Backspace' ||
+        (mod && ['z', 'y', 'd', 'c', 'x', 'v'].includes(k));
+      if (blocked) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isReadOnlyViewer]);
+
+  // 只读模式下同步 Agent 操作桥只读标志（2026-08-25 系统性只读防护）：
+  // executeCanvasOp 直接拒绝执行——已打开的 Agent 会话/历史消息携带的 canvas_op 不会落到画布
+  useEffect(() => {
+    setAgentReadOnly(isReadOnlyViewer);
+  }, [isReadOnlyViewer]);
+
+  // 标题属房主 project 元数据(同步链只对 owner 生效),参与者(含可编辑权限)改标题无法持久化
+  // → 禁用编辑入口,避免"改了刷新又变回去"的假可编辑
+  const isCollabGuest = !!collabRoom && !collabRoom.isOwner;
 
   // 素材库
   const { addAsset: addAssetToStore } = useAssets();
@@ -204,6 +273,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // R2-3: 画布配置桥接需要最新 dialogs 状态（set_config 应用+持久化）
   const dialogsRef = useRef(dialogs);
   dialogsRef.current = dialogs;
+  // Agent 批量操作结束 flush 回调引用：避免 onAgentBatchEnd 变化导致桥接层重建
+  const batchEndRef = useRef(onAgentBatchEnd);
+  batchEndRef.current = onAgentBatchEnd;
   useEffect(() => {
     setCanvasOpBridge({
       getCommandQueue: () => bridgeStateRef.current.editor?.core.commandQueue ?? null,
@@ -226,14 +298,17 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         d.setAssetPickerOpen(true);
         return true;
       },
+      // Agent 批量操作结束后单次 flush Yjs 图推送
+      onBatchEnd: () => batchEndRef.current?.(),
     });
     return () => setCanvasOpBridge(null);
   }, []);
 
   // Plan#33 D5: 主页智能体工作流 - 消费待注入提示词
   // 流程: 主页点生成 → 先建画布项目 → 跳转本页 → 打开 Agent 面板 + 提示词完整占位到输入框 + 自动发送(面板内思考)
+  // 只读跳过（2026-08-25 系统性只读防护）：不消费不打开——viewer 不得自动触发 Agent 执行
   useEffect(() => {
-    if (state.loading || !canvasId) return;
+    if (state.loading || !canvasId || isReadOnlyViewer) return;
     const prompt = consumePendingAgentPrompt();
     if (prompt == null) return;
     const s = useCanvasAgentStore.getState();
@@ -293,6 +368,19 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       if (project?.title) {
         dialogs.setTitle(project.title);
         dialogs.setTitleDraft(project.title);
+        return;
+      }
+      // 参与者本地无 project 元数据(画布属发起者)→ 从协作房间接口拿画布标题,
+      // 避免加入端显示"未命名画布"与发起端标题不一致
+      try {
+        const room = await getRoomByCanvas(canvasId);
+        // 审核制待审标记(pending)无 canvasTitle，跳过（2026-08-25）
+        if (room && 'canvasTitle' in room && room.canvasTitle) {
+          dialogs.setTitle(room.canvasTitle);
+          dialogs.setTitleDraft(room.canvasTitle);
+        }
+      } catch {
+        // 非成员/无房间:保持默认标题
       }
     })();
   }, [canvasId]);
@@ -337,6 +425,141 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const selectedNodeHasContent = !!selectedNodeData?.content || !!selectedNodeData?.storageKey;
   const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning;
   const handlers = useCanvasHandlers(refs, containerRef);
+
+  // ===== 只读浏览手势（2026-08-25 用户反馈：只读遮罩不能浏览画布）=====
+  // 只读遮罩拦截全部编辑交互（拖拽/框选/连线/右键），但保留浏览能力：
+  // 鼠标左键拖动 = 平移画布；触摸单指 = 平移（双指 pinch 缩放由 use-editor-state
+  // 的容器原生 touch 监听处理，遮罩 touch 事件两指时主动让位）；滚轮缩放/平移
+  // 由容器原生 wheel 监听统一处理（controller.handleWheel）。
+  // 2026-08-25 二次反馈「只读不代表不能点击节点/双击聚焦」：遮罩按下时做命中检测——
+  // 命中节点 → 点击选中（高亮查看）/ 双击聚焦（focusOnNode 放大动画）；未命中 → 平移。
+  const readOnlyOverlayRef = useRef<HTMLDivElement | null>(null);
+  const readOnlyPanRef = useRef<{ startX: number; startY: number; vpX: number; vpY: number } | null>(null);
+  // 只读点击状态：pendingClick = 上次点击的节点（双击判定）；moved = 空白按下后是否位移超过阈值
+  const readOnlyPendingClickRef = useRef<{ nodeId: string; width: number; height: number; time: number } | null>(null);
+  const readOnlyMovedRef = useRef(false);
+  const getNodeSizeRef = useRef(interactions.getNodeSize);
+  getNodeSizeRef.current = interactions.getNodeSize;
+
+  // 只读命中检测：屏幕坐标命中节点矩形（逆序遍历 = 后渲染的在上层，与 NodeLayer 一致）
+  const hitTestReadOnlyNode = useCallback((clientX: number, clientY: number, rect: DOMRect): { nodeId: string; width: number; height: number } | null => {
+    const store = state.editor?.store;
+    if (!store) return null;
+    const vp = store.getViewport();
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
+    const nodes = store.getGraph().nodes;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
+      if (!n) continue;
+      const size = getNodeSizeRef.current(n);
+      const nx = n.position.x * vp.k + vp.x;
+      const ny = n.position.y * vp.k + vp.y;
+      const nw = size.width * vp.k;
+      const nh = size.height * vp.k;
+      if (screenX >= nx && screenX <= nx + nw && screenY >= ny && screenY <= ny + nh) {
+        return { nodeId: n.id, width: size.width, height: size.height };
+      }
+    }
+    return null;
+  }, [state.editor]);
+
+  const handleReadOnlyPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return; // 触摸走 touch 事件路径，避免双重平移
+    if (e.button !== 0) return;
+    const store = state.editor?.store;
+    if (!store) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const hit = hitTestReadOnlyNode(e.clientX, e.clientY, rect);
+    if (hit) {
+      // 命中节点：点击选中（高亮查看）；同一节点 400ms 内二次按下 = 双击聚焦放大
+      const now = Date.now();
+      const prev = readOnlyPendingClickRef.current;
+      if (prev && prev.nodeId === hit.nodeId && now - prev.time < 400) {
+        store.focusOnNode(hit.nodeId, state.containerSize, hit.width, hit.height, 400, 51);
+        readOnlyPendingClickRef.current = null;
+      } else {
+        store.selectNodes([hit.nodeId], false);
+        readOnlyPendingClickRef.current = { nodeId: hit.nodeId, width: hit.width, height: hit.height, time: now };
+      }
+      return; // 节点上不进入平移
+    }
+    // 未命中（空白）：开始平移；按下即视为新交互，清除上一节点的双击判定
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const vp = store.getViewport();
+    readOnlyPanRef.current = { startX: e.clientX, startY: e.clientY, vpX: vp.x, vpY: vp.y };
+    readOnlyMovedRef.current = false;
+    readOnlyPendingClickRef.current = null;
+    e.currentTarget.style.cursor = 'grabbing';
+  }, [state.editor, state.containerSize, hitTestReadOnlyNode]);
+
+  const handleReadOnlyPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return;
+    const p = readOnlyPanRef.current;
+    const store = state.editor?.store;
+    if (!p || !store) return;
+    // 4px 阈值内视为点击（不移动视口），超出才真正平移
+    if (!readOnlyMovedRef.current) {
+      const dx = e.clientX - p.startX;
+      const dy = e.clientY - p.startY;
+      if (Math.abs(dx) + Math.abs(dy) < 4) return;
+      readOnlyMovedRef.current = true;
+    }
+    store.setViewport({
+      ...store.getViewport(),
+      x: p.vpX + (e.clientX - p.startX),
+      y: p.vpY + (e.clientY - p.startY),
+    });
+  }, [state.editor]);
+
+  const handleReadOnlyPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return;
+    // 空白按下后无位移 = 点击空白 → 清除选择（与编辑模式 select 模式点击空白一致）
+    if (readOnlyPanRef.current && !readOnlyMovedRef.current) {
+      state.editor?.store.clearSelection();
+    }
+    readOnlyPanRef.current = null;
+    readOnlyMovedRef.current = false;
+    e.currentTarget.style.cursor = 'grab';
+  }, [state.editor?.store]);
+
+  const handleReadOnlyTouchStart = useCallback((e: React.TouchEvent) => {
+    const store = state.editor?.store;
+    if (!store) return;
+    if (e.touches.length >= 2) {
+      // 双指：让位给容器原生 pinch 缩放，清除单指平移状态避免冲突
+      readOnlyPanRef.current = null;
+      return;
+    }
+    const t = e.touches[0];
+    if (!t) return;
+    // 触摸命中节点 = 选中查看（与桌面一致；节点优先，不进入平移）
+    const rect = e.currentTarget.getBoundingClientRect();
+    const hit = hitTestReadOnlyNode(t.clientX, t.clientY, rect);
+    if (hit) {
+      store.selectNodes([hit.nodeId], false);
+      return;
+    }
+    const vp = store.getViewport();
+    readOnlyPanRef.current = { startX: t.clientX, startY: t.clientY, vpX: vp.x, vpY: vp.y };
+  }, [state.editor, hitTestReadOnlyNode]);
+
+  const handleReadOnlyTouchMove = useCallback((e: React.TouchEvent) => {
+    const p = readOnlyPanRef.current;
+    const store = state.editor?.store;
+    if (!p || !store || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (!t) return;
+    store.setViewport({
+      ...store.getViewport(),
+      x: p.vpX + (t.clientX - p.startX),
+      y: p.vpY + (t.clientY - p.startY),
+    });
+  }, [state.editor]);
+
+  const handleReadOnlyTouchEnd = useCallback(() => {
+    readOnlyPanRef.current = null;
+  }, []);
 
   // 双击节点缩放
   const handleNodeDoubleClick = useCallback((nodeId: string, width: number, height: number) => {
@@ -516,6 +739,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   }, [t, message]);
 
   return (
+    <ReadOnlyProvider value={isReadOnlyViewer}>
     <Layout style={layoutStyle(theme)}>
       <div style={mainRowStyle}>
       {/* 桌面端:画布结构(层级)侧边栏 — 全高占位,展开时同时推开顶部 NAV 与右侧内容区(沉浸式体验) */}
@@ -593,18 +817,16 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           title={dialogs.title}
           titleDraft={dialogs.titleDraft}
           isTitleEditing={dialogs.isTitleEditing}
+          titleEditable={!isCollabGuest}
           onTitleDraftChange={dialogs.setTitleDraft}
-          onStartTitleEditing={() => { dialogs.setTitleDraft(dialogs.title); dialogs.setIsTitleEditing(true); }}
+          onStartTitleEditing={() => {
+            if (isCollabGuest) return; // 参与者标题只读(元数据归房主)
+            dialogs.setTitleDraft(dialogs.title); dialogs.setIsTitleEditing(true);
+          }}
           onFinishTitleEditing={dialogs.handleFinishTitleEditing}
           onCancelTitleEditing={() => dialogs.setIsTitleEditing(false)}
           agentOpen={agentDockOpen}
-          onToggleAgent={() => {
-            dialogs.setAgentOpen((v: boolean) => !v);
-            // 同步到 AgentDock 的 zustand store
-            import('@/features/canvas-agent/ui/store.js').then(m =>
-              m.useCanvasAgentStore.getState().toggleDock()
-            );
-          }}
+          onToggleAgent={() => useCanvasAgentStore.getState().toggleDock()}
           gridStyle={dialogs.background}
           onGridStyleChange={dialogs.setBackground}
           onOpenSettings={dialogs.onOpenSettings}
@@ -612,7 +834,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
           // R2-8: 协作聊天面板入口已并入 AgentDock 页签，Nav 按钮移除
-          onSaveVersion={dialogs.onSaveVersion}
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
           keyboardShortcuts={keyboardShortcuts}
           syncBadge={
@@ -669,11 +890,26 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         <div style={flexContainerStyle}>
           {/* 画布区域(flex-1 自适应) */}
           <div ref={containerRef} style={canvasAreaStyle}>
-            {/* 只读保护遮罩（Plan#38 Phase 7.4）：viewer 成员拦截画布指针交互，仅保留浏览；不影响顶栏/弹窗 */}
+            {/* 只读保护遮罩（Plan#38 Phase 7.4）：viewer 成员拦截画布编辑交互，仅保留浏览；不影响顶栏/弹窗 */}
+            {/* 2026-08-25 用户反馈：遮罩改为「编辑拦截 + 浏览转发」——鼠标拖动/触摸单指平移画布，双指缩放与滚轮缩放由容器原生监听处理 */}
             {isReadOnlyViewer && !state.loading && (
               <div
-                style={{ position: 'absolute', inset: 0, zIndex: 45, touchAction: 'none' }}
-                onWheel={(e) => e.preventDefault()}
+                ref={readOnlyOverlayRef}
+                style={{ position: 'absolute', inset: 0, zIndex: 45, touchAction: 'none', cursor: 'grab' }}
+                onPointerDown={handleReadOnlyPointerDown}
+                onPointerMove={handleReadOnlyPointerMove}
+                onPointerUp={handleReadOnlyPointerUp}
+                onPointerCancel={handleReadOnlyPointerUp}
+                onTouchStart={handleReadOnlyTouchStart}
+                onTouchMove={handleReadOnlyTouchMove}
+                onTouchEnd={handleReadOnlyTouchEnd}
+                onTouchCancel={handleReadOnlyTouchEnd}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  // 只读拦截拖放上传：遮罩吞掉 drop，阻止冒泡到容器触发 processFiles 建节点
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
               >
                 <div
                   style={{
@@ -902,8 +1138,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         ) : null}
 
         {/* 小地图(桌面端右下角 / 移动端左下角上移,isMiniMapOpen 时显示) */}
+        {/* 只读时 zIndex 提到 46 > 遮罩 45：小地图点击跳转是无害浏览导航，viewer 可用 */}
         {!state.loading && dialogs.isMiniMapOpen && state.editor && refs.nodesPlugin ? (
-          <div style={isMobile ? mobileMinimapWrapStyle : minimapWrapStyle}>
+          <div style={isReadOnlyViewer ? { ...(isMobile ? mobileMinimapWrapStyle : minimapWrapStyle), zIndex: 46 } : (isMobile ? mobileMinimapWrapStyle : minimapWrapStyle)}>
             <MinimapView
               store={state.editor.store}
               registry={refs.nodesPlugin.getRegistry()}
@@ -946,13 +1183,28 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           node={dialogs.detailNode}
           onClose={() => dialogs.setDetailNode(null)}
         />
+
+        {/* 审核制待审 Modal（2026-08-25）：状态驱动——批准后随 status 恢复 active 自动关闭 */}
+        <Modal
+          open={collabStatus === 'pending' && !!canvasId}
+          title={t('collab.pendingApprovalTitle')}
+          okText={t('collab.backToHome')}
+          cancelButtonProps={{ style: { display: 'none' } }}
+          centered
+          closable={false}
+          maskClosable={false}
+          onOk={onBack}
+        >
+          {t('collab.pendingApprovalContent')}
+        </Modal>
         </div>
       </div>
       </Layout.Content>
       </div>
       {/* Agent Dock（右侧可收起面板，推开整个 nav+content）
-          注入画布上下文:供 Agent @ 提及弹窗实时读取画布节点 */}
-      {!state.loading && !isMobile && (
+          注入画布上下文:供 Agent @ 提及弹窗实时读取画布节点
+          移动端改用全屏 Drawer（MobileAgentDrawer）承载同一 DockContent */}
+      {!state.loading && (
         <CanvasContextProvider
           value={{
             getNodes: () => {
@@ -975,7 +1227,11 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             },
           }}
         >
-          <AgentDock projectId={canvasId} />
+          {isMobile ? (
+            <MobileAgentDrawer projectId={canvasId} />
+          ) : (
+            <AgentDock projectId={canvasId} />
+          )}
         </CanvasContextProvider>
       )}
       </div>
@@ -1125,15 +1381,13 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         />
       )}
 
-      {/* 版本快照弹窗(保存版本 + 版本历史 + 回退,由 TopBar 按钮或 Ctrl+S 触发) */}
+      {/* 版本快照面板(保存+历史+回退单页面,由 TopBar 按钮或 Ctrl+S 触发) */}
       {!state.loading && (
         <VersionDialogs
           canvasId={canvasId}
           nodeCount={refs.store?.getGraph().nodes.length ?? 0}
-          saveOpen={dialogs.versionSaveOpen}
-          historyOpen={dialogs.versionHistoryOpen}
-          onSaveClose={() => dialogs.setVersionSaveOpen(false)}
-          onHistoryClose={() => dialogs.setVersionHistoryOpen(false)}
+          open={dialogs.versionDialogOpen}
+          onClose={() => dialogs.setVersionDialogOpen(false)}
           theme={theme}
         />
       )}
@@ -1153,12 +1407,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           onClose={() => dialogs.setMobileNavOpen(false)}
           projectActions={dialogs.mobileNavProjectActions}
           onProjectAction={dialogs.handleMobileProjectAction}
-          onToggleAgent={() => {
-            dialogs.setAgentOpen((v: boolean) => !v);
-            import('@/features/canvas-agent/ui/store.js').then(m =>
-              m.useCanvasAgentStore.getState().toggleDock()
-            );
-          }}
+          onToggleAgent={isReadOnlyViewer ? undefined : () => useCanvasAgentStore.getState().toggleDock()}
           onOpenShortcuts={() => dialogs.setMobileShortcutsOpen(true)}
           onOpenSettings={() => dialogs.onOpenSettings()}
           onOpenAppearance={() => dialogs.setMobileAppearanceOpen(true)}
@@ -1201,11 +1450,15 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         />
       ) : null}
     </Layout>
+    </ReadOnlyProvider>
   );
 }
 
 function layoutStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  return { position: 'relative', height: '100%', overflow: 'hidden', background: theme.canvas.background };
+  // R3: 根 Layout 是 AppLayout Content(flex) 的 flex item,必须显式撑满——
+  // 否则宽度收缩到内容 max-content(画布节点为绝对定位不参与计算),
+  // AgentDock 脱离视口右缘,右侧露出大片空白
+  return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: theme.canvas.background };
 }
 const headerStyle: CSSProperties = { height: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
 const contentLayoutStyle: CSSProperties = { position: 'relative', overflow: 'hidden' };

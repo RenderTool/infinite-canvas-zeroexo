@@ -17,6 +17,7 @@ import { getApiBaseUrl, getToken } from '@/services/api-client.js';
 import { useCollaborationStore } from './use-collaboration-store.js';
 import { listMembers, getRoomByCanvas, listMessages } from './collaboration-api.js';
 import type { CollaborationEvent, CollaborationMessage } from './collaboration-types.js';
+import { isPendingJoinResult } from './collaboration-types.js';
 
 export interface CollaborationSocketHandle {
   /** 关闭 SSE 连接 */
@@ -180,6 +181,8 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
   }
 
   const store = useCollaborationStore;
+  // 当前连接（事件处理共用；连接可能已被关闭，用空串兜底）
+  const myUserId = activeConnections.get(canvasId)?.userId ?? '';
 
   switch (event.type) {
     case 'welcome':
@@ -189,6 +192,11 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       const message = event.meta?.message as CollaborationMessage | undefined;
       if (message?.id) {
         store.getState().addMessage(message);
+        // 未读提醒：排除自己发的消息（发送者也收 SSE 广播），且不在此判断聊天页是否激活
+        // （由 DockContent 在 collab Tab 激活时清 0，避免 socket 依赖 canvas-agent store 产生循环）
+        if (message.senderId !== myUserId) {
+          store.getState().bumpUnreadMessages();
+        }
       }
       break;
     }
@@ -199,12 +207,41 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       }
       break;
     }
-    case 'member_joined':
-      void refreshMembers(canvasId);
+    case 'member_joined': {
+      // 立即刷新成员列表（新成员加入需立即可见）
+      refreshMembers(canvasId).catch(() => {
+        setTimeout(() => refreshMembers(canvasId).catch(() => {}), 500);
+      });
+      // 新成员加入提醒：只要有 userId 且非自己就计数（不再依赖 myUserId，避免被踢出后 myUserId 为空导致判断错误）
+      if (event.userId && event.userId !== myUserId) {
+        store.getState().bumpNewMemberCount();
+      }
+      // 审核制（2026-08-25 体验闭环）：自己 pending 时收到 member_joined = 申请被批准 →
+      // 重新探测房间恢复协作（setRoom 联动 status → active，editor-page 的待审 Modal 自动关闭）
+      if (event.userId && event.userId === myUserId && store.getState().status === 'pending') {
+        void refreshRoom(canvasId);
+      }
       break;
+    }
     case 'join_application':
       // Phase 8：新的待审加入申请 → 通知房主端刷新待审列表并提示（弹窗打开时自行拉取）
       window.dispatchEvent(new CustomEvent('zeroexo:collab-join-application', { detail: { canvasId, userId: event.userId } }));
+      // 未读申请提醒（仅房主；非房主收到广播不显示红点）
+      if (store.getState().room?.ownerId === myUserId) {
+        store.getState().bumpPendingApprovals();
+      }
+      // 申请人自己（2026-08-25 审核制漏洞修复）：画布页内重进被 SSE 转 pending →
+      // 同步"待审中"状态并弹等待审核提示（membership_pending 的兜底，双通道防漏）
+      if (event.userId && event.userId === myUserId) {
+        store.getState().setStatus('pending');
+        window.dispatchEvent(new CustomEvent('zeroexo:collab-pending', { detail: { canvasId, userId: event.userId } }));
+      }
+      break;
+    case 'membership_pending':
+      // 2026-08-25 审核制漏洞修复：申请人自己被转为待审（画布页内重进被 SSE 拦截）
+      // → 置"待审中"状态 + 弹等待审核覆盖层（阻止继续编辑）
+      store.getState().setStatus('pending');
+      window.dispatchEvent(new CustomEvent('zeroexo:collab-pending', { detail: { canvasId, userId: event.userId } }));
       break;
     case 'member_left':
       // 检测是否自己被踢出
@@ -224,6 +261,29 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       // 非自己 → 刷新成员列表
       void refreshMembers(canvasId);
       break;
+    case 'member_updated':
+      // 自己被封禁 → 断开 SSE 连接，停止重连，通知用户并引导返回主页
+      // (被封禁广播是 member_updated + banned,与 member_left+kicked 的踢出同等级处理)
+      if (event.meta?.banned === true && event.userId) {
+        const conn = activeConnections.get(canvasId);
+        if (conn && conn.userId === event.userId) {
+          closeConnection(canvasId);
+          store.getState().setActive(false);
+          store.getState().setError('你已被封禁');
+          window.dispatchEvent(new CustomEvent('zeroexo:collab-banned', { detail: { canvasId } }));
+          return;
+        }
+      }
+      // 自己被解除禁言 → 清除错误状态（允许重新发送消息）
+      if (event.meta?.unmuted === true && event.userId) {
+        const conn = activeConnections.get(canvasId);
+        if (conn && conn.userId === event.userId) {
+          store.getState().setError(null);
+        }
+      }
+      // 非自己/非封禁(禁言/解禁/权限变更) → 刷新成员列表
+      void refreshMembers(canvasId);
+      break;
     case 'room_updated':
       // 房间设置变更 → 重新拉取房间信息
       void refreshRoom(canvasId);
@@ -241,6 +301,10 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
           (event.meta?.ownerId as string | undefined) ?? store.getState().room?.ownerId;
         store.getState().setRoom(null);
         store.getState().setAgentStatus(null);
+        // 房间关闭后未读/待审/新成员提醒一并清零（房间已不存在，残留红点无意义）
+        store.getState().clearUnreadMessages();
+        store.getState().setPendingApprovals(0);
+        store.getState().clearNewMemberCount();
         if (ownerId === store.getState().userId) {
           store.getState().setStatus('idle');
         } else {
@@ -273,6 +337,10 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
       const message = event.meta?.message as CollaborationMessage | undefined;
       if (message?.id) {
         store.getState().addMessage(message);
+        // Agent 回复同样计入未读提醒（非自己；与 message case 保持一致）
+        if (message.senderId !== myUserId) {
+          store.getState().bumpUnreadMessages();
+        }
       }
       break;
     }
@@ -285,7 +353,8 @@ function handleServerEvent(canvasId: string, dataLine: string): void {
 async function refreshRoom(canvasId: string): Promise<void> {
   try {
     const room = await getRoomByCanvas(canvasId);
-    if (room) {
+    // 审核制待审（2026-08-25）：pending 标记不覆盖房间状态（等待审核由独立事件/init 处理）
+    if (room && !isPendingJoinResult(room)) {
       useCollaborationStore.getState().setRoom(room);
     }
   } catch {
@@ -299,7 +368,8 @@ async function refreshMembers(canvasId: string): Promise<void> {
     const members = await listMembers(canvasId);
     useCollaborationStore.getState().setMembers(members);
   } catch {
-    // 忽略拉取失败
+    // 忽略拉取失败，500ms 后重试
+    setTimeout(() => listMembers(canvasId).then(m => useCollaborationStore.getState().setMembers(m)).catch(() => {}), 500);
   }
 }
 

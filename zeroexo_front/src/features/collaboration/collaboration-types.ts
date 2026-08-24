@@ -8,14 +8,14 @@ export type CollaborationMode = 'invite-only' | 'public' | 'auto-self';
 /** 房间状态 */
 export type RoomStatus = 'active' | 'closed' | 'expired';
 
-/** 画布协作状态（对外语义：未开启/协作中/已失效） */
-export type CollaborationStatus = 'idle' | 'active' | 'expired';
+/** 画布协作状态（对外语义：未开启/协作中/已失效/待审中——2026-08-25 审核制：画布页内重进被转 pending） */
+export type CollaborationStatus = 'idle' | 'active' | 'expired' | 'pending';
 
 /** 成员角色 */
 export type MemberRole = 'owner' | 'editor' | 'viewer';
 
 /** 成员状态 */
-export type MemberStatus = 'online' | 'offline' | 'banned' | 'muted';
+export type MemberStatus = 'online' | 'offline' | 'banned' | 'muted' | 'left';
 
 /** 设备类型 */
 export type DeviceType = 'desktop' | 'tablet' | 'mobile';
@@ -82,6 +82,7 @@ export type CollaborationEventType =
   | 'member_joined'
   | 'member_left'
   | 'join_application'
+  | 'membership_pending' // 2026-08-25：申请人自己被转为待审（画布页内重进被 SSE 拦截）
   | 'room_updated'
   | 'member_updated'
   | 'message'
@@ -119,8 +120,10 @@ export interface AwarenessState {
   selectedNodeIds: string[];
   /** 在线状态 */
   online: boolean;
-  /** 最后更新时间 */
+  /** 发送端最后更新时间（双通道去重用） */
   lastUpdated: number;
+  /** 接收端本地时间（超时判定用；两端时钟差 >30s 时发送端时间戳会误判离线） */
+  receivedAt: number;
 }
 
 /** 加入房间请求 */
@@ -193,6 +196,8 @@ export interface SendMessageRequest {
 /** API 响应：房间信息 */
 export interface RoomResponse extends CollaborationRoom {
   members?: CollaborationMember[];
+  /** 画布标题(服务端下发,参与者本地无 project 元数据时用于编辑页标题) */
+  canvasTitle?: string | null;
 }
 
 /** API 响应：我的房间列表项 */

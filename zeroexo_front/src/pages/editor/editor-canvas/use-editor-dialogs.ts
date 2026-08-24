@@ -20,6 +20,7 @@ import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import { HomeIcon, PlusIcon, CopyIcon, Trash2 } from 'lucide-react';
 import i18n from '@/i18n/config';
+import { useReadOnly } from '@/shared/readonly-context.js';
 import type { EditorRefs } from './use-editor-state.js';
 
 export function useEditorDialogs({
@@ -47,6 +48,10 @@ export function useEditorDialogs({
   t: (key: string, opts?: any) => string;
   isMobile: boolean;
 }) {
+  // 只读防护（2026-08-25 系统性只读防护）：所有项目级写操作（新建/拷贝/删除/清空）在此 hook 内统一拦截，
+  // 与 UI 层隐藏互为纵深——即使未来新增入口调用了 handleXxx，readOnly 时也直接早退
+  const readOnly = useReadOnly();
+
   // ===== 画布标题 =====
   const [title, setTitle] = useState(() => t('editor.untitled'));
   const [titleDraft, setTitleDraft] = useState(() => t('editor.untitled'));
@@ -86,19 +91,17 @@ export function useEditorDialogs({
     setCollaborationOpen(true);
   }, []);
 
-  // ===== 版本快照弹窗 =====
-  const [versionSaveOpen, setVersionSaveOpen] = useState(false);
-  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  // ===== 版本快照面板(2026-08-24 保存+历史合并为单页面) =====
+  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
 
-  const onSaveVersion = useCallback(() => setVersionSaveOpen(true), []);
-  const onOpenVersionHistory = useCallback(() => setVersionHistoryOpen(true), []);
+  const onOpenVersionHistory = useCallback(() => setVersionDialogOpen(true), []);
 
-  // Ctrl+S 保存版本(Ctrl 或 Meta,并阻止浏览器默认保存)
+  // Ctrl+S 打开版本面板(Ctrl 或 Meta,并阻止浏览器默认保存)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        setVersionSaveOpen(true);
+        setVersionDialogOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -178,15 +181,17 @@ export function useEditorDialogs({
     saveCanvasConfig(next);
   }, []);
 
-  // 删除项目（弹窗确认）
+  // 删除项目（弹窗确认，只读早退）
   const handleMenuDeleteProject = useCallback(() => {
+    if (readOnly) return;
     setConfirmDeleteProject(true);
-  }, []);
+  }, [readOnly]);
 
-  // 清空画布（弹窗确认）
+  // 清空画布（弹窗确认，只读早退）
   const handleClearCanvasClick = useCallback(() => {
+    if (readOnly) return;
     setConfirmClearCanvas(true);
-  }, []);
+  }, [readOnly]);
 
   // 实际执行删除
   const doDeleteProject = useCallback(async () => {
@@ -326,8 +331,9 @@ export function useEditorDialogs({
     [refs, state.containerSize, message],
   );
 
-  // 创建新项目
+  // 创建新项目（只读早退：新建项目=项目级写操作）
   const handleNewProject = useCallback(async () => {
+    if (readOnly) return;
     let baseTitle = t('home.untitled');
     try {
       const { listProjects } = await import('@zeroexo/plugin-persistence');
@@ -347,8 +353,9 @@ export function useEditorDialogs({
     }
   }, [t, onOpenProject]);
 
-  // 拷贝项目
+  // 拷贝项目（只读早退：拷贝=创建副本，viewer 禁止）
   const handleCopyProject = useCallback(async () => {
+    if (readOnly) return;
     const current = await getProject(canvasId);
     const memoryGraph = refs.store?.getGraph();
     const rawGraph = memoryGraph ?? await loadProjectGraph(canvasId);
@@ -368,32 +375,41 @@ export function useEditorDialogs({
     }
   }, [canvasId, t, onOpenProject, refs.store]);
 
-  // 移动端导航操作列表
+  // 移动端导航操作列表（只读只保留 home：新建/拷贝/删除均为项目级写操作，2026-08-25 系统性只读防护）
   const mobileNavProjectActions = useMemo<NavProjectAction[]>(
-    () => [
-      {
-        key: 'home',
-        label: t('menu.backHome'),
-        icon: createElement(HomeIcon, { size: 16 }),
-      },
-      {
-        key: 'newProject',
-        label: t('menu.newProject'),
-        icon: createElement(PlusIcon, { size: 16 }),
-      },
-      {
-        key: 'copyProject',
-        label: t('menu.copyProject'),
-        icon: createElement(CopyIcon, { size: 16 }),
-      },
-      {
-        key: 'deleteProject',
-        label: t('menu.deleteCanvas'),
-        icon: createElement(Trash2, { size: 16 }),
-        danger: true,
-      },
-    ],
-    [t],
+    () =>
+      readOnly
+        ? [
+            {
+              key: 'home',
+              label: t('menu.backHome'),
+              icon: createElement(HomeIcon, { size: 16 }),
+            },
+          ]
+        : [
+            {
+              key: 'home',
+              label: t('menu.backHome'),
+              icon: createElement(HomeIcon, { size: 16 }),
+            },
+            {
+              key: 'newProject',
+              label: t('menu.newProject'),
+              icon: createElement(PlusIcon, { size: 16 }),
+            },
+            {
+              key: 'copyProject',
+              label: t('menu.copyProject'),
+              icon: createElement(CopyIcon, { size: 16 }),
+            },
+            {
+              key: 'deleteProject',
+              label: t('menu.deleteCanvas'),
+              icon: createElement(Trash2, { size: 16 }),
+              danger: true,
+            },
+          ],
+    [t, readOnly],
   );
 
   // 移动端导航操作分发
@@ -455,12 +471,9 @@ export function useEditorDialogs({
     setCollaborationOpen,
     onOpenCollaboration,
 
-    // 版本快照弹窗
-    versionSaveOpen,
-    setVersionSaveOpen,
-    versionHistoryOpen,
-    setVersionHistoryOpen,
-    onSaveVersion,
+    // 版本快照面板(保存+历史合并单页面)
+    versionDialogOpen,
+    setVersionDialogOpen,
     onOpenVersionHistory,
 
     // 组样式编辑

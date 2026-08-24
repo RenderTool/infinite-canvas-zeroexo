@@ -32,9 +32,22 @@ import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
 import { createProductionManagerExtensions } from '@/features/canvas-nodes/production-manager/production-manager-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
+import { isAgentBatching } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
 import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT } from '@/services/sync/broadcast-channel-service.js';
 import { collectImageStorageKeys, getProject, scheduleDeferredCleanup } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
+
+/**
+ * 远端/播种节点归一化:Yjs 广播、DB 快照或 Agent 操作产生的节点可能缺失 position
+ * (Agent add_node op 未携带时直通 AddNodeCommand),渲染层读 node.position 会抛 TypeError
+ * (node-layer NodeItem)——统一补默认位置后再进入 graph。
+ */
+function normalizeRemoteNodes(nodes: unknown[]): GraphModel['nodes'] {
+  return (nodes as GraphModel['nodes']).map((n) => ({
+    ...n,
+    position: n.position ?? { x: 0, y: 0 },
+  }));
+}
 
 export type InteractionMode = 'select' | 'pan';
 
@@ -125,6 +138,7 @@ export function useEditorState(canvasId: string): {
   collaboration: ReturnType<typeof useCollaboration> | null;
   awarenessStates: Map<number, AwarenessState>;
   collaborationActive: boolean;
+  onAgentBatchEnd: () => void;
 } {
   const containerRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
@@ -141,6 +155,11 @@ export function useEditorState(canvasId: string): {
   // 直接引用 collaboration 会捕获首个渲染的旧值(此时 active=false,远端光标永远收不到本地广播)
   const collaborationRef = useRef(collaboration);
   collaborationRef.current = collaboration;
+  // Yjs 连接状态引用:光标广播门控用「Yjs 已连接」而非协作 active——
+  // 关闭协作只断 SSE,Yjs WS 仍共享(分身页签继续编辑同步),光标广播必须跟随 Yjs 生命周期,
+  // 否则关协作后远端光标停止刷新 → 30s 超时被清,出现「同步结果在但光标消失」
+  const canvasSyncStatusRef = useRef(canvasSync.status);
+  canvasSyncStatusRef.current = canvasSync.status;
 
   // 协作掉线警告去抖间隔:Yjs 断开后去抖 3s 仍断才提示,避免信号抖动频繁弹窗
   const COLLAB_OFFLINE_WARN_DEBOUNCE_MS = 3000;
@@ -286,7 +305,8 @@ export function useEditorState(canvasId: string): {
             // 非成员/无房间（含接口 403）→ 走原有项目不存在逻辑，不泄露房间存在性。
             try {
               const room = await getRoomByCanvas(canvasId);
-              if (room && room.status !== 'active' && !room.isOwner) {
+              // 审核制待审标记(pending)无 status/isOwner，跳过失效判定（2026-08-25）
+              if (room && 'status' in room && room.status !== 'active' && !room.isOwner) {
                 message.error(i18n.t('collab.roomExpired'));
                 window.location.hash = '#/';
                 return;
@@ -331,7 +351,7 @@ export function useEditorState(canvasId: string): {
           suppressNextSync = true;
           ed.plugins.persistence?.suppressNextSave();
           commandQueue.replaceState({
-            nodes: (g.nodes ?? []) as GraphModel['nodes'],
+            nodes: normalizeRemoteNodes(g.nodes ?? []),
             edges: (g.edges ?? []) as GraphModel['edges'],
             viewport: store.getViewport(),
             metadata: (g.metadata as GraphModel['metadata']) ?? {},
@@ -607,7 +627,7 @@ export function useEditorState(canvasId: string): {
       suppressNextSync = true;
       ed.plugins.persistence?.suppressNextSave();
       commandQueue.replaceState({
-        nodes: (remote.nodes ?? []) as GraphModel['nodes'],
+        nodes: normalizeRemoteNodes(remote.nodes ?? []),
         edges: (remote.edges ?? []) as GraphModel['edges'],
         viewport: store.getViewport(),
         metadata: (remote.metadata as GraphModel['metadata']) ?? {},
@@ -655,6 +675,10 @@ export function useEditorState(canvasId: string): {
     const pushYjs = (skipResourceSync: boolean) => {
       dragPushTimer = null;
       dragPushPending = false;
+      // Agent 批量执行期间抑制推送：每个 op 都触发 onGraphChanged → pushYjs，
+      // N 个操作会导致 N 次 syncProjectResourcesToCloud(全量节点扫描+blob哈希) + N 次 pushGraph(图序列化+WS广播)。
+      // 由 executeCanvasOp 的 _agentBatching 标志抑制，完成后 onBatchEnd 单次 flush。
+      if (isAgentBatching()) return;
       // fire-and-forget:先上传本地资源(图片/视频/音频)到云端,将 storageKey 替换为 cloud key,
       // 再通过 Yjs 广播,避免其他浏览器收到 local storageKey 后找不到 blob。
       (async () => {
@@ -676,7 +700,10 @@ export function useEditorState(canvasId: string): {
     let pendingSelection: string[] = [];
     const broadcastCursor = () => {
       cursorFrame = 0;
-      if (!collaborationRef.current.active) return;
+      // 门控:Yjs 已连接 && 会话级协作曾激活——协作关闭(room_closed)只断 SSE 不断 Yjs,
+      // 分身页签的编辑仍在同步,光标必须持续广播;但从未开启协作时(双页签 idle)
+      // 不广播,避免 25Hz 光标消息无谓往返导致卡顿
+      if (canvasSyncStatusRef.current !== 'connected' || !collaborationRef.current.collabSessionActive) return;
       collaborationRef.current.setLocalCursor(pendingCursor, pendingViewport, pendingSelection);
     };
     const scheduleCursorBroadcast = () => {
@@ -712,8 +739,8 @@ export function useEditorState(canvasId: string): {
       cc.handlePointerMove(e);
       // 协作:广播光标位置/视口/选中态到远端 Awareness
       // 统一通过 collaboration.setLocalCursor 写入 'cursor-data' key(与订阅端一致)
-      // 必须经 ref 读取最新协作状态:闭包中的 collaboration 是首次渲染的旧对象(active 恒为 false)
-      if (collaborationRef.current.active) {
+      // 门控:Yjs 连接状态(经 ref 读最新值) + 会话级协作曾激活(未开启协作不广播)
+      if (canvasSyncStatusRef.current === 'connected' && collaborationRef.current.collabSessionActive) {
         const rect = containerRef.current?.getBoundingClientRect();
         const vp = store.getViewport();
         if (rect) {
@@ -1146,6 +1173,12 @@ export function useEditorState(canvasId: string): {
     setCloudUpdateAvailable(false);
   }, []);
 
+  /** Agent 批量操作结束后单次 flush 最终 graph 到 Yjs（skipResourceSync=true，资源由 fullSync 补推） */
+  const onAgentBatchEnd = useCallback((): void => {
+    if (!editor) return;
+    pushGraph({ nodes: editor.store.getGraph().nodes, edges: editor.store.getGraph().edges });
+  }, [editor, pushGraph]);
+
   return {
     state,
     actions,
@@ -1157,5 +1190,6 @@ export function useEditorState(canvasId: string): {
     collaboration,
     awarenessStates: collaboration.awarenessStates,
     collaborationActive: collaboration.active,
+    onAgentBatchEnd,
   };
 }

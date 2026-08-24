@@ -43,7 +43,7 @@
 
 ### 写 / 改（各节点 data 结构）
 - `canvas_add_node(type, title, data)` 新建；`canvas_update_node(id, patch)` 外科手术式修改（patch.data 与现有 data 合并，只改给的字段）
-- **script 剧本节点**：`data = { content: 剧本全文 }`。改内容：read_node → canvas_update_node(patch={data:{content:新全文}})
+- **script 剧本节点**：`data = { episodes: [{id, number, title, content: 剧本HTML}], activeEpisodeId, status:'ready' }`（前端标准格式，content 为好莱坞格式剧本 HTML）。create_script 的 content 参数由前端自动转为第 1 集(episodes)落地；改内容：read_node → canvas_update_node(patch={data:{episodes:[完整数组]}})
 - **text 文本节点**：`data = { content: 文本 }`。读写方式同剧本节点
 - **storyboard 分镜节点**：`data = { shots: Shot[], entities: [], status }`；Shot 字段：id/number/sceneId/dayNight/duration/description/shotType/cameraMovement/dialogue/images/entities
   - **新增单镜头**：`storyboard_add_shot(nodeId, description, shotType?, cameraMovement?, dialogue?, duration?)`，自动编号、直写

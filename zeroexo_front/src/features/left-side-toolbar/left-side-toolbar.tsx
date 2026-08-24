@@ -26,6 +26,7 @@ import { Button, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { Tooltip, NodeCreateMenu } from '@/shared/components/index.js';
 import type { AddNodeType } from '@/shared/components/index.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 import {
   Map,
   FolderTree,
@@ -78,6 +79,7 @@ function LeftSideToolBarView({
   theme,
 }: LeftSideToolBarViewProps): React.ReactElement {
   const { t } = useTranslation();
+  const readOnly = useReadOnly();
   const [zoomOpen, setZoomOpen] = useState(false);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodePos, setAddNodePos] = useState<{ x: number; y: number }>({ x: 56, y: 72 });
@@ -168,7 +170,8 @@ function LeftSideToolBarView({
   );
 
   // 加号按钮(透明,和其他按钮一样样式)
-  const plusButton = (
+  // 只读模式隐藏（2026-08-25 系统性只读防护）：加号创建节点是核心编辑入口
+  const plusButton = readOnly ? null : (
     <Tooltip title={t('toolbar.more')} theme={theme}>
       <Button
         ref={plusButtonRef as React.Ref<HTMLButtonElement>}
@@ -284,12 +287,14 @@ function LeftSideToolBarView({
                 {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
               </Button>
             </Tooltip>
-            {/* 清空画布 */}
+            {/* 清空画布（只读隐藏：2026-08-25 系统性只读防护） */}
+            {!readOnly && (
             <Tooltip title={t('toolbar.clear')} theme={theme}>
               <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} className="zx-toolbar-btn" style={{ width: 32, height: 32, padding: 0 }}>
                 <Eraser size={18} />
               </Button>
             </Tooltip>
+            )}
           </div>
         </div>
       </div>

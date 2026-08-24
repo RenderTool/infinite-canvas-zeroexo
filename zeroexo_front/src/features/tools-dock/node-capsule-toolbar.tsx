@@ -35,6 +35,7 @@ import {
   } from 'lucide-react';
 import { DOCK_ICONS } from './icons.js';
 import { NodeJoystickNav } from './node-joystick-nav.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 export interface NodeCapsuleToolbarProps {
   nodeId: string | null;
@@ -190,6 +191,7 @@ export function NodeCapsuleToolbar({
 }: NodeCapsuleToolbarProps): React.ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
+  const readOnly = useReadOnly();
   const graph = useGraph(store);
   const viewport = useViewport(store);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -235,6 +237,9 @@ export function NodeCapsuleToolbar({
     return count;
   }, [isMultiSelect, onStackSelected, store, getExtension]);
 
+  // 只读模式整体隐藏（2026-08-25 系统性只读防护）：胶囊工具栏全部为编辑工具（复制/删除/替换等），
+  // viewer 不应看到也不可操作——portal 浮层逃逸画布遮罩，必须组件级拦截
+  if (readOnly) return null;
   if (!hasNodeTools && !isMultiSelect) return null;
   // 拖动中隐藏(移动结束恢复):剔除移动时每帧跟随计算消耗
   if (isDragging) return null;

@@ -23,6 +23,7 @@ import {
   BatchCommand,
 } from '@zeroexo/core';
 import { allowAllCanvasSchema } from '@zeroexo/core';
+import { plainTextToScriptHtml } from '@/features/canvas-nodes/script-editor/script-lines.js';
 import type {
   CanvasOperationContext,
   CanvasOperationMetrics,
@@ -124,6 +125,8 @@ export interface CanvasOpExecutorOptions {
   schema?: CanvasSchema;
   observer?: CanvasOperationObserver;
   defaultContext?: Partial<CanvasOperationContext>;
+  /** 按类型解析节点默认尺寸(注入节点扩展 defaultSize;缺省回退 200×80) */
+  getDefaultSize?: (type: string) => { width: number; height: number } | undefined;
 }
 
 function createId(prefix: string): string {
@@ -140,12 +143,14 @@ export class CanvasOpExecutor {
   private readonly schema: CanvasSchema;
   private readonly observer?: CanvasOperationObserver;
   private readonly defaultContext: Partial<CanvasOperationContext>;
+  private readonly getDefaultSize?: (type: string) => { width: number; height: number } | undefined;
 
   constructor(commandQueue: CommandQueue, options: CanvasOpExecutorOptions = {}) {
     this.commandQueue = commandQueue;
     this.schema = options.schema ?? allowAllCanvasSchema;
     this.observer = options.observer;
     this.defaultContext = options.defaultContext ?? {};
+    this.getDefaultSize = options.getDefaultSize;
   }
 
   /**
@@ -266,18 +271,45 @@ export class CanvasOpExecutor {
     switch (op.op) {
       case 'add_node': {
         const { id, type, position, size, title, data } = op.args;
+        // Agent 剧本节点兜底:后端契约只传 data.content(纯文本),前端剧本节点标准格式为
+        // episodes[](结构化剧本 HTML 列表)——执行端转换为第1集,避免生成"不是剧本格式"的节点
+        let nodeData: Record<string, unknown> = data ?? {};
+        if (type === 'script' && !Array.isArray(nodeData.episodes) && typeof nodeData.content === 'string' && nodeData.content.trim()) {
+          nodeData = {
+            ...nodeData,
+            episodes: [{ id: 'ep-1', number: 1, title: '第1集', content: plainTextToScriptHtml(nodeData.content) }],
+            activeEpisodeId: 'ep-1',
+            status: 'ready',
+          };
+        }
         return new AddNodeCommand({
           id,
           type,
-          position,
-          size: size ?? { width: 200, height: 80 },
+          // Agent op 可能未携带 position(契约缺省)——补默认位置,否则渲染层读 node.position 崩溃
+          position: position ?? { x: 0, y: 0 },
+          // 尺寸缺省按类型走扩展 defaultSize(剧本 720×520 等),未知类型回退 200×80
+          size: size ?? this.getDefaultSize?.(type) ?? { width: 200, height: 80 },
           title: title ?? '',
-          data: data ?? {},
+          data: nodeData,
         });
       }
 
       case 'update_node': {
         const { id, patch } = op.args;
+        // 剧本节点兜底(与 add_node 同构):先建空节点再写 content 的 Agent 流程,同样转为 episodes[]
+        const dataPatch = (patch.data ?? {}) as Record<string, unknown> | undefined;
+        if (dataPatch && typeof dataPatch.content === 'string' && dataPatch.content.trim() && !Array.isArray(dataPatch.episodes)) {
+          const current = this.commandQueue.getState().nodes.find((n) => n.id === id);
+          const currentData = (current?.data ?? {}) as Record<string, unknown>;
+          if (current?.type === 'script' && !Array.isArray(currentData.episodes)) {
+            patch.data = {
+              ...dataPatch,
+              episodes: [{ id: 'ep-1', number: 1, title: '第1集', content: plainTextToScriptHtml(dataPatch.content) }],
+              activeEpisodeId: 'ep-1',
+              status: 'ready',
+            };
+          }
+        }
         return new UpdateNodeDataCommand(id, patch);
       }
 

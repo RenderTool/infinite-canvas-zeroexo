@@ -210,8 +210,9 @@ export function NodeHoverToolbar({
   // 优先级:getGroupBounds(实时组 bounds,跟随组移动)> overrideBounds(预览组)> node 位置 + size
   const size = node.size ?? ext?.defaultSize ?? { width: 200, height: 80 };
   const liveGroupBounds = isGroupNode && getGroupBounds ? getGroupBounds(node.id) : null;
-  const boundsX = liveGroupBounds?.x ?? overrideBounds?.x ?? node.position.x;
-  const boundsY = liveGroupBounds?.y ?? overrideBounds?.y ?? node.position.y;
+  // position 可能缺失(远端/Agent 节点),统一兜底,否则读 node.position.x 抛 TypeError
+  const boundsX = liveGroupBounds?.x ?? overrideBounds?.x ?? node.position?.x ?? 0;
+  const boundsY = liveGroupBounds?.y ?? overrideBounds?.y ?? node.position?.y ?? 0;
   const boundsW = liveGroupBounds?.width ?? overrideBounds?.width ?? size.width;
   const nodeCenterScreenX = boundsX * viewport.k + viewport.x + (boundsW * viewport.k) / 2;
   const nodeTopScreenY = boundsY * viewport.k + viewport.y;

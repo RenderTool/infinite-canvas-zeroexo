@@ -32,6 +32,9 @@ export class AgentWorkerService {
 
   /** 待归档的工具调用参数（toolCallId → {toolName, args}，tool_result 成功后写档案） */
   private pendingArtifactArgs = new Map<string, { toolName: string; args: Record<string, unknown> }>();
+  
+  /** 工具调用消息（toolCallId → messageId，tool_result 回填结果摘要供历史胶囊还原） */
+  private pendingToolMessages = new Map<string, string>();
 
   /**
    * 生成产物归档（图书馆式，R2-4）：生成类工具成功后自动写入 AgentArtifact。
@@ -206,18 +209,31 @@ export class AgentWorkerService {
                 args: parsedArgs,
               });
             }
-            // 会话内：写入工具调用消息
+            // 会话内：写入工具调用消息（toolCallId 关联，供 tool_result 回填摘要）
             if (task.conversationId) {
+              const toolCallId = String((event.data as any)?.toolCallId ?? '');
               void this.writeMessage(task, {
                 role: 'assistant',
                 content: `调用工具 ${(event.data as any)?.toolName ?? ''}`,
                 toolName: (event.data as any)?.toolName ?? '',
                 toolArguments: JSON.stringify((event.data as any)?.arguments ?? {}),
+                toolCallId: toolCallId || undefined,
+              }).then((msgId) => {
+                if (msgId && toolCallId) this.pendingToolMessages.set(toolCallId, msgId);
               });
             }
             break;
           case 'agent:tool_result': {
             const resultData = (event.data as any)?.result;
+            // 历史忠实还原：工具结果摘要回填到 tool_call 消息（刷新后胶囊展开可见 Result）
+            const toolCallId = String((event.data as any)?.toolCallId ?? '');
+            if (toolCallId) {
+              const msgId = this.pendingToolMessages.get(toolCallId);
+              if (msgId) {
+                this.pendingToolMessages.delete(toolCallId);
+                void this.updateMessageResult(msgId, resultData);
+              }
+            }
             // R2-4: 生成类工具成功 → 归档产物档案库（异步，不阻塞事件流）
             void this.archiveArtifact(task, String((event.data as any)?.toolCallId ?? ''), resultData);
             // 死路径修复(Plan#33 D4): 工具返回的 canvasOps 逐个 emit,前端 onCanvasOp 真执行
@@ -566,23 +582,39 @@ export class AgentWorkerService {
   }
 
   /**
-   * 会话内写入消息（失败仅告警，不阻塞主流程）
+   * 会话内写入消息（失败仅告警，不阻塞主流程）；返回消息 id（tool_result 回填用）
    */
   private async writeMessage(
     task: any,
-    input: { role: string; content: string; toolName?: string; toolArguments?: string },
-  ): Promise<void> {
+    input: { role: string; content: string; toolName?: string; toolArguments?: string; toolCallId?: string },
+  ): Promise<string | null> {
     try {
-      await this.conversationService.addMessage({
+      const msg = await this.conversationService.addMessage({
         conversationId: task.conversationId,
         role: input.role,
         content: input.content,
         taskId: task.id,
         toolName: input.toolName,
         toolArguments: input.toolArguments,
+        toolCallId: input.toolCallId,
       });
+      return msg?.id ?? null;
     } catch (err) {
       this.logger.warn(`会话消息写入失败: ${task.conversationId}`, (err as Error).message);
+      return null;
+    }
+  }
+
+  /** 工具结果摘要回填（历史胶囊 Result 展开，与聊天时一致；失败仅告警） */
+  private async updateMessageResult(messageId: string, result: unknown): Promise<void> {
+    try {
+      const summary =
+        typeof result === 'string'
+          ? result.slice(0, 2000)
+          : JSON.stringify(result ?? {}).slice(0, 2000);
+      await this.conversationService.updateMessageResult(messageId, summary);
+    } catch (err) {
+      this.logger.warn(`工具结果回填失败: ${messageId}`, (err as Error).message);
     }
   }
 

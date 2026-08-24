@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, MessageSquare, Plus, Shield, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, X, Search } from 'lucide-react';
+import { ChevronDown, LogOut, MessageSquare, Plus, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, User, X, Search } from 'lucide-react';
 import { Button, App as AntdApp } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -41,6 +41,7 @@ import type {
   BriefCardData,
 } from './types.js';
 import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import {
   listMembers,
@@ -49,6 +50,7 @@ import {
   unmuteMember,
 } from '@/features/collaboration/collaboration-api.js';
 import type { CollaborationMember } from '@/features/collaboration/collaboration-types.js';
+import { semanticOfTool } from './think-stream/tool-semantics.js';
 
 /**
  * 交互工具名 → 消息类型映射
@@ -61,6 +63,11 @@ const INTERACTION_TOOL_TYPE_MAP: Record<string, string> = {
   plan_present: 'plan',
   emit_brief: 'brief',
 };
+
+/** 剥离用户回执消息的协议前缀（如 `[用户选择]: xxx` → `xxx`） */
+function stripReplyPrefix(text: string): string {
+  return text.replace(/^\[[^\]]+\]:\s*/, '');
+}
 
 /**
  * 后端消息 → store 消息（跳过记忆压缩摘要等 system 消息）
@@ -155,6 +162,41 @@ function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | nu
     
     return baseMessage;
   }
+  // 普通工具调用消息（后端存 role=assistant + toolName + toolArguments + toolResult）：
+  // 忠实还原为单步骤胶囊（timeline 消息，StepCapsule 与聊天时同一视觉体系），
+  // 禁止显示为 content 纯文本（此前 bug：全部回退成"调用工具 xxx"文本）
+  if (dto.toolName) {
+    const sem = semanticOfTool(dto.toolName);
+    let parsedArgs: unknown;
+    try {
+      if (dto.toolArguments) parsedArgs = JSON.parse(dto.toolArguments);
+    } catch {
+      /* 解析失败则 input 省略 */
+    }
+    const input =
+      parsedArgs && typeof parsedArgs === 'object'
+        ? JSON.stringify(parsedArgs).slice(0, 200)
+        : undefined;
+    return {
+      id: dto.id,
+      role: 'agent' as const,
+      type: 'timeline' as const,
+      text: '执行轨迹',
+      timeline: {
+        steps: [
+          {
+            id: dto.id,
+            name: sem.label,
+            kind: 'tool' as const,
+            status: 'done' as const,
+            input,
+            result: dto.toolResult ?? undefined,
+          },
+        ],
+      },
+      timestamp: ts,
+    };
+  }
   return {
     id: dto.id,
     role: 'agent' as const,
@@ -179,6 +221,7 @@ export interface DockContentProps {
 type DockTab = 'chat' | 'collab' | 'members';
 
 export function DockContent({ projectId }: DockContentProps): React.ReactElement {
+  const readOnly = useReadOnly();
   const messages = useCanvasAgentStore((s) => s.messages);
   const isGenerating = useCanvasAgentStore((s) => s.isGenerating);
   // 思考流文本:思考块随流增长时保持滚动到底部
@@ -200,6 +243,20 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
   /** 历史会话搜索关键词（标题/最后消息预览模糊匹配） */
   const [convQuery, setConvQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  // 未读消息数（collab 聊天页签红点；切到该页签清零）
+  const unreadMessages = useCollaborationStore((s) => s.unreadMessages);
+  // 新成员加入提醒数（members 页签红点；切到该页签清零）
+  const newMemberCount = useCollaborationStore((s) => s.newMemberCount);
+  // 对话页签未读提醒数（Agent 回复完成且不在对话页签时 +1；切到该页签清零）
+  const agentUnread = useCanvasAgentStore((s) => s.agentUnread);
+  const clearAgentUnread = useCanvasAgentStore((s) => s.clearAgentUnread);
+
+  // 兜底清零：正在对话/聊天/成员页签时新事件到达（红点+1 已发生）立即归零，避免页签已激活仍残留红点
+  useEffect(() => {
+    if (tab === 'chat' && agentUnread > 0) clearAgentUnread();
+    if (tab === 'collab' && unreadMessages > 0) collabStore.clearUnreadMessages();
+    if (tab === 'members' && newMemberCount > 0) collabStore.clearNewMemberCount();
+  }, [tab, agentUnread, unreadMessages, newMemberCount, clearAgentUnread, collabStore]);
 
   // 挂载：恢复最近会话历史 + 加载会话列表
   useEffect(() => {
@@ -220,23 +277,27 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         const msgs = await loadConversationMessages(target.id);
         if (cancelled) return;
         store.clearMessages();
-        // 遍历消息列表，交互消息需检测下一条是否为用户消息以判断 answered 状态
+        // 先全部转为 store 消息，再在数组上标记 answered，最后一次性写入 store
+        // 避免组件在 answered=false 时初始化本地状态（useState 只取初始值）
+        const converted: CanvasAgentMessage[] = [];
         for (let i = 0; i < msgs.length; i++) {
-          const dto = msgs[i]!;
-          const m = dtoToStoreMessage(dto);
-          if (m) store.addMessage(m);
+          const m = dtoToStoreMessage(msgs[i]!);
+          if (m) converted.push(m);
         }
-        // 第二遍：标记交互消息的 answered 状态（下一条为用户消息则视为已回答）
-        const allMsgs = store.messages;
-        for (let i = 0; i < allMsgs.length; i++) {
-          const cur = allMsgs[i];
-          if (cur && (cur.type === 'question' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief')) {
-            const next = allMsgs[i + 1];
+        // 标记交互消息的 answered 状态（下一条为用户消息则视为已回答）
+        for (let i = 0; i < converted.length; i++) {
+          const cur = converted[i]!;
+          if (cur.type === 'question' || cur.type === 'clarify' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief' || cur.type === 'text') {
+            const next = converted[i + 1];
             if (next && next.role === 'user') {
-              store.updateMessage(cur.id, { answered: true });
+              cur.answered = true;
+              if (cur.type === 'params') cur.paramsAnswered = true;
+              // 从用户消息中提取答案原文，用于历史还原选择状态
+              if (next.text) cur.restoredAnswer = stripReplyPrefix(next.text);
             }
           }
         }
+        store.batchSetMessages(converted);
       } catch {
         // 未登录/无会话时静默，保持空态欢迎页
       }
@@ -293,6 +354,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     }
   };
 
+  // 解禁成员（封禁入口已移除：移出=移出，被移出成员不留在列表，重进须重新申请/走邀请）
+
   // 自动滚动到底部（仅对话 Tab）
   useEffect(() => {
     if (tab !== 'chat') return;
@@ -310,22 +373,25 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     store.clearMessages();
     try {
       const msgs = await loadConversationMessages(id);
+      // 先全部转为 store 消息，再在数组上标记 answered，最后一次性写入 store
+      const converted: CanvasAgentMessage[] = [];
       for (let i = 0; i < msgs.length; i++) {
-        const dto = msgs[i]!;
-        const m = dtoToStoreMessage(dto);
-        if (m) store.addMessage(m);
+        const m = dtoToStoreMessage(msgs[i]!);
+        if (m) converted.push(m);
       }
       // 标记交互消息的 answered 状态
-      const allMsgs = store.messages;
-      for (let i = 0; i < allMsgs.length; i++) {
-        const cur = allMsgs[i];
-        if (cur && (cur.type === 'question' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief')) {
-          const next = allMsgs[i + 1];
+      for (let i = 0; i < converted.length; i++) {
+        const cur = converted[i]!;
+        if (cur.type === 'question' || cur.type === 'clarify' || cur.type === 'step' || cur.type === 'plan' || cur.type === 'upload' || cur.type === 'params' || cur.type === 'brief' || cur.type === 'text') {
+          const next = converted[i + 1];
           if (next && next.role === 'user') {
-            store.updateMessage(cur.id, { answered: true });
+            cur.answered = true;
+            if (cur.type === 'params') cur.paramsAnswered = true;
+            if (next.text) cur.restoredAnswer = stripReplyPrefix(next.text);
           }
         }
       }
+      store.batchSetMessages(converted);
     } catch {
       // 历史加载失败时保持空会话
     }
@@ -507,8 +573,15 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             <button
               key={k}
               type="button"
-              onClick={() => setTab(k)}
+              onClick={() => {
+                setTab(k);
+                // 切到对话/聊天页签 = 已读；切到成员页签 = 已看到新成员
+                if (k === 'chat') clearAgentUnread();
+                if (k === 'collab') collabStore.clearUnreadMessages();
+                if (k === 'members') collabStore.clearNewMemberCount();
+              }}
               style={{
+                position: 'relative',
                 padding: '3px 10px',
                 borderRadius: 6,
                 border: 'none',
@@ -521,6 +594,41 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               }}
             >
               {k === 'chat' ? '对话' : k === 'collab' ? '聊天' : '成员'}
+              {/* 红点冒泡：右上角未读徽标（对话回复/聊天消息/新成员） */}
+              {(k === 'chat' && agentUnread > 0) ||
+              (k === 'collab' && unreadMessages > 0) ||
+              (k === 'members' && newMemberCount > 0) ? (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -4,
+                    right: -6,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 8,
+                    background: '#f5222d',
+                    color: '#fff',
+                    fontSize: 10,
+                    lineHeight: '16px',
+                    fontWeight: 700,
+                    textAlign: 'center',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {k === 'chat'
+                    ? agentUnread > 99
+                      ? '99+'
+                      : agentUnread
+                    : k === 'collab'
+                      ? unreadMessages > 99
+                        ? '99+'
+                        : unreadMessages
+                      : newMemberCount > 99
+                        ? '99+'
+                        : newMemberCount}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -707,7 +815,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                 <Sparkles size={24} color="#fff" />
               </div>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--agent-text)', marginBottom: 4 }}>
-                VideoForge Agent
+                ZeroExo Agent
               </div>
               <div style={{ fontSize: 12, color: 'var(--agent-muted)', lineHeight: 1.6, marginBottom: 16 }}>
                 描述你的需求，Agent 会调用工具在画布上执行任务。
@@ -748,7 +856,15 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                           </div>
                         )}
                         {m.role === 'user' ? (
-                          <div className="user-text">{m.text}</div>
+                          /* R4：用户消息 = 气泡 + 最右侧头像（仅回合首条带头像，与角色行一致） */
+                          <div className="user-main">
+                            <div className="user-text">{m.text}</div>
+                            {m === group[0] && (
+                              <span className="user-avatar">
+                                <User size={16} />
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <div className="ai-body">
                             <MessageRenderer message={m} />
@@ -811,7 +927,6 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             collabMembers.map((member) => {
               const online = member.sessions.some((s) => s.status === 'online');
               const muted = member.sessions.some((s) => s.status === 'muted');
-              const banned = member.sessions.some((s) => s.status === 'banned');
               return (
                 <div
                   key={member.userId}
@@ -861,7 +976,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--agent-muted)', lineHeight: 1.4 }}>
                       {t(`collab.role.${member.role}`)}
-                      {banned ? ` · ${t('collab.memberBanned')}` : muted ? ` · ${t('collab.memberMuted')}` : online ? ` · ${t('collab.status.online')}` : ''}
+                      {muted ? ` · ${t('collab.memberMuted')}` : online ? ` · ${t('collab.status.online')}` : ''}
                     </div>
                   </div>
                   {isRoomOwner && !member.isSelf && (
@@ -878,7 +993,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
                       <Button
                         size="small"
                         type="text"
-                        icon={<Shield size={13} />}
+                        // 移出图标: LogOut(而非盾牌)——盾牌是封禁语义,移出≠封禁,避免误导
+                        icon={<LogOut size={13} />}
                         onClick={() => void handleKick(member)}
                         loading={busyUserId === member.userId}
                         title={t('collab.kick')}
@@ -893,9 +1009,24 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         </div>
       )}
 
-      {/* ===== 输入区（仅对话 Tab） ===== */}
-      {tab === 'chat' && <PinnedTodoSlot />}
-      {tab === 'chat' && <ComposerInput />}
+      {/* ===== 输入区（仅对话 Tab；只读隐藏 2026-08-25 系统性只读防护：Agent 执行画布写操作，viewer 不可用） ===== */}
+      {tab === 'chat' && readOnly && (
+        <div
+          style={{
+            padding: '10px 12px',
+            fontSize: 12,
+            lineHeight: '18px',
+            color: 'var(--agent-muted)',
+            background: 'var(--agent-bg-soft, rgba(127,127,127,0.08))',
+            borderTop: '1px solid var(--agent-border)',
+            textAlign: 'center',
+          }}
+        >
+          {t('agentPanel.readOnlyHint')}
+        </div>
+      )}
+      {tab === 'chat' && !readOnly && <PinnedTodoSlot />}
+      {tab === 'chat' && !readOnly && <ComposerInput />}
     </div>
   );
 }

@@ -20,6 +20,8 @@ export interface TitleEditorProps {
   onStartTitleEditing: () => void;
   onFinishTitleEditing: () => void;
   onCancelTitleEditing: () => void;
+  /** 是否允许编辑(参与者标题归房主,false 时只读展示,无双击/hover/提示) */
+  editable?: boolean;
 }
 
 export function TitleEditor({
@@ -31,6 +33,7 @@ export function TitleEditor({
   onStartTitleEditing,
   onFinishTitleEditing,
   onCancelTitleEditing,
+  editable = true,
 }: TitleEditorProps): React.ReactElement {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,27 +91,29 @@ export function TitleEditor({
     fontSize: 18,
     fontWeight: 600,
     color: theme.toolbar.text,
-    cursor: 'pointer',
+    cursor: editable ? 'pointer' : 'default',
     transition: 'border-color 0.15s',
   };
 
+  const titleButton = (
+    <button
+      type="button"
+      onDoubleClick={editable ? onStartTitleEditing : undefined}
+      onMouseEnter={editable ? (event) => {
+        event.currentTarget.style.borderBottomColor = theme.toolbar.text;
+      } : undefined}
+      onMouseLeave={editable ? (event) => {
+        event.currentTarget.style.borderBottomColor = 'transparent';
+      } : undefined}
+      style={displayStyle}
+    >
+      {title}
+    </button>
+  );
+
   return (
     <div style={wrapperStyle}>
-      <Tooltip title={t('topbar.renameHint')}>
-        <button
-          type="button"
-          onDoubleClick={onStartTitleEditing}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.borderBottomColor = theme.toolbar.text;
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.borderBottomColor = 'transparent';
-          }}
-          style={displayStyle}
-        >
-          {title}
-        </button>
-      </Tooltip>
+      {editable ? <Tooltip title={t('topbar.renameHint')}>{titleButton}</Tooltip> : titleButton}
     </div>
   );
 }

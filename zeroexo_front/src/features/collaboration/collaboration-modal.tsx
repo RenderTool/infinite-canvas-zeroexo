@@ -28,7 +28,6 @@ import {
   closeRoom,
   listMembers,
   kickMember,
-  banMember,
   muteMember,
   unmuteMember,
   removeSelfFromRoom,
@@ -37,6 +36,7 @@ import {
   rejectApplication,
 } from './collaboration-api';
 import type { JoinApplication } from './collaboration-types';
+import { isPendingJoinResult } from './collaboration-types';
 import { useCollaborationStore } from './use-collaboration-store';
 import { useAuth } from '@/features/auth/auth-store';
 import { ApiError } from '@/services/api-client';
@@ -79,6 +79,8 @@ export function CollaborationModal({
   const [requiresApproval, setRequiresApproval] = useState(false);
   const [applications, setApplications] = useState<JoinApplication[]>([]);
   const [activeTab, setActiveTab] = useState<string>('manage');
+  // 批准/拒绝处理中的用户 ID（防连点：并发批准会让 approve 多次成功 → 重复广播 + 重复 toast，2026-08-25）
+  const [processingUserId, setProcessingUserId] = useState<string | null>(null);
 
   // 本地派生状态：发起者视角 expired 视同 idle（可重新开启协作），参与者才标记 expired
   // （与 use-collaboration init 的派生逻辑对齐；全局 store 的 setRoom 对发起者无此特判）
@@ -103,6 +105,17 @@ export function CollaborationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // SSE member_joined/member_left 实时刷新的是全局 store,弹窗本地 state 需跟随,
+  // 否则他人加入/离开时成员列表不更新,必须重开弹窗才刷新;
+  // canvasId 守卫:全局 store 跨画布单例,避免残留其他画布的成员数据闪入
+  const globalMembers = useCollaborationStore((s) => s.members);
+  const globalCanvasId = useCollaborationStore((s) => s.canvasId);
+  useEffect(() => {
+    if (open && globalCanvasId === canvasId) {
+      setMembers(globalMembers);
+    }
+  }, [globalMembers, globalCanvasId, open, canvasId]);
+
   // 重置本地表单状态（弹窗关闭后重新打开时触发）
   const resetState = useCallback(() => {
     setInviteCode('');
@@ -119,6 +132,9 @@ export function CollaborationModal({
     try {
       const list = await listApplications(canvasId);
       setApplications(list);
+      // 同步全局待审红点（TopBar 协作按钮）：弹窗打开/SSE 到达/批准/拒绝后都覆盖真实数量，
+      // 申请处理完（批准或拒绝）后列表为空 → 红点自动移除
+      useCollaborationStore.getState().setPendingApprovals(list.length);
     } catch {
       // 非房主或房间不存在：静默（待审区仅房主可见）
     }
@@ -129,22 +145,24 @@ export function CollaborationModal({
     setLoading(true);
     try {
       const data = await getRoomByCanvas(canvasId);
+      // 审核制（2026-08-25）：自己是待审申请者（画布页内被 SSE 转 pending）→ 弹窗无房间信息，按"未开启"处理
+      const roomData = data && isPendingJoinResult(data) ? null : data;
       // 弹窗视角本地状态：任何结果（含 null）都立即刷新，避免残留上一画布的房间
-      setRoomState(data);
-      useCollaborationStore.getState().setRoom(data); // null → status idle
-      if (!data) {
+      setRoomState(roomData);
+      useCollaborationStore.getState().setRoom(roomData); // null → status idle
+      if (!roomData) {
         setInviteCode('');
         setMembers([]);
         useCollaborationStore.getState().setMembers([]);
         return;
       }
-      setInviteCode(data.inviteCode);
-      setAllowChat(data.allowChat);
-      setAllowEdit(data.allowEdit);
-      setRequiresApproval(data.requiresApproval ?? false);
+      setInviteCode(roomData.inviteCode);
+      setAllowChat(roomData.allowChat);
+      setAllowEdit(roomData.allowEdit);
+      setRequiresApproval(roomData.requiresApproval ?? false);
       // 精确档位不可从绝对时间戳反推，仅区分「永不过期/有过期」作展示近似（后端有效期已修通）
-      setExpiresInHours(data.expiresAt ? 24 : 0);
-      if (data.status === 'active') {
+      setExpiresInHours(roomData.expiresAt ? 24 : 0);
+      if (roomData.status === 'active') {
         try {
           const memberList = await listMembers(canvasId);
           setMembers(memberList);
@@ -153,7 +171,7 @@ export function CollaborationModal({
           setMembers([]);
         }
         // 房主侧同步拉取待审申请（非房主静默失败）
-        if (data.ownerId === String(user?.id)) void loadApplications();
+        if (roomData.ownerId === String(user?.id)) void loadApplications();
       } else {
         setMembers([]);
       }
@@ -193,6 +211,10 @@ export function CollaborationModal({
       const memberList = await listMembers(canvasId);
       setMembers(memberList);
       useCollaborationStore.getState().setMembers(memberList);
+      // 新房间必然无待审申请：清空残留列表 + 红点归零
+      // （关闭协作前的申请已随旧房间作废，不清理则残留假申请，点通过必 404——2026-08-25 审核制漏洞修复）
+      setApplications([]);
+      useCollaborationStore.getState().setPendingApprovals(0);
       message.success(t('collab.collabStarted'));
     } catch (err) {
       console.error('[CollaborationModal] start collaboration failed:', err);
@@ -248,7 +270,7 @@ export function CollaborationModal({
     }
   };
 
-  // 踢除成员（可选封禁）
+  // 移出成员（移出=移出：默认不封禁；被移出者重进须重新申请(审核制)或走邀请(非审核制)）
   const handleKickMember = (userId: string) => {
     if (!isOwner) return;
     modal.confirm({
@@ -258,10 +280,6 @@ export function CollaborationModal({
           <p style={{ marginBottom: 8, color: theme.toolbar.text }}>
             {t('collab.kickConfirmContent')}
           </p>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: theme.toolbar.text }}>
-            <input type="checkbox" id="kick-ban-check" />
-            <span style={{ fontSize: 13 }}>{t('collab.kickAndBan')}</span>
-          </label>
         </div>
       ),
       okText: t('collab.kick'),
@@ -269,11 +287,7 @@ export function CollaborationModal({
       okType: 'danger',
       centered: true,
       onOk: async () => {
-        const banChecked = (document.getElementById('kick-ban-check') as HTMLInputElement)?.checked;
         try {
-          if (banChecked) {
-            await banMember(canvasId, userId);
-          }
           await kickMember(canvasId, userId);
           const updated = await listMembers(canvasId);
           setMembers(updated);
@@ -346,6 +360,9 @@ export function CollaborationModal({
           useCollaborationStore.getState().setRoom(null);
           message.success(t('collab.exitSuccess'));
           onClose();
+          // 退出协作后返回主页:EditorPage 卸载 → useCanvasSync releaseDoc 断开 Yjs WS + SSE,
+          // 发起端不再看到本端光标/操作;若不跳转,退出者仍留在画布持续同步
+          window.location.hash = '#/';
         } catch (err) {
           console.error('[CollaborationModal] exit collaboration failed:', err);
           message.error(t('collab.operationFailed'));
@@ -373,6 +390,8 @@ export function CollaborationModal({
 
   // 批准待审申请（房主）：批准后同步刷新成员列表
   const handleApproveApplication = async (applicantUserId: string) => {
+    if (processingUserId) return; // 防连点
+    setProcessingUserId(applicantUserId);
     try {
       await approveApplication(canvasId, applicantUserId);
       await loadApplications();
@@ -382,19 +401,29 @@ export function CollaborationModal({
       message.success(t('collab.approveSuccess'));
     } catch (err) {
       console.error('[CollaborationModal] approve application failed:', err);
+      // 失败多为申请已失效(房间重开/已处理)：刷新列表清掉残留的假申请（2026-08-25 审核制漏洞修复）
+      void loadApplications();
       message.error(t('collab.operationFailed'));
+    } finally {
+      setProcessingUserId(null);
     }
   };
 
   // 拒绝待审申请（房主）
   const handleRejectApplication = async (applicantUserId: string) => {
+    if (processingUserId) return; // 防连点
+    setProcessingUserId(applicantUserId);
     try {
       await rejectApplication(canvasId, applicantUserId);
       await loadApplications();
       message.success(t('collab.rejectSuccess'));
     } catch (err) {
       console.error('[CollaborationModal] reject application failed:', err);
+      // 同批准：申请已失效则刷新列表自愈
+      void loadApplications();
       message.error(t('collab.operationFailed'));
+    } finally {
+      setProcessingUserId(null);
     }
   };
 
@@ -638,7 +667,9 @@ export function CollaborationModal({
       {applications.length > 0 && (
         <div style={cardStyle}>
           <div style={cardTitleStyle}>
-            {t('collab.pendingApplications')} ({applications.length})
+            {t('collab.pendingApplications')}{' '}
+            {/* 红色数量：与 TopBar 红点呼应，一眼看到待处理数 */}
+            <span style={{ color: '#f5222d' }}>({applications.length})</span>
           </div>
           {applications.map((app) => (
             <div key={app.userId} style={memberItemStyle(false)}>
@@ -646,10 +677,22 @@ export function CollaborationModal({
                 <span style={memberNameStyle}>{app.nickname || t('collab.unnamed')}</span>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <Button size="small" type="primary" onClick={() => void handleApproveApplication(app.userId)}>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={processingUserId === app.userId}
+                  disabled={!!processingUserId}
+                  onClick={() => void handleApproveApplication(app.userId)}
+                >
                   {t('collab.approveJoin')}
                 </Button>
-                <Button size="small" danger onClick={() => void handleRejectApplication(app.userId)}>
+                <Button
+                  size="small"
+                  danger
+                  loading={processingUserId === app.userId}
+                  disabled={!!processingUserId}
+                  onClick={() => void handleRejectApplication(app.userId)}
+                >
                   {t('collab.rejectJoin')}
                 </Button>
               </div>
@@ -671,6 +714,8 @@ export function CollaborationModal({
           ) : (
             members.map((member) => {
               const isSelf = member.isSelf;
+              // 状态标签优先级: 禁言 > 在线/离线(被封禁成员已被列表过滤,移出就是移出)
+              const muted = member.sessions.some((s) => s.status === 'muted');
               const isOnline = member.sessions.some((s) => s.status === 'online');
               return (
                 <div key={member.userId} style={memberItemStyle(isSelf)}>
@@ -680,16 +725,19 @@ export function CollaborationModal({
                       {isSelf && ` (${t('collab.self')})`}
                     </span>
                     <span style={memberRoleStyle}>
-                      {t(`collab.role.${member.role}`)} · {t(`collab.status.${isOnline ? 'online' : 'offline'}`)}
+                      {t(`collab.role.${member.role}`)}
+                      {muted
+                        ? ` · ${t('collab.memberMuted')}`
+                        : ` · ${t(`collab.status.${isOnline ? 'online' : 'offline'}`)}`}
                     </span>
                   </div>
                   {isOwner && !isSelf && (
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       <Button
                         size="small"
-                        onClick={() => handleMuteMember(member.userId, member.sessions.some((s) => s.status === 'muted'))}
+                        onClick={() => handleMuteMember(member.userId, muted)}
                       >
-                        {member.sessions.some((s) => s.status === 'muted') ? t('collab.unmute') : t('collab.mute')}
+                        {muted ? t('collab.unmute') : t('collab.mute')}
                       </Button>
                       <Button
                         size="small"
@@ -788,13 +836,16 @@ export function CollaborationModal({
     >
       {isGuestExpired ? (
         renderExpiredView()
-      ) : (
+      ) : isOwner ? (
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
           style={{ marginBottom: 0 }}
           items={tabs}
         />
+      ) : (
+        // 参与者仅一个退出入口,不再用 Tabs 包裹(少一步 tab 点击)
+        renderExitCard()
       )}
     </Modal>
   );

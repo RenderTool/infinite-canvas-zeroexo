@@ -165,7 +165,7 @@ const NodeItem = React.memo(
       // 使用节点底色(与 NodeShell shellColor 优先级一致: fillColor 优先于 ext.color)
       const nodeColor = node.backgroundColor ?? node.nodeColor ?? nodeDefaults.fillColor ?? ext?.color ?? '#16213e';
       const size = resolveNodeSize(node, ext);
-      const nodeTransform = `translate(${node.position.x}px, ${node.position.y}px)`;
+      const nodeTransform = `translate(${node.position?.x ?? 0}px, ${node.position?.y ?? 0}px)`;
 
       return (
         <div
@@ -249,8 +249,8 @@ const NodeItem = React.memo(
     const domW = useScale ? defaultSize.width : size.width;
     const domH = useScale ? defaultSize.height : size.height;
     const nodeTransform = useScale
-      ? `translate(${node.position.x}px, ${node.position.y}px) scale(${sx}, ${sy})`
-      : `translate(${node.position.x}px, ${node.position.y}px)`;
+      ? `translate(${node.position?.x ?? 0}px, ${node.position?.y ?? 0}px) scale(${sx}, ${sy})`
+      : `translate(${node.position?.x ?? 0}px, ${node.position?.y ?? 0}px)`;
 
     const renderer: NodeRenderer | undefined = ext?.renderNode;
     const content: React.ReactNode = renderer
@@ -542,7 +542,10 @@ export const NodeLayer = React.memo(function NodeLayer({
       for (const n of chain) status.set(n.id, result ? 2 : 1);
       return result;
     };
-    return nodes.filter(
+    // 防御性去重：协作同步/撤销重做/Agent 快速创建等边界情况可能产生重复 ID
+    // Map 保留后出现的节点（更新的数据），避免 React duplicate key 警告
+    const deduped = Array.from(byId.values());
+    return deduped.filter(
       (n) => n.type !== 'group' && !n.hidden && !hasHiddenAncestor(n),
     );
   }, [nodes]);

@@ -208,6 +208,8 @@ export interface CanvasAgentMessage {
   meta?: Record<string, unknown>;
   /** 交互消息是否已被用户回答（历史还原时检测） */
   answered?: boolean;
+  /** 历史还原：从后续用户消息中解析出的答案原文 */
+  restoredAnswer?: string;
 }
 
 // ===== step 接口（StepBlock 契约 UI, Plan#33 D1/D2） =====

@@ -37,7 +37,7 @@ export function ProjectCreateModal({ open, onClose, onComplete }: ProjectCreateM
   const handleCreate = useCallback(async () => {
     setCreating(true);
     try {
-      const finalTitle = projectTitle.trim() || '未命名项目';
+      const finalTitle = projectTitle.trim() || i18n.t('home.untitledProject');
       const project = await createArtifact({ title: finalTitle });
       resetState();
       onComplete(project.id, project.title);
@@ -123,7 +123,7 @@ export function ProjectCreateModal({ open, onClose, onComplete }: ProjectCreateM
           </div>
           <div style={{ fontSize: 13, color: textMuted, marginBottom: 28, maxWidth: 320, margin: '0 auto 28px', lineHeight: 1.6 }}>
             一个好名字能让创作更有方向感<br />
-            留空将使用"未命名项目"
+            留空将使用"未命名画布"
           </div>
 
           {/* Name Input */}

@@ -17,9 +17,13 @@ export interface ParsedFormResult {
   form: QuestionData;
   /** 原始 XML 块 */
   raw: string;
+  /** 在原文中的起始位置（用于多表单场景计算间隙文本） */
+  startIndex: number;
+  /** 原始 XML 块长度 */
+  rawLength: number;
 }
 
-const QUESTION_FORM_RE = /<question-form\b([^>]*)>([\s\S]*?)<\/question-form>/i;
+const QUESTION_FORM_RE = /<question-form\b([^>]*)>([\s\S]*?)<\/question-form>/gi;
 const ITEM_RE = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
 const ATTR_RE = /([a-zA-Z-]+)\s*=\s*"([^"]*)"/g;
 
@@ -55,25 +59,36 @@ function parseItems(inner: string): QuestionData['items'] {
 
 /** 从消息文本中解析第一个 <question-form> 块（无则返回 null） */
 export function parseQuestionForm(text: string): ParsedFormResult | null {
-  const match = QUESTION_FORM_RE.exec(text);
-  if (!match) return null;
-  const attrsStr = match[1]!;
-  const inner = match[2]!;
-  const raw = match[0]!;
-  const attrs = parseAttrs(attrsStr);
-  const items = parseItems(inner);
-  if (items.length === 0) return null;
+  const results = parseAllQuestionForms(text);
+  return results.length > 0 ? results[0]! : null;
+}
 
-  return {
-    before: text.slice(0, match.index),
-    after: text.slice(match.index + raw.length),
-    raw,
-    form: {
-      guideText: attrs['guide-text'] || attrs.guide || '',
-      multi: attrs.multi === 'true' || attrs.multi === '1',
-      items,
-    },
-  };
+/** 从消息文本中解析所有 <question-form> 块（按出现顺序） */
+export function parseAllQuestionForms(text: string): ParsedFormResult[] {
+  const results: ParsedFormResult[] = [];
+  let m: RegExpExecArray | null;
+  QUESTION_FORM_RE.lastIndex = 0;
+  while ((m = QUESTION_FORM_RE.exec(text))) {
+    const attrsStr = m[1]!;
+    const inner = m[2]!;
+    const raw = m[0]!;
+    const attrs = parseAttrs(attrsStr);
+    const items = parseItems(inner);
+    if (items.length === 0) continue;
+    results.push({
+      before: text.slice(0, m.index),
+      after: text.slice(m.index + raw.length),
+      raw,
+      form: {
+        guideText: attrs['guide-text'] || attrs.guide || '',
+        multi: attrs.multi === 'true' || attrs.multi === '1',
+        items,
+      },
+      startIndex: m.index,
+      rawLength: raw.length,
+    });
+  }
+  return results;
 }
 
 /**

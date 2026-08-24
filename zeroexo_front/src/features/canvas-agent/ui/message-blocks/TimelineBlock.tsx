@@ -14,7 +14,8 @@ export function TimelineBlock({ message }: { message: CanvasAgentMessage }): Rea
   if (!data || data.steps.length === 0) return <></>;
 
   const steps: ThinkingStep[] = data.steps.map((st) => ({
-    icon: st.kind === 'canvas' ? 'tool' : 'search',
+    // tool 步骤用扳手图标、canvas 步骤用放大镜（原映射写反，历史胶囊图标错误）
+    icon: st.kind === 'tool' ? ('tool' as const) : ('search' as const),
     name: st.name,
     status: st.status, // R2：failed 原样保留，红色 X 兜底展示
     input: st.input,

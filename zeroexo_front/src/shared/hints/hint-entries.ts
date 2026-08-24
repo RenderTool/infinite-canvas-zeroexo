@@ -59,7 +59,8 @@ export const HINT_ENTRIES: readonly HintEntry[] = [
   // 空画布:新手最迷茫时刻,提示首个节点创建入口(右键或左侧加号)
   { id: 'empty-canvas-create', kind: 'panel', labelKey: 'hints.emptyCanvasCreate', priority: 13 },
   // 画布导航组(无选中时低优先级常驻,但精简至推荐项,避免信息过载):
-  // 滚轮=平移画布(默认,性能考量);Ctrl+滚轮缩放功能保留但不再常驻展示(用户拍板)
+  // 滚轮=缩放(2026-08-25 用户拍板:滚轮必须直接缩放,不再要求 Ctrl;
+  // Ctrl+滚轮=上下平移兜底,Shift+滚轮=水平平移,均不常驻展示)
   { id: 'scroll-pan', kind: 'panel', labelKey: 'hints.scrollPan', gesture: 'wheel', priority: 17 },
   // Space 临时平移:仅按住时实时提示(取消无选中常驻,与滚轮提示叠加会信息过载)
   { id: 'space-pan', kind: 'panel', labelKey: 'hints.spacePan', keys: ['Space'], gesture: 'drag', priority: 18 },

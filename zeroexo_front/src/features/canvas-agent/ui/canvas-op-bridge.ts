@@ -80,6 +80,8 @@ export interface CanvasOpBridge {
   applyCanvasConfig?: (patch: Record<string, unknown>) => boolean;
   /** R3-A2：打开资产库弹窗（附件卡点击跳转；未注入返回 false） */
   openAssetLibrary?: () => boolean;
+  /** Agent 批量操作结束后单次 flush Yjs 图推送（editor-page 注入） */
+  onBatchEnd?: () => void;
 }
 
 /** 单条 Agent 画布操作(后端 CanvasOp 的松散形态) */
@@ -91,6 +93,24 @@ export interface AgentCanvasOp {
 // ===== 模块级状态(仿 setSessionProjectId) =====
 
 let activeBridge: CanvasOpBridge | null = null;
+
+/**
+ * 只读防护标志（2026-08-25 系统性只读防护）：只读模式下置 true，
+ * executeCanvasOp 直接拒绝执行——即使 UI 层入口被隐藏，已打开的 Agent 会话/历史消息
+ * 携带的 canvas_op 也不会落到画布（纵深拦截，editor-page 同步 isReadOnlyViewer）。
+ */
+let _agentReadOnly = false;
+export function setAgentReadOnly(v: boolean): void { _agentReadOnly = v; }
+export function isAgentReadOnly(): boolean { return _agentReadOnly; }
+
+/**
+ * Agent 批量执行标志：executeCanvasOp 执行期间为 true，
+ * use-editor-state 的 pushYjs 检测到此标志后跳过昂贵的资源扫描(syncProjectResourcesToCloud)
+ * 和 Yjs 图推送(pushGraph)，完成后单次 flush 补发。
+ * 避免 Agent 连续 N 个操作触发 N 次全量资源扫描 + 图序列化导致画布卡顿。
+ */
+let _agentBatching = false;
+export function isAgentBatching(): boolean { return _agentBatching; }
 
 export function setCanvasOpBridge(bridge: CanvasOpBridge | null): void {
   activeBridge = bridge;
@@ -237,7 +257,7 @@ async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChain
   });
 
   // 5. 执行 + 聚焦(胶囊高度 51,与画布其余聚焦调用一致)
-  const executor = new CanvasOpExecutor(queue);
+  const executor = new CanvasOpExecutor(queue, { getDefaultSize: (t) => extensions.get(t)?.defaultSize });
   await executor.executeOps(ops);
   store.focusOnBounds(positions.bounds, containerSize, 400, 51);
   return positions.bounds;
@@ -249,94 +269,106 @@ async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChain
  * 执行单条 Agent 画布操作。桥接层未注入时返回 false(调用方回退文本展示)。
  */
 export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
+  // 只读早退（2026-08-25 系统性只读防护）：Agent 画布操作全部为写操作，viewer 一律拒绝
+  if (_agentReadOnly) return false;
   const bridge = activeBridge;
   if (!bridge) return false;
   const store = bridge.getStore();
   const queue = bridge.getCommandQueue();
   if (!store || !queue) return false;
 
-  switch (op.op) {
-    case 'workflow_chain': {
-      const bounds = await executeWorkflowChain(bridge, op.args as unknown as WorkflowChainDefinitionLike);
-      if (bounds) pulseAgentCursor(bridge, { bounds, label: '工作链已就位' });
-      return true;
-    }
+  // 批量抑制：执行期间 onGraphChanged → pushYjs 跳过资源扫描 + Yjs 推送，
+  // finally 单次 flush 补发最终状态（N 个操作 → 1 次资源扫描 + 1 次图序列化）
+  _agentBatching = true;
+  try {
+    switch (op.op) {
+      case 'workflow_chain': {
+        const bounds = await executeWorkflowChain(bridge, op.args as unknown as WorkflowChainDefinitionLike);
+        if (bounds) pulseAgentCursor(bridge, { bounds, label: '工作链已就位' });
+        return true;
+      }
 
-    case 'set_selection': {
-      const nodeIds = Array.isArray(op.args.nodeIds)
-        ? (op.args.nodeIds as unknown[]).filter((x): x is string => typeof x === 'string')
-        : [];
-      store.setSelection({ selectedNodeIds: new Set(nodeIds), selectedEdgeIds: new Set() });
-      if (nodeIds[0]) pulseAgentCursor(bridge, { nodeId: nodeIds[0], label: '已选中' });
-      return true;
-    }
+      case 'set_selection': {
+        const nodeIds = Array.isArray(op.args.nodeIds)
+          ? (op.args.nodeIds as unknown[]).filter((x): x is string => typeof x === 'string')
+          : [];
+        store.setSelection({ selectedNodeIds: new Set(nodeIds), selectedEdgeIds: new Set() });
+        if (nodeIds[0]) pulseAgentCursor(bridge, { nodeId: nodeIds[0], label: '已选中' });
+        return true;
+      }
 
-    case 'focus': {
-      const id = typeof op.args.id === 'string' ? op.args.id : '';
-      if (!id) return true;
-      const node = store.getNode(id);
-      // R3-A2: 引用节点已被删除时不执行聚焦，返回 false 供调用方友好提示
-      if (!node) return false;
-      store.focusOnNode(
-        id,
-        bridge.getContainerSize(),
-        node?.size?.width ?? 200,
-        node?.size?.height ?? 200,
-        400,
-        51,
-      );
-      pulseAgentCursor(bridge, { nodeId: id, label: '已定位' });
-      return true;
-    }
+      case 'focus': {
+        const id = typeof op.args.id === 'string' ? op.args.id : '';
+        if (!id) return true;
+        const node = store.getNode(id);
+        // R3-A2: 引用节点已被删除时不执行聚焦，返回 false 供调用方友好提示
+        if (!node) return false;
+        store.focusOnNode(
+          id,
+          bridge.getContainerSize(),
+          node?.size?.width ?? 200,
+          node?.size?.height ?? 200,
+          400,
+          51,
+        );
+        pulseAgentCursor(bridge, { nodeId: id, label: '已定位' });
+        return true;
+      }
 
-    case 'open_assets': {
-      // R3-A2: 附件卡点击 → 打开资产库弹窗（editor-page 注入实现）
-      if (!bridge.openAssetLibrary) return false;
-      return bridge.openAssetLibrary();
-    }
+      case 'open_assets': {
+        // R3-A2: 附件卡点击 → 打开资产库弹窗（editor-page 注入实现）
+        if (!bridge.openAssetLibrary) return false;
+        return bridge.openAssetLibrary();
+      }
 
-    case 'set_config': {
-      // R2-3: 画布配置修改（主题色等），白名单后端已校验；未注入时回退文本展示
-      const patch = (op.args.patch ?? {}) as Record<string, unknown>;
-      if (!bridge.applyCanvasConfig) return false;
-      return bridge.applyCanvasConfig(patch);
-    }
+      case 'set_config': {
+        // R2-3: 画布配置修改（主题色等），白名单后端已校验；未注入时回退文本展示
+        const patch = (op.args.patch ?? {}) as Record<string, unknown>;
+        if (!bridge.applyCanvasConfig) return false;
+        return bridge.applyCanvasConfig(patch);
+      }
 
-    case 'start_storyboard_generate': {
-      // R2-3: 分镜节点已由前序 add_node 创建；此处选中+聚焦引导用户在节点上启动既有生成链路
-      const sbNodeId = typeof op.args.storyboardNodeId === 'string' ? op.args.storyboardNodeId : '';
-      if (sbNodeId) {
-        const sbNode = store.getNode(sbNodeId);
-        if (sbNode) {
-          store.setSelection({ selectedNodeIds: new Set([sbNodeId]), selectedEdgeIds: new Set() });
-          store.focusOnNode(
-            sbNodeId,
-            bridge.getContainerSize(),
-            sbNode.size?.width ?? 200,
-            sbNode.size?.height ?? 200,
-            400,
-            51,
-          );
-          pulseAgentCursor(bridge, { nodeId: sbNodeId, label: '分镜就绪' });
+      case 'start_storyboard_generate': {
+        // R2-3: 分镜节点已由前序 add_node 创建；此处选中+聚焦引导用户在节点上启动既有生成链路
+        const sbNodeId = typeof op.args.storyboardNodeId === 'string' ? op.args.storyboardNodeId : '';
+        if (sbNodeId) {
+          const sbNode = store.getNode(sbNodeId);
+          if (sbNode) {
+            store.setSelection({ selectedNodeIds: new Set([sbNodeId]), selectedEdgeIds: new Set() });
+            store.focusOnNode(
+              sbNodeId,
+              bridge.getContainerSize(),
+              sbNode.size?.width ?? 200,
+              sbNode.size?.height ?? 200,
+              400,
+              51,
+            );
+            pulseAgentCursor(bridge, { nodeId: sbNodeId, label: '分镜就绪' });
+          }
         }
+        return true;
       }
-      return true;
-    }
 
-    default: {
-      const executor = new CanvasOpExecutor(queue);
-      await executor.executeOps([op as unknown as CanvasOp]);
-      // R3-D1: 结构操作（add/update/remove）后脉冲光标指向目标节点
-      const targetId = typeof op.args.id === 'string' ? op.args.id : '';
-      if (targetId && store.getNode(targetId)) {
-        const label =
-          op.op === 'add_node' ? '已创建节点'
-          : op.op === 'remove_node' ? '已删除'
-          : op.op === 'update_node' ? '已更新'
-          : `已执行 ${op.op}`;
-        pulseAgentCursor(bridge, { nodeId: targetId, label });
+      default: {
+        // 尺寸缺省按类型走扩展 defaultSize(剧本 720×520),与 UI 创建节点一致
+        const executor = new CanvasOpExecutor(queue, { getDefaultSize: (t) => bridge.getExtensions().get(t)?.defaultSize });
+        await executor.executeOps([op as unknown as CanvasOp]);
+        // R3-D1: 结构操作（add/update/remove）后脉冲光标指向目标节点
+        const targetId = typeof op.args.id === 'string' ? op.args.id : '';
+        if (targetId && store.getNode(targetId)) {
+          const label =
+            op.op === 'add_node' ? '已创建节点'
+            : op.op === 'remove_node' ? '已删除'
+            : op.op === 'update_node' ? '已更新'
+            : `已执行 ${op.op}`;
+          pulseAgentCursor(bridge, { nodeId: targetId, label });
+        }
+        return true;
       }
-      return true;
     }
+  } finally {
+    _agentBatching = false;
+    // 单次 flush 最终 graph 状态到 Yjs（skipResourceSync=true，资源由 fullSync 定时器补推）
+    activeBridge?.onBatchEnd?.();
   }
 }

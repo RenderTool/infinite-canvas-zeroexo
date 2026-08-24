@@ -25,6 +25,7 @@ export type CollaborationEventType =
   | 'member_joined'
   | 'member_left'
   | 'join_application' // Phase 8：新的待审加入申请到达（房主端提示）
+  | 'membership_pending' // 2026-08-25：申请人自己被告知已被转为待审（画布页内重进被 SSE 拦截）
   | 'room_updated'
   | 'member_updated'
   | 'message'

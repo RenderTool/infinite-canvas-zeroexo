@@ -24,6 +24,7 @@ import {
   getRoomByCanvas,
   leaveRoom,
 } from './collaboration-api.js';
+import { isPendingJoinResult } from './collaboration-types.js';
 
 /** 协作状态 */
 export interface CollaborationState {
@@ -59,6 +60,16 @@ export interface CollaborationState {
   } | null;
   /** 是否显示本地光标(自检):默认关闭,仅调试面板可开启 */
   showSelfCursor: boolean;
+  /** 会话级协作激活标记:本次页面会话中协作曾激活过(active/房间存在)。
+   *  room_closed 后保持 true → 光标广播继续(关协作只断 SSE 不断 Yjs);
+   *  从未开启协作时保持 false → 不广播光标(双页签 idle 无谓广播是卡顿源之一) */
+  collabSessionActive: boolean;
+  /** 未读聊天消息数（SSE 实时消息到达且不在聊天 Tab 时累加；切到聊天 Tab 清零） */
+  unreadMessages: number;
+  /** 待审加入申请数（房主侧；join_application 到达时累加，弹窗同步真实列表后覆盖） */
+  pendingApprovals: number;
+  /** 新成员加入提醒数（member_joined 到达且非自己时累加；切到成员 Tab 清零） */
+  newMemberCount: number;
 }
 
 /** 协作 actions */
@@ -95,6 +106,20 @@ export interface CollaborationActions {
   setAgentStatus: (status: CollaborationState['agentStatus']) => void;
   /** 切换本地光标(自检)显示 */
   setShowSelfCursor: (show: boolean) => void;
+  /** 设置会话级协作激活标记(只置 true,不因 room_closed 清除) */
+  setCollabSessionActive: (active: boolean) => void;
+  /** 未读消息 +1（排除自己发的） */
+  bumpUnreadMessages: () => void;
+  /** 清空未读消息（切到聊天 Tab / 发消息时） */
+  clearUnreadMessages: () => void;
+  /** 待审申请数（以弹窗拉取的真实列表覆盖） */
+  setPendingApprovals: (n: number) => void;
+  /** 待审申请数 +1（SSE join_application 到达） */
+  bumpPendingApprovals: () => void;
+  /** 新成员加入提醒 +1（SSE member_joined 到达且非自己） */
+  bumpNewMemberCount: () => void;
+  /** 清空新成员提醒（切到成员 Tab 时） */
+  clearNewMemberCount: () => void;
 }
 
 export type CollaborationStore = CollaborationState & CollaborationActions;
@@ -114,6 +139,13 @@ const initialState: CollaborationState = {
   localAwareness: null,
   agentStatus: null,
   showSelfCursor: false,
+  collabSessionActive: false,
+  /** 未读聊天消息数(SSE 实时消息到达且不在聊天 Tab 时累加;切到聊天 Tab 清零) */
+  unreadMessages: 0,
+  /** 待审加入申请数(房主侧;join_application 到达时累加,弹窗同步真实列表后覆盖) */
+  pendingApprovals: 0,
+  /** 新成员加入提醒数(member_joined 到达且非自己时累加;切到成员 Tab 清零) */
+  newMemberCount: 0,
 };
 
 /**
@@ -132,6 +164,12 @@ export function createCollaborationStore() {
         const room = await getRoomByCanvas(canvasId);
 
         if (room) {
+          // 审核制（2026-08-25）：待审申请未批准（画布页内重进被 SSE 转 pending /
+          // 重进时后端返回待审标记）→ 置"待审中"状态，画布页据此显示等待审核覆盖层
+          if (isPendingJoinResult(room)) {
+            set({ room: null, status: 'pending', active: false, initialized: true, joining: false });
+            return;
+          }
           const isOwner = room.ownerId === String(userId ?? room.ownerId);
           // 房主视角：已失效(expired)视同未开启(idle)，可重新发起协作
           // 参与者视角：已失效(expired)标记为"协作已失效"
@@ -146,6 +184,8 @@ export function createCollaborationStore() {
             initialized: true,
             joining: false,
             members: (room as RoomResponse).members ?? [],
+            // 房间活跃 → 标记会话级激活(光标广播门控用)
+            collabSessionActive: status === 'active' ? true : get().collabSessionActive,
           });
         } else {
           set({
@@ -183,6 +223,8 @@ export function createCollaborationStore() {
         room,
         active: !!room && room.status === 'active',
         status: !room ? 'idle' : room.status === 'active' ? 'active' : 'expired',
+        // 房间曾活跃 → 置位;room_closed 置 null 时不清(光标广播跟随 Yjs 生命周期)
+        collabSessionActive: !!room && room.status === 'active' ? true : get().collabSessionActive,
       });
     },
 
@@ -242,7 +284,11 @@ export function createCollaborationStore() {
     },
 
     setActive: (active) => {
-      set({ active });
+      set({
+        active,
+        // 激活过即置位,关协作(setActive false)不清——光标广播门控依赖此标记
+        collabSessionActive: active ? true : get().collabSessionActive,
+      });
     },
 
     setAgentStatus: (status) => {
@@ -251,6 +297,34 @@ export function createCollaborationStore() {
 
     setShowSelfCursor: (show) => {
       set({ showSelfCursor: show });
+    },
+
+    setCollabSessionActive: (active) => {
+      set({ collabSessionActive: active ? true : get().collabSessionActive });
+    },
+
+    bumpUnreadMessages: () => {
+      set((s) => ({ unreadMessages: s.unreadMessages + 1 }));
+    },
+
+    clearUnreadMessages: () => {
+      set({ unreadMessages: 0 });
+    },
+
+    setPendingApprovals: (n) => {
+      set({ pendingApprovals: n });
+    },
+
+    bumpPendingApprovals: () => {
+      set((s) => ({ pendingApprovals: s.pendingApprovals + 1 }));
+    },
+
+    bumpNewMemberCount: () => {
+      set((s) => ({ newMemberCount: s.newMemberCount + 1 }));
+    },
+
+    clearNewMemberCount: () => {
+      set({ newMemberCount: 0 });
     },
   }));
 }

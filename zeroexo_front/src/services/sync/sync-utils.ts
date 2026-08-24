@@ -8,6 +8,7 @@
 
 import { listAssets } from '@/features/asset-picker/asset-store.js';
 import { listPrompts } from '@/features/prompt-library/prompt-store.js';
+import { listProjects } from '@zeroexo/plugin-persistence';
 import { setTabInactive } from './sync-store.js';
 
 // ===== 调试函数 =====
@@ -74,6 +75,14 @@ async function hasLocalChanges(): Promise<boolean> {
   const localPrompts = await listPrompts();
   for (const p of localPrompts) {
     if (!p.cloudId) return true;
+  }
+
+  // 3. 检查是否有未同步的本地项目(无 cloudId:编辑器内新建/复制的画布)
+  // 缺失此检查会导致 fullSync 误判"无本地改动"跳过 pushLocalProjects,
+  // 新建画布永远无法上云(打开时 404、首页云端列表不展示)
+  const localProjects = await listProjects();
+  for (const proj of localProjects) {
+    if (!proj.cloudId) return true;
   }
 
   return false;

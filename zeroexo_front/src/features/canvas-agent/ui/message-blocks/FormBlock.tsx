@@ -10,7 +10,7 @@
  * （答案作为下一条用户消息回到 Agent 会话，对齐 open-design question-form）。
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { QuestionData } from '../types.js';
 import { formatFormAnswers } from './form-utils.js';
 import { sendMessage } from '../session/agent-session.js';
@@ -18,14 +18,45 @@ import { useCanvasAgentStore } from '../store.js';
 
 export interface FormBlockProps {
   form: QuestionData;
+  /** 历史消息还原时，父消息已回答则表单只读 */
+  answered?: boolean;
+  /** 历史还原：从后续用户消息中解析出的答案原文 */
+  restoredAnswer?: string;
 }
 
-export function FormBlock({ form }: FormBlockProps): React.ReactElement {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
-  const [customText, setCustomText] = useState('');
-  const [showCustom, setShowCustom] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+export function FormBlock({ form, answered: initialAnswered, restoredAnswer }: FormBlockProps): React.ReactElement {
+  // 历史还原：从 restoredAnswer 解析出之前的选择
+  // 格式："回答：选项A、选项B" 或 "guideText\n回答：选项A"
+  const restored = useMemo(() => {
+    if (!initialAnswered || !restoredAnswer) return null;
+    const match = restoredAnswer.match(/回答：(.+)/s);
+    if (!match) return null;
+    const answerText = match[1]!.trim();
+    const values = answerText.split('、').map((s) => s.trim()).filter(Boolean);
+    const isMulti = form.multi ?? false;
+    if (isMulti) {
+      // 多选：匹配选项值
+      const matchedValues = new Set<string>();
+      for (const v of values) {
+        const item = form.items.find((it) => it.value === v || it.label === v);
+        if (item) matchedValues.add(item.value);
+      }
+      return { multiValues: matchedValues };
+    } else {
+      // 单选：第一个值
+      const v = values[0];
+      if (!v) return null;
+      const item = form.items.find((it) => it.value === v || it.label === v);
+      if (item) return { selectedValue: item.value };
+      return { customText: v };
+    }
+  }, [initialAnswered, restoredAnswer, form]);
+
+  const [selected, setSelected] = useState<string | null>(restored?.selectedValue ?? null);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(restored?.multiValues ?? new Set());
+  const [customText, setCustomText] = useState(restored?.customText ?? '');
+  const [showCustom, setShowCustom] = useState(!!restored?.customText);
+  const [submitted, setSubmitted] = useState(initialAnswered ?? false);
 
   const isMulti = form.multi ?? false;
   const total = form.items.length;
@@ -81,7 +112,8 @@ export function FormBlock({ form }: FormBlockProps): React.ReactElement {
     <div
       style={{
         width: '100%',
-        margin: '6px 0',
+        maxWidth: 480,
+        margin: '6px auto',
         padding: 12,
         background: 'linear-gradient(180deg, var(--agent-surface), var(--agent-surface-2))', /* R2：投影风格，无边线 */
         border: 'none',

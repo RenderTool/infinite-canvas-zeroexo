@@ -23,6 +23,7 @@ import { X, Bot, CornerUpLeft, Reply } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useAuth } from '@/features/auth/auth-store.js';
+import { ApiError } from '@/services/api-client.js';
 import type { CollaborationMember, CollaborationMessage } from './collaboration-types.js';
 import {
   listMessages,
@@ -30,6 +31,7 @@ import {
   deleteMessage,
 } from './collaboration-api.js';
 import { useCollaborationStore } from './use-collaboration-store.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 /** 提取内容中的提及(成员昵称) */
 function extractMentions(content: string, members: CollaborationMember[]): string[] {
@@ -128,7 +130,9 @@ export function MentionInput({
     const list: { key: string; label: string; type: 'member' }[] = [];
 
     for (const m of members) {
+      // 提及仅限可对话的活跃成员：被封禁(banned)成员不应出现在建议列表
       if (!m.nickname) continue;
+      if (m.sessions.some((s) => s.status === 'banned')) continue;
       if (!q || m.nickname.toLowerCase().includes(q)) {
         list.push({ key: m.userId, label: m.nickname, type: 'member' });
       }
@@ -260,6 +264,8 @@ export interface CollaborationChatProps {
 
 export function CollaborationChat({ theme, height }: CollaborationChatProps): React.ReactElement {
   const { t } = useTranslation();
+  // 只读防护（2026-08-25 系统性只读防护）：viewer 可浏览聊天记录，不可发言
+  const readOnly = useReadOnly();
   const store = useCollaborationStore();
   const messages = store.messages;
   const room = store.room;
@@ -301,8 +307,22 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
   const handleSend = async () => {
     const content = text.trim();
     if (!content || !room || sending) return;
+    if (readOnly) {
+      message.warning(t('collab.chatReadOnly'));
+      return;
+    }
     if (!canChat) {
       message.warning(t('collab.chatNotAllowed'));
+      return;
+    }
+    // 自己被禁言:本地成员状态直接拦截,给出明确原因而非等到后端 403
+    // 禁言持久化在 permissions(移除 chat):退出重进后 session 可能恢复 online,需同时查权限
+    const self = members.find((m) => m.isSelf) ?? null;
+    const selfMuted =
+      !!self &&
+      (self.sessions.some((s) => s.status === 'muted') || (canChat && !self.permissions.includes('chat')));
+    if (selfMuted) {
+      message.warning(t('collab.chatMuted'));
       return;
     }
     setSending(true);
@@ -316,7 +336,12 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
       setReplyingTo(null);
     } catch (err) {
       console.error('[CollaborationChat] send failed:', err);
-      message.error(t('collab.chatFailed'));
+      // 被禁言等业务错误要有明确原因,不能一律"消息发送失败"(后端返回 COLLAB_MEMBER_MUTED)
+      if (err instanceof ApiError && err.code === 'COLLAB_MEMBER_MUTED') {
+        message.error(t('collab.chatMuted'));
+      } else {
+        message.error(t('collab.chatFailed'));
+      }
     } finally {
       setSending(false);
     }
@@ -572,7 +597,7 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
             onSend={() => void handleSend()}
             members={members}
             placeholder={t('collab.chatPlaceholder')}
-            disabled={!canChat || sending}
+            disabled={!canChat || sending || readOnly}
             theme={theme}
           />
           <div className="composer-row">
@@ -580,7 +605,7 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
             <button
               type="button"
               onClick={() => void handleSend()}
-              disabled={!canChat || sending || !text.trim()}
+              disabled={!canChat || sending || !text.trim() || readOnly}
               className="composer-send"
               title={t('collab.chatSend')}
             >

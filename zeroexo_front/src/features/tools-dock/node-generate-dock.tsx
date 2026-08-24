@@ -45,6 +45,7 @@ import type { ModelCapability, ModelChannel } from '@/features/ai-config/use-ai-
 import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 /** 生成模式(宿主节点类型映射;text 模式走文本能力) */
 export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
@@ -713,6 +714,7 @@ export function NodeGenerateDock({
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
+  const readOnly = useReadOnly();
   // 生成类型由宿主节点类型推导(堆叠不作为生成目标,见下方 return null)
   const mode: GenerationMode = defaultMode(nodeType, configMode);
   const [prompt, setPrompt] = useState(initialPrompt.trim());
@@ -980,6 +982,10 @@ export function NodeGenerateDock({
   }, [isRunning, onStop, nodeId, submit]);
 
   const typeMeta = TYPE_META[nodeType] ?? TYPE_META.generator!;
+
+  // 只读模式整体隐藏（2026-08-25 系统性只读防护）：提示词输入/生成按钮是核心编辑入口，
+  // portal 浮层逃逸画布遮罩，必须组件级拦截
+  if (readOnly) return null;
 
   // 堆叠节点:资源浏览器语义,不作为生成目标(用户拍板:下方不显示提示词面板,
   // 堆叠只作为上游参考输入,具体卡片经 @ 在生成节点面板中引用)

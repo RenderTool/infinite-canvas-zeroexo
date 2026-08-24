@@ -622,7 +622,8 @@ function loadTexture(url: string): Promise<THREE.Texture> {
 
 // ===== 样式（与 editor-page 画布壳一致）=====
 function layoutStyle(bg: string): CSSProperties {
-  return { position: 'relative', height: '100%', overflow: 'hidden', background: bg };
+  // 同 editor-page R3: AppLayout Content(flex) 内必须显式撑满,否则收缩导致内容不贴右缘
+  return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: bg };
 }
 const headerStyle: CSSProperties = { height: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
 const contentLayoutStyle: CSSProperties = { position: 'relative', overflow: 'hidden' };

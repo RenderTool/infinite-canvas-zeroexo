@@ -167,6 +167,8 @@ export function useAssetUploadQueue(
       }
 
       const results: CreateAssetInput[] = [];
+      // 收集本批次失败原因:全败时抛出首个错误,避免用户只见笼统的格式提示
+      const errors: unknown[] = [];
 
       // 2. 使用 UploadQueue 处理并发上传和重试
       const unsub = uploadQueue.on((event) => {
@@ -180,6 +182,7 @@ export function useAssetUploadQueue(
           s.completeOne(storeId);
         } else if (event.type === 'task-failed') {
           s.failOne(storeId, event.error);
+          errors.push(event.error);
         } else if (event.type === 'task-retrying') {
           s.updateItem(storeId, { status: 'uploading' });
         }
@@ -208,6 +211,12 @@ export function useAssetUploadQueue(
       } finally {
         unsub();
         uploadQueue.removeTasks(taskIds);
+      }
+
+      // 全败时透出真实失败原因(如文件过大/格式不支持),而非静默返回空数组
+      if (results.length === 0 && errors.length > 0) {
+        const first = errors[0];
+        throw first instanceof Error ? first : new Error(String(first));
       }
 
       return results;

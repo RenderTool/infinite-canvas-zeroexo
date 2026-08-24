@@ -34,6 +34,7 @@ import type { ThemeConfig } from '@zeroexo/shared';
 import { resolveThumbnailUrl, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import { buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from '@zeroexo/plugin-nodes';
 import { AuthorizedImage, AuthorizedVideo } from '@/shared/components/authorized-media.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 
 export interface HierarchyPanelSidebarProps {
   closing: boolean;
@@ -385,6 +386,7 @@ const HierarchyRow = memo(function HierarchyRow({
   onSelect, onToggleCollapse, onStartRename, onReparent, onFocusNode, toggleSelectId, dragIdRef,
 }: HierarchyRowProps): React.ReactElement {
   const { t } = useTranslation();
+  const readOnly = useReadOnly();
   const hidden = node.hidden ?? false;
   const locked = node.locked ?? false;
 
@@ -432,14 +434,19 @@ const HierarchyRow = memo(function HierarchyRow({
     <div
       className="hierarchy-row"
       data-hierarchy-id={node.id}
-      draggable={!isRenaming && !selectMode}
-      onDragStart={(e) => { dragIdRef.current = node.id; e.dataTransfer.effectAllowed = 'move'; }}
+      draggable={!isRenaming && !selectMode && !readOnly}
+      onDragStart={(e) => {
+        if (readOnly) { e.preventDefault(); return; }
+        dragIdRef.current = node.id; e.dataTransfer.effectAllowed = 'move';
+      }}
       onDragOver={(e) => {
+        if (readOnly || node.type !== 'group') return;
         if (node.type === 'group' && dragIdRef.current && dragIdRef.current !== node.id) {
           e.preventDefault(); e.dataTransfer.dropEffect = 'move';
         }
       }}
       onDrop={(e) => {
+        if (readOnly) return;
         if (node.type !== 'group') return;
         e.preventDefault(); e.stopPropagation();
         if (dragIdRef.current && dragIdRef.current !== node.id) {
@@ -458,7 +465,7 @@ const HierarchyRow = memo(function HierarchyRow({
           requestAnimationFrame(() => onFocusNode(node.id));
         });
       }}
-      onDoubleClick={() => { if (!selectMode) onStartRename(node.id); }}
+      onDoubleClick={() => { if (!selectMode && !readOnly) onStartRename(node.id); }}
       style={rowStyle}
     >
       {/* 树形引导线(类似目录结构) */}

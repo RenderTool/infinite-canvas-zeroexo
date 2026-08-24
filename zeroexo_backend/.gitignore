@@ -28,6 +28,13 @@ config/settings.local.json
 # Logs
 *.log
 
+# 临时排查脚本（一次性调试用，不入库）
+/check-*.cjs
+/repro*.cjs
+/monitor-user.cjs
+/read-history.cjs
+/verify-api.cjs
+
 # Storage runtime data (仅根目录,避免误伤 src/modules/storage 源码模块)
 /storage/
 

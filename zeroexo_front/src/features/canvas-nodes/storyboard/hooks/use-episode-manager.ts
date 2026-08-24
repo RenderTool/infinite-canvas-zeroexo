@@ -92,6 +92,14 @@ function splitPlainTextIntoPages(text: string): ScriptContentPage[] {
   return pages;
 }
 
+/** 超大内容直接走纯文本分页(正则剥标签,不建 DOM)——Agent 生成整本剧本可达数万字,DOMParser 每次渲染全量解析会卡 */
+const MAX_PARSE_CHARS = 30_000;
+
+/** 快速剥标签取纯文本(比 DOMParser 快一个量级,超大内容分页专用) */
+function stripTagsFast(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/g, '&');
+}
+
 /**
  * 将剧集 HTML 内容按页拆分（分集与分页关系映射核心）：
  * 1. 遇到 .script-page-break 手动分页标记 → 强制换页
@@ -100,6 +108,10 @@ function splitPlainTextIntoPages(text: string): ScriptContentPage[] {
  */
 export function splitContentIntoPages(contentHtml: string): ScriptContentPage[] {
   if (!contentHtml) return [];
+  // 超大内容节流:不建 DOM,按纯文本字符均匀分页(页数估算与真实解析一致,性能 O(n))
+  if (contentHtml.length > MAX_PARSE_CHARS) {
+    return splitPlainTextIntoPages(stripTagsFast(contentHtml));
+  }
   const doc = new DOMParser().parseFromString(contentHtml, 'text/html');
   const blocks = Array.from(doc.body.children) as HTMLElement[];
   if (blocks.length === 0) {

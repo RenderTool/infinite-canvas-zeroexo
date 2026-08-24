@@ -49,7 +49,7 @@ export function createRoom(dto: CreateRoomRequest): Promise<RoomResponse> {
   return apiPost(`${COLLAB}/rooms`, dto);
 }
 
-export function getRoomByCanvas(canvasId: string): Promise<RoomResponse> {
+export function getRoomByCanvas(canvasId: string): Promise<JoinRoomResult | null> {
   return apiGet(`${COLLAB}/rooms/${canvasId}`);
 }
 
@@ -114,6 +114,11 @@ export function joinRoom(canvasId: string, inviteCode: string, nickname?: string
 }
 
 // ==================== 加入审核（Phase 8：需要审核/无需审核两档） ====================
+
+/** 当前用户待审申请总数（主页 NAV 红点轮询；跨房间汇总） */
+export function countPendingApplications(): Promise<{ count: number }> {
+  return apiGet(`${COLLAB}/applications/pending-count`);
+}
 
 /** 待审加入申请列表（仅房主） */
 export function listApplications(canvasId: string): Promise<JoinApplication[]> {

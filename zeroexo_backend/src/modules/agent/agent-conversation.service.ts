@@ -138,6 +138,7 @@ export class AgentConversationService {
     taskId?: string;
     toolName?: string;
     toolArguments?: string;
+    toolCallId?: string;
   }) {
     const msg = await this.prisma.agentMessage.create({ data: input });
     await this.prisma.agentConversation.update({
@@ -145,6 +146,14 @@ export class AgentConversationService {
       data: { updatedAt: new Date() },
     });
     return msg;
+  }
+
+  /** 回填工具调用结果摘要（历史胶囊 Result 展开，与聊天时一致） */
+  async updateMessageResult(messageId: string, toolResult: string): Promise<void> {
+    await this.prisma.agentMessage.update({
+      where: { id: messageId },
+      data: { toolResult },
+    });
   }
 
   /** 会话内任务收尾时触发记忆压缩（失败不抛出，仅告警） */

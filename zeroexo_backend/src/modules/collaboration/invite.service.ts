@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /** 排除易混淆字符（O/0, I/1, l 等）- 已在 CHARSET 中排除 */
 const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
+/** 过期房间软清理后的保留期(天):期间参与者主页仍能看到"已失效"协作,到期物理删除 */
+const EXPIRED_RETENTION_DAYS = 30;
 
 /**
  * 邀请码服务 - 生成与验证 6 位邀请码，处理过期逻辑。
@@ -102,6 +106,35 @@ export class InviteService {
     });
     if (result.count > 0) {
       this.logger.log(`清理过期协作房间 ${result.count} 个`);
+    }
+    return result.count;
+  }
+
+  /**
+   * 定时清理(每小时第 5 分钟):过期 active 房间软置 expired + 超保留期 expired 房间物理删除。
+   * 历史缺口:此前 cleanupExpiredRooms 只在邀请码验证时惰性生效,过期房间永不自动失效,
+   * expired 记录也永不删除 → 幽灵房间堆积;ScheduleModule 已在 app.module 注册。
+   */
+  @Cron('0 5 * * * *')
+  async timerCleanupExpiredRooms(): Promise<void> {
+    try {
+      await this.cleanupExpiredRooms();
+      await this.purgeExpiredRooms();
+    } catch (err) {
+      this.logger.error(`定时清理协作房间失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * 物理删除超过保留期的 expired 房间(成员/消息 onDelete: Cascade 级联清理)
+   */
+  async purgeExpiredRooms(): Promise<number> {
+    const deadline = new Date(Date.now() - EXPIRED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.collaborationRoom.deleteMany({
+      where: { status: 'expired', updatedAt: { lt: deadline } },
+    });
+    if (result.count > 0) {
+      this.logger.log(`物理清理超期协作房间 ${result.count} 个`);
     }
     return result.count;
   }

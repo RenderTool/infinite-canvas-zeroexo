@@ -242,10 +242,12 @@ export class CollaborationAgentService {
     return room;
   }
 
-  /** 校验用户是房间成员（可选要求 agent 权限） */
+  /** 校验用户是房间成员（可选要求 agent 权限）
+   * muted=禁言仅禁 chat，不影响 agent 使用（permissions 仍含 agent 时放行）；
+   * offline=离屏≠退出，与 sendMessage/listMessages 口径一致 */
   private async requireMember(roomId: string, userId: string, opts: { needAgent?: boolean } = {}) {
     const member = await this.prisma.collaborationMember.findFirst({
-      where: { roomId, userId, status: 'online' },
+      where: { roomId, userId, status: { notIn: ['banned', 'left', 'pending'] } },
     });
     if (!member) throw forbidden('FORBIDDEN', 'You are not a member of this room');
     if (opts.needAgent && !member.permissions.split(',').includes('agent')) {

@@ -284,8 +284,8 @@ export const BlockCanvasLayer = React.memo(function BlockCanvasLayer({
       const size = getNodeSize(node, extensions);
       const w = size.width;
       const h = size.height;
-      const x = node.position.x;
-      const y = node.position.y;
+      const x = node.position?.x ?? 0;
+      const y = node.position?.y ?? 0;
       const isHovered = hoveredStr === node.id;
       const isSelected = selectedIdsSet.has(node.id);
       const borderRadius = Math.min(node.borderRadius ?? 8, w / 2, h / 2);
@@ -360,8 +360,9 @@ export const BlockCanvasLayer = React.memo(function BlockCanvasLayer({
       const size = getNodeSize(n, extensions);
       const w = size.width;
       const h = size.height;
-      if (wx >= n.position.x && wx <= n.position.x + w
-        && wy >= n.position.y && wy <= n.position.y + h) {
+      const px = n.position?.x ?? 0;
+      const py = n.position?.y ?? 0;
+      if (wx >= px && wx <= px + w && wy >= py && wy <= py + h) {
         return n;
       }
     }

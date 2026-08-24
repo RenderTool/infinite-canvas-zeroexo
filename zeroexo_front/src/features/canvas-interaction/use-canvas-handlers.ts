@@ -57,8 +57,8 @@ export function useCanvasHandlers(
   }, [ic]);
 
   const onNodePointerDown = useCallback((e: ReactPointerEvent, nodeId: string) => {
-    // 中键透传:不拦截，冒泡到画布层触发中键平移（controller.handleCanvasPointerDown 支持 button1）
-    if (e.button === 1) return;
+    // 仅左键(button===0)需要拦截:拖拽/选中逻辑;中键/右键一律放行(右键冒泡到 Viewport_ 触发右键菜单)
+    if (e.button !== 0) return;
     e.stopPropagation();
     ic?.handleNodePointerDown(e.nativeEvent, nodeId);
   }, [ic]);

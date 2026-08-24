@@ -128,10 +128,10 @@ function computePinPoint(
   const pinAreaPad = NODE_PIN_PADDING;
   const totalPad = nodePad + pinAreaPad;
   const contentH = size.height - totalPad * 2;
-  const y = node.position.y + totalPad + (idx + 0.5) * (contentH / N);
+  const y = (node.position?.y ?? 0) + totalPad + (idx + 0.5) * (contentH / N);
   const x = pin.direction === 'input'
-    ? node.position.x
-    : node.position.x + size.width;
+    ? (node.position?.x ?? 0)
+    : (node.position?.x ?? 0) + size.width;
   return { x, y };
 }
 
@@ -154,16 +154,16 @@ function getEdgeEndpointsFor(
 
   const sourceFallbackX = source.type === 'group' && source.bounds
     ? source.bounds.x + source.bounds.width
-    : source.position.x + sourceSize.width;
+    : (source.position?.x ?? 0) + sourceSize.width;
   const sourceFallbackY = source.type === 'group' && source.bounds
     ? source.bounds.y + source.bounds.height / 2
-    : source.position.y + sourceSize.height / 2;
+    : (source.position?.y ?? 0) + sourceSize.height / 2;
   const targetFallbackX = target.type === 'group' && target.bounds
     ? target.bounds.x
-    : target.position.x;
+    : (target.position?.x ?? 0);
   const targetFallbackY = target.type === 'group' && target.bounds
     ? target.bounds.y + target.bounds.height / 2
-    : target.position.y + targetSize.height / 2;
+    : (target.position?.y ?? 0) + targetSize.height / 2;
 
   return {
     sourceX: sp?.x ?? sourceFallbackX,
@@ -333,10 +333,10 @@ const EdgeItem = React.memo(function EdgeItem({
       const offT = offsets.get(t.id);
       if (!offS && !offT) return;
       const shiftedS = offS
-        ? { ...s, position: { x: s.position.x + offS.dx, y: s.position.y + offS.dy } }
+        ? { ...s, position: { x: (s.position?.x ?? 0) + offS.dx, y: (s.position?.y ?? 0) + offS.dy } }
         : s;
       const shiftedT = offT
-        ? { ...t, position: { x: t.position.x + offT.dx, y: t.position.y + offT.dy } }
+        ? { ...t, position: { x: (t.position?.x ?? 0) + offT.dx, y: (t.position?.y ?? 0) + offT.dy } }
         : t;
       const shiftedEndpoints = getEdgeEndpointsFor(
         shiftedS,
@@ -461,10 +461,10 @@ const ActiveVisualLayer = React.memo(function ActiveVisualLayer({
           const offT = offsets.get(t.id);
           if (!offS && !offT) continue;
           const shiftedS = offS
-            ? { ...s, position: { x: s.position.x + offS.dx, y: s.position.y + offS.dy } }
+            ? { ...s, position: { x: (s.position?.x ?? 0) + offS.dx, y: (s.position?.y ?? 0) + offS.dy } }
             : s;
           const shiftedT = offT
-            ? { ...t, position: { x: t.position.x + offT.dx, y: t.position.y + offT.dy } }
+            ? { ...t, position: { x: (t.position?.x ?? 0) + offT.dx, y: (t.position?.y ?? 0) + offT.dy } }
             : t;
           const endpoints = getEdgeEndpointsFor(shiftedS, shiftedT, edge, ext, pd, ik);
           if (!endpoints) continue;

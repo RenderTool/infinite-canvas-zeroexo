@@ -170,6 +170,12 @@ export class CollaborationController {
 
   // ==================== 加入审核（Phase 8：需要审核/无需审核两档） ====================
 
+  /** 当前用户待审申请总数（主页 NAV 红点轮询；跨房间汇总，仅房主统计自己） */
+  @Get('applications/pending-count')
+  async countPendingApplications(@Req() req: AuthedRequest) {
+    return this.collaborationService.countPendingApplications(req.user.id);
+  }
+
   /** 待审加入申请列表（仅房主） */
   @Get('rooms/:canvasId/applications')
   async listApplications(@Req() req: AuthedRequest, @Param('canvasId') canvasId: string) {

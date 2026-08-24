@@ -208,6 +208,12 @@ export async function pushLocalProjects(): Promise<void> {
     if (!local.cloudId) {
       try {
         await pushProjectMeta(local.id);
+        // 推送成功后回写 cloudId(后端 upsert 以本地 id 为云端主键),
+        // 避免后续 fullSync 重复推送 + 使 pullCloudProjects 的孤儿清理不误伤已上云项目
+        const fresh = await getProject(local.id);
+        if (fresh && !fresh.cloudId) {
+          await upsertProject({ ...fresh, cloudId: local.id, lastSyncedAt: new Date().toISOString() });
+        }
       } catch (err) {
         debugError(`[sync-service] push project ${local.id} failed:`, err);
       }

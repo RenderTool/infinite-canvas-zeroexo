@@ -15,14 +15,48 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   const { message } = props;
   const items = message.clarifyItems ?? [];
 
+  // 历史还原：从 restoredAnswer 解析出之前的澄清答案
+  const restoredAnswers = useMemo(() => {
+    if (!message.answered || !message.restoredAnswer) return null;
+    try {
+      const list = JSON.parse(message.restoredAnswer) as ClarifyAnswer[];
+      if (!Array.isArray(list)) return null;
+      const map: Record<string, {
+        itemId: string;
+        values?: string[];
+        text?: string;
+        skipped?: boolean;
+      }> = {};
+      for (const a of list) {
+        const item = items.find((it) => it.itemId === a.itemId);
+        if (!item) continue;
+        if (item.kind === 'text') {
+          map[a.itemId] = { itemId: a.itemId, text: Array.isArray(a.value) ? a.value[0] : (a.value as string) };
+        } else {
+          const vals = Array.isArray(a.value) ? a.value : (a.value ? [a.value] : []);
+          if (vals.length === 0) {
+            map[a.itemId] = { itemId: a.itemId, skipped: true };
+          } else {
+            map[a.itemId] = { itemId: a.itemId, values: vals };
+          }
+        }
+      }
+      return map;
+    } catch {
+      return null;
+    }
+  }, [message.answered, message.restoredAnswer, items]);
+
   // 答案状态
   const [answers, setAnswers] = useState<Record<string, {
     itemId: string;
     values?: string[];
     text?: string;
     skipped?: boolean;
-  }>>({});
+  }>>(restoredAnswers ?? {});
   const [submitting, setSubmitting] = useState(false);
+  // 历史消息还原：父消息已回答则表单只读
+  const [submitted, setSubmitted] = useState(!!message.answered);
 
   const total = items.length;
   const answered = useMemo(
@@ -38,6 +72,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   );
 
   const handleSelect = (itemId: string, value: string) => {
+    if (submitted) return;
     setAnswers((prev) => {
       const item = items.find((i) => i.itemId === itemId);
       if (!item) return prev;
@@ -55,6 +90,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   };
 
   const handleTextChange = (itemId: string, text: string) => {
+    if (submitted) return;
     setAnswers((prev) => ({
       ...prev,
       [itemId]: { itemId, text },
@@ -62,6 +98,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   };
 
   const handleSkip = (itemId: string) => {
+    if (submitted) return;
     setAnswers((prev) => ({
       ...prev,
       [itemId]: { itemId, skipped: true },
@@ -69,7 +106,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   };
 
   const handleSubmit = () => {
+    if (submitted) return;
     setSubmitting(true);
+    setSubmitted(true);
     const answerList: ClarifyAnswer[] = items.map((item) => {
       const a = answers[item.itemId];
       if (!a || a.skipped) return { itemId: item.itemId, value: [] };
@@ -81,7 +120,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
   };
 
   const handleSkipAll = () => {
+    if (submitted) return;
     setSubmitting(true);
+    setSubmitted(true);
     void sendAnswer(JSON.stringify(items.map((item) => ({ itemId: item.itemId, value: [] }))));
   };
 
@@ -91,7 +132,8 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
     <div
       style={{
         width: '100%',
-        margin: '6px 0',
+        maxWidth: 480,
+        margin: '6px auto',
         padding: 12,
         background: 'var(--agent-surface)',
         border: '1px solid var(--agent-border)',
@@ -123,6 +165,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                   value={a?.text ?? ''}
                   onChange={(e) => handleTextChange(item.itemId, e.target.value)}
                   placeholder="输入…"
+                  disabled={submitted}
                   className="agent-form-textarea"
                   style={{
                     width: '100%',
@@ -155,6 +198,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                       key={opt.value}
                       type="button"
                       onClick={() => handleSelect(item.itemId, opt.value)}
+                      disabled={submitted}
                       className="agent-poll-opt"
                       style={{
                         width: '100%',
@@ -166,12 +210,13 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                         background: 'var(--agent-surface)',
                         border: `1.5px solid ${isSelected ? 'var(--agent-accent)' : 'var(--agent-border)'}`,
                         borderRadius: 9,
-                        cursor: 'pointer',
+                        cursor: submitted ? 'default' : 'pointer',
                         fontFamily: 'inherit',
                         fontSize: 12.5,
                         color: 'var(--agent-text)',
                         textAlign: 'left',
                         transition: 'all 0.15s',
+                        opacity: submitted ? 0.7 : 1,
                       }}
                     >
                       {/* 选择指示器 */}
@@ -216,6 +261,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
               <button
                 type="button"
                 onClick={() => handleSkip(item.itemId)}
+                disabled={submitted}
                 style={{
                   marginTop: 4,
                   padding: '2px 8px',
@@ -223,8 +269,9 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
                   border: 'none',
                   color: 'var(--agent-muted)',
                   fontSize: 11,
-                  cursor: 'pointer',
+                  cursor: submitted ? 'default' : 'pointer',
                   fontFamily: 'inherit',
+                  opacity: submitted ? 0.5 : 1,
                 }}
               >
                 跳过
@@ -252,6 +299,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
           <button
             type="button"
             onClick={handleSkipAll}
+            disabled={submitted}
             className="agent-btn-secondary"
             style={{
               padding: '4px 12px',
@@ -262,7 +310,8 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
               fontSize: 11,
               fontWeight: 600,
               fontFamily: 'inherit',
-              cursor: 'pointer',
+              cursor: submitted ? 'default' : 'pointer',
+              opacity: submitted ? 0.5 : 1,
             }}
           >
             跳过全部
@@ -270,7 +319,7 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitted || submitting}
             className="agent-btn-primary"
             style={{
               padding: '4px 14px',
@@ -283,8 +332,8 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
               fontSize: 11,
               fontWeight: 700,
               fontFamily: 'inherit',
-              cursor: answered > 0 ? 'pointer' : 'default',
-              opacity: submitting ? 0.6 : 1,
+              cursor: answered > 0 && !submitted ? 'pointer' : 'default',
+              opacity: submitting || submitted ? 0.6 : 1,
             }}
           >
             提交

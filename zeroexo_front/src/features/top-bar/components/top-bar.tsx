@@ -16,12 +16,14 @@ import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   Bot, BookOpen, Undo2, Redo2, Keyboard, Users,
-  History, Save, SquareMousePointer,
+  History, SquareMousePointer,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { Button as AntdButton, Dropdown, Tooltip } from 'antd';
-import type { MenuProps } from 'antd';
+import { Badge, Button as AntdButton, Tooltip } from 'antd';
+import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
+import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
+import { useReadOnly } from '@/shared/readonly-context.js';
 import { AppearanceDialog, ShortcutsDialog, LanguageSwitcher } from '@/shared/components/index.js';
 import type { GridStyle } from '@/shared/components/index.js';
 import { TitleEditor } from './title-editor.js';
@@ -45,6 +47,8 @@ export interface TopBarProps {
   title: string;
   titleDraft: string;
   isTitleEditing: boolean;
+  /** 标题是否可编辑(参与者只读,默认 true) */
+  titleEditable?: boolean;
   onTitleDraftChange: (v: string) => void;
   onStartTitleEditing: () => void;
   onFinishTitleEditing: () => void;
@@ -70,9 +74,7 @@ export interface TopBarProps {
   onMobileNavOpen?: () => void;
   /** 打开协作弹窗 */
   onOpenCollaboration?: () => void;
-  /** 打开保存版本弹窗 */
-  onSaveVersion?: () => void;
-  /** 打开版本历史面板 */
+  /** 打开版本快照面板(保存+历史合并单页面) */
   onOpenVersionHistory?: () => void;
   /** 快捷键注册表(键盘插件实例;透传给快捷键弹窗自动映射) */
   keyboardShortcuts?: readonly ShortcutEntry[];
@@ -82,6 +84,7 @@ export function TopBar({
   title,
   titleDraft,
   isTitleEditing,
+  titleEditable = true,
   onTitleDraftChange,
   onStartTitleEditing,
   onFinishTitleEditing,
@@ -99,14 +102,20 @@ export function TopBar({
   onRedo,
   canvasMenu,
   onOpenCollaboration,
-  onSaveVersion,
   onOpenVersionHistory,
   keyboardShortcuts,
 }: TopBarProps): React.ReactElement {
   const { theme, mode } = useTheme();
   const { t } = useTranslation();
+  const readOnly = useReadOnly();
   const isMobileAuto = useIsMobile();
   const mobile = isMobile ?? isMobileAuto;
+  // 未读提醒红点：协作按钮=待审申请数+新成员加入数（房主）；Agent 按钮=协作未读+对话未读总数（dock 关闭时也能看到）
+  const pendingApprovals = useCollaborationStore((s) => s.pendingApprovals);
+  const newMemberCount = useCollaborationStore((s) => s.newMemberCount);
+  const unreadMessages = useCollaborationStore((s) => s.unreadMessages);
+  const agentUnread = useCanvasAgentStore((s) => s.agentUnread);
+
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -157,14 +166,9 @@ export function TopBar({
     // 文档即将上线,先占位(入口保留,便于后续接入文档站点)
   };
 
-  /** 版本快照下拉:保存版本 + 版本历史 */
-  const versionItems: MenuProps['items'] = [
-    { key: 'save', icon: <Save size={14} />, label: t('topbar.saveVersion') },
-    { key: 'history', icon: <History size={14} />, label: t('topbar.versionHistory') },
-  ];
-  const onVersionMenuClick: MenuProps['onClick'] = ({ key }) => {
-    if (key === 'save') onSaveVersion?.();
-    else if (key === 'history') onOpenVersionHistory?.();
+  /** 版本快照:点按钮直接打开合并面板(保存+历史),无下拉 */
+  const handleOpenVersion = (): void => {
+    onOpenVersionHistory?.();
   };
 
   return (
@@ -176,28 +180,29 @@ export function TopBar({
           title={title}
           titleDraft={titleDraft}
           isTitleEditing={isTitleEditing}
+          editable={titleEditable}
           onTitleDraftChange={onTitleDraftChange}
           onStartTitleEditing={onStartTitleEditing}
           onFinishTitleEditing={onFinishTitleEditing}
           onCancelTitleEditing={onCancelTitleEditing}
         />
-        {/* 撤销/重做 */}
+        {/* 撤销/重做（只读禁用：2026-08-25 系统性只读防护，viewer 不得回滚/重放编辑） */}
         <Tooltip title={t('topbar.undo')}>
           <AntdButton
             type="text"
             icon={<Undo2 size={16} />}
-            disabled={!canUndo}
+            disabled={!canUndo || readOnly}
             onClick={onUndo}
-            style={undoRedoBtnStyle(canUndo)}
+            style={undoRedoBtnStyle(canUndo && !readOnly)}
           />
         </Tooltip>
         <Tooltip title={t('topbar.redo')}>
           <AntdButton
             type="text"
             icon={<Redo2 size={16} />}
-            disabled={!canRedo}
+            disabled={!canRedo || readOnly}
             onClick={onRedo}
-            style={undoRedoBtnStyle(canRedo)}
+            style={undoRedoBtnStyle(canRedo && !readOnly)}
           />
         </Tooltip>
         {/* 保存状态指示器(标题旁,与创作页统一) */}
@@ -250,16 +255,15 @@ export function TopBar({
               />
             </Tooltip>
 
-            {/* 版本快照:保存版本 + 版本历史(合并下拉) */}
-            <Dropdown menu={{ items: versionItems, onClick: onVersionMenuClick }} placement="bottomRight" trigger={['click']}>
-              <Tooltip title={t('topbar.versionHistory')}>
-                <AntdButton
-                  type="text"
-                  icon={<History size={16} />}
-                  style={iconBtnInHeader}
-                />
-              </Tooltip>
-            </Dropdown>
+            {/* 版本快照:点击直接打开合并面板(保存+历史单页面,2026-08-24 去下拉) */}
+            <Tooltip title={t('topbar.versionHistory')}>
+              <AntdButton
+                type="text"
+                icon={<History size={16} />}
+                onClick={handleOpenVersion}
+                style={iconBtnInHeader}
+              />
+            </Tooltip>
           </>
         )}
 
@@ -277,28 +281,35 @@ export function TopBar({
         {/* 协作 + Agent(桌面端;账号/退出已移入左上角 CanvasMenu) */}
         {!mobile && (
           <>
-            {/* 协作(仅登录用户;未登录时点击引导登录) */}
+            {/* 协作(仅登录用户;未登录时点击引导登录)；待审申请+新成员加入红点：弹窗同步真实列表后覆盖，批准/拒绝/查看成员后自动移除 */}
             <Tooltip title={t('topbar.collaboration')}>
-              <AntdButton
-                type="text"
-                icon={<Users size={16} />}
-                onClick={() => onOpenCollaboration?.()}
-                style={iconBtnInHeader}
-              />
+              <Badge count={pendingApprovals + newMemberCount} size="small" overflowCount={99} offset={[2, -2]}>
+                <AntdButton
+                  type="text"
+                  icon={<Users size={16} />}
+                  onClick={() => onOpenCollaboration?.()}
+                  style={iconBtnInHeader}
+                />
+              </Badge>
             </Tooltip>
             {/* R2-8: 协作聊天面板入口已移除（并入 AgentDock 页签，避免 Nav 双入口） */}
-            {/* Agent 面板开关 */}
-            <Tooltip title={t('topbar.toggleAgent')}>
-              <AntdButton
-                type="text"
-                icon={<Bot size={16} />}
-                onClick={onToggleAgent}
-                style={{
-                  ...iconBtnInHeader,
-                  color: agentOpen ? theme.toolbar.accent : theme.toolbar.text,
-                }}
-              />
-            </Tooltip>
+            {/* Agent 面板开关；未读红点=协作聊天未读+对话未读（dock 关闭时也可感知新消息；切到对应页签后归零）
+                只读隐藏（2026-08-25 系统性只读防护）：Agent 唯一用途是执行画布写操作，viewer 不可用 */}
+            {!readOnly && (
+              <Tooltip title={t('topbar.toggleAgent')}>
+                <Badge count={unreadMessages + agentUnread} size="small" overflowCount={99} offset={[2, -2]}>
+                  <AntdButton
+                    type="text"
+                    icon={<Bot size={16} />}
+                    onClick={onToggleAgent}
+                    style={{
+                      ...iconBtnInHeader,
+                      color: agentOpen ? theme.toolbar.accent : theme.toolbar.text,
+                    }}
+                  />
+                </Badge>
+              </Tooltip>
+            )}
           </>
         )}
       </div>

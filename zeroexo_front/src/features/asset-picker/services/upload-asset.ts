@@ -38,7 +38,7 @@ const FILE_SIZE_LIMITS: Record<string, number> = {
   image: 50 * 1024 * 1024,   // 50MB
   video: 2 * 1024 * 1024 * 1024,  // 2GB
   audio: 500 * 1024 * 1024,  // 500MB
-  text: 10 * 1024 * 1024,    // 10MB
+  text: 20 * 1024 * 1024,    // 20MB
 };
 
 /** 已知扩展名 → MIME 类型映射(用于扩展名校验,不信任浏览器 file.type) */
@@ -88,6 +88,18 @@ const ALL_SUPPORTED_MIME_TYPES = [
   ...SUPPORTED_MIME_TYPES.text,
 ];
 
+/** 智能读取文本文件:严格 UTF-8 优先,失败回落 GB18030(经验 #31,禁止裸 readAsText) */
+async function readTextWithEncodingDetect(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    // 严格 UTF-8:非法字节序列会抛错,据此判定非 UTF-8 文件
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    // GB18030 是 GBK/GB2312 超集,兼容 Windows 中文 txt 常见编码
+    return new TextDecoder('gb18030').decode(buf);
+  }
+}
+
 export function getSupportedFileTypes(): string {
   return [...ALL_SUPPORTED_MIME_TYPES, '.md'].join(',');
 }
@@ -127,7 +139,7 @@ export async function uploadAsset(
   // 2. 文件大小校验
   const limit = FILE_SIZE_LIMITS[kind];
   if (limit && file.size > limit) {
-    throw new FileTooLargeError(file.name, file.size, kind === 'image' ? '50MB' : kind === 'video' ? '2GB' : kind === 'audio' ? '500MB' : '10MB');
+    throw new FileTooLargeError(file.name, file.size, kind === 'image' ? '50MB' : kind === 'video' ? '2GB' : kind === 'audio' ? '500MB' : '20MB');
   }
 
   // 优先走后端(带 sharp 多尺寸管道)
@@ -238,7 +250,7 @@ export async function uploadAsset(
     };
   }
 
-  const content = await file.text();
+  const content = await readTextWithEncodingDetect(file);
   return {
     title,
     kind: 'text',
@@ -249,19 +261,6 @@ export async function uploadAsset(
       content,
     },
   };
-}
-
-export async function uploadAssets(files: File[]): Promise<CreateAssetInput[]> {
-  const results: CreateAssetInput[] = [];
-  for (const file of files) {
-    try {
-      const input = await uploadAsset(file);
-      results.push(input);
-    } catch (err) {
-      console.error(`[uploadAssets] failed to upload ${file.name}:`, err);
-    }
-  }
-  return results;
 }
 
 export function getAssetStorageKey(asset: Asset): string | undefined {

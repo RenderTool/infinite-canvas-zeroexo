@@ -203,9 +203,14 @@ async function rawFetch<T>(
       rateLimit,
     });
   }
-  // 后端 TransformInterceptor 统一返回 { data: T }
-  const wrapped = body as { data?: T };
-  return (wrapped?.data ?? (body as T)) as T;
+  // 后端 TransformInterceptor 统一返回 { data: T }。
+  // 注意:必须用 'data' in wrapped 而非 ?? 判断——当后端显式返回 null(如
+  // getRoomByCanvas 无房间)时响应体为 {"data":null},?? 会把 null 当"缺失"
+  // 回退返回包装对象本身,导致调用方拿到 truthy 空壳误判"有数据"。
+  if (body !== null && typeof body === 'object' && !Array.isArray(body) && 'data' in (body as object)) {
+    return (body as { data: T }).data;
+  }
+  return body as T;
 }
 
 /**

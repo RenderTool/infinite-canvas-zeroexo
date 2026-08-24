@@ -57,6 +57,35 @@ const STREAM_CHUNK_SIZE = 256 * 1024; // 256KB 分块
 const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1MB 以上使用流式
 
 /**
+ * 智能读取文本文件:严格 UTF-8 优先,失败回落 GB18030(经验 #31,禁止裸 readAsText)。
+ * 用于小文件全文读取。
+ */
+async function readTextWithEncodingDetect(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    // 严格 UTF-8:非法字节序列会抛错,据此判定非 UTF-8 文件
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    // GB18030 是 GBK/GB2312 超集,兼容 Windows 中文 txt 常见编码
+    return new TextDecoder('gb18030').decode(buf);
+  }
+}
+
+/**
+ * 探测大文件流式读取的编码:读头部 256KB 做严格 UTF-8 判定,失败回落 GB18030。
+ * 流式解码全程使用同一编码器,保证块边界多字节字符不被切碎。
+ */
+async function detectStreamEncoding(file: File): Promise<'utf-8' | 'gb18030'> {
+  const head = await file.slice(0, STREAM_CHUNK_SIZE).arrayBuffer();
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(head);
+    return 'utf-8';
+  } catch {
+    return 'gb18030';
+  }
+}
+
+/**
  * 执行章节检测管线
  *
  * 流程：
@@ -92,11 +121,11 @@ export async function chapterDetectPipeline(
       throw e;
     }
   } else {
-    // 小文件：直接读取全文
+    // 小文件：直接读取全文(编码探测,经验 #31)
     onProgress?.(5, i18n.t('chapterDetect.readingFile'));
     let rawText: string;
     try {
-      rawText = await file.text();
+      rawText = await readTextWithEncodingDetect(file);
     } catch (e) {
       loadingMsg?.();
       throw e;
@@ -176,7 +205,7 @@ export async function chapterDetectPipeline(
     );
   } else {
     // 小文件：重新读取全文构建（段落模式也走此路径）
-    const rawText = await file.text();
+    const rawText = await readTextWithEncodingDetect(file);
     const { detectStructure } = await import('./chapter-detector');
     const fullResult = detectStructure(rawText, divisionMode);
     zeroexoText = buildZeroexoText(rawText, fullResult, selectedIndices, file.name);
@@ -218,6 +247,9 @@ async function streamDetectChapters(
   );
 
   try {
+    // 先探测编码(GBK 文件按 UTF-8 分块解码会全篇乱码,经验 #31),再建立 Worker 流式链路
+    const encoding = await detectStreamEncoding(file);
+
     return await new Promise<DetectResult>((resolve, reject) => {
       let resolved = false;
 
@@ -276,12 +308,12 @@ async function streamDetectChapters(
       worker.postMessage({ type: 'init', totalFileSize: file.size });
 
       // 分块读取文件并发送给 Worker
-      streamFileToWorker(file, worker);
+      streamFileToWorker(file, worker, encoding);
     });
   } catch {
     // Worker 失败时回退到主线程（小文件模式）
     worker.terminate();
-    const rawText = await file.text();
+    const rawText = await readTextWithEncodingDetect(file);
     const { detectStructure } = await import('./chapter-detector');
     const result = detectStructure(rawText, divisionMode);
     return {
@@ -308,28 +340,44 @@ async function streamDetectChapters(
 
 /**
  * 分块读取文件并发送给 Worker
+ * 使用 TextDecoder 连续解码(stream:true)保持跨块状态,避免块边界切碎多字节字符产生乱码;
+ * 最后 flush 解码器残留字节,与最后一块合并发送,保持 isLast 语义唯一。
  */
-async function streamFileToWorker(file: File, worker: Worker): Promise<void> {
+async function streamFileToWorker(
+  file: File,
+  worker: Worker,
+  encoding: 'utf-8' | 'gb18030',
+): Promise<void> {
   const totalSize = file.size;
   let offset = 0;
+  const decoder = new TextDecoder(encoding, { stream: true } as TextDecoderOptions);
 
   while (offset < totalSize) {
     const end = Math.min(offset + STREAM_CHUNK_SIZE, totalSize);
-    const blob = file.slice(offset, end);
-    const text = await blob.text();
-    const isLast = end >= totalSize;
+    const buf = await file.slice(offset, end).arrayBuffer();
+    const text = decoder.decode(buf, { stream: true });
+    const physicallyLast = end >= totalSize;
+
+    if (physicallyLast) {
+      // 最后一块:先 flush 解码器残留,拼接后一次性发送(保证 isLast 只发一次)
+      const tail = decoder.decode();
+      worker.postMessage({
+        type: 'chunk',
+        data: { text: text + tail, offset, isLast: true },
+      });
+      offset = end;
+      break;
+    }
 
     worker.postMessage({
       type: 'chunk',
-      data: { text, offset, isLast },
+      data: { text, offset, isLast: false },
     });
 
     offset = end;
 
     // 让出主线程，避免 UI 卡顿
-    if (offset < totalSize) {
-      await new Promise((r) => setTimeout(r, 0));
-    }
+    await new Promise((r) => setTimeout(r, 0));
   }
 }
 
@@ -351,9 +399,9 @@ async function showChapterSelectorModal(
   const { createRoot } = await import('react-dom/client');
   const React = await import('react');
 
-  // 段落模式：需要全文 content，回退到 file.text()
+  // 段落模式：需要全文 content，编码探测读取（经验 #31）
   if (detectResult.structure === 'paragraph' && file) {
-    const rawText = await file.text();
+    const rawText = await readTextWithEncodingDetect(file);
     const { detectStructure } = await import('./chapter-detector');
     const newResult = detectStructure(rawText, divisionMode);
 
