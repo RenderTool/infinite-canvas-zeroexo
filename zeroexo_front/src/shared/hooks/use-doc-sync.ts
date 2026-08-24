@@ -38,6 +38,9 @@ interface DocEntry {
   refCount: number;
   initialized: boolean;
   waiters: Array<() => void>;
+  /** Plan#40 Phase2：doc 首次出现非空内容的通知（首屏播种事件驱动，避免轮询） */
+  contentWaiters: Array<() => void>;
+  contentArrived: boolean;
 }
 
 /** 模块级 doc 缓存：同一 docName 共享同一 Y.Doc，避免多实例状态分裂 */
@@ -71,8 +74,27 @@ function acquireDoc(docName: string, initialJson: unknown): DocEntry {
     refCount: 1,
     initialized: false,
     waiters: [],
+    contentWaiters: [],
+    contentArrived: false,
   };
   docCache.set(docName, entry);
+
+  // doc 内容到达通知：首次非空时触发一次性 waiters（本地 idb 恢复 / 服务端播种均适用）
+  // 注意不用 doc.once：若首个 update 后 map 仍为空（如纯墓碑更新）需继续等待下一个 update。
+  const onMaybeContent = () => {
+    if (entry.contentArrived) return;
+    if (doc.getMap().size === 0) return;
+    entry.contentArrived = true;
+    doc.off('update', onMaybeContent);
+    const waiters = entry.contentWaiters;
+    entry.contentWaiters = [];
+    waiters.forEach((w) => w());
+  };
+  if (doc.getMap().size > 0) {
+    entry.contentArrived = true;
+  } else {
+    doc.on('update', onMaybeContent);
+  }
 
   const tryInit = () => {
     if (entry.initialized || !(idbSynced && cloudSynced)) return;
@@ -109,7 +131,11 @@ function acquireDoc(docName: string, initialJson: unknown): DocEntry {
       url: buildWsUrl(docName),
       // 断线重连指数退避:500ms 起步,1.6x 指数增长,30s 封顶。
       // 服务器不可用期间避免高频重连轰炸(默认 maxDelay 仅 2.5s)。
+      // 注意: 必须显式 minDelay 与 delay 对齐,否则 @hocuspocus/provider 默认
+      // minDelay=1000 > delay=500, 断线重连时 lifeomic/attempt 抛
+      // "delay cannot be less than minDelay"(间歇性,首次连接不触发)。
       delay: 500,
+      minDelay: 500,
       factor: 1.6,
       maxDelay: 30_000,
     });
@@ -268,6 +294,11 @@ export interface CanvasSyncResult {
   subscribeRemote: (cb: (remote: CanvasGraphPayload) => void) => () => void;
   /** 主动读取当前 Y.Doc 中的 graph（无数据返回 null） */
   readRemote: () => CanvasGraphPayload | null;
+  /**
+   * 等待 Y.Doc 首次出现非空内容（本地 idb 恢复或服务端播种）。
+   * timeoutMs 内未到达则 resolve(false)，调用方自行降级。
+   */
+  waitForInitialContent: (timeoutMs?: number) => Promise<boolean>;
   /** 设置本地 Awareness 字段（光标/视口/选中状态） */
   setAwarenessField: (key: string, value: unknown) => void;
   /** 订阅远端 Awareness 变化 */
@@ -411,15 +442,36 @@ export function useCanvasSync(canvasId: string | undefined): CanvasSyncResult {
     }
   }, []);
 
+  const waitForInitialContent = useCallback((timeoutMs = 5000): Promise<boolean> => {
+    const entry = entryRef.current;
+    if (!entry) return Promise.resolve(false);
+    if (entry.contentArrived) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const settle = (v: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const idx = entry.contentWaiters.indexOf(onArrived);
+        if (idx >= 0) entry.contentWaiters.splice(idx, 1);
+        resolve(v);
+      };
+      const onArrived = () => settle(true);
+      const timer = setTimeout(() => settle(false), timeoutMs);
+      entry.contentWaiters.push(onArrived);
+    });
+  }, []);
+
   return useMemo(() => ({
     ready,
     status,
     pushGraph,
     subscribeRemote,
     readRemote,
+    waitForInitialContent,
     setAwarenessField,
     subscribeAwareness,
     getAwarenessStates,
     getAwarenessClientId,
-  }), [ready, status, pushGraph, subscribeRemote, readRemote, setAwarenessField, subscribeAwareness, getAwarenessStates, getAwarenessClientId]);
+  }), [ready, status, pushGraph, subscribeRemote, readRemote, waitForInitialContent, setAwarenessField, subscribeAwareness, getAwarenessStates, getAwarenessClientId]);
 }

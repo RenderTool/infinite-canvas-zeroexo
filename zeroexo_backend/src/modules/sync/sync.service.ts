@@ -4,6 +4,7 @@ import type { Duplex } from 'stream';
 import * as jwt from 'jsonwebtoken';
 import { Server, Extension } from '@hocuspocus/server';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ResourceService } from '../assets/resource.service';
 
 /** 命名空间 → Project 字段映射（canvas 走 Project 表，不在此映射） */
 const NAMESPACE_FIELD = {
@@ -157,8 +158,10 @@ function deriveStoryboardForStore(mapJson: Record<string, unknown>): Record<stri
  *
  * 职责：
  * - onAuthenticate：校验 JWT，注入 userId 到 context
- * - onLoadDocument：从 Project.{field} 的 JSON 快照填充 Y.Doc
+ * - onLoadDocument：从 Project.{field} 的 JSON 快照填充 Y.Doc（canvas 允许 active 协作成员加载）
  * - onStoreDocument：将 Y.Doc 顶层 Y.Map 序列化为 JSON 快照写回 Project.{field}
+ *   （Plan#40 Phase1：canvas 命名空间也落库——Yjs 单主干方向的最后一块；
+ *   双写观察期内不递增 version（HTTP 乐观锁仍管版本），落库时增量 diff 维护 refCount）
  *
  * 多浏览器实时合并由 Yjs CRDT 协议保证；快照落库为防抖写入（debounce 2s / maxDebounce 10s），
  */
@@ -169,7 +172,36 @@ export class SyncService implements OnModuleDestroy {
   private nestHttpServer?: HttpServer;
   private upgradeForwarder?: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly resourceService: ResourceService,
+  ) {}
+
+  /**
+   * canvas 访问权限判定：画布 owner 或 active 协作房间的已批准成员（排除 pending 待审）。
+   * requireEdit=true 时额外要求成员持有 edit 权限（对齐 #38 只读/可编辑两档：
+   * viewer 只读不落库；服务端写权限强制校验的已知缺口在此部分收口）。
+   * 供 onLoadDocument（requireEdit=false）与 onStoreDocument（requireEdit=true）共用。
+   */
+  private async canAccessCanvas(userId: string, canvasId: string, requireEdit = false): Promise<boolean> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: canvasId },
+      select: { ownerId: true },
+    });
+    if (!project) return false;
+    if (project.ownerId === userId) return true;
+    const membership = await this.prisma.collaborationMember.findFirst({
+      where: {
+        userId,
+        status: { not: 'pending' },
+        room: { canvasId, status: 'active' },
+      },
+      select: { id: true, role: true, permissions: true },
+    });
+    if (!membership) return false;
+    if (!requireEdit) return true;
+    return membership.role === 'editor' || membership.permissions.split(',').includes('edit');
+  }
 
   /** 将 Yjs WebSocket 服务挂载到 NestJS 的 HTTP server（不占用新端口） */
   attach(httpServer: HttpServer): void {
@@ -211,9 +243,11 @@ export class SyncService implements OnModuleDestroy {
         if (!userId) return;
 
         // canvas：读 Project 表 scene/connections/viewport，包装为 graph 对象
+        // Plan#40 Phase1：除 owner 外，active 协作房间的已批准成员也可加载（协作者编辑需服务端播种）
         if (parsed.namespace === CANVAS_NAMESPACE) {
+          if (!(await this.canAccessCanvas(userId, parsed.artifactId))) return;
           const canvasProject = await this.prisma.project.findUnique({ where: { id: parsed.artifactId } });
-          if (!canvasProject || canvasProject.ownerId !== userId) return;
+          if (!canvasProject) return;
           const ymap = data.document.getMap();
           if (ymap.size > 0) return;
           ymap.set('nodes', (canvasProject.scene as unknown) ?? []);
@@ -255,10 +289,19 @@ export class SyncService implements OnModuleDestroy {
         const json = data.document.getMap().toJSON();
         if (Object.keys(json).length === 0) return;
 
-        // canvas：仅做实时 CRDT 合并广播，不写 DB。
-        // 画布持久化（scene/connections/viewport）仍由 HTTP `/api/projects/:id`（乐观锁+资源引用）
-        // 负责，避免 Yjs onStore 与 HTTP 双写造成 version 冲突。onLoad 从 DB 读初始快照。
+        // canvas 落库（Plan#40 Phase1：Yjs 单主干方向补齐最后一块）。
+        // 双写观察期：HTTP PATCH 推送仍保留，本钩子与其幂等写同一行；
+        // 不递增 version（乐观锁版本仍由 HTTP 路径管理，避免 409 风暴），
+        // refCount 增量 diff（拍板点①：复用 resourceService 现成能力）。
         if (parsed.namespace === CANVAS_NAMESPACE) {
+          try {
+            await this.storeCanvasDocument(userId, parsed.artifactId, json);
+          } catch (err) {
+            // ⚠️ 钩子内禁止 throw（hocuspocus-hook-throw-crash 经验）：只告警放行
+            this.logger.warn(
+              `[sync] canvas store failed: ${data.documentName} - ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
           return;
         }
 
@@ -287,6 +330,50 @@ export class SyncService implements OnModuleDestroy {
     httpServer.on('upgrade', this.upgradeForwarder);
 
     this.logger.log('Yjs sync server attached to HTTP server');
+  }
+
+  /**
+   * canvas Y.Doc 落库：scene/connections/viewport 写回 Project 表 + refCount 增量 diff。
+   * - 权限：画布 owner 或 active 协作成员（协作中任意编辑者均可触发落库，
+   *   修复原架构「协作期间 HTTP 被抑制且 Yjs 不落库 → 编辑只在内存」的持久化盲区）
+   * - 双写观察期不递增 version；Phase3 删 HTTP 写路径后版本管理移交服务端落库。
+   */
+  private async storeCanvasDocument(
+    userId: string,
+    projectId: string,
+    json: Record<string, unknown>,
+  ): Promise<void> {
+    if (!(await this.canAccessCanvas(userId, projectId, true))) return;
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { scene: true },
+    });
+    if (!project) return;
+
+    const scene = (json.nodes as unknown) ?? [];
+    const connections = (json.edges as unknown) ?? [];
+    const viewport = (json.viewport as unknown) ?? { x: 0, y: 0, k: 1 };
+
+    // refCount 增量 diff：新旧 scene 的 storageKey 集合对比，只调整变化项（拍板点①）
+    const oldKeys = this.resourceService.extractStorageKeysFromScene(project.scene);
+    const newKeys = this.resourceService.extractStorageKeysFromScene(scene);
+    const added = new Set([...newKeys].filter((k) => !oldKeys.has(k)));
+    const removed = new Set([...oldKeys].filter((k) => !newKeys.has(k)));
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        scene: scene as object,
+        connections: connections as object,
+        viewport: viewport as object,
+        lastSyncedAt: new Date(),
+      },
+    });
+
+    if (added.size > 0 || removed.size > 0) {
+      await this.resourceService.adjustRefs(added, removed);
+    }
   }
 
   /**

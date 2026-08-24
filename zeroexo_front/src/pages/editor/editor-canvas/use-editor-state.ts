@@ -137,9 +137,9 @@ export function useEditorState(canvasId: string): {
   // 挂载状态引用:initGraph 在每个 await 后检查此值,若为 false 则立即退出
   // 防止组件卸载后的异步操作继续执行并修改已销毁的编辑器实例
   const isMountedRef = useRef(false);
-  // Yjs 画布实时同步（多端合并广播；持久化仍由 HTTP sync-service 负责）
+  // Yjs 画布实时同步（Plan#40 Phase2：Y.Doc 升为第一播种源；双写观察期 HTTP 推送仍保留）
   const canvasSync = useCanvasSync(canvasId);
-  const { pushGraph, subscribeRemote } = canvasSync;
+  const { pushGraph, subscribeRemote, readRemote, waitForInitialContent } = canvasSync;
   // 协作系统（auto-join + Awareness 光标同步 + 成员管理）
   const collaboration = useCollaboration(canvasId, canvasSync);
   // 协作引用：onPointerMove 等一次性注册的闭包需要读取最新协作状态(active/userId)，
@@ -323,37 +323,74 @@ export function useEditorState(canvasId: string): {
 
         if (!isMountedRef.current) return;
 
-        // 步骤2:从 localforage 加载 graph
+        // 步骤2:播种源（Plan#40 Phase2：Y.Doc 为第一播种源）
+        // Y.Doc 已含 y-indexeddb 本地缓存 + 服务端 onLoadDocument 播种（Phase1 后服务端持续落库）。
+        // 事件驱动等待首份内容（非轮询）：本地有快照时只给 Y.Doc 短暂窗口（300ms），
+        // 避免弱网下首屏变慢；本地无快照时才等云端播种（3s）。
+        const seedFromYDoc = async (hasLocalSaved: boolean): Promise<boolean> => {
+          // 纯本地新项目（无 cloudId）：云端永远不会播种，空等无意义，直接降级。
+          try {
+            const localMeta = await getProject(canvasId);
+            if (!hasLocalSaved && localMeta && !localMeta.cloudId) return false;
+          } catch {
+            // 读取失败不阻断，照常等待
+          }
+          const arrived = await waitForInitialContent(hasLocalSaved ? 300 : 3000);
+          if (!arrived || !isMountedRef.current) return false;
+          const g = readRemote();
+          if (!g || g.nodes.length === 0) return false;
+          await syncProjectResourcesFromCloud(g.nodes as GraphModel['nodes']);
+          if (!isMountedRef.current) return true;
+          // suppressNextSync/suppressNextSave 防播种触发 HTTP 推送与回写（与 subscribeRemote 同构）
+          suppressNextSync = true;
+          ed.plugins.persistence?.suppressNextSave();
+          commandQueue.replaceState({
+            nodes: (g.nodes ?? []) as GraphModel['nodes'],
+            edges: (g.edges ?? []) as GraphModel['edges'],
+            viewport: store.getViewport(),
+            metadata: (g.metadata as GraphModel['metadata']) ?? {},
+          });
+          debugLog(`[canvas] seed from Y.Doc: ${g.nodes.length} nodes`);
+          return true;
+        };
+
+        // localforage 在双写观察期仍是快照缓存（PersistencePlugin 照常写入），此处仅作降级读源。
         const saved = await ed.plugins.persistence?.load();
         if (!isMountedRef.current) return;
 
-        if (saved && saved.nodes.length > 0) {
-          // 重建 blob URL
-          try {
-            await syncProjectResourcesFromCloud(saved.nodes);
-            if (!isMountedRef.current) return;
-            onProjectUpdated(canvasId);
-          } catch (err) {
-            console.warn('[use-editor-state] resolve node resources failed:', err);
-          }
-          ed.plugins.persistence?.suppressNextSave();
-          commandQueue.replaceState(saved);
-        } else {
-          // 本地数据为空:尝试从云端拉取(仅在云端版本更高时才写入,非破坏性)
-          // 覆盖快速返回导致 localforage 数据丢失的场景
-          try {
-            await syncProjectFromCloud(canvasId, false);
-            if (!isMountedRef.current) return;
-            const retry = await ed.plugins.persistence?.load();
-            if (retry && retry.nodes.length > 0) {
-              await syncProjectResourcesFromCloud(retry.nodes);
+        const seeded = await seedFromYDoc(Boolean(saved && saved.nodes.length > 0));
+        if (!isMountedRef.current) return;
+
+        if (!seeded) {
+          // Y.Doc 播种失败（弱网/服务端不可达/新画布）→ 降级旧链路：localforage + 云端补拉兑底。
+          if (saved && saved.nodes.length > 0) {
+            // 重建 blob URL
+            try {
+              await syncProjectResourcesFromCloud(saved.nodes);
               if (!isMountedRef.current) return;
               onProjectUpdated(canvasId);
-              ed.plugins.persistence?.suppressNextSave();
-              commandQueue.replaceState(retry);
+            } catch (err) {
+              console.warn('[use-editor-state] resolve node resources failed:', err);
             }
-          } catch {
-            // 云端也无数据,保持空画布
+            ed.plugins.persistence?.suppressNextSave();
+            commandQueue.replaceState(saved);
+          } else {
+            // 本地数据为空:尝试从云端拉取(仅在云端版本更高时才写入,非破坏性)
+            // 覆盖快速返回导致 localforage 数据丢失的场景
+            try {
+              await syncProjectFromCloud(canvasId, false);
+              if (!isMountedRef.current) return;
+              const retry = await ed.plugins.persistence?.load();
+              if (retry && retry.nodes.length > 0) {
+                await syncProjectResourcesFromCloud(retry.nodes);
+                if (!isMountedRef.current) return;
+                onProjectUpdated(canvasId);
+                ed.plugins.persistence?.suppressNextSave();
+                commandQueue.replaceState(retry);
+              }
+            } catch {
+              // 云端也无数据,保持空画布（新用户场景：后续欢迎节点逻辑接管）
+            }
           }
         }
 
