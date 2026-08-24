@@ -426,19 +426,30 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             画布
           </Title>
 
-          <Space size={8} wrap>
-            <Tooltip title={t('home.searchPlaceholder')}>
-              <Input
-                prefix={<Search size={14} style={{ opacity: 0.5 }} />}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t('home.searchPlaceholder')}
-                allowClear
-                style={{ width: isMobile ? '100%' : 180 }}
-                size="small"
-              />
-            </Tooltip>
+          {/* 移动端适配（对齐资产库搜索行模式）：搜索框独占一行；
+              其余下拉筛选与按钮在下方容器内自动换行；桌面端保持单行布局 */}
+          <div style={{
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            alignItems: isMobile ? 'stretch' : 'center',
+            gap: 8,
+            minWidth: 0,
+          }}>
+            <div style={{ width: isMobile ? '100%' : 180, flexShrink: 0 }}>
+              <Tooltip title={t('home.searchPlaceholder')}>
+                <Input
+                  prefix={<Search size={14} style={{ opacity: 0.5 }} />}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={t('home.searchPlaceholder')}
+                  allowClear
+                  style={{ width: '100%' }}
+                  size="small"
+                />
+              </Tooltip>
+            </div>
 
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', minWidth: 0 }}>
             {!collabMode && !selectMode && (
               <Select
                 size="small"
@@ -534,7 +545,8 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                 <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
               </Tooltip>
             )}
-          </Space>
+            </div>
+          </div>
         </div>
 
         <input
