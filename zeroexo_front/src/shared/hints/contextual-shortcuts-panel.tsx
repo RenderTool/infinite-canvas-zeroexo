@@ -101,7 +101,7 @@ function isVisible(entry: HintEntry, ctx: HintContext): boolean {
     // 空画布:提示创建首个节点(新手最迷茫时刻)
     case 'empty-canvas-create':
       return !ctx.canvasHasNodes && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
-    // 滚轮缩放画布:无选中时低优先级常驻(导航教育通道;2026-08-25 起滚轮=缩放,与 3D 版一致)
+    // 滚轮上下平移画布:无选中时低优先级常驻(导航教育通道;2026-08-25 起滚轮=上下平移,Ctrl+滚轮=缩放)
     case 'scroll-pan':
       return ctx.canvasHasNodes && !ctx.singleSelected && !ctx.isGroupPreviewing && !ctx.createMenuOpen;
     // Space 平移:仅按住时实时提示(取消常驻展示,避免与滚轮提示叠加信息过载)

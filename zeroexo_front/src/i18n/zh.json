@@ -1404,7 +1404,7 @@
     "dblclickFocus": "双击放大查看",
     "textDblclickEdit": "双击编辑文字",
     "groupRenameDblclick": "双击组名字改名",
-    "scrollPan": "滚轮缩放",
+    "scrollPan": "滚轮上下移动",
     "connectCreate": "拖动节点圆点连线",
     "canvasCreate": "选择创建",
     "emptyCanvasCreate": "右键或点左侧 + 号，创建第一个节点",
@@ -1957,6 +1957,8 @@
     "resetView": "重置视图",
     "panMode": "平移模式",
     "selectMode": "选择模式",
+    "wheelScroll": "滚轮上下移动",
+    "ctrlScrollZoom": "Ctrl+滚轮缩放",
     "groupConfirm": "合成一组",
     "groupUngroup": "解组（选中组）",
     "previewCancel": "取消成组预览"

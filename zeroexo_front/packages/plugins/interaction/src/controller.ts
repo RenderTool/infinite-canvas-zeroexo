@@ -554,10 +554,9 @@ export class InteractionController {
   // ===== 滚轮缩放/平移 =====
 
   /**
-   * 滚轮交互:
-   * - 普通滚轮: 以鼠标位置为中心缩放(白板惯例,与 canvas-v2 3D 版滚轮远近一致;
-   *   2026-08-25 用户反馈:滚动滚轮期待缩放,原设计普通滚轮=平移导致「无法缩放」)
-   * - Ctrl/Cmd + 滚轮: 上下平移画布(原普通滚轮行为,保留老习惯通道)
+   * 滚轮交互（2026-08-25 用户拍板反转：与常规文档滚动直觉一致）:
+   * - 普通滚轮: 上下平移画布（主通道，常驻教育提示）
+   * - Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放（修饰通道）
    * - Shift + 滚轮: 水平平移画布
    */
   handleWheel = (event: WheelEvent): void => {
@@ -565,13 +564,23 @@ export class InteractionController {
     const container = this.getContainer();
     if (!container) return;
 
-    const rect = this.getContainerOffset();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
     const viewport = this.store.getViewport();
 
-    // 普通滚轮: 以鼠标位置为中心缩放
+    // 普通滚轮: 上下平移
     if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      const speed = 1.5;
+      this.store.setViewport({
+        ...viewport,
+        y: viewport.y - event.deltaY * speed,
+      });
+      return;
+    }
+
+    // Ctrl/Cmd + 滚轮: 以鼠标位置为中心缩放
+    if (event.ctrlKey || event.metaKey) {
+      const rect = this.getContainerOffset();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
       const delta = -event.deltaY;
       const factor = Math.pow(1.1, delta / 100);
       const newK = Math.min(Math.max(viewport.k * factor, 0.05), 5);
@@ -583,16 +592,6 @@ export class InteractionController {
         x: mouseX - worldX * newK,
         y: mouseY - worldY * newK,
         k: newK,
-      });
-      return;
-    }
-
-    // Ctrl/Cmd + 滚轮: 上下平移
-    if (event.ctrlKey || event.metaKey) {
-      const speed = 1.5;
-      this.store.setViewport({
-        ...viewport,
-        y: viewport.y - event.deltaY * speed,
       });
       return;
     }

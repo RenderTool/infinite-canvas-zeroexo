@@ -28,11 +28,14 @@ export interface ShortcutsDialogProps {
 // 注册表外补充条目:手势/内部监听类(不进 keyboard 注册表,UI 展示仍需声明)
 // - Space 平移 / Shift 拖出组:画布手势(非 keyboard 插件分发)
 // - V 键:interaction 插件内部监听(use-editor-state),非注册表条目
+// - Wheel/Ctrl+Wheel:滚轮手势(2026-08-25 拍板反转:滚轮=上下平移、Ctrl+滚轮=缩放)
 const noop = (): boolean => false;
 const EXTRA_SHORTCUTS: ShortcutEntry[] = [
   { id: 'ui:pan-mode', key: 'Space', meta: { category: 'canvas', descriptionKey: 'shortcuts.panMode' }, handler: noop },
   { id: 'ui:select-mode', key: 'v', meta: { category: 'canvas', descriptionKey: 'shortcuts.selectMode' }, handler: noop },
   { id: 'ui:drag-detach', key: 'Shift', meta: { category: 'edit', descriptionKey: 'shortcuts.dragDetach' }, handler: noop },
+  { id: 'ui:wheel-scroll', key: 'Wheel', meta: { category: 'view', descriptionKey: 'shortcuts.wheelScroll' }, handler: noop },
+  { id: 'ui:ctrl-scroll-zoom', key: 'Wheel', ctrlKey: true, meta: { category: 'view', descriptionKey: 'shortcuts.ctrlScrollZoom' }, handler: noop },
 ];
 
 // 分类展示顺序(目录条目缺省分类归 'other',UI 无展示位)

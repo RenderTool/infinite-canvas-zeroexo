@@ -429,8 +429,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // ===== 只读浏览手势（2026-08-25 用户反馈：只读遮罩不能浏览画布）=====
   // 只读遮罩拦截全部编辑交互（拖拽/框选/连线/右键），但保留浏览能力：
   // 鼠标左键拖动 = 平移画布；触摸单指 = 平移（双指 pinch 缩放由 use-editor-state
-  // 的容器原生 touch 监听处理，遮罩 touch 事件两指时主动让位）；滚轮缩放/平移
-  // 由容器原生 wheel 监听统一处理（controller.handleWheel）。
+  // 的容器原生 touch 监听处理，遮罩 touch 事件两指时主动让位）；滚轮上下平移/
+  // Ctrl+滚轮缩放由容器原生 wheel 监听统一处理（controller.handleWheel）。
   // 2026-08-25 二次反馈「只读不代表不能点击节点/双击聚焦」：遮罩按下时做命中检测——
   // 命中节点 → 点击选中（高亮查看）/ 双击聚焦（focusOnNode 放大动画）；未命中 → 平移。
   const readOnlyOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -891,7 +891,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           {/* 画布区域(flex-1 自适应) */}
           <div ref={containerRef} style={canvasAreaStyle}>
             {/* 只读保护遮罩（Plan#38 Phase 7.4）：viewer 成员拦截画布编辑交互，仅保留浏览；不影响顶栏/弹窗 */}
-            {/* 2026-08-25 用户反馈：遮罩改为「编辑拦截 + 浏览转发」——鼠标拖动/触摸单指平移画布，双指缩放与滚轮缩放由容器原生监听处理 */}
+            {/* 2026-08-25 用户反馈：遮罩改为「编辑拦截 + 浏览转发」——鼠标拖动/触摸单指平移画布，双指缩放与滚轮平移/缩放由容器原生监听处理 */}
             {isReadOnlyViewer && !state.loading && (
               <div
                 ref={readOnlyOverlayRef}
@@ -1466,7 +1466,9 @@ const flexContainerStyle: CSSProperties = { display: 'flex', width: '100%', heig
 // 顶层行布局:层级侧边栏(全高) + 右列(TopBar + 内容),抽屉展开时 NAV 与内容同时被推开
 const mainRowStyle: CSSProperties = { display: 'flex', flex: 1, width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' };
 const mainColStyle: CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 };
-const canvasAreaStyle: CSSProperties = { flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden' };
+// 画布区域: touchAction none 关键——移动端单指拖节点/平移时禁止浏览器原生滚动
+// （2026-08-25 用户反馈：拖节点时页面跟着滚动；只读遮罩已带 none，编辑态补齐）
+const canvasAreaStyle: CSSProperties = { flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden', touchAction: 'none' };
 // BUG3b: 小地图移到右下角,避免被左侧工具栏(LeftSideToolBar)遮挡
 const minimapWrapStyle: CSSProperties = {
   position: 'absolute', right: 20, bottom: 20, zIndex: 40,

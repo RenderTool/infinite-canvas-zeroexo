@@ -1405,7 +1405,7 @@
     "dblclickFocus": "Double-click to zoom in",
     "textDblclickEdit": "Double-click to edit",
     "groupRenameDblclick": "Double-click group name to rename",
-    "scrollPan": "Scroll to zoom",
+    "scrollPan": "Scroll to pan",
     "connectCreate": "Drag the node dot to connect",
     "canvasCreate": "Pick a type",
     "emptyCanvasCreate": "Right-click or tap + to create your first node",
@@ -1958,6 +1958,8 @@
     "resetView": "Reset View",
     "panMode": "Pan Mode",
     "selectMode": "Select Mode",
+    "wheelScroll": "Scroll to pan vertically",
+    "ctrlScrollZoom": "Ctrl + scroll to zoom",
     "groupConfirm": "Make group",
     "groupUngroup": "Ungroup (selected group)",
     "previewCancel": "Cancel group preview"

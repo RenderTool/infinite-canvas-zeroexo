@@ -1349,7 +1349,7 @@
     "dblclickFocus": "ダブルクリックで拡大表示",
     "textDblclickEdit": "ダブルクリックで編集",
     "groupRenameDblclick": "グループ名をダブルクリックで変更",
-    "scrollPan": "ホイールでズーム",
+    "scrollPan": "ホイールで上下移動",
     "connectCreate": "ノードの点をドラッグして接続",
     "canvasCreate": "タイプを選んで作成",
     "emptyCanvasCreate": "右クリックまたは左の＋ボタンで最初のノードを作成",
@@ -1937,6 +1937,8 @@
     "resetView": "ビューをリセット",
     "panMode": "パンモード",
     "selectMode": "選択モード",
+    "wheelScroll": "ホイールで上下移動",
+    "ctrlScrollZoom": "Ctrl+ホイールでズーム",
     "groupConfirm": "グループにする",
     "groupUngroup": "グループ解除（選択グループ）",
     "previewCancel": "グループプレビューをキャンセル"
