@@ -15,6 +15,7 @@ import { executeCanvasOp } from '../canvas-op-bridge.js';
 import { parseAllQuestionForms } from './form-utils.js';
 import { FormBlock } from './FormBlock.js';
 import { mdComponents } from './MarkdownBlock.js';
+import { linkifyNodeIds } from './node-ref.js';
 
 export interface TextBlockProps {
   message: CanvasAgentMessage;
@@ -154,8 +155,11 @@ export function TextBlock({ message }: TextBlockProps): React.ReactElement {
     );
   }
 
+  // Plan#42 0.5：裸节点 id → @引用芯片（可点击定位），后续解析均基于预处理后文本
+  const agentText = linkifyNodeIds(message.text ?? '');
+
   // 内联澄清表单：解析正文中的所有 <question-form> 块
-  const forms = parseAllQuestionForms(message.text ?? '');
+  const forms = parseAllQuestionForms(agentText);
   if (forms.length > 0) {
     return (
       <div style={agentTextStyle}>
@@ -165,7 +169,7 @@ export function TextBlock({ message }: TextBlockProps): React.ReactElement {
         )}
         {forms.map((f, i) => {
           const prevEnd = i === 0 ? 0 : forms[i - 1]!.startIndex + forms[i - 1]!.rawLength;
-          const gapText = message.text!.slice(prevEnd, f.startIndex);
+          const gapText = agentText.slice(prevEnd, f.startIndex);
           return (
             <Fragment key={i}>
               {gapText && (
@@ -185,7 +189,7 @@ export function TextBlock({ message }: TextBlockProps): React.ReactElement {
 
   return (
     <div style={agentTextStyle}>
-      <ReactMarkdown components={mdComponents as never}>{message.text ?? ''}</ReactMarkdown>
+      <ReactMarkdown components={mdComponents as never}>{agentText}</ReactMarkdown>
     </div>
   );
 }

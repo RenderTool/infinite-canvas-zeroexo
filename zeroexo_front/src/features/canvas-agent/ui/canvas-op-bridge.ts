@@ -122,32 +122,43 @@ export function getCanvasOpBridge(): CanvasOpBridge | null {
 
 // ===== 工具 =====
 
-/** R3-D1: Agent 操作后脉冲光标 + 聚焦高亮（世界→屏幕 = world*k+vp，对齐 CollabOverlay） */
+/**
+ * R3-D1: Agent 操作后脉冲光标 + 聚焦高亮。
+ * Plan#42 0.4：锚点改世界坐标——覆盖层每帧按实时视口换算，
+ * 聚焦视口动画期间光标全程贴节点飞行（「AI 带路」操纵感）。
+ * 尺寸三级兜底：node.size > 扩展 defaultSize > 200（修聚焦尺寸不准）。
+ */
+function resolveNodeSizeFor(bridge: CanvasOpBridge, node: { type?: string; size?: { width: number; height: number } }): { width: number; height: number } {
+  const ext = typeof node.type === 'string' ? bridge.getExtensions().get(node.type) : undefined;
+  return {
+    width: node.size?.width ?? ext?.defaultSize?.width ?? 200,
+    height: node.size?.height ?? ext?.defaultSize?.height ?? 200,
+  };
+}
+
 function pulseAgentCursor(
   bridge: CanvasOpBridge,
   opts: { nodeId?: string; bounds?: { x: number; y: number; width: number; height: number }; label: string },
 ): void {
   const store = bridge.getStore();
   if (!store) return;
-  const vp = store.getViewport();
   let bounds = opts.bounds ?? null;
-  let cx: number | null = null;
-  let cy: number | null = null;
+  let wx: number | null = null;
+  let wy: number | null = null;
   if (opts.nodeId) {
     const node = store.getNode(opts.nodeId);
     if (node) {
-      const w = node.size?.width ?? 200;
-      const h = node.size?.height ?? 200;
-      bounds = { x: node.position.x, y: node.position.y, width: w, height: h };
-      cx = (node.position.x + w / 2) * vp.k + vp.x;
-      cy = (node.position.y + h / 2) * vp.k + vp.y;
+      const size = resolveNodeSizeFor(bridge, node);
+      bounds = { x: node.position.x, y: node.position.y, width: size.width, height: size.height };
+      wx = node.position.x + size.width / 2;
+      wy = node.position.y + size.height / 2;
     }
   } else if (bounds) {
-    cx = (bounds.x + bounds.width / 2) * vp.k + vp.x;
-    cy = (bounds.y + bounds.height / 2) * vp.k + vp.y;
+    wx = bounds.x + bounds.width / 2;
+    wy = bounds.y + bounds.height / 2;
   }
-  if (cx == null || cy == null) return;
-  showAgentCursor({ x: cx, y: cy, bounds, label: opts.label, ts: Date.now() });
+  if (wx == null || wy == null) return;
+  showAgentCursor({ worldX: wx, worldY: wy, bounds, label: opts.label, ts: Date.now() });
 }
 function uniqueId(base: string, existing: Set<string>): string {
   if (!existing.has(base)) return base;
@@ -263,12 +274,43 @@ async function executeWorkflowChain(bridge: CanvasOpBridge, chain: WorkflowChain
   return positions.bounds;
 }
 
-// ===== 统一执行入口 =====
+// ===== 统一执行入口（串行队列 + 批量抑制窗口） =====
+//
+// 卡顿根因修复（2026-08-25 Plan#42 Phase 0）：
+// SSE 的 onCanvasOp 事件逐条到达，旧实现每条 `void executeCanvasOp()` 并发 fire-and-forget，
+// 每条独立包裹 _agentBatching 标志并在 finally 里 flush——N 个操作并发时：
+//   ① 先完成的 op 会把 _agentBatching 置回 false，后续 op 的 pushYjs 不再被抑制；
+//   ② onBatchEnd 被调用 N 次 → N 次全图序列化 + WS 广播；
+//   ③ N 个命令并发写 store → N 轮 React 重渲染风暴。
+// 修复：串行队列执行 + 队列生命周期级批量抑制（首个入队开标志，最后一个出队单次 flush）。
+
+let opQueueChain: Promise<void> = Promise.resolve();
+/** 当前已入队未完成的数量（>0 即处于批量抑制窗口） */
+let queuedOps = 0;
 
 /**
  * 执行单条 Agent 画布操作。桥接层未注入时返回 false(调用方回退文本展示)。
+ * 多条操作自动排队串行执行，整批完成后单次 flush Yjs。
  */
-export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
+export function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
+  queuedOps += 1;
+  _agentBatching = true;
+  const run = opQueueChain
+    .then(() => executeCanvasOpNow(op))
+    .catch(() => false);
+  opQueueChain = run.then(() => undefined);
+  return run.finally(() => {
+    queuedOps -= 1;
+    if (queuedOps <= 0) {
+      queuedOps = 0;
+      _agentBatching = false;
+      // 单次 flush 最终 graph 状态到 Yjs（资源由 fullSync 定时器补推）
+      activeBridge?.onBatchEnd?.();
+    }
+  });
+}
+
+async function executeCanvasOpNow(op: AgentCanvasOp): Promise<boolean> {
   // 只读早退（2026-08-25 系统性只读防护）：Agent 画布操作全部为写操作，viewer 一律拒绝
   if (_agentReadOnly) return false;
   const bridge = activeBridge;
@@ -277,11 +319,7 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
   const queue = bridge.getCommandQueue();
   if (!store || !queue) return false;
 
-  // 批量抑制：执行期间 onGraphChanged → pushYjs 跳过资源扫描 + Yjs 推送，
-  // finally 单次 flush 补发最终状态（N 个操作 → 1 次资源扫描 + 1 次图序列化）
-  _agentBatching = true;
-  try {
-    switch (op.op) {
+  switch (op.op) {
       case 'workflow_chain': {
         const bounds = await executeWorkflowChain(bridge, op.args as unknown as WorkflowChainDefinitionLike);
         if (bounds) pulseAgentCursor(bridge, { bounds, label: '工作链已就位' });
@@ -303,11 +341,13 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
         const node = store.getNode(id);
         // R3-A2: 引用节点已被删除时不执行聚焦，返回 false 供调用方友好提示
         if (!node) return false;
+        // Plan#42 0.4：尺寸三级兜底（node.size > 扩展 defaultSize > 200），修聚焦缩放不准
+        const size = resolveNodeSizeFor(bridge, node);
         store.focusOnNode(
           id,
           bridge.getContainerSize(),
-          node?.size?.width ?? 200,
-          node?.size?.height ?? 200,
+          size.width,
+          size.height,
           400,
           51,
         );
@@ -334,12 +374,13 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
         if (sbNodeId) {
           const sbNode = store.getNode(sbNodeId);
           if (sbNode) {
+            const sbSize = resolveNodeSizeFor(bridge, sbNode);
             store.setSelection({ selectedNodeIds: new Set([sbNodeId]), selectedEdgeIds: new Set() });
             store.focusOnNode(
               sbNodeId,
               bridge.getContainerSize(),
-              sbNode.size?.width ?? 200,
-              sbNode.size?.height ?? 200,
+              sbSize.width,
+              sbSize.height,
               400,
               51,
             );
@@ -365,10 +406,5 @@ export async function executeCanvasOp(op: AgentCanvasOp): Promise<boolean> {
         }
         return true;
       }
-    }
-  } finally {
-    _agentBatching = false;
-    // 单次 flush 最终 graph 状态到 Yjs（skipResourceSync=true，资源由 fullSync 定时器补推）
-    activeBridge?.onBatchEnd?.();
   }
 }

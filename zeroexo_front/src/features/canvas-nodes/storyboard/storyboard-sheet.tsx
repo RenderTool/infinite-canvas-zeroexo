@@ -90,11 +90,12 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
         .filter((it: any) => it.id && it.name.trim()),
     );
   }, [graph, nodeId, data]);
-  const scriptOptionLabel = useCallback((n: { id: string; title?: string }) => {
+  const scriptOptionLabel = useCallback((n: { id?: string; title?: string }) => {
     const scriptDefault = t('storyboard.script');
     const title = n.title || scriptDefault;
     const sameCount = scriptNodes.reduce((acc, x) => acc + ((x.title || scriptDefault) === title ? 1 : 0), 0);
-    return sameCount > 1 ? `${title} #${n.id.replace(/[^0-9a-zA-Z]/gi, '').slice(-4)}` : title;
+    const shortId = n.id ? n.id.replace(/[^0-9a-zA-Z]/gi, '').slice(-4) : '';
+    return sameCount > 1 ? `${title} #${shortId}` : title;
   }, [scriptNodes, t]);
   const scriptEpisodes = useMemo(() => {
     if (!linkedScript) return [];

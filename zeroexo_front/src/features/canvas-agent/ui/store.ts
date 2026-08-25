@@ -127,7 +127,18 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
 
   // 消息流
   messages: [],
-  addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+  addMessage: (msg) =>
+    set((s) => {
+      // 防重复：同 id 消息已存在时改为合并更新，
+      // 杜绝同毫秒 Date.now() 碰撞 / 双路径写入导致的重复渲染（2026-08-25 历史重复两次修复）
+      const idx = s.messages.findIndex((m) => m.id === msg.id);
+      if (idx >= 0) {
+        const next = [...s.messages];
+        next[idx] = { ...next[idx]!, ...msg };
+        return { messages: next };
+      }
+      return { messages: [...s.messages, msg] };
+    }),
   updateMessage: (id, patch) =>
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),

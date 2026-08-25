@@ -17,7 +17,7 @@ import { Button, App as AntdApp } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasAgentStore } from './store.js';
-import { ThinkStream } from './think-stream/ThinkStream.js';
+import { ThinkTreeLive } from './think-stream/ThinkTree.js';
 import { MessageRenderer } from './message-blocks/MessageRenderer.js';
 import { ComposerInput } from './composer/ComposerInput.js';
 import { PinnedTodoSlot } from './PinnedTodoSlot.js';
@@ -42,6 +42,7 @@ import type {
 } from './types.js';
 import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
+import { LocalAgentConnector } from './LocalAgentConnector.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import {
   listMembers,
@@ -214,6 +215,29 @@ function formatMsgTime(ts: number): string {
   return `${hh}:${mm}`;
 }
 
+/**
+ * 历史去重（2026-08-25 修复“历史加载重复两次自己说的话”）：
+ * 相邻内容完全一致的 agent 文本消息合并保留一条，
+ * 防御落库双写 / 重复事件 / 异常重试导致的历史重复。
+ */
+function dedupeLoadedMessages(msgs: CanvasAgentMessage[]): CanvasAgentMessage[] {
+  const out: CanvasAgentMessage[] = [];
+  for (const m of msgs) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      prev.role === 'agent' &&
+      prev.type === 'text' &&
+      m.type === 'text' &&
+      prev.text === m.text
+    ) {
+      continue;
+    }
+    out.push(m);
+  }
+  return out;
+}
+
 export interface DockContentProps {
   projectId?: string;
 }
@@ -297,7 +321,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             }
           }
         }
-        store.batchSetMessages(converted);
+        store.batchSetMessages(dedupeLoadedMessages(converted));
       } catch {
         // 未登录/无会话时静默，保持空态欢迎页
       }
@@ -391,7 +415,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
           }
         }
       }
-      store.batchSetMessages(converted);
+      store.batchSetMessages(dedupeLoadedMessages(converted));
     } catch {
       // 历史加载失败时保持空会话
     }
@@ -883,8 +907,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
               });
             })()
           )}
-          {/* 思考态融入消息流:作为最后一条消息之后的内容,随滚动呈现(非顶部固定) */}
-          <ThinkStream />
+          {/* Plan#43 B1：思考树融入消息流（默认折叠，过程收进树内；替代旧底部常驻 ThinkStream） */}
+          <ThinkTreeLive />
         </div>
       ) : tab === 'collab' ? (
         /* ===== 协作聊天 Tab ===== */
@@ -1026,6 +1050,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
         </div>
       )}
       {tab === 'chat' && !readOnly && <PinnedTodoSlot />}
+      {tab === 'chat' && !readOnly && <LocalAgentConnector />}
       {tab === 'chat' && !readOnly && <ComposerInput />}
     </div>
   );

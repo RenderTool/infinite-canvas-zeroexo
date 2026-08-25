@@ -2,19 +2,22 @@
  * agent-cursor.ts - Agent 画布操作光标状态（R3-D1）
  *
  * Agent 每次操作画布（建节点/聚焦/选中/工作链展开）后，经 executeCanvasOp
- * 脉冲一次光标（位置 + 目标包围盒 + 操作语义），由 AgentCursorOverlay 渲染：
- * 1. 聚焦高亮框（对齐远程协作选中样式：2px 彩色边框 + glow）
+ * 脉冲一次光标（世界坐标锚点 + 目标包围盒 + 操作语义），由 AgentCursorOverlay 渲染：
+ * 1. 聚焦高亮框（对齐远程协作选中样式：2px 彩色边框 + glow + 呼吸动效）
  * 2. Agent 光标（箭头 + 胶囊，对齐远端光标视觉语言）
  *
+ * 锚点采用世界坐标（Plan#42 0.4）：覆盖层每帧用实时视口换算屏幕坐标，
+ * 聚焦视口动画（400ms）期间光标/高亮框全程贴着节点飞——「AI 带路」操纵感；
+ * 旧屏幕坐标方案在动画期间光标脱节（错位一闪而过）。
  * 低频（操作级）事件，React 订阅渲染即可，无需 DOM 直更/rAF
  * （区别于高频远端光标，见经验 collab-cursor-perf）。
  */
 
-/** Agent 光标状态（屏幕坐标空间，渲染层直接用） */
+/** Agent 光标状态（世界坐标锚点，渲染层按实时视口换算屏幕坐标） */
 export interface AgentCursorState {
-  /** 箭头锚点屏幕坐标 */
-  x: number;
-  y: number;
+  /** 锚点世界坐标（节点中心） */
+  worldX: number;
+  worldY: number;
   /** 目标节点包围盒（世界坐标，聚焦高亮框用；null = 无高亮） */
   bounds: { x: number; y: number; width: number; height: number } | null;
   /** 操作语义文案（如「已创建节点」） */

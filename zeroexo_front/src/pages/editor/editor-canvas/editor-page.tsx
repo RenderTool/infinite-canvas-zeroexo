@@ -53,6 +53,7 @@ import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
 import { AssetLibraryModal } from '@/features/asset-library/index.js';
 import { AgentDock, MobileAgentDrawer, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
 import { setCanvasOpBridge, setAgentReadOnly, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
+import { autoReconnectLocalAgent } from '@/features/canvas-agent/ui/local-agent-bridge.js';
 import { saveCanvasConfig } from '@/features/top-bar/index.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js';
@@ -303,6 +304,13 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     });
     return () => setCanvasOpBridge(null);
   }, []);
+
+  // Plan#42 MCP S4：本地 Canvas Agent 自动重连（配置过且未主动断开时，刷新页面恢复连接）
+  // 只读跳过（系统性只读防护）：viewer 不得连接本地 Agent 执行画布写操作
+  useEffect(() => {
+    if (isReadOnlyViewer) return;
+    autoReconnectLocalAgent();
+  }, [isReadOnlyViewer]);
 
   // Plan#33 D5: 主页智能体工作流 - 消费待注入提示词
   // 流程: 主页点生成 → 先建画布项目 → 跳转本页 → 打开 Agent 面板 + 提示词完整占位到输入框 + 自动发送(面板内思考)

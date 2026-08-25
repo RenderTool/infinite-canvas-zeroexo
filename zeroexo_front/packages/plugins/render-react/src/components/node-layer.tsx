@@ -545,8 +545,11 @@ export const NodeLayer = React.memo(function NodeLayer({
     // 防御性去重：协作同步/撤销重做/Agent 快速创建等边界情况可能产生重复 ID
     // Map 保留后出现的节点（更新的数据），避免 React duplicate key 警告
     const deduped = Array.from(byId.values());
+    // 防御性过滤无 id 节点：Agent add_node 契约允许缺省 id，若上游未兜底生成会
+    // 产生 id=undefined 节点，渲染 key=node.id 失效触发 React unique key 警告。
+    // 执行端已兜底（canvas-op-executor），此处为渲染层双保险。
     return deduped.filter(
-      (n) => n.type !== 'group' && !n.hidden && !hasHiddenAncestor(n),
+      (n) => typeof n.id === 'string' && n.id.length > 0 && n.type !== 'group' && !n.hidden && !hasHiddenAncestor(n),
     );
   }, [nodes]);
 

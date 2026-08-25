@@ -22,6 +22,14 @@ export function ThinkStream(): React.ReactElement {
   const phaseLabel = useCanvasAgentStore((s) => s.phaseLabel);
 
   const [collapsed, setCollapsed] = useState(true);
+  // 动效省略号：活跃时每 400ms 推进 1→2→3，静态省略号无生命感会让用户以为卡死（2026-08-25）
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    if (!thinking.active) return;
+    setDots(1);
+    const t = setInterval(() => setDots((d) => (d % 3) + 1), 400);
+    return () => clearInterval(t);
+  }, [thinking.active]);
   // R2 返工：计时基准 = 任务开始时间（store 记录），不再用组件挂载时刻（会累计面板打开时长）
   const baseTs = thinking.startedAt ?? Date.now();
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -44,10 +52,18 @@ export function ThinkStream(): React.ReactElement {
 
   if (!thinking.active && !thinking.text && thinking.steps.length === 0) return <></>;
 
-  const statusText = phaseLabel || (phase ? PHASE_STATUS_TEXT[phase] : 'Agent 工作中…');
   const elapsed = Math.max(0, nowTs - baseTs);
   const elapsedText = `${(elapsed / 1000).toFixed(1)}s`;
   const hasThinking = thinking.text.length > 0;
+  // 空窗期保活（2026-08-25）：无任何增量/步骤时，8s 后轮播等待文案，让用户确信 Agent 活着；
+  // 一旦有真实增量（思考流/步骤）立即让位给真实状态（statusText 接管）
+  const IDLE_HINTS = ['模型正在组织语言，稍等一下', '正在思考下一步', '仍在处理中，马上就好'];
+  const hintIdx = Math.floor(Math.max(0, elapsed - 8000) / 4000) % IDLE_HINTS.length;
+  const showIdleHint = thinking.active && !hasThinking && thinking.steps.length === 0 && elapsed > 8000;
+  const statusText = showIdleHint
+    ? IDLE_HINTS[hintIdx]!
+    : phaseLabel || (phase ? PHASE_STATUS_TEXT[phase] : 'Agent 工作中…');
+  const dotStr = thinking.active ? '.'.repeat(dots) : '';
 
   return (
     <div style={{ width: '100%', maxWidth: '100%' }}>
@@ -70,7 +86,7 @@ export function ThinkStream(): React.ReactElement {
         )}
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--agent-muted)' }}>
           {thinking.active
-            ? statusText
+            ? `${statusText}${dotStr}`
             : `已完成 ${thinking.steps.length} 步 · ${elapsedText}`}
         </span>
         {thinking.active && (

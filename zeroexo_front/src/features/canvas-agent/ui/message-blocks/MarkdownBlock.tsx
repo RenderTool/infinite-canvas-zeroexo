@@ -7,6 +7,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import type { CanvasAgentMessage } from '../types.js';
+import { isNodeRefHref, nodeIdFromHref, NodeRefChip, linkifyNodeIds } from './node-ref.js';
 
 const mdStyle: React.CSSProperties = {
   width: '100%',
@@ -103,13 +104,23 @@ export const mdComponents = {
       {...p}
     />
   ),
-  a: (p: Record<string, unknown>) => <a style={{ color: 'var(--agent-accent)' }} {...p} />,
+  a: (p: Record<string, unknown>) => {
+    // Plan#42 0.5：canvas-node: 协议链接 → @节点引用芯片（点击选中+聚焦定位）
+    const href = typeof p.href === 'string' ? p.href : undefined;
+    if (isNodeRefHref(href)) {
+      const children = Array.isArray(p.children) ? p.children : [p.children];
+      const raw = children.filter((c) => typeof c === 'string').join('');
+      const label = raw.replace(/^@/, '') || nodeIdFromHref(href).slice(-6);
+      return <NodeRefChip nodeId={nodeIdFromHref(href)} label={label} />;
+    }
+    return <a style={{ color: 'var(--agent-accent)' }} {...p} />;
+  },
   hr: (p: Record<string, unknown>) => <hr style={{ border: 'none', borderTop: '1px solid var(--agent-border)', margin: '8px 0' }} {...p} />,
 };
 
 export function MarkdownBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
-  const content = message.text ?? '';
+  const content = linkifyNodeIds(message.text ?? '');
   if (!content) return <></>;
 
   return (

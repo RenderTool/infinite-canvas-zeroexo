@@ -271,6 +271,10 @@ export class CanvasOpExecutor {
     switch (op.op) {
       case 'add_node': {
         const { id, type, position, size, title, data } = op.args;
+        // id 兜底:Agent 契约允许不传 id(禁止硬编码 ID,create_script/restore 等内部
+        // 工具下发时 id 可能为 undefined)——缺省时前端生成,否则 graph 出现 id=undefined
+        // 节点,渲染层 key=node.id 失效触发 React unique key 警告
+        const nodeId = typeof id === 'string' && id.trim() ? id : createId('node');
         // Agent 剧本节点兜底:后端契约只传 data.content(纯文本),前端剧本节点标准格式为
         // episodes[](结构化剧本 HTML 列表)——执行端转换为第1集,避免生成"不是剧本格式"的节点
         let nodeData: Record<string, unknown> = data ?? {};
@@ -283,7 +287,7 @@ export class CanvasOpExecutor {
           };
         }
         return new AddNodeCommand({
-          id,
+          id: nodeId,
           type,
           // Agent op 可能未携带 position(契约缺省)——补默认位置,否则渲染层读 node.position 崩溃
           position: position ?? { x: 0, y: 0 },

@@ -11,11 +11,14 @@ import { ClipboardList, AlertTriangle } from 'lucide-react';
 import { sendAnswer } from '../session/agent-session.js';
 import { useCanvasAgentStore } from '../store.js';
 import type { CanvasAgentMessage } from '../types.js';
+import { PhaseTimeline, derivePhases } from '../think-stream/PhaseTimeline.js';
 
 export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
   const planCard = message.planCard;
   const updateMessage = useCanvasAgentStore((s) => s.updateMessage);
+  // Plan#43 B2：确认后接入 Phase 待办打勾流（状态由 todo_write 快照推进）
+  const todoSnapshot = useCanvasAgentStore((s) => s.todoSnapshot);
   const [modifying, setModifying] = useState(false);
   const [modifyText, setModifyText] = useState('');
 
@@ -255,6 +258,11 @@ export function PlanBlock(props: { message: CanvasAgentMessage }): React.ReactEl
             {modifying ? '提交修改意见' : '我要修改'}
           </button>
         </div>
+      )}
+
+      {/* Plan#43 B2：计划确认后接入 Phase 待办打勾流（圆圈待办/旋转/打勾折叠推进） */}
+      {locked && planCard.steps.length > 0 && (
+        <PhaseTimeline plan={planCard} phases={derivePhases(planCard, todoSnapshot)} />
       )}
     </div>
   );

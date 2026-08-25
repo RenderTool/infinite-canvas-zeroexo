@@ -105,6 +105,16 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
     }));
   };
 
+  /** 撤销跳过（提交前可反悔，Plan#42 0.5） */
+  const handleUnskip = (itemId: string) => {
+    if (submitted) return;
+    setAnswers((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+  };
+
   const handleSubmit = () => {
     if (submitted) return;
     setSubmitting(true);
@@ -149,7 +159,46 @@ export function ClarifyBlock(props: { message: CanvasAgentMessage }): React.Reac
       {/* 选项列表 */}
       {items.map((item) => {
         const a = answers[item.itemId];
-        if (a?.skipped) return null;
+        // Plan#42 0.5：跳过项保留可见——整块灰化 + 「已跳过」徽标 + 提交前可撤销
+        // （旧行为 return null 直接消失，用户跳过后看不到自己跳过了什么）
+        if (a?.skipped) {
+          return (
+            <div key={item.itemId} style={{ marginBottom: 10, opacity: 0.45, transition: 'opacity 0.2s' }}>
+              <div style={{ fontSize: 12, color: 'var(--agent-muted)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ textDecoration: 'line-through' }}>{item.question}</span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: '1px 7px',
+                    borderRadius: 999,
+                    border: '1px solid var(--agent-border)',
+                    color: 'var(--agent-muted)',
+                    flexShrink: 0,
+                  }}
+                >
+                  用户已跳过
+                </span>
+                {!submitted && (
+                  <button
+                    type="button"
+                    onClick={() => handleUnskip(item.itemId)}
+                    style={{
+                      padding: '1px 6px',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--agent-accent)',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    撤销
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div key={item.itemId} style={{ marginBottom: 10 }}>

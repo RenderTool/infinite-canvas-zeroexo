@@ -22,7 +22,7 @@
 | storyboard_add_shot | 向分镜节点追加单镜头（自动编号） | 否 |
 | canvas_set_selection / canvas_focus | 辅助操作 | 否 |
 | create_script / create_storyboard | 剧本/分镜生成落画布 | 否 |
-| workflow_generate | 素材源+生成器+产物三段式工作链（媒体生成唯一入口） | 否 |
+| workflow_generate | 素材源副本→产物两段式工作链（媒体生成唯一入口，无生成器概念） | 否 |
 | canvas_set_config | 画布配置修改（白名单） | 否 |
 | read_content_chunked | 超长内容分块定位读取（剧本/分镜节点） | 否 |
 | read_asset_content | 附件落库后按需分段读取（assetId + offset，每段 6000 字） | 否 |
@@ -43,7 +43,11 @@
 
 ### 写 / 改（各节点 data 结构）
 - `canvas_add_node(type, title, data)` 新建；`canvas_update_node(id, patch)` 外科手术式修改（patch.data 与现有 data 合并，只改给的字段）
-- **script 剧本节点**：`data = { episodes: [{id, number, title, content: 剧本HTML}], activeEpisodeId, status:'ready' }`（前端标准格式，content 为好莱坞格式剧本 HTML）。create_script 的 content 参数由前端自动转为第 1 集(episodes)落地；改内容：read_node → canvas_update_node(patch={data:{episodes:[完整数组]}})
+- **script 剧本节点**：`data = { episodes: [{id, number, title, content: 剧本HTML}], activeEpisodeId, status:'ready' }`（前端标准格式，**前端按 episodes 分页——一集一页**，content 为好莱坞格式剧本 HTML）
+  - **单集**：create_script 的 content 参数由前端自动转为第 1 集(episodes)落地
+  - **多集（分集剧本）**：用 `canvas_add_node(type='script', title, data={episodes:[每集一条目{id:'ep-1',number:1,title:'第 1 集…',content:该集完整好莱坞格式HTML}, …], activeEpisodeId:'ep-1', status:'ready'})` 直建；**严禁把多集内容塞进单一 episode**（Plan#43 A 拍板）
+  - **改内容**：read_node → canvas_update_node(patch={data:{episodes:[完整数组]}})
+  - **content 格式铁律**：场景头（场号+内/外景+地点+日/夜）/ 动作行 / 角色名 + 对白，结构化段落；**禁止大段落裸文本/原样搬运输入素材**；杂乱素材必须重排为标准结构
 - **text 文本节点**：`data = { content: 文本 }`。读写方式同剧本节点
 - **storyboard 分镜节点**：`data = { shots: Shot[], entities: [], status }`；Shot 字段：id/number/sceneId/dayNight/duration/description/shotType/cameraMovement/dialogue/images/entities
   - **新增单镜头**：`storyboard_add_shot(nodeId, description, shotType?, cameraMovement?, dialogue?, duration?)`，自动编号、直写
@@ -80,7 +84,7 @@ Agent: emit_brief(成果摘要+节点引用+待审核声明) → request_questio
 用户: "帮我用这张图生成赛博朋克猫"
 Agent: canvas_get_state → 读取图片节点
 Agent: workflow_generate(sources=[图片], targetType=image, prompt=优化后提示词)
-Agent: "生成器与提示词已就绪，在生成器节点上点击执行即可" → 续作询问
+Agent: "提示词与参数已写入产物节点，选中它即可执行生成" → 续作询问
 ```
 
 ### 场景3：追问修改（超长内容）
