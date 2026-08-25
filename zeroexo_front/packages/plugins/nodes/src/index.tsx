@@ -22,7 +22,7 @@
 import type { Plugin, PluginContext, NodeTypeExtension, NodeRendererProps, ToolDefinition, ToolContext, NodeRuntimeContract } from '@zeroexo/core';
 import type { NodeRecord } from '@zeroexo/core';
 import type { NodeRegistryPlugin } from '@zeroexo/plugin-node-registry';
-import type { ConnectionController } from '@zeroexo/plugin-connection';
+import type { ConnectionController, ConnectionEndpoint, ConnectionValidation } from '@zeroexo/plugin-connection';
 import { ConnectionPlugin } from '@zeroexo/plugin-connection';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import i18next from 'i18next';
@@ -255,6 +255,26 @@ function createGeneratorExtension(controller: ConnectionController | null, store
   };
 }
 
+/**
+ * AI 生成结果只读素材防线(2026-08-25 用户拍板):
+ * 有 generationId 且当前无上游连入 = 只读素材节点态 → 禁止被连入上游(连入无意义);
+ * 生成节点态(已有上游)不受限,可继续连入参考输入。
+ */
+function rejectReadonlyAssetAsTarget(
+  store: ReactGraphStore | null,
+  _source: ConnectionEndpoint,
+  target: ConnectionEndpoint,
+): ConnectionValidation | void {
+  if (!store || target.direction !== 'input') return;
+  const tgtNode = store.getNode(target.nodeId);
+  if (!tgtNode) return;
+  const d = (tgtNode.data ?? {}) as Record<string, unknown>;
+  if (!d.generationId) return;
+  const hasIncoming = store.getGraph().edges.some((e) => e.target.nodeId === target.nodeId);
+  if (hasIncoming) return;
+  return { valid: false, reason: i18next.t('nodes.readonlyAssetNoInput') };
+}
+
 function createImageExtension(
   controller: ConnectionController | null,
   store: ReactGraphStore | null,
@@ -278,6 +298,7 @@ function createImageExtension(
       useShellChrome: true,
     },
     getPins: () => getImageNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
     createDefaultData: createImageDefaultData,
     getTools: () => getImageTools(),
     renderNode: (props: NodeRendererProps) => (
@@ -309,6 +330,7 @@ function createVideoExtension(
       useShellChrome: true,
     },
     getPins: () => getVideoNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
     createDefaultData: createVideoDefaultData,
     getTools: () => getVideoTools(),
     renderNode: (props: NodeRendererProps) => (
@@ -341,6 +363,7 @@ function createAudioExtension(
       useShellChrome: true,
     },
     getPins: () => getAudioNodePins(),
+    canConnect: (source, target) => rejectReadonlyAssetAsTarget(store, source, target),
     createDefaultData: createAudioDefaultData,
     getTools: () => getAudioTools(),
     renderNode: (props: NodeRendererProps) => (

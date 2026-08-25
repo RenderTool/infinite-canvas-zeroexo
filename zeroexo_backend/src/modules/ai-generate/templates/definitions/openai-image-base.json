@@ -24,8 +24,16 @@
       "type": "enum",
       "label": "尺寸",
       "default": "1024x1024",
-      "values": ["1024x1024", "1792x1024", "1024x1792"],
-      "labels": { "1024x1024": "1024×1024", "1792x1024": "1792×1024", "1024x1792": "1024×1792" },
+      "values": [
+        "1024x1024",
+        "1792x1024",
+        "1024x1792"
+      ],
+      "labels": {
+        "1024x1024": "1024×1024",
+        "1792x1024": "1792×1024",
+        "1024x1792": "1024×1792"
+      },
       "display": "select"
     },
     {
@@ -34,7 +42,8 @@
       "label": "生成数量",
       "default": 1,
       "min": 1,
-      "max": 10
+      "max": 10,
+      "advanced": true
     },
     {
       "name": "watermark",
@@ -47,9 +56,16 @@
       "type": "enum",
       "label": "图片格式",
       "default": "jpeg",
-      "values": ["png", "jpeg"],
-      "labels": { "png": "PNG", "jpeg": "JPEG" },
-      "display": "select"
+      "values": [
+        "png",
+        "jpeg"
+      ],
+      "labels": {
+        "png": "PNG",
+        "jpeg": "JPEG"
+      },
+      "display": "select",
+      "advanced": true
     }
   ],
   "channelConstraints": {
@@ -68,5 +84,9 @@
     },
     "valueMapping": {}
   },
-  "matchKeywords": ["openai", "gpt-image", "dall-e"]
+  "matchKeywords": [
+    "openai",
+    "gpt-image",
+    "dall-e"
+  ]
 }

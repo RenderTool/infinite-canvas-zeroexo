@@ -6,6 +6,9 @@
  *
  * 新增模板 → 在 definitions/ 下新建一个 .json 文件即可，无需改任何代码。
  * 每次查询直接从磁盘读取，不缓存，保证始终返回最新模板数据。
+ *
+ * 自定义模板（用户导入，存 DB）通过 setCustomTemplates 注入，
+ * 查询 API 自动合并：自定义模板优先于内置模板匹配。
  */
 
 import * as fs from 'fs';
@@ -14,6 +17,19 @@ import type { ModelTemplate } from './model-templates.types';
 
 // ─── 目录路径 ──────────────────────────────────────────────────
 const DEFINITIONS_DIR = path.join(__dirname, 'definitions');
+
+// ─── 自定义模板（用户导入，由 TemplateRegistryService 注入） ────
+let customTemplates: ModelTemplate[] = [];
+
+/** 注入自定义模板列表（DB 变更时由 TemplateRegistryService 调用） */
+export function setCustomTemplates(list: ModelTemplate[]): void {
+  customTemplates = list ?? [];
+}
+
+/** 获取自定义模板列表 */
+export function getCustomTemplates(): ModelTemplate[] {
+  return customTemplates;
+}
 
 // ─── 模板标准化 ────────────────────────────────────────────────
 
@@ -33,6 +49,11 @@ function normalizeTemplate(raw: any): ModelTemplate {
     maxPromptLength: raw.maxPromptLength,
     parameters,
     channelConstraints: raw.channelConstraints,
+    // DSL v2 视频协议字段（可选）
+    request: raw.request,
+    sync: raw.sync,
+    task: raw.task,
+    auth: raw.auth,
     fallback: raw.fallback === true,
     pricing: raw.pricing ? { ...raw.pricing } : undefined,
     matchKeywords: raw.matchKeywords ? [...raw.matchKeywords] : undefined,
@@ -72,9 +93,10 @@ function scanAndLoad(): ModelTemplate[] {
 
 /**
  * 返回所有模板（每次调用从磁盘重新读取，无缓存）
+ * 自定义模板优先排列（recommend 匹配时自定义优先）
  */
 export function getAllTemplates(): ModelTemplate[] {
-  return scanAndLoad();
+  return [...customTemplates, ...scanAndLoad()];
 }
 
 /**
@@ -94,29 +116,39 @@ export function getTemplateById(id: string): ModelTemplate | undefined {
 /**
  * 推荐匹配的模板
  * 根据模型 ID 中的关键词匹配最适合的模板
- * 优先级：匹配到的最长关键词优先（更具体的匹配优先）
+ * 优先级：自定义模板优先于内置；同一集合内匹配到的最长关键词优先（更具体的匹配优先）
  */
 export function recommendTemplate(modelId: string, modelType: string): ModelTemplate | null {
-  const templates = getAllTemplates().filter((t) => t.modelType === modelType);
   const lowerId = modelId.toLowerCase();
 
-  // 1. 优先匹配有 matchKeywords 的模板（族级模板）
-  const keywordCandidates: Array<{ template: ModelTemplate; keywordLen: number }> = [];
-  for (const t of templates) {
-    const keywords = t.matchKeywords;
-    if (!keywords || keywords.length === 0) continue;
-    const matched = keywords.find((kw) => lowerId.includes(kw.toLowerCase()));
-    if (matched) {
-      keywordCandidates.push({ template: t, keywordLen: matched.length });
+  // 关键词匹配（含候选排序：最长关键词优先）
+  const matchByKeywords = (templates: ModelTemplate[]): ModelTemplate | null => {
+    const candidates: Array<{ template: ModelTemplate; keywordLen: number }> = [];
+    for (const t of templates) {
+      const keywords = t.matchKeywords;
+      if (!keywords || keywords.length === 0) continue;
+      const matched = keywords.find((kw) => lowerId.includes(kw.toLowerCase()));
+      if (matched) {
+        candidates.push({ template: t, keywordLen: matched.length });
+      }
     }
-  }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.keywordLen - a.keywordLen);
+    return candidates[0].template;
+  };
 
-  if (keywordCandidates.length > 0) {
-    // 关键词最长者优先（更精确的匹配）
-    keywordCandidates.sort((a, b) => b.keywordLen - a.keywordLen);
-    return keywordCandidates[0].template;
-  }
+  // 兜底模板（无关键词匹配时）
+  const matchFallback = (templates: ModelTemplate[]): ModelTemplate | null =>
+    templates.find((t) => t.fallback) ?? null;
 
-  // 2. 无关键词匹配时，返回 fallback 模板
-  return templates.find((t) => t.fallback) ?? null;
+  // 1. 自定义模板优先
+  const custom = matchByKeywords(customTemplates.filter((t) => t.modelType === modelType));
+  if (custom) return custom;
+  const customFallback = matchFallback(customTemplates.filter((t) => t.modelType === modelType));
+  if (customFallback) return customFallback;
+
+  // 2. 内置模板
+  const builtin = matchByKeywords(scanAndLoad().filter((t) => t.modelType === modelType));
+  if (builtin) return builtin;
+  return matchFallback(scanAndLoad().filter((t) => t.modelType === modelType));
 }

@@ -340,7 +340,7 @@ export async function requestGeneration(
   }
 
   const quality = normalizeQuality(req.quality);
-  const requestSize = resolveRequestSize(quality, req.size);
+  const requestSize = resolveRequestSize(quality, req.size ?? '');
   try {
     const response = await axios.post<ImageApiResponse>(
       aiApiUrl(config, "/images/generations"),
@@ -380,7 +380,7 @@ export async function requestEdit(
   }
 
   const quality = normalizeQuality(req.quality);
-  const requestSize = resolveRequestSize(quality, req.size);
+  const requestSize = resolveRequestSize(quality, req.size ?? '');
   const formData = new FormData();
   formData.set("model", config.model);
   formData.set("prompt", withSystemPrompt(config, requestPrompt));

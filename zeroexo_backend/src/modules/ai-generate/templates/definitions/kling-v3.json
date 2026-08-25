@@ -11,7 +11,10 @@
       "type": "enum",
       "label": "生成模式",
       "default": "image-to-video-first-last-frame",
-      "values": ["image-to-video-first-last-frame", "multi-modal-reference"],
+      "values": [
+        "image-to-video-first-last-frame",
+        "multi-modal-reference"
+      ],
       "labels": {
         "image-to-video-first-last-frame": "首尾帧",
         "multi-modal-reference": "多模态"
@@ -27,8 +30,14 @@
       "type": "enum",
       "label": "时长（秒）",
       "default": 5,
-      "values": ["5", "10"],
-      "labels": { "5": "5秒", "10": "10秒" },
+      "values": [
+        "5",
+        "10"
+      ],
+      "labels": {
+        "5": "5秒",
+        "10": "10秒"
+      },
       "display": "radio"
     },
     {
@@ -36,8 +45,20 @@
       "type": "enum",
       "label": "视频尺寸",
       "default": "720x1280",
-      "values": ["720x1280", "1080x1920", "1280x720", "1920x1080", "1024x1024"],
-      "labels": { "720x1280": "720P 竖屏", "1080x1920": "1080P 竖屏", "1280x720": "720P 横屏", "1920x1080": "1080P 横屏", "1024x1024": "1:1 方形" },
+      "values": [
+        "720x1280",
+        "1080x1920",
+        "1280x720",
+        "1920x1080",
+        "1024x1024"
+      ],
+      "labels": {
+        "720x1280": "720P 竖屏",
+        "1080x1920": "1080P 竖屏",
+        "1280x720": "720P 横屏",
+        "1920x1080": "1080P 横屏",
+        "1024x1024": "1:1 方形"
+      },
       "display": "select"
     },
     {
@@ -54,16 +75,30 @@
       "default": 0,
       "min": 0,
       "max": 2147483647,
-      "tooltip": "随机种子，相同种子可复现相同结果（0 表示随机）"
+      "tooltip": "随机种子，相同种子可复现相同结果（0 表示随机）",
+      "advanced": true
     },
     {
       "name": "style",
       "type": "enum",
       "label": "风格",
       "default": "auto",
-      "values": ["auto", "cinematic", "anime", "realistic", "3d-cartoon"],
-      "labels": { "auto": "自动", "cinematic": "电影感", "anime": "动漫", "realistic": "写实", "3d-cartoon": "3D卡通" },
-      "display": "select"
+      "values": [
+        "auto",
+        "cinematic",
+        "anime",
+        "realistic",
+        "3d-cartoon"
+      ],
+      "labels": {
+        "auto": "自动",
+        "cinematic": "电影感",
+        "anime": "动漫",
+        "realistic": "写实",
+        "3d-cartoon": "3D卡通"
+      },
+      "display": "select",
+      "advanced": true
     },
     {
       "name": "maxReferenceImages",
@@ -119,6 +154,41 @@
       }
     }
   },
-  "pricing": { "perSecond": 0.08 },
-  "matchKeywords": ["kling", "kling-v3"]
+  "request": {
+    "bodyStyle": "flat",
+    "contentRoles": {
+      "image": "image",
+      "firstFrame": "first_frame",
+      "lastFrame": "last_frame",
+      "video": "video",
+      "audio": "audio",
+      "firstLastModes": [
+        "image-to-video-first-last-frame"
+      ]
+    }
+  },
+  "task": {
+    "submitIdPath": "data.task_id",
+    "pollUrlTemplate": "/api/v1/services/aigc/video-generation/video-synthesis/{id}",
+    "statusPath": "data.task_status",
+    "successValues": [
+      "succeeded"
+    ],
+    "failureValues": [
+      "failed"
+    ],
+    "resultPath": "data.task_result.videos[0].url",
+    "pollIntervalMs": 5000,
+    "maxPollMs": 600000
+  },
+  "auth": {
+    "type": "kling-hmac"
+  },
+  "pricing": {
+    "perSecond": 0.08
+  },
+  "matchKeywords": [
+    "kling",
+    "kling-v3"
+  ]
 }

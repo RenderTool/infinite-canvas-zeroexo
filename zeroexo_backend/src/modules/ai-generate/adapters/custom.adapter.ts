@@ -7,9 +7,9 @@ import {
 } from './adapter.interface';
 import { buildApiUrl } from '../../api-providers/adapters/build-api-url';
 import { applyParamMapping } from './adapter.factory';
-import { createAbortController, isUserCancelled } from './abort-utils';
-import { ErrorCode } from '../../../common/errors/error-codes';
-import { badRequest } from '../../../common/errors/app-exception.js';
+import { executeVideoByTemplate } from './video-executor';
+import { sniffImageMime } from './image-utils';
+import sharp from 'sharp';
 
 /**
  * 中转 API(Custom)适配器 - P3.3
@@ -20,7 +20,8 @@ import { badRequest } from '../../../common/errors/app-exception.js';
  * - 支持图生图: 当传入 referenceImages 时,作为 image 数组发送(中转服务通用字段)
  * - size 参数兼容像素值(1024x1024)与比例值(16:9)
  *
- * 仅支持 image/text/audio,视频生成抛 BadRequest。
+ * 支持 image/text/audio/video;视频生成按模板 DSL 执行,
+ * 无 DSL 时按 OpenAI 兼容兜底(POST /videos/generations)。
  */
 export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
   async generate(
@@ -28,7 +29,7 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
     ctx: AdapterContext,
   ): Promise<GenerateResult> {
     if (req.kind === 'video') {
-      throw badRequest(ErrorCode.BAD_REQUEST, 'Relay API video generation is not supported yet');
+      return executeVideoByTemplate(req, ctx, req.template);
     }
     if (req.kind === 'image') {
       return this.generateImageCustom(req, ctx);
@@ -49,9 +50,33 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
     const apiBase = buildApiUrl(ctx.baseUrl, 'custom');
     const url = `${apiBase}/images/generations`;
 
+    // ─── 参考图 buffer 提前解析 ───
+    // AUTO 宽高比计算需要真实宽高(sharp 读元数据),base64 提交复用同一批 buffer,避免二次读取(2026-08-25)
+    const refImages = req.params.referenceImages;
+    const refBuffers: Buffer[] = [];
+    if (Array.isArray(refImages) && refImages.length > 0) {
+      for (const imageUrl of refImages as string[]) {
+        refBuffers.push(await this.resolveImageBuffer(imageUrl, ctx));
+      }
+    }
+
     const explicitSize = req.params.size as string | undefined;
     const aspectRatio = req.params.aspectRatio as string | undefined;
-    const size = explicitSize || aspectRatio || '1024x1024';
+    // auto 不是合法 size 值:显式 size 优先,其次固定宽高比,auto 回退 1:1(2026-08-25 修复)
+    let size = explicitSize || (aspectRatio && aspectRatio !== 'auto' ? aspectRatio : undefined) || '1024x1024';
+    // AUTO + 参考图:按参考图比例 + 分辨率档位计算(用户拍板:auto=跟随输入图片比例输出)
+    if (!explicitSize && aspectRatio === 'auto' && refBuffers.length > 0) {
+      const meta = await sharp(refBuffers[0]).metadata();
+      if (meta.width && meta.height) {
+        const res = String(req.params.resolution ?? '').toLowerCase();
+        const resMap: Record<string, number> = { '1k': 1024, '1024': 1024, '2k': 1792, '1792': 1792 };
+        const longEdge = resMap[res] || 1024;
+        const ratio = meta.width / meta.height;
+        size = ratio >= 1
+          ? `${longEdge}x${Math.round(longEdge / ratio)}`
+          : `${Math.round(longEdge * ratio)}x${longEdge}`;
+      }
+    }
 
     // ─── 构造中间参数（前端 key + 计算后的 size） ───
     const intermediateParams: Record<string, any> = {
@@ -73,15 +98,12 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
     };
 
     // ─── 参考图特殊处理（base64 转换 + paramMapping 映射） ───
-    const refImages = req.params.referenceImages;
-    if (Array.isArray(refImages) && refImages.length > 0) {
+    if (refBuffers.length > 0) {
       const refApiField = req.template?.paramMapping?.referenceImages ?? 'image';
-      const base64Images: string[] = [];
-      for (const imageUrl of refImages as string[]) {
-        const b64 = await this.resolveImageToBase64(imageUrl, ctx);
-        base64Images.push(b64);
-      }
-      body[refApiField] = base64Images.map((b) => `data:image/png;base64,${b}`);
+      // 按字节魔数探测真实 MIME,避免硬编码 png 导致 JPEG 图被误标(2026-08-25 seedream-4.5 实测)
+      body[refApiField] = refBuffers.map(
+        (b) => `data:${sniffImageMime(b)};base64,${b.toString('base64')}`,
+      );
     }
 
     const json = await this.postJson(url, body, ctx);
@@ -133,73 +155,6 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
     };
   }
 
-  /**
-   * 将图像 URL 解析为 base64 字符串
-   * - 本地存储 URL: 提取 storageKey 读取文件
-   * - 外部 URL: 远程拉取
-   * - 已是 base64 格式: 去除 data URI 前缀后返回
-   */
-  private async resolveImageToBase64(imageUrl: string, ctx: AdapterContext): Promise<string> {
-    if (imageUrl.startsWith('data:')) {
-      const match = imageUrl.match(/^data:image\/[^;]+;base64,(.+)$/);
-      if (!match) {
-        throw new Error('无效的 base64 图片格式');
-      }
-      return match[1];
-    }
-
-    let buffer: Buffer;
-    const storageKey = this.extractStorageKey(imageUrl);
-    if (storageKey) {
-      if (!ctx.readFile) {
-        throw new Error('缺少读取本地文件的能力');
-      }
-      const fileBuffer = await ctx.readFile(storageKey);
-      if (!fileBuffer) {
-        throw new Error(`参考图文件不存在: ${storageKey}`);
-      }
-      buffer = fileBuffer;
-    } else {
-      buffer = await this.fetchBinary(imageUrl, ctx);
-    }
-
-    return buffer.toString('base64');
-  }
-
-  /** 从 URL 中提取 storageKey */
-  private extractStorageKey(url: string): string | null {
-    const match = url.match(/[/?&]key=([^&]+)/);
-    if (match) {
-      return decodeURIComponent(match[1]);
-    }
-    return null;
-  }
-
-  /** 拉取远程图片为 Buffer(中转服务返回 url 时使用) */
-  private async fetchBinary(
-    imageUrl: string,
-    ctx: AdapterContext,
-  ): Promise<Buffer> {
-    const { controller, cleanup } = createAbortController(ctx.timeoutMs, ctx.signal);
-    try {
-      const res = await fetch(imageUrl, { signal: controller.signal });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`拉取图片失败 HTTP ${res.status}: ${text.slice(0, 200)}`);
-      }
-      const arrayBuffer = await res.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(
-          isUserCancelled(err, ctx.signal)
-            ? '用户取消'
-            : `请求超时(超过 ${ctx.timeoutMs / 1000} 秒),请稍后重试`,
-        );
-      }
-      throw err;
-    } finally {
-      cleanup();
-    }
-  }
+  // resolveImageBuffer / extractStorageKey / fetchBinary 复用父类 OpenAiAdapter 的 protected 实现
+  // (2026-08-25:父类补齐图生图支持后删除子类重复实现,消除 TS2415 同名 private 冲突)
 }

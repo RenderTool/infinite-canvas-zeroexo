@@ -342,7 +342,7 @@ export function ConfigDialog({
         </div>
         <div style={configAreaStyle}>
           <div style={subtitleStyle}>{t('settings.subtitle')}</div>
-          {/* ===== 操作提示开关卡片(立即生效,不随“重置默认”联动) ===== */}
+          {/* ===== 操作提示开关卡片(立即生效,不随"重置默认"联动) ===== */}
           <div style={cardStyle}>
             <div style={cardTitleStyle}>{t('config.hints')}</div>
             <div style={{ ...rowStyle, marginBottom: 0 }}>
@@ -355,7 +355,7 @@ export function ConfigDialog({
               </div>
             </div>
           </div>
-
+          
           {/* ===== 节点配置卡片 ===== */}
           <div style={cardStyle}>
             <div style={cardTitleStyle}>{t('config.nodeStyle')}</div>

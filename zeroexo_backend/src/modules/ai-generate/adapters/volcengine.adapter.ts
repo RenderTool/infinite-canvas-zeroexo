@@ -5,9 +5,12 @@ import {
   GenerateResult,
 } from './adapter.interface';
 import { applyParamMapping } from './adapter.factory';
+import { executeVideoByTemplate } from './video-executor';
 import { createAbortController, isUserCancelled } from './abort-utils';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import { badRequest } from '../../../common/errors/app-exception.js';
+import { sniffImageMime } from './image-utils';
+import sharp from 'sharp';
 
 /**
  * 校验图片 URL 列表，防止 SSRF 攻击
@@ -17,8 +20,8 @@ import { badRequest } from '../../../common/errors/app-exception.js';
  */
 function validateImageUrls(urls: string[]): void {
   for (const url of urls) {
-    // 跳过 data: 协议(base64 内嵌图片)
-    if (url.startsWith('data:')) continue;
+    // 跳过 data: 协议(base64 内嵌图片)与相对路径(本地存储 /api/storage/get?key=...,由 extractStorageKey 读本地文件,无 SSRF 风险)
+    if (url.startsWith('data:') || url.startsWith('/')) continue;
 
     let parsed: URL;
     try {
@@ -33,6 +36,17 @@ function validateImageUrls(urls: string[]): void {
     }
   }
 }
+
+/**
+ * 前端生成模式(模板 mode 枚举值) → Seedance 官方 task 值
+ * 原模板 valueMapping 语义,删除 valueMapping 后内联进适配器。
+ */
+const MODE_TO_TASK: Record<string, string> = {
+  'image-to-video-first-last-frame': 'reference',
+  'multi-modal-reference': 'reference',
+  'video-edit': 'edit',
+  'video-extend': 'extend',
+};
 
 function assertNotInternalUrl(url: string): void {
   const parsed = new URL(url);
@@ -146,6 +160,17 @@ export class VolcengineAdapter implements AiProviderAdapter {
   ): Promise<GenerateResult> {
     const url = `${ctx.baseUrl.replace(/\/$/, '')}/images/generations`;
 
+    // ─── 参考图 buffer 提前解析 ───
+    // AUTO 宽高比计算需要真实宽高(sharp 读元数据),base64 提交复用同一批 buffer,避免二次读取(2026-08-25)
+    const refImages = req.params.referenceImages as string[] | undefined;
+    const refBuffers: Buffer[] = [];
+    if (refImages && refImages.length > 0) {
+      validateImageUrls(refImages);
+      for (const imageUrl of refImages) {
+        refBuffers.push(await this.resolveImageBuffer(imageUrl, ctx));
+      }
+    }
+
     // ─── 计算 size ───
     // 防御性处理：size 可能是 {width, height} 对象（前端联动逻辑遗留），转为 "WxH" 字符串
     const rawSize = req.params.size;
@@ -160,8 +185,18 @@ export class VolcengineAdapter implements AiProviderAdapter {
 
     // 预设模式：优先使用 resolution + aspectRatio 计算火山预设 size（如 "2k"/"3k"/"4k"）
     // 仅当 size 为空时才走预设计算，避免具体像素值覆盖预设值
-    if (!size && resolution) {
+    if ((!size || size === '0x0') && resolution) {
       const res = resolution.toLowerCase();
+      // AUTO 模式 + 有参考图:按参考图比例 + 分辨率档位计算(用户拍板:auto=跟随输入图片比例输出)
+      if (aspectRatio === 'auto' && refBuffers.length > 0) {
+        const meta = await sharp(refBuffers[0]).metadata();
+        if (meta.width && meta.height) {
+          const dims = this.calculateDimensions(resolution, `${meta.width}:${meta.height}`, req.template?.bounds);
+          if (dims) {
+            size = `${dims.width}x${dims.height}`;
+          }
+        }
+      }
       // 优先使用火山预设 size 值（如 "2k", "4k"）,宽高比 1:1 时直接用预设
       if (aspectRatio === '1:1' || !aspectRatio) {
         if (res === '2k' || res === '2048') size = '2k';
@@ -171,7 +206,7 @@ export class VolcengineAdapter implements AiProviderAdapter {
 
       // 非 1:1 宽高比: 计算具体像素(硬编码映射表已满足所有 seedream 模型的最小像素要求)
       if (!size && aspectRatio) {
-        // AUTO 模式：无需特定宽高比时使用 1:1 作为默认比
+        // AUTO 模式：无需特定宽高比时使用 1:1 作为默认比(有参考图时上方已按参考图比例计算)
         const effectiveAspect = aspectRatio === 'auto' ? '1:1' : aspectRatio;
         const dims = this.calculateDimensions(resolution, effectiveAspect, req.template?.bounds);
         if (dims) {
@@ -223,18 +258,12 @@ export class VolcengineAdapter implements AiProviderAdapter {
     };
 
     // ─── 参考图特殊处理（base64 转换 + paramMapping 映射） ───
-    const refImages = req.params.referenceImages as string[] | undefined;
-    if (refImages && refImages.length > 0) {
-      // SSRF 防护：校验所有 URL 只允许 http/https 协议，禁止内网地址
-      validateImageUrls(refImages);
+    if (refBuffers.length > 0) {
       const refApiField = req.template?.paramMapping?.referenceImages ?? 'image';
-
-      const base64Images: string[] = [];
-      for (const imageUrl of refImages) {
-        const b64 = await this.resolveImageToBase64(imageUrl, ctx);
-        base64Images.push(b64);
-      }
-      body[refApiField] = base64Images.map((b) => `data:image/png;base64,${b}`);
+      // 按字节魔数探测真实 MIME,避免硬编码 png 导致 JPEG 图被误标(2026-08-25 seedream-4.5 实测)
+      body[refApiField] = refBuffers.map(
+        (b) => `data:${sniffImageMime(b)};base64,${b.toString('base64')}`,
+      );
     }
 
     const json = await this.postJson(url, body, ctx);
@@ -402,160 +431,28 @@ export class VolcengineAdapter implements AiProviderAdapter {
     };
   }
 
-  /** 视频生成(异步任务:提交 → 轮询 → 下载) - Seedance 2.0 风格 */
+  /** 视频生成(异步任务:提交 → 轮询 → 下载) - 模板 DSL 驱动 */
   private async generateVideo(
     req: GenerateRequest,
     ctx: AdapterContext,
   ): Promise<GenerateResult> {
-    const baseUrl = ctx.baseUrl.replace(/\/$/, '');
-    const submitUrl = `${baseUrl}/contents/generations/tasks`;
-
-    // UI 生成模式(模板 mode 枚举值):驱动 content role 语义与编辑/延长任务约束
-    const uiMode = (req.params.mode as string) ?? 'image-to-video-first-last-frame';
-    const isFirstLast = uiMode === 'image-to-video-first-last-frame';
-    const isEditOrExtend = uiMode === 'video-edit' || uiMode === 'video-extend';
-
-    // ─── 1. 构建 content 数组 ──────────────────────────────────
-    const content: any[] = [{ type: 'text', text: req.prompt }];
-
-    // 参考图(base64 data-url)
-    // 首尾帧模式:官方要求 role 必填,按顺序分配 first_frame / last_frame(互斥场景)
-    // 其余模式(多模态参考/编辑/延长):role=reference_image
-    const refImages = req.params.referenceImages as string[] | undefined;
-    if (refImages?.length) {
-      refImages.forEach((img, idx) => {
-        content.push({
-          type: 'image_url',
-          image_url: { url: img },
-          role: isFirstLast ? (idx === 0 ? 'first_frame' : 'last_frame') : 'reference_image',
-        });
-      });
+    // 前端 mode(模板枚举值) → 官方 task 值(原模板 valueMapping 语义,内联进适配器)
+    const params: Record<string, any> = { ...req.params };
+    const uiMode = (params.mode as string) ?? 'image-to-video-first-last-frame';
+    if (params.mode !== undefined) {
+      params.mode = MODE_TO_TASK[uiMode] ?? uiMode;
     }
-    // 参考视频
-    const refVideos = req.params.referenceVideos as string[] | undefined;
-    if (refVideos?.length) {
-      for (const vid of refVideos) {
-        content.push({ type: 'video_url', video_url: { url: vid }, role: 'reference_video' });
-      }
-    }
-    // 参考音频
-    const refAudio = req.params.referenceAudio as string[] | undefined;
-    if (refAudio?.length) {
-      for (const aud of refAudio) {
-        content.push({ type: 'audio_url', audio_url: { url: aud }, role: 'reference_audio' });
-      }
-    }
-
-    // ─── 2. 映射参数并构建请求体 ────────────────────────────────
-    const intermediateParams: Record<string, any> = { ...req.params };
-    delete intermediateParams.referenceImages;
-    delete intermediateParams.referenceVideos;
-    delete intermediateParams.referenceAudio;
-    delete intermediateParams.maxReferenceImages;
-    delete intermediateParams.maxReferenceVideos;
-    delete intermediateParams.maxReferenceAudios;
-    delete intermediateParams.referenceImagesEnabled;
-    delete intermediateParams.referenceVideosEnabled;
-    delete intermediateParams.referenceAudiosEnabled;
-    // mode 保留:模板 paramMapping.mode="task" + valueMapping 将其映射为官方 task 值
-    // (reference / edit / extend),由 applyParamMapping 写入请求体
-
-    const mapped = applyParamMapping(intermediateParams, req.template);
+    // 保留原始 mode,供执行器判定首尾帧 role(executor 发送前剔除 _uiMode,不会传给 API)
+    params._uiMode = uiMode;
 
     // 编辑/延长任务:官方硬性要求 ratio=adaptive、duration=-1(时长由模型自动选择),
     // 无论前端参数面板如何设置,一律强制兜底
-    if (isEditOrExtend) {
-      mapped.ratio = 'adaptive';
-      mapped.duration = -1;
+    if (uiMode === 'video-edit' || uiMode === 'video-extend') {
+      params.ratio = 'adaptive';
+      params.duration = -1;
     }
 
-    const body: Record<string, any> = {
-      model: req.model,
-      content,
-      ...mapped,
-    };
-
-    // ─── 3. 提交生成任务 ────────────────────────────────────────
-    const createResult = await this.postJson(submitUrl, body, ctx);
-    const taskId = createResult?.id;
-    if (!taskId) {
-      throw new Error('火山引擎视频生成任务创建失败：未返回任务 ID');
-    }
-
-    // ─── 4. 轮询任务状态 ──────────────────────────────────────
-    const taskUrl = `${submitUrl}/${taskId}`;
-    const pollStart = Date.now();
-    const maxPollMs = 10 * 60 * 1000; // 最长 10 分钟
-    const pollIntervalMs = 5000;       // 每 5 秒查询一次
-
-    while (Date.now() - pollStart < maxPollMs) {
-      if (ctx.signal?.aborted) {
-        throw new Error('用户取消');
-      }
-
-      // 每次轮询使用单独的 30 秒超时，不占用 ctx.timeoutMs
-      const taskResult = await this.getJson(taskUrl, 30_000, ctx.apiKey, ctx.signal);
-      const status = taskResult?.status;
-
-      if (status === 'succeeded') {
-        const videoUrl = taskResult?.content?.video_url;
-        if (!videoUrl) {
-          throw new Error('火山引擎视频生成成功但未返回视频 URL');
-        }
-        // 下载视频
-        const buffer = await this.fetchBinary(videoUrl, ctx);
-        return {
-          kind: 'video',
-          buffer,
-          mimeType: 'video/mp4',
-          ext: 'mp4',
-        };
-      }
-
-      if (status === 'failed') {
-        throw new Error(`火山引擎视频生成失败: ${taskResult?.error || '未知错误'}`);
-      }
-
-      // 仍在处理中，等待后继续轮询
-      await this.delay(pollIntervalMs);
-    }
-
-    throw new Error('火山引擎视频生成超时（超过 10 分钟）');
-  }
-
-  private async getJson(
-    url: string,
-    timeoutMs: number,
-    apiKey: string,
-    signal?: AbortSignal,
-  ): Promise<any> {
-    const { controller, cleanup } = createAbortController(timeoutMs, signal);
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
-      }
-      return await res.json();
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`请求超时(超过 ${timeoutMs / 1000} 秒),请稍后重试`);
-      }
-      throw err;
-    } finally {
-      cleanup();
-    }
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return executeVideoByTemplate({ ...req, params }, ctx, req.template);
   }
 
   private async postJson(
@@ -666,13 +563,13 @@ export class VolcengineAdapter implements AiProviderAdapter {
     }
   }
 
-  private async resolveImageToBase64(imageUrl: string, ctx: AdapterContext): Promise<string> {
+  private async resolveImageBuffer(imageUrl: string, ctx: AdapterContext): Promise<Buffer> {
     if (imageUrl.startsWith('data:')) {
       const match = imageUrl.match(/^data:image\/[^;]+;base64,(.+)$/);
       if (!match) {
         throw new Error('无效的 base64 图片格式');
       }
-      return match[1];
+      return Buffer.from(match[1], 'base64');
     }
 
     let buffer: Buffer;
@@ -691,7 +588,7 @@ export class VolcengineAdapter implements AiProviderAdapter {
       buffer = await this.fetchBinary(imageUrl, ctx);
     }
 
-    return buffer.toString('base64');
+    return buffer;
   }
 
   private extractStorageKey(url: string): string | null {

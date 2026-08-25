@@ -313,11 +313,12 @@ async function createSeedanceTask(
   const payload = {
     model: config.model,
     content,
-    ratio: normalizeSeedanceRatio(req.size),
+    ratio: normalizeSeedanceRatio(req.size ?? ''),
     resolution: normalizeSeedanceResolution(req.vquality, config.model),
     duration: normalizeSeedanceDuration(req.seconds),
     generate_audio: req.generateAudio,
     watermark: req.watermark,
+    return_last_frame: req.returnLastFrame ?? false,
   };
   try {
     const created = unwrapSeedanceTask(
@@ -380,7 +381,7 @@ async function createOpenAIVideoTask(
   body.append("model", config.model);
   body.append("prompt", req.prompt);
   body.append("seconds", normalizeVideoSeconds(req.seconds));
-  const size = normalizeVideoSize(req.size);
+  const size = normalizeVideoSize(req.size ?? '');
   if (size) body.append("size", size);
   body.append("resolution_name", normalizeVideoResolution(req.vquality));
   body.append("preset", "normal");

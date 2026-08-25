@@ -37,6 +37,8 @@ export interface ParameterDef {
   tooltip?: string;
   placeholder?: string;
   required?: boolean;
+  /** 高级参数：生成面板默认折叠在「高级选项」中（普通用户不常调整） */
+  advanced?: boolean;
 }
 
 export interface ChannelConstraints {
@@ -132,6 +134,7 @@ const VOLCENGINE_SIZE_MAP: Record<string, Record<string, { width: number; height
 
 /**
  * 从分辨率 + 宽高比计算实际像素尺寸，确保满足像素约束。
+ * 命中官方尺寸表同样需要统一过一遍 bounds 裁剪（maxEdge → minPixels → maxPixels）。
  */
 function computeSizePreset(
   resolution: string,
@@ -140,36 +143,48 @@ function computeSizePreset(
 ): { width: number; height: number } {
   const res = resolution.toLowerCase();
   const resMap = VOLCENGINE_SIZE_MAP[res];
+  let w: number;
+  let h: number;
   if (resMap?.[aspectRatio]) {
-    return { ...resMap[aspectRatio] };
+    ({ width: w, height: h } = resMap[aspectRatio]);
+  } else {
+    const [rw, rh] = aspectRatio.split(':').map(Number);
+    if (!rw || !rh) return { width: 1024, height: 1024 };
+    const rawEdge = resolvePixels(res, bounds?.maxEdgeLength || 1024);
+    const edge = bounds?.maxEdgeLength ? Math.min(rawEdge, bounds.maxEdgeLength) : rawEdge;
+    w = rw >= rh ? edge : Math.round((edge * rw) / rh);
+    h = rh >= rw ? edge : Math.round((edge * rh) / rw);
   }
-  const [rw, rh] = aspectRatio.split(':').map(Number);
-  if (!rw || !rh) return { width: 1024, height: 1024 };
-  const rawEdge = resolvePixels(res, bounds?.maxEdgeLength || 1024);
-  const maxEdge = bounds?.maxEdgeLength ? Math.min(rawEdge, bounds.maxEdgeLength) : rawEdge;
-  let w = rw >= rh ? maxEdge : Math.round((maxEdge * rw) / rh);
-  let h = rh >= rw ? maxEdge : Math.round((maxEdge * rh) / rw);
+  // 最长边约束（保持比例裁剪）
+  const maxEdge = bounds?.maxEdgeLength;
+  if (maxEdge && Math.max(w, h) > maxEdge) {
+    const ratio = w / h;
+    if (ratio >= 1) {
+      w = maxEdge;
+      h = Math.max(1, Math.round(maxEdge / ratio));
+    } else {
+      h = maxEdge;
+      w = Math.max(1, Math.round(maxEdge * ratio));
+    }
+  }
+  // 最小像素约束（提升时若超最长边则按最长边比例回退）
   const minPixels = bounds?.minTotalPixels ?? 921600;
   if (w * h < minPixels) {
     const scale = Math.sqrt(minPixels / (w * h));
     w = Math.round(w * scale);
     h = Math.round(h * scale);
-    if (w > maxEdge || h > maxEdge) {
-      const ratio = rw / rh;
-      let newW: number, newH: number;
+    if (maxEdge && (w > maxEdge || h > maxEdge)) {
+      const ratio = w / h;
       if (ratio >= 1) {
-        newW = maxEdge;
-        newH = Math.round(maxEdge / ratio);
+        w = maxEdge;
+        h = Math.max(1, Math.round(maxEdge / ratio));
       } else {
-        newH = maxEdge;
-        newW = Math.round(maxEdge * ratio);
-      }
-      if (newW * newH >= minPixels) {
-        w = newW;
-        h = newH;
+        h = maxEdge;
+        w = Math.max(1, Math.round(maxEdge * ratio));
       }
     }
   }
+  // 最大像素约束
   const maxPixels = bounds?.maxTotalPixels;
   if (maxPixels && w * h > maxPixels) {
     const scale = Math.sqrt(maxPixels / (w * h));
@@ -234,6 +249,7 @@ function SizeRenderer({
   constraints,
   theme,
   onChangeParam,
+  params,
 }: {
   param: ParameterDef;
   value: any;
@@ -241,10 +257,30 @@ function SizeRenderer({
   constraints?: ChannelConstraints;
   theme: ThemeConfig;
   onChangeParam: (name: string, value: any) => void;
+  /** 完整参数列表：消费模板配置的 resolution/aspectRatio values/labels，而非硬编码档位 */
+  params: ParameterDef[];
 }): React.ReactElement {
   const { t } = useTranslation();
+
+  // ── 档位/比例优先取模板配置（如 seedream 只配 1k/2k → 不渲染 512/3k/4k） ──
+  const resolutionParam = params.find((p) => p.name === 'resolution');
+  const aspectParam = params.find((p) => p.name === 'aspectRatio');
+  const resolutionOptions = resolutionParam?.values?.length
+    ? resolutionParam.values
+    : RESOLUTION_OPTIONS;
+  const rawAspectValues = aspectParam?.values?.length
+    ? aspectParam.values
+    : ['auto', ...ASPECT_OPTIONS.map((o) => o.value)];
+  const hasAutoAspect = rawAspectValues.includes('auto');
+  const aspectOptions = rawAspectValues
+    .filter((v) => v !== 'auto')
+    .map((v) => {
+      const [rw, rh] = v.split(':').map(Number);
+      return { value: v, ratio: rw && rh ? rw / rh : 1 };
+    });
+
   // 当前分辨率/宽高比/尺寸值
-  const resolution = (allValues['resolution'] as string) || '2k';
+  const resolution = (allValues['resolution'] as string) || resolutionOptions[0];
   const aspectRatio = (allValues['aspectRatio'] as string) || 'auto';
   const isAuto = aspectRatio === 'auto';
   const rawSize = value && typeof value === 'object' && 'width' in value
@@ -268,15 +304,14 @@ function SizeRenderer({
     [rawSize, constraints?.bounds],
   );
 
-  // 分辨率变更
+  // 分辨率变更(AUTO 比例下也可点选:分辨率独立生效,比例保持 AUTO)
   const handleResolutionChange = useCallback((val: string) => {
-    if (isAuto) return;
     onChangeParam('resolution', val);
     if (aspectRatio && aspectRatio !== 'auto') {
       const { width: w, height: h } = computeSizePreset(val, aspectRatio, constraints?.bounds);
       onChangeParam('size', { width: w, height: h });
     }
-  }, [isAuto, aspectRatio, constraints?.bounds, onChangeParam]);
+  }, [aspectRatio, constraints?.bounds, onChangeParam]);
 
   // 宽高比变更
   const handleAspectRatioChange = useCallback((val: string) => {
@@ -318,53 +353,56 @@ function SizeRenderer({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* 分辨率档位选择 */}
+      {/* 分辨率档位选择（档位来自模板配置 values，无配置时回退内置列表） */}
       <SettingGroup title={t('promptPanel.resolution')} color={mutedColor}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-          {RESOLUTION_OPTIONS.map((opt) => (
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(5, resolutionOptions.length)}, 1fr)`, gap: 6 }}>
+          {resolutionOptions.map((opt) => (
             <OptionPill
               key={opt}
               selected={resolution === opt}
               theme={theme}
               onClick={() => handleResolutionChange(opt)}
-              disabled={isAuto}
             >
-              {opt}
+              {resolutionParam?.labels?.[opt] ?? opt}
             </OptionPill>
           ))}
         </div>
       </SettingGroup>
 
-      {/* 宽高比预设选择 */}
+      {/* 宽高比预设选择（选项来自模板配置 values） */}
       <SettingGroup title={t('promptPanel.aspectRatio')} color={mutedColor}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-          <Tooltip title={t('promptPanel.autoAspect')}>
-            <button
-              type="button"
-              onClick={() => handleAspectRatioChange('auto')}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                height: 56,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 4,
-                borderRadius: 10,
-                border: `1px solid ${isAuto ? textColor : theme.toolbar.border}`,
-                background: 'transparent',
-                color: textColor,
-                cursor: 'pointer',
-                fontSize: 11,
-                transition: 'opacity 0.12s',
-              }}
-            >
-              <AspectIcon ratio={0} color={textColor} />
-              <span>auto</span>
-            </button>
-          </Tooltip>
-          {ASPECT_OPTIONS.map((opt) => (
+          {hasAutoAspect && (
+            <Tooltip title={t('promptPanel.autoAspect')}>
+              <button
+                type="button"
+                onClick={() => handleAspectRatioChange('auto')}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{
+                  height: 56,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  borderRadius: 10,
+                  border: `1px solid ${isAuto ? theme.toolbar.accent : theme.toolbar.border}`,
+                  background: isAuto
+                    ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.08)')
+                    : 'transparent',
+                  color: textColor,
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  transition: 'opacity 0.12s',
+                }}
+              >
+                <AspectIcon ratio={0} color={textColor} />
+                <span>{aspectParam?.labels?.['auto'] ?? 'auto'}</span>
+              </button>
+            </Tooltip>
+          )}
+          {aspectOptions.map((opt) => (
             <Tooltip key={opt.value} title={opt.value}>
               <button
                 type="button"
@@ -379,8 +417,10 @@ function SizeRenderer({
                   justifyContent: 'center',
                   gap: 4,
                   borderRadius: 10,
-                  border: `1px solid ${!isAuto && aspectRatio === opt.value ? textColor : theme.toolbar.border}`,
-                  background: 'transparent',
+                  border: `1px solid ${!isAuto && aspectRatio === opt.value ? theme.toolbar.accent : theme.toolbar.border}`,
+                  background: !isAuto && aspectRatio === opt.value
+                    ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.08)')
+                    : 'transparent',
                   color: textColor,
                   cursor: 'pointer',
                   fontSize: 11,
@@ -388,27 +428,30 @@ function SizeRenderer({
                 }}
               >
                 <AspectIcon ratio={opt.ratio} color={textColor} />
-                <span>{opt.value}</span>
+                <span>{aspectParam?.labels?.[opt.value] ?? opt.value}</span>
               </button>
             </Tooltip>
           ))}
         </div>
       </SettingGroup>
 
-      {/* 宽度 × 高度输入 */}
+      {/* 宽度 × 高度输入(锁定按钮与输入框垂直居中:容器底部对齐 + 按钮等高 32px) */}
       <SettingGroup title={param.label || t('promptPanel.dimensions')} color={mutedColor}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: mutedColor, marginBottom: 2 }}>{t('promptPanel.width')}</div>
             <NumberInput
               value={String(rawSize.width || '')}
               min={constraints?.bounds?.minWidth ?? 0}
               max={constraints?.bounds?.maxWidth ?? 9999}
               theme={theme}
+              disabled={isAuto}
               onChange={handleWidthChange}
+              width="100%"
+              radius={8}
             />
           </div>
-          {/* 锁定比例按钮 */}
+          {/* 锁定比例按钮(32px 与输入框等高,底部对齐 → 垂直居中于输入框) */}
           <Tooltip title={aspectLocked ? t('promptPanel.unlockAspect') : t('promptPanel.lockAspect')}>
             <span
               onClick={() => setAspectLocked(!aspectLocked)}
@@ -419,8 +462,7 @@ function SizeRenderer({
                 alignItems: 'center',
                 justifyContent: 'center',
                 width: 20,
-                height: 20,
-                marginTop: 22,
+                height: 32,
                 cursor: 'pointer',
                 color: aspectLocked ? theme.toolbar.accent : (theme.mode === 'dark' ? '#666' : '#bfbfbf'),
                 borderRadius: 4,
@@ -428,17 +470,20 @@ function SizeRenderer({
                 flexShrink: 0,
               }}
             >
-            {aspectLocked ? <Link size={14} /> : <Unlink size={14} />}
-          </span>
+              {aspectLocked ? <Link size={14} /> : <Unlink size={14} />}
+            </span>
           </Tooltip>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: mutedColor, marginBottom: 2 }}>{t('promptPanel.height')}</div>
             <NumberInput
               value={String(rawSize.height || '')}
               min={constraints?.bounds?.minHeight ?? 0}
               max={constraints?.bounds?.maxHeight ?? 9999}
               theme={theme}
+              disabled={isAuto}
               onChange={handleHeightChange}
+              width="100%"
+              radius={8}
             />
           </div>
         </div>
@@ -532,6 +577,7 @@ const DISPLAY_EXCLUDE_NAMES = new Set([
   'maxReferenceImages',
   'maxReferenceVideos',
   'maxReferenceAudios',
+  // 水印参数由模板驱动显示(boolean SwitchRow),默认关闭由模板 default: false 保证(2026-08-25 用户拍板)
 ]);
 
 /** 过滤需要显示的参数 */
@@ -563,8 +609,11 @@ function buildSummary(params: ParameterDef[], values: Record<string, any>): stri
     if (param.type === 'enum') {
       parts.push(getValueLabel(param, String(val)));
     } else if (param.type === 'size') {
-      if (typeof val === 'object' && val?.width) {
-        parts.push(`${val.width}x${val.height}`);
+      // width/height 为数值即有效(0 也合法:AUTO 模式 size={width:0,height:0} 曾致 String({}) 显示 [object Object])
+      if (typeof val === 'object' && val !== null && typeof (val as any).width === 'number') {
+        const w = (val as any).width as number;
+        const h = (val as any).height as number;
+        parts.push(w > 0 && h > 0 ? `${w}x${h}` : 'AUTO');
       } else {
         parts.push(String(val));
       }
@@ -598,6 +647,8 @@ export function DynamicParamForm({
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<TemplateDef[]>([]);
   const [loaded, setLoaded] = useState<boolean>(false);
+  // 高级参数折叠区展开状态（默认收起）
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // 加载模板
   useEffect(() => {
@@ -626,12 +677,16 @@ export function DynamicParamForm({
 
   // Bug3: 模型切换时参数必须随之刷新 —— 将新模型模板的默认值写回 paramValues,
   // 避免旧模型残留参数(如 mode/分辨率)继续显示。初始挂载模型不重置(保留已保存参数)。
+  // mode 不做默认写回:参考区首尾帧/多模态需用户显式选择才切换(2026-08-25 用户拍板)
   const prevModelRef = useRef<string>(model);
   useEffect(() => {
     if (!loaded || prevModelRef.current === model || parameters.length === 0) return;
     prevModelRef.current = model;
     const defaults: Record<string, any> = {};
-    for (const p of parameters) defaults[p.name] = p.default;
+    for (const p of parameters) {
+      if (p.name === 'mode') continue;
+      defaults[p.name] = p.default;
+    }
     onChange(defaults);
   }, [loaded, model, parameters, onChange]);
 
@@ -647,12 +702,17 @@ export function DynamicParamForm({
     }
     initialDefaultAppliedRef.current = true;
     const defaults: Record<string, any> = {};
-    for (const p of parameters) defaults[p.name] = p.default;
+    for (const p of parameters) {
+      if (p.name === 'mode') continue;
+      defaults[p.name] = p.default;
+    }
     onChange(defaults);
   }, [loaded, parameters, paramValues, onChange]);
 
-  // 过滤显示参数
+  // 过滤显示参数（advanced 参数折叠在「高级选项」中）
   const displayParams = useMemo(() => filterDisplayParameters(parameters), [parameters]);
+  const basicParams = useMemo(() => displayParams.filter((p) => !p.advanced), [displayParams]);
+  const advancedParams = useMemo(() => displayParams.filter((p) => p.advanced), [displayParams]);
 
   // 合并所有值用于摘要和联动(基于完整 parameters 构建默认值,确保被 size 渲染器
   // 内部处理的 resolution/aspectRatio 也能拿到模板默认值)
@@ -664,11 +724,11 @@ export function DynamicParamForm({
     return { ...result, ...paramValues };
   }, [parameters, paramValues]);
 
-  // 计算摘要
+  // 计算摘要（仅基础参数；高级参数不干扰普通用户摘要）
   const summary = useMemo(() => {
-    if (displayParams.length === 0) return t('promptPanel.defaultSummary');
-    return buildSummary(displayParams, allValues);
-  }, [displayParams, allValues, t]);
+    if (basicParams.length === 0) return t('promptPanel.defaultSummary');
+    return buildSummary(basicParams, allValues);
+  }, [basicParams, allValues, t]);
 
   // 处理参数变更
   const handleParamChange = useCallback((name: string, value: any) => {
@@ -677,7 +737,11 @@ export function DynamicParamForm({
 
   // 渲染参数控件(必须在条件性 return 之前调用,以保持 hooks 顺序一致)
   const renderParam = useCallback((param: ParameterDef) => {
-    const value = paramValues[param.name] ?? param.default;
+    // mode 参数:仅显式选择后才有值(参考区随用户选择切换首尾帧/多模态),
+    // 不回退模板默认值,避免"默认选中首尾帧"的假象
+    const value = param.name === 'mode'
+      ? paramValues[param.name]
+      : (paramValues[param.name] ?? param.default);
 
     switch (param.type) {
       case 'enum': {
@@ -686,7 +750,8 @@ export function DynamicParamForm({
         if (param.display === 'radio' || param.values.length <= 6) {
           return (
             <SettingGroup title={param.label} color={theme.toolbar.textMuted}>
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(4, param.values.length)}, 1fr)`, gap: 8 }}>
+              {/* flex-wrap 自适应宽度(对齐 admin EnumRenderer):固定网格会挤压长 label 导致换行(如「编辑视频」) */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {param.values.map((v) => (
                   <OptionPill
                     key={v}
@@ -764,7 +829,7 @@ export function DynamicParamForm({
       }
 
       case 'size': {
-        // size 参数使用完整的 SizeRenderer
+        // size 参数使用完整的 SizeRenderer（传入完整参数列表以消费模板档位配置）
         return (
           <SizeRenderer
             param={param}
@@ -773,6 +838,7 @@ export function DynamicParamForm({
             constraints={constraints}
             theme={theme}
             onChangeParam={handleParamChange}
+            params={parameters}
           />
         );
       }
@@ -806,12 +872,12 @@ export function DynamicParamForm({
       default:
         return null;
     }
-  }, [paramValues, theme, handleParamChange, allValues, constraints]);
+  }, [paramValues, theme, handleParamChange, allValues, constraints, parameters]);
 
-  // 无参数时显示默认摘要(在所有 hooks 之后判断)
-  if (displayParams.length === 0) {
+  // 无参数时显示默认摘要（在所有 hooks 之后判断）
+  if (basicParams.length === 0 && advancedParams.length === 0) {
     return (
-      <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+      <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
         <div style={{ padding: '12px 0', textAlign: 'center', color: theme.toolbar.textMuted, fontSize: 12 }}>
           {t('promptPanel.noCustomParams')}
         </div>
@@ -820,14 +886,56 @@ export function DynamicParamForm({
   }
 
   return (
-    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320}>
+    <SettingsPopoverShell summary={summary} theme={theme} panelWidth={320} triggerVariant="dropdown">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: theme.toolbar.text }}>
           {t('promptPanel.paramSettings', { prefix: titlePrefix })}
         </div>
-        {displayParams.map((param) => (
+        {basicParams.map((param) => (
           <div key={param.name}>{renderParam(param)}</div>
         ))}
+
+        {/* 高级选项折叠区：普通用户不常调整的专业参数（固定镜头/尾帧/优先级等） */}
+        {advancedParams.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                height: 30,
+                borderRadius: 8,
+                border: `1px solid ${theme.toolbar.border}`,
+                background: 'transparent',
+                color: theme.toolbar.textMuted,
+                cursor: 'pointer',
+                fontSize: 12,
+                transition: 'opacity 0.12s',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  transform: showAdvanced ? 'rotate(90deg)' : 'none',
+                  transition: 'transform 0.15s',
+                  fontSize: 10,
+                }}
+              >
+                ▸
+              </span>
+              {t('promptPanel.advancedOptions')}
+              <span style={{ opacity: 0.6 }}>{advancedParams.length}</span>
+            </button>
+            {showAdvanced && advancedParams.map((param) => (
+              <div key={param.name}>{renderParam(param)}</div>
+            ))}
+          </div>
+        )}
       </div>
     </SettingsPopoverShell>
   );

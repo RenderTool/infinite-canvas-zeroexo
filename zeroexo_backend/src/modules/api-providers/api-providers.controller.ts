@@ -28,7 +28,8 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AI_BRAND_PRESETS } from './presets/ai-provider-presets';
 import { EMAIL_PROVIDER_PRESETS } from './presets/email-provider-presets';
 import { OAUTH_PROVIDER_PRESETS } from './presets/oauth-provider-presets';
-import { getAllTemplates, getTemplatesByType, recommendTemplate } from '../ai-generate/templates/built-in-templates';
+import { recommendTemplate } from '../ai-generate/templates/built-in-templates';
+import { TemplateRegistryService } from '../ai-generate/templates/registry.service';
 
 /**
  * API Provider 管理 Controller(统一入口)
@@ -55,6 +56,7 @@ export class ApiProvidersController {
   constructor(
     private readonly apiProvidersService: ApiProvidersService,
     private readonly auditLog: AuditLogService,
+    private readonly templateRegistry: TemplateRegistryService,
   ) {}
 
   @Get()
@@ -99,13 +101,15 @@ export class ApiProvidersController {
   /**
    * 获取指定模型类型的可用模板列表
    * GET /admin/api-providers/templates?type=image
+   * 来源：模型模板库（内置 definitions/ + 用户导入 DB），带 isBuiltIn/enabled 标记
    */
   @Get('templates')
-  getTemplates(@Query('type') type: string) {
+  async getTemplates(@Query('type') type: string) {
+    const all = await this.templateRegistry.list();
     if (!type) {
-      return getAllTemplates();
+      return all;
     }
-    return getTemplatesByType(type);
+    return all.filter((t) => t.modelType === type);
   }
 
   /**

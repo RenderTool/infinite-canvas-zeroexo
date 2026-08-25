@@ -23,8 +23,14 @@
       "type": "enum",
       "label": "分辨率",
       "default": "2k",
-      "values": ["1k", "2k"],
-      "labels": { "1k": "1K", "2k": "2K" },
+      "values": [
+        "1k",
+        "2k"
+      ],
+      "labels": {
+        "1k": "1K",
+        "2k": "2K"
+      },
       "display": "radio"
     },
     {
@@ -32,10 +38,25 @@
       "type": "enum",
       "label": "宽高比",
       "default": "auto",
-      "values": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+      "values": [
+        "auto",
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3"
+      ],
       "labels": {
-        "auto": "AUTO", "1:1": "1:1", "16:9": "16:9", "9:16": "9:16",
-        "4:3": "4:3", "3:4": "3:4", "3:2": "3:2", "2:3": "2:3"
+        "auto": "AUTO",
+        "1:1": "1:1",
+        "16:9": "16:9",
+        "9:16": "9:16",
+        "4:3": "4:3",
+        "3:4": "3:4",
+        "3:2": "3:2",
+        "2:3": "2:3"
       },
       "display": "radio"
     },
@@ -62,8 +83,22 @@
       "type": "enum",
       "label": "质量",
       "default": "auto",
-      "values": ["auto", "hd", "standard", "high", "medium", "low"],
-      "labels": { "auto": "自动", "hd": "高清", "standard": "标准", "high": "高", "medium": "中", "low": "低" },
+      "values": [
+        "auto",
+        "hd",
+        "standard",
+        "high",
+        "medium",
+        "low"
+      ],
+      "labels": {
+        "auto": "自动",
+        "hd": "高清",
+        "standard": "标准",
+        "high": "高",
+        "medium": "中",
+        "low": "低"
+      },
       "display": "select"
     },
     {
@@ -71,18 +106,36 @@
       "type": "enum",
       "label": "输出格式",
       "default": "png",
-      "values": ["png", "jpeg", "webp"],
-      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
-      "display": "select"
+      "values": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "labels": {
+        "png": "PNG",
+        "jpeg": "JPEG",
+        "webp": "WebP"
+      },
+      "display": "select",
+      "advanced": true
     },
     {
       "name": "background",
       "type": "enum",
       "label": "背景",
       "default": "auto",
-      "values": ["auto", "transparent", "opaque"],
-      "labels": { "auto": "自动", "transparent": "透明", "opaque": "不透明" },
-      "display": "select"
+      "values": [
+        "auto",
+        "transparent",
+        "opaque"
+      ],
+      "labels": {
+        "auto": "自动",
+        "transparent": "透明",
+        "opaque": "不透明"
+      },
+      "display": "select",
+      "advanced": true
     },
     {
       "name": "n",
@@ -91,7 +144,8 @@
       "default": 1,
       "min": 1,
       "max": 10,
-      "step": 1
+      "step": 1,
+      "advanced": true
     },
     {
       "name": "watermark",
@@ -117,9 +171,17 @@
       "n": "n"
     },
     "valueMapping": {
-      "resolution": { "1k": "1024x1024", "2k": "2048x2048" }
+      "resolution": {
+        "1k": "1024x1024",
+        "2k": "2048x2048"
+      }
     }
   },
-  "pricing": { "perImage": 0.04 },
-  "matchKeywords": ["gpt-image-2", "gptimage2"]
+  "pricing": {
+    "perImage": 0.04
+  },
+  "matchKeywords": [
+    "gpt-image-2",
+    "gptimage2"
+  ]
 }

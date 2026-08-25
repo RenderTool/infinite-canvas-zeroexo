@@ -545,13 +545,16 @@ export function saveNodeConfig(
 
 /** provider 强类型兜底字段(模板参数缺失时使用;params 存在时后端以其为准) */
 export interface TemplateProviderFallback {
-  size: string;
+  /** AUTO 模式(参考图自动适配)下为 undefined,后端据此走 auto 计算;其余模式为 "WxH" 字符串 */
+  size?: string;
   quality?: string;
   count?: number;
   seconds?: number;
   vquality?: string;
   generateAudio?: boolean;
   watermark?: boolean;
+  /** 返回尾帧(Seedance: return_last_frame) */
+  returnLastFrame?: boolean;
   voice?: string;
   format?: string;
   speed?: number;
@@ -566,6 +569,7 @@ const TEMPLATE_META_PARAMS = new Set([
   'maxReferenceAudios',
   'referenceVideosEnabled',
   'referenceAudiosEnabled',
+  // 水印由参数面板模板驱动(默认关闭),随参数透传后端(2026-08-25 用户拍板)
 ]);
 
 /**
@@ -605,9 +609,11 @@ export function buildTemplateParams(
   for (const key of TEMPLATE_META_PARAMS) delete filtered[key];
 
   // 强类型兜底字段
-  const fallback: TemplateProviderFallback = { size: '1024x1024' };
+  const fallback: TemplateProviderFallback = {};
   if (mode === 'image') {
-    fallback.size = (filtered.size as string) ?? '1024x1024';
+    // AUTO 模式:size 必须置空——曾用 '1024x1024' 兜底填回,后端拿到显式 size 后跳过 auto 计算直接 1:1
+    // (2026-08-25 修复:auto 由后端按参考图比例 + 分辨率档位计算)
+    fallback.size = (filtered.size as string) ?? (isAuto ? undefined : '1024x1024');
     fallback.quality = (filtered.quality as string) ?? 'standard';
     fallback.count = (filtered.count as number) ?? 1;
   } else if (mode === 'video') {
@@ -615,7 +621,10 @@ export function buildTemplateParams(
     fallback.seconds = (filtered.seconds as number) ?? (filtered.duration as number) ?? 5;
     fallback.vquality = (filtered.vquality as string) ?? (filtered.resolution as string) ?? '720p';
     fallback.generateAudio = (filtered.generateAudio as boolean) ?? true;
+    // 水印:参数面板模板驱动(默认关闭),随参数透传
     fallback.watermark = (filtered.watermark as boolean) ?? false;
+    // 返回尾帧:模板参数显式选中才生效
+    fallback.returnLastFrame = (filtered.returnLastFrame as boolean) ?? false;
   } else if (mode === 'audio') {
     fallback.voice = (filtered.voice as string) ?? 'alloy';
     fallback.format = (filtered.audioFormat as string) ?? 'mp3';

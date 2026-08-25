@@ -59,13 +59,29 @@ export function SettingsPopoverShell({
       if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
       setOpen(false);
     };
+    // 画布为 transform 平移式滚动（不产生原生 scroll 事件）时 scroll 监听失效，
+    // 弹层会留在原位 → 补 wheel/touchmove 捕获兜底：外部滚轮/拖拽滚动一律收起
+    const closeOnWheel = (event: WheelEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const closeOnTouchMove = (event: TouchEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     syncPosition();
     window.addEventListener('resize', syncPosition);
     window.addEventListener('scroll', closeOnScroll, true);
+    window.addEventListener('wheel', closeOnWheel, true);
+    window.addEventListener('touchmove', closeOnTouchMove, true);
     window.addEventListener('pointerdown', closeOnOutside, true);
     return () => {
       window.removeEventListener('resize', syncPosition);
       window.removeEventListener('scroll', closeOnScroll, true);
+      window.removeEventListener('wheel', closeOnWheel, true);
+      window.removeEventListener('touchmove', closeOnTouchMove, true);
       window.removeEventListener('pointerdown', closeOnOutside, true);
     };
   }, [open]);
@@ -221,12 +237,17 @@ export function OptionPill({
         height: 32,
         padding: '0 10px',
         borderRadius: 9999,
-        border: `1px solid ${selected ? theme.toolbar.text : theme.toolbar.border}`,
-        background: 'transparent',
+        // 选中态对齐 admin EnumRenderer(primary 实心高亮):accent 描边 + 半透明背景 + 加粗
+        border: `1px solid ${selected ? theme.toolbar.accent : theme.toolbar.border}`,
+        background: selected
+          ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.08)')
+          : 'transparent',
         color: theme.toolbar.text,
+        fontWeight: selected ? 600 : 400,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.35 : 1,
         fontSize: 12,
+        whiteSpace: 'nowrap',
         transition: 'opacity 0.12s',
       }}
     >
@@ -289,12 +310,21 @@ export function NumberInput({
   max,
   theme,
   onChange,
+  width = 60,
+  radius = 9999,
+  disabled = false,
 }: {
   value: string;
   min: number;
   max: number;
   theme: ThemeConfig;
   onChange: (value: string) => void;
+  /** 输入框宽度(默认 60;尺寸渲染器传 '100%' 自适应) */
+  width?: number | string;
+  /** 圆角(默认 9999 胶囊;尺寸渲染器传 8 方角) */
+  radius?: number;
+  /** 禁用(尺寸渲染器在 AUTO 宽高比时禁用输入,对齐 admin 规则) */
+  disabled?: boolean;
 }): React.ReactElement {
   return (
     <input
@@ -302,12 +332,13 @@ export function NumberInput({
       min={min}
       max={max}
       value={value}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       style={{
         height: 32,
-        borderRadius: 9999,
+        borderRadius: radius,
         border: `1px solid ${theme.toolbar.border}`,
         background: 'transparent',
         color: theme.toolbar.text,
@@ -315,7 +346,9 @@ export function NumberInput({
         fontSize: 12,
         textAlign: 'center',
         outline: 'none',
-        width: 60,
+        width,
+        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? 'not-allowed' : 'text',
         // 隐藏 number 输入的 spin 按钮
         WebkitAppearance: 'textfield' as unknown as 'none',
       }}

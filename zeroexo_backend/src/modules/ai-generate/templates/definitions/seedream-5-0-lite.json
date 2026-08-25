@@ -11,8 +11,16 @@
       "type": "enum",
       "label": "分辨率",
       "default": "2k",
-      "values": ["2k", "3k", "4k"],
-      "labels": { "2k": "2K", "3k": "3K", "4k": "4K" },
+      "values": [
+        "2k",
+        "3k",
+        "4k"
+      ],
+      "labels": {
+        "2k": "2K",
+        "3k": "3K",
+        "4k": "4K"
+      },
       "display": "radio"
     },
     {
@@ -20,10 +28,27 @@
       "type": "enum",
       "label": "宽高比",
       "default": "1:1",
-      "values": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+      "values": [
+        "auto",
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3",
+        "21:9"
+      ],
       "labels": {
-        "auto": "AUTO", "1:1": "1:1", "16:9": "16:9", "9:16": "9:16",
-        "4:3": "4:3", "3:4": "3:4", "3:2": "3:2", "2:3": "2:3", "21:9": "21:9"
+        "auto": "AUTO",
+        "1:1": "1:1",
+        "16:9": "16:9",
+        "9:16": "9:16",
+        "4:3": "4:3",
+        "3:4": "3:4",
+        "3:2": "3:2",
+        "2:3": "2:3",
+        "21:9": "21:9"
       },
       "display": "radio"
     },
@@ -31,7 +56,10 @@
       "name": "size",
       "type": "size",
       "label": "尺寸（宽×高）",
-      "default": { "width": 2048, "height": 2048 }
+      "default": {
+        "width": 2048,
+        "height": 2048
+      }
     },
     {
       "name": "watermark",
@@ -58,15 +86,23 @@
       "type": "enum",
       "label": "图片格式",
       "default": "jpeg",
-      "values": ["jpeg", "png"],
-      "labels": { "jpeg": "JPEG", "png": "PNG" },
-      "display": "select"
+      "values": [
+        "jpeg",
+        "png"
+      ],
+      "labels": {
+        "jpeg": "JPEG",
+        "png": "PNG"
+      },
+      "display": "select",
+      "advanced": true
     },
     {
       "name": "webSearch",
       "type": "boolean",
       "label": "联网搜索",
-      "default": false
+      "default": false,
+      "advanced": true
     }
   ],
   "channelConstraints": {
@@ -87,9 +123,19 @@
       "webSearch": "web_search"
     },
     "valueMapping": {
-      "resolution": { "2k": "2k", "3k": "3k", "4k": "4k" }
+      "resolution": {
+        "2k": "2k",
+        "3k": "3k",
+        "4k": "4k"
+      }
     }
   },
-  "pricing": { "perImage": 0.03 },
-  "matchKeywords": ["seedream-5-0-lite", "doubao-seedream-5-0-lite", "doubao-seedream-5-0-260128"]
+  "pricing": {
+    "perImage": 0.03
+  },
+  "matchKeywords": [
+    "seedream-5-0-lite",
+    "doubao-seedream-5-0-lite",
+    "doubao-seedream-5-0-260128"
+  ]
 }

@@ -915,6 +915,30 @@ export class ApiProvidersService {
   }
 
   /**
+   * 解密完整凭证(约定 credentials.json 中各敏感字段)
+   * 返回 apiKey/secretKey 等解密后的明文,供 AK/SK 签名类渠道(如 Kling 官方直连)使用
+   */
+  async getDecryptedCredentials(id: string): Promise<Record<string, any>> {
+    const provider = await this.getRawById(id);
+    const creds = (provider.credentials as Record<string, any>) || {};
+    if (!creds || typeof creds !== 'object') return {};
+    const decrypted: Record<string, any> = {};
+    for (const [k, v] of Object.entries(creds)) {
+      const isSensitive = /pass|secret|token|key/i.test(k);
+      if (isSensitive && typeof v === 'string' && v.length > 0) {
+        try {
+          decrypted[k] = decrypt(v, this.encryptionKey);
+        } catch {
+          decrypted[k] = '';
+        }
+      } else {
+        decrypted[k] = v;
+      }
+    }
+    return decrypted;
+  }
+
+  /**
    * 标记最近使用时间(轻量更新,fire-and-forget 也可)
    */
   async markUsed(id: string): Promise<void> {

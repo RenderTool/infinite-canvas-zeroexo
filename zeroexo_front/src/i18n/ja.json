@@ -775,6 +775,10 @@
     "replayDone": "生成リンクを復元しました：新ノード + {{n}} 個の参照を再接続済み、確認後に再生成できます",
     "replayPartial": "生成リンクを復元しました。ただし {{n}} 個の参照は復元不可（内容が未保存）、他は再接続済み",
     "replayModelInvalid": "生成リンクを復元しました。元のチャネル/モデルは無効になったため、モデルを再選択してください",
+    "nodeDock": {
+      "placeholder": "プロンプトを入力... 接続済みの素材は自動で入力源になります（スタックは @ で内部リソースを指定）",
+      "mentionStackedHint": "スタック内部のリソースは @ 指定しないと入力源になりません"
+    },
     "backToContent": "コンテンツへ戻る",
     "untitled": "無題キャンバス",
     "canvasHint": "右クリックでノードを追加",
@@ -1008,6 +1012,7 @@
     "stackEject": "取り出す",
     "stackEjectTitle": "個別ノードとして取り出し自動接続",
     "stackOnlyAcceptsMedia": "スタックは画像/動画のみ接続できます",
+    "readonlyAssetNoInput": "AI生成の読み取り専用素材には上流を接続できません",
     "stackConvertTo": "スタックに変換",
     "stackCreateNew": "スタックノードを作成",
     "stackSelected": "選択ノードをスタック",
@@ -1481,7 +1486,8 @@
     "autoModeHint": "AUTOモードでは解像度とアスペクト比からサイズを自動計算します",
     "defaultSummary": "デフォルト",
     "noCustomParams": "カスタムパラメータはありません",
-    "paramSettings": "{{prefix}}パラメータ設定"
+    "paramSettings": "{{prefix}}パラメータ設定",
+    "advancedOptions": "詳細設定"
   },
   "creative": {
     "heroTitle": "ZEROEXO · 心を理解し、華を尽くす",

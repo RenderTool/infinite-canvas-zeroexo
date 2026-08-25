@@ -92,9 +92,11 @@ export function AudioNodeView({
 
   const hydratedContent = useHydratedContent(data.storageKey, data.content ?? '');
   const hasContent = !!hydratedContent;
-  // 生成器态判定:空节点(无内容)连入上游支持节点 → 生成器态(隐藏节点内上传按钮,避免"既是生成器又是资源器"二义态)
+  // 生成节点语义(2026-08-25 用户拍板):只要连入上游即生成节点态(隐藏替换按钮,避免"既是生成器又是资源器"二义态);
+  // 断开全部上游才降级为素材节点;AI 生成结果(有 generationId)恒为只读素材,永不显示替换按钮
   const hasIncoming = useHasIncomingEdges(store, node.id, isSelected);
-  const isGeneratorState = !hasContent && hasIncoming;
+  const isGeneratorState = hasIncoming;
+  const isAiGenerated = !!(data as Record<string, unknown>).generationId;
 
   const updateData = (patch: Partial<AudioNodeData>): void => {
     updateNode({ data: { ...data, ...patch } });
@@ -372,7 +374,7 @@ export function AudioNodeView({
         hasContent={hasContent}
         onReplace={handleReplaceClick}
         isSelected={isSelected}
-        showReplaceButton={isSelected && !isGeneratorState}
+        showReplaceButton={isSelected && !isGeneratorState && !isAiGenerated}
         backgroundColor={nodeColor}
         taskLabel={(data.taskLabel as string) ?? undefined}
         replaceBtnPosition="left"

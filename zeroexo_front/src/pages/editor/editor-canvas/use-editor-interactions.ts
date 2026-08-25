@@ -9,7 +9,7 @@ import { useCallback, createElement, useEffect, useMemo, useRef, useSyncExternal
 import { App } from 'antd';
 import { EDITOR_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
+import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, UpdateNodeTitleCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
 import type {
   ImageNodeData,
@@ -40,6 +40,7 @@ import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/sto
 import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import { buildTemplateParams } from './interactions/ai-generation-utils.js';
+import { promptTitleSummary } from './interactions/ai-generation.js';
 import { collectAgentNodeSnapshots, notifyAgentNodesDeleted } from '@/features/canvas-agent/ui/agent-node-reminder.js';
 import i18n from '@/i18n/config';
 
@@ -455,20 +456,25 @@ export function useEditorInteractions({
         } as NodeRecord),
       ];
       const targetPin = NODE_INPUT_PIN[srcNode.type] ?? 'input';
-      // 5a. 引用清单:优先生成时刻快照(冻结缓存);遗留记录(无快照)降级从当前连入节点取存档(尽力而为)
+      // 5a. 引用清单:只基于生成时刻冻结快照(_inputs)重建,与画布现状完全隔离
+      //    (画布源节点可能早已迭代/被删/被拷贝,快照才是唯一可信源——用户拍板 2026-08-25)
       type RefSpec = { type: string; storageKey?: string; content?: string; text?: string; title?: string };
       const refSpecs: RefSpec[] = [];
       let unrestorable = 0;
-      const inputs: Array<{ nodeId: string; nodeType: string; assetStorageKey?: string; title?: string; textPreview?: string }> =
+      const inputs: Array<{ nodeId: string; nodeType: string; assetStorageKey?: string; content?: string; title?: string; textPreview?: string }> =
         Array.isArray(params._inputs) ? params._inputs : [];
       if (inputs.length > 0) {
         for (const it of inputs) {
           const isMedia = it.nodeType === 'image' || it.nodeType === 'video' || it.nodeType === 'audio';
           if (isMedia && it.assetStorageKey) {
             refSpecs.push({ type: it.nodeType, storageKey: it.assetStorageKey, title: it.title });
+          } else if (isMedia && it.content) {
+            refSpecs.push({ type: it.nodeType, content: it.content, title: it.title });
           } else if (it.nodeType === 'text' && it.textPreview) {
             refSpecs.push({ type: 'text', text: it.textPreview, title: it.title });
           } else {
+            // 快照未存档内容(旧记录生成时未存 media content):无法重建,计入缺失提示;
+            // 不查现存画布节点(与画布隔离原则,避免用已迭代的源节点内容误导复原)
             unrestorable += 1;
           }
         }
@@ -893,12 +899,24 @@ export function useEditorInteractions({
   );
 
   // 节点配置变更(模型/尺寸/质量等)
+  // paramValues 增量合并基于 graph 最新值:一次点击可能连发多个 patch(如分辨率联动尺寸),
+  // 若在组件层用旧闭包合并会互相覆盖(曾导致「点 1k 不高亮」「AUTO 切 4K 尺寸变 4096x4096」)
   const handleNodeConfigChange = useCallback(
     (nodeId: string, patch: Record<string, unknown>): void => {
       if (!refs.commandQueue) return;
-      refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, patch));
+      let finalPatch = patch;
+      const pv = patch.paramValues;
+      if (pv && typeof pv === 'object') {
+        const node = refs.store?.getGraph().nodes.find((n: any) => n.id === nodeId);
+        const cur = (node?.data as Record<string, any> | undefined)?.paramValues;
+        finalPatch = {
+          ...patch,
+          paramValues: { ...(cur && typeof cur === 'object' ? cur : {}), ...(pv as Record<string, any>) },
+        };
+      }
+      refs.commandQueue.execute(new UpdateNodeDataCommand(nodeId, finalPatch));
     },
-    [refs.commandQueue],
+    [refs.commandQueue, refs.store],
   );
 
   const handlePromptGenerate = useCallback(
@@ -957,17 +975,31 @@ export function useEditorInteractions({
         } as Record<string, unknown>),
       );
       try {
-        // @ 引用 → API 资产源输入(仅明确 @ 到的引用;堆叠整体条目不发送,展开卡片按支持类型过滤)
+        // 输入源收集(2026-08-25 用户拍板:连入即输入,无需逐个 @):媒体走 reference 通道,
+        // 文本引用无 API 通道 → 内容拼入 prompt 参考段;堆叠整体条目不发送,展开卡片按支持类型过滤
         const refImages: string[] = [];
         const refVideos: Array<{ dataUrl?: string; durationMs?: number }> = [];
         const refAudios: Array<{ dataUrl?: string; durationMs?: number }> = [];
+        let effectivePrompt = prompt;
+        const refTextParts: string[] = [];
         for (const r of mentionedRefs ?? []) {
-          const raw = r.asset?.content ?? (r.asset?.storageKey ? getResourceUrl(r.asset.storageKey, 'full') : undefined);
+          if (r.type === 'text') {
+            const rawText = r.asset?.content;
+            if (typeof rawText === 'string' && rawText.trim()) {
+              refTextParts.push(rawText.trim().slice(0, 1500));
+            }
+            continue;
+          }
+          // 空字符串 content 也兑底 storageKey(?? 不兑底 falsy 值,曾致参考图静默丢失走文生图 → 2026-08-25 seedream-4.0 修复)
+          const raw = r.asset?.content || (r.asset?.storageKey ? getResourceUrl(r.asset.storageKey, 'full') : undefined);
           if (!raw) continue;
           const src = await contentToDataUrl(raw);
           if (r.type === 'image') refImages.push(src);
           else if (r.type === 'video') refVideos.push({ dataUrl: src });
           else if (r.type === 'audio') refAudios.push({ dataUrl: src });
+        }
+        if (refTextParts.length > 0) {
+          effectivePrompt = `${prompt}\n\n[参考文本]\n${refTextParts.join('\n---\n')}`;
         }
         // 连线自动参考图(征集#51:连线到本节点的图片自动作为参考图,无需手动 @)
         // 与 @ 显式引用合并去重;堆叠展开为具体卡片,仅收集 image 内容
@@ -981,7 +1013,11 @@ export function useEditorInteractions({
               const cards = ((sourceNode.data as { cards?: Array<{ sourceType: string; data?: Record<string, unknown> }> } | undefined)?.cards) ?? [];
               for (const card of cards) {
                 if (card.sourceType !== 'image') continue;
-                const cardRaw = (card.data as Record<string, unknown>)?.content as string | undefined;
+                const cardData = (card.data as Record<string, unknown>) ?? {};
+                // 空字符串/缺 content 时兑底 storageKey(与主路径同策略,2026-08-25)
+                const cardRaw =
+                  (cardData.content as string | undefined) ||
+                  (typeof cardData.storageKey === 'string' ? getResourceUrl(cardData.storageKey, 'full') : undefined);
                 if (!cardRaw) continue;
                 try {
                   const srcUrl = await contentToDataUrl(cardRaw);
@@ -989,7 +1025,11 @@ export function useEditorInteractions({
                 } catch { /* 跳过无效引用 */ }
               }
             } else if (sourceNode.type === 'image') {
-              const srcContent = (sourceNode.data as Record<string, unknown>)?.content as string | undefined;
+              const srcData = (sourceNode.data as Record<string, unknown>) ?? {};
+              // 空字符串/缺 content 时兑底 storageKey(2026-08-25 seedream-4.0 修复:content='' 曾致参考图静默丢失)
+              const srcContent =
+                (srcData.content as string | undefined) ||
+                (typeof srcData.storageKey === 'string' ? getResourceUrl(srcData.storageKey, 'full') : undefined);
               if (!srcContent) continue;
               try {
                 const srcUrl = await contentToDataUrl(srcContent);
@@ -1000,20 +1040,28 @@ export function useEditorInteractions({
         }
         // 契约参数模块:从 node.data.paramValues 组装模板参数 + provider 强类型兜底字段
         const { params, fallback } = buildTemplateParams(mode, nodeData as Record<string, unknown>);
-        // 生成引用快照(征集#43 方案 A):本次 @ 到的引用节点摘要,后端存 AiGeneration.params._inputs,供溯源/一键同款(文本引用附内容存档供重建)
-        const inputRefs = (mentionedRefs ?? []).map((r) => ({
-          nodeId: r.id,
-          nodeType: r.type,
-          assetStorageKey: r.asset?.storageKey,
-          title: r.title ?? r.name,
-          textPreview: r.type === 'text' && r.asset?.content ? r.asset.content.slice(0, 2000) : undefined,
-        }));
+        // 生成引用快照(征集#43 方案 A):本次作为输入源的全部引用节点摘要,后端存 AiGeneration.params._inputs,
+        // 供溯源/一键同款。与画布现状完全隔离:media 无 storageKey 时存档 http(s) 内容 URL(data:/blob: 体积大不入库),
+        // 文本存 textPreview —— 一键同款只依赖快照本身,不查现存画布节点(画布源节点可能早已迭代/被删)
+        const inputRefs = (mentionedRefs ?? []).map((r) => {
+          const rawContent = r.asset?.content;
+          const content =
+            typeof rawContent === 'string' && /^https?:\/\//.test(rawContent) ? rawContent.slice(0, 2000) : undefined;
+          return {
+            nodeId: r.id,
+            nodeType: r.type,
+            assetStorageKey: r.asset?.storageKey,
+            content,
+            title: r.title ?? r.name,
+            textPreview: r.type === 'text' && r.asset?.content ? r.asset.content.slice(0, 2000) : undefined,
+          };
+        });
         if (mode === 'image') {
           const data = nodeData;
           // 有 @ 参考图 → 图生图(editImage);否则文生图
           const results = refImages.length > 0
             ? await provider.editImage({
-                prompt,
+                prompt: effectivePrompt,
                 model: (data?.model as string) ?? 'gpt-4o',
                 params,
                 size: fallback.size,
@@ -1024,7 +1072,7 @@ export function useEditorInteractions({
                 signal: ctl.signal,
               })
             : await provider.generateImage({
-                prompt,
+                prompt: effectivePrompt,
                 model: (data?.model as string) ?? 'gpt-4o',
                 params,
                 size: fallback.size,
@@ -1049,7 +1097,7 @@ export function useEditorInteractions({
         } else if (mode === 'text') {
           const data = nodeData;
           const text = await provider.generateText({
-            prompt,
+            prompt: effectivePrompt,
             // 用户从下拉选择的 LLM(编码值 channelId::modelName,provider 内部解析渠道配置)
             model: (data?.model as string) ?? 'gpt-4o',
             referenceImages: refImages.length > 0 ? refImages : undefined,
@@ -1064,7 +1112,7 @@ export function useEditorInteractions({
         } else if (mode === 'video') {
           const data = nodeData;
           const result = await provider.generateVideo({
-            prompt,
+            prompt: effectivePrompt,
             model: (data?.model as string) ?? 'sora-2',
             params,
             size: fallback.size,
@@ -1072,6 +1120,7 @@ export function useEditorInteractions({
             vquality: fallback.vquality!,
             generateAudio: fallback.generateAudio!,
             watermark: fallback.watermark!,
+            returnLastFrame: fallback.returnLastFrame!,
             referenceImages: refImages.length > 0 ? refImages : undefined,
             referenceVideos: refVideos.length > 0 ? refVideos : undefined,
             referenceAudios: refAudios.length > 0 ? refAudios : undefined,
@@ -1091,10 +1140,35 @@ export function useEditorInteractions({
             errorDetails: undefined,
             errorType: undefined,
           } as Record<string, unknown>, { width: result.width, height: result.height, fallbackWidth: 420, fallbackHeight: 236 });
+          // 尾帧闭环:勾选「返回尾帧」且后端返回尾帧 → 在视频节点下方创建尾帧图片节点,
+          // 尾帧可直接 @ 引用作为下一段视频的首帧(连续视频工作流)
+          if (result.lastFrameUrl) {
+            const graph = refs.store.getGraph();
+            const videoNode = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
+            if (videoNode) {
+              const lastFrameId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+              const vSize = videoNode.size ?? { width: 420, height: 236 };
+              refs.commandQueue.execute(new AddNodeCommand({
+                id: lastFrameId,
+                type: 'image',
+                position: {
+                  x: videoNode.position.x,
+                  y: videoNode.position.y + (vSize.height ?? 236) + 24,
+                },
+                title: '尾帧',
+                data: {
+                  content: result.lastFrameUrl,
+                  status: 'success',
+                  prompt: `${prompt}\n[尾帧]`,
+                  model: (data?.model as string) ?? '',
+                },
+              }));
+            }
+          }
         } else if (mode === 'audio') {
           const data = nodeData;
           const result = await provider.generateAudio({
-            prompt,
+            prompt: effectivePrompt,
             model: (data?.model as string) ?? 'tts-1',
             params,
             voice: fallback.voice!,
@@ -1115,6 +1189,11 @@ export function useEditorInteractions({
             errorDetails: undefined,
             errorType: undefined,
           } as Record<string, unknown>);
+        }
+        // 生成成功:标题替换为提示词摘要(简写截断,失败/取消不改标题,保留原标题)
+        const titleSummary = promptTitleSummary(prompt);
+        if (titleSummary) {
+          refs.commandQueue.execute(new UpdateNodeTitleCommand(nodeId, titleSummary));
         }
         // 成功:清空失败计数
         nodeFailureCountRef.current.delete(nodeId);

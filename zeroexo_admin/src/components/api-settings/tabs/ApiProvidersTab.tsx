@@ -16,6 +16,7 @@ import type { ProviderCardItem } from '../ProviderCardGrid';
 import { HooksErrorBoundary } from './HooksErrorBoundary';
 import CustomBrandModal, { type CustomBrandModalRef } from './CustomBrandModal';
 import TemplateImportModal from './TemplateImportModal';
+import ModelTemplateLibrary from './ModelTemplateLibrary';
 import {
   STORAGE_KEY,
   MODEL_TYPE_LABELS,
@@ -668,6 +669,9 @@ export default function AiProvidersTab() {
           showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`}
         />
       </div>
+
+      {/* 模型模板库（系统级模板：内置 + 用户导入） */}
+      <ModelTemplateLibrary />
 
       {/* 自定义品牌弹窗 */}
       <CustomBrandModal

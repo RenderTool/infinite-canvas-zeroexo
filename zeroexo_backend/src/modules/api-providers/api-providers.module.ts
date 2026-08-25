@@ -21,6 +21,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AuditLogModule } from '../audit/audit-log.module';
 import { StorageModule } from '../storage/storage.module';
 import { LogsModule } from '../logs/logs.module';
+import { TemplateRegistryService } from '../ai-generate/templates/registry.service';
 
 /**
  * API Provider 统一模块
@@ -63,6 +64,7 @@ import { LogsModule } from '../logs/logs.module';
     RecordUsageInterceptor,
     UsageTrackerGuard,
     StorageMigrationService,
+    TemplateRegistryService,
   ],
   exports: [
     ApiProvidersService,
@@ -78,6 +80,7 @@ import { LogsModule } from '../logs/logs.module';
     StorageAdapter,
     PaymentAdapter,
     StorageMigrationService,
+    TemplateRegistryService,
   ],
 })
 export class ApiProvidersModule {}

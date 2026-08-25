@@ -417,13 +417,16 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // 选中节点数据
   const selectedNodeData = state.selectedNodeData;
   const isPromptRunning = selectedNodeData?.status === 'loading';
-  // 节点生成面板三态判定(Plan#33 延伸):
-  // - media 节点(text/image/video/audio)有实质内容(content/storageKey)= 资源态 → 隐藏生成面板(上传替换/拖入资产自动降级)
+  // 节点生成面板三态判定(Plan#33 延伸 + 2026-08-25 生成节点语义拍板):
+  // - media 节点(text/image/video/audio)有实质内容(content/storageKey)且无上游 = 素材节点态 → 隐藏生成面板
   // - media 节点无内容 = 空节点/生成器态 → 显示生成面板;生成中(loading)强制保持面板(停止按钮)
+  // - 只要选中节点有上游边连入(含生成成功后)= 生成节点态 → 始终显示面板,直到用户断开全部上游才降级为素材节点
   // - generator 等非 media 类型恒显示面板(节点自身语义即生成器)
   const selectedNodeIsMedia = state.selectedNodeType === 'image' || state.selectedNodeType === 'video' || state.selectedNodeType === 'audio' || state.selectedNodeType === 'text';
   const selectedNodeHasContent = !!selectedNodeData?.content || !!selectedNodeData?.storageKey;
-  const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning;
+  const selectedHasIncoming = !!state.selectedNodeId && !!state.editor
+    && state.editor.store.getGraph().edges.some((e) => e.target.nodeId === state.selectedNodeId);
+  const nodeDockVisible = !selectedNodeIsMedia || !selectedNodeHasContent || isPromptRunning || selectedHasIncoming;
   const handlers = useCanvasHandlers(refs, containerRef);
 
   // ===== 只读浏览手势（2026-08-25 用户反馈：只读遮罩不能浏览画布）=====
@@ -1192,7 +1195,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           cancelButtonProps={{ style: { display: 'none' } }}
           centered
           closable={false}
-          maskClosable={false}
+          mask={{ closable: false }}
           onOk={onBack}
         >
           {t('collab.pendingApprovalContent')}

@@ -24,7 +24,6 @@ import {
   AlertCircle,
   RefreshCw,
   Upload,
-  Square,
   LoaderCircle,
 } from 'lucide-react';
 import type { NodeRecord, Pin } from '@zeroexo/core';
@@ -240,7 +239,7 @@ export interface AIStateViewProps {
   taskLabel?: string;
   /** 失败/生成中:重试回调(节点视图内 emit 到 editor-page) */
   onRetry?: () => void;
-  /** 生成中/失败:取消回调(节点视图内 emit 到 editor-page) */
+  /** 失败态清理回调(节点视图内 emit 到 editor-page;仅 error 态渲染——媒体生成中不可取消,拍板 2026-08-23 R3 D2) */
   onCancel?: () => void;
   /** 生成中骨架类型: media(图片/视频/音频)/text(文本)——视觉已统一为分镜同款骨架（脉冲点+阶段文案+shimmer 行） */
   skeleton?: 'media' | 'text';
@@ -394,7 +393,7 @@ export function AIStateView({
   children,
 }: AIStateViewProps): React.ReactElement {
   const { t } = useTranslation();
-  // loading: 骨架(spinner) + 半透明遮罩 + 任务信息 + 取消按钮
+  // loading: 骨架(spinner) + 半透明遮罩 + 任务信息(媒体生成提交后不可取消,不渲染停止按钮;打断入口在 dock 的 interruptible 分支)
   if (status === 'loading') {
     const spinId = `ze-ai-spin-${accentColor.replace('#', '')}`;
     return (
@@ -465,29 +464,6 @@ export function AIStateView({
           >
             {taskLabel}
           </span>
-        ) : null}
-        {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{
-              position: 'relative',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '3px 10px',
-              borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.4)',
-              background: 'rgba(255,255,255,0.12)',
-              color: '#fff',
-              fontSize: 11,
-              cursor: 'pointer',
-            }}
-          >
-            <Square size={11} fill="currentColor" />
-            {t('nodes.cancelGeneration')}
-          </button>
         ) : null}
         {!skeleton && <style>{`@keyframes ${spinId} { to { transform: rotate(360deg); } }`}</style>}
       </div>
@@ -678,6 +654,8 @@ function ReplaceButton({ onClick, position = 'top-right', visible = false }: {
 }): React.ReactElement {
   const [hover, setHover] = React.useState(false);
   const opacity = visible ? (hover ? 0.85 : 1) : 0;
+  // 隐藏时同步屏蔽指针事件:opacity 0 仍接收点击,曾致生成节点态"按钮看不见但能点开文件选择器"(2026-08-25)
+  const pointerEvents = visible ? 'auto' : 'none';
   return (
     <button
       type="button"
@@ -690,8 +668,9 @@ function ReplaceButton({ onClick, position = 'top-right', visible = false }: {
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'absolute',
+        // 空节点左上角替换按钮:右下对角偏移 12px 避开左上缩放句柄(react-flow 四角均布 resize handle,6px 会被遮挡)
         ...(position === 'left'
-          ? { left: 6, top: 6 }
+          ? { left: 12, top: 12 }
           : { right: 20, top: 20 }
         ),
         width: 24,
@@ -707,6 +686,7 @@ function ReplaceButton({ onClick, position = 'top-right', visible = false }: {
         transition: 'opacity 0.15s',
         zIndex: 10,
         opacity,
+        pointerEvents,
       }}
     >
       <Upload size={13} />

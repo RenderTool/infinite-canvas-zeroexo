@@ -24,7 +24,8 @@ export interface GenerationInputRef {
 export interface ImageGenerationRequest {
   prompt: string;
   model: string;
-  size: string;
+  /** AUTO 模式(参考图自动适配)下为 undefined,后端据此走 auto 计算;其余模式为 "WxH" 字符串 */
+  size?: string;
   quality: string;
   count: number;
   /** 参考图(dataUrl 或公网 URL 列表),图生图时传入,由后端适配器转换后提交 */
@@ -86,11 +87,14 @@ export interface ReferenceAudio {
 export interface VideoGenerationRequest {
   prompt: string;
   model: string;
-  size: string;
+  /** AUTO 模式(参考图自动适配)下为 undefined,后端据此走 auto 计算;其余模式为 "WxH" 字符串 */
+  size?: string;
   seconds: number;
   vquality: string;
   generateAudio: boolean;
   watermark: boolean;
+  /** 返回尾帧(Seedance: return_last_frame;直连官方 API 时透传,代理链路随 params 透传) */
+  returnLastFrame?: boolean;
   signal?: AbortSignal;
   /** 生成引用快照(连入节点摘要),供溯源与一键同款 */
   inputs?: GenerationInputRef[];
@@ -113,6 +117,8 @@ export interface GeneratedVideo {
   bytes: number;
   /** 后端生成记录 id(成功后回写节点,供溯源/一键同款) */
   generationId?: string;
+  /** 尾帧图像 URL(returnLastFrame 能力:生成完成后后端返回的末帧 PNG,可创建尾帧图片节点供下一段首帧参考) */
+  lastFrameUrl?: string;
 }
 
 // ===== 音频生成 =====

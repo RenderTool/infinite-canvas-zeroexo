@@ -20,7 +20,7 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Text, Image, Music, Film, Sparkles, LoaderCircle, Lock,
-  ChevronDown, ChevronUp, Cpu, Trash2, Upload, FileText, Check, X, Layers,
+  ChevronDown, ChevronUp, Cpu, Upload, FileText, Check, X, Layers,
 } from 'lucide-react';
 import { useViewport } from '@zeroexo/plugin-render-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -316,6 +316,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
   const isDark = theme.mode === 'dark';
   const navBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
   const bgHover = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)';
+  const dangerColor = theme.toolbar.danger ?? '#ef4444';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const handleAddReference = useCallback(() => { fileInputRef.current?.click(); }, []);
 
@@ -393,30 +394,33 @@ const DockReferencesSection = memo(function DockReferencesSection({
             </span>
           </div>
         )}
-        {/* 兼容性指示(蓝勾/红叉,与生成器一致) */}
+        {/* 兼容性指示(绿勾/主题红叉;绿 #a4fd01、红=theme.toolbar.danger,2026-08-25 用户拍板) */}
         <div style={{
           position: 'absolute', top: 2, left: 2, width: 12, height: 12,
-          borderRadius: '50%', background: isCompatible ? '#3b82f6' : '#ef4444',
+          borderRadius: '50%', background: isCompatible ? '#a4fd01' : dangerColor,
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
         }}>
           {isCompatible
             ? <Check size={7} color="#fff" strokeWidth={3} />
             : <X size={7} color="#fff" strokeWidth={3} />}
         </div>
-        {/* 删除按钮(方块样式,与生成器一致) */}
+        {/* 删除按钮(右上角,Agent ReferenceChip 圆形叉同款:16px 圆 + 半透明底 + muted 叉) */}
         <button
           type="button"
           onClick={() => onRemoveIncoming(n.id)}
+          title={t('nodeDock.removeRef', '移除参考素材')}
           style={{
-            position: 'absolute', top: 2, right: 2, width: 12, height: 12,
-            borderRadius: 4, background: '#ff4d4f', color: '#fff', border: 'none',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 0, zIndex: 2, opacity: 0.85, transition: 'opacity 0.12s',
+            position: 'absolute', top: 2, right: 2, width: 16, height: 16,
+            borderRadius: '50%', border: 'none',
+            background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
+            color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1,
+            transition: 'background 0.1s', flexShrink: 0, zIndex: 2,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.14)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)'; }}
         >
-          <Trash2 size={7} />
+          <X size={10} />
         </button>
       </div>
     );
@@ -435,14 +439,19 @@ const DockReferencesSection = memo(function DockReferencesSection({
                   <button
                     type="button"
                     onClick={() => onRemoveIncoming(node.id)}
+                    title={t('nodeDock.removeRef', '移除参考素材')}
                     style={{
-                      position: 'absolute', top: 2, right: 2, width: 12, height: 12,
-                      borderRadius: 4, background: '#ff4d4f', color: '#fff', border: 'none',
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      padding: 0, zIndex: 2, opacity: 0.85,
+                      position: 'absolute', top: 2, right: 2, width: 16, height: 16,
+                      borderRadius: '50%', border: 'none',
+                      background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
+                      color: theme.toolbar.textMuted ?? '', cursor: 'pointer', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1,
+                      transition: 'background 0.1s', flexShrink: 0, zIndex: 2,
                     }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.14)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)'; }}
                   >
-                    <Trash2 size={7} />
+                    <X size={10} />
                   </button>
                 </div>
               ) : (
@@ -574,6 +583,7 @@ const DockFooterBar = memo(function DockFooterBar({
   onConfigChange,
   onParamValuesChange,
   onConstraintsReady,
+  mentionRequired,
 }: {
   nodeId: string;
   mode: GenerationMode;
@@ -589,12 +599,18 @@ const DockFooterBar = memo(function DockFooterBar({
   onParamValuesChange: (patch: Record<string, any>) => void;
   /** 模板约束就绪回调(参考区读取参考素材上限) */
   onConstraintsReady?: (constraints?: ChannelConstraints) => void;
+  /** 有堆叠内部卡片但未在输入框 @ 引用(仅提示,不禁用生成) */
+  mentionRequired?: boolean;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const isDark = theme.mode === 'dark';
   const spinRef = useRef<HTMLSpanElement>(null);
   const actionDisabled = !isRunning && !hasText;
+  // 未 @ 堆叠内部卡片时的按钮提示(仅提示,不禁用:非堆叠连入素材自动作为输入源)
+  const actionTitle = mentionRequired
+    ? t('nodeDock.mentionStackedHint', '堆叠节点需 @ 内部资源才会作为输入源')
+    : isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成');
 
   // LoaderCircle 旋转动画(Web Animations API 自包含)
   useEffect(() => {
@@ -659,7 +675,7 @@ const DockFooterBar = memo(function DockFooterBar({
             onClick={onAction}
             disabled={actionDisabled}
             aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
-            title={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
+            title={actionTitle}
             style={{
               width: 36, height: 36, flexShrink: 0,
               borderRadius: '50%',
@@ -945,16 +961,29 @@ export function NodeGenerateDock({
     [onPromptChange, nodeId],
   );
 
-  // 契约参数模块:单字段 patch 合并进 node.data.paramValues
+  // 契约参数模块:增量 patch 直传,由 handleNodeConfigChange 基于 graph 最新 paramValues 合并,
+  // 避免组件层旧闭包合并导致一次点击连发的多个 patch 互相覆盖(分辨率/宽高比联动曾丢更新)
   const handleParamValuesChange = useCallback(
     (patch: Record<string, any>) => {
-      onConfigChange?.(nodeId, { paramValues: { ...(paramValues ?? {}), ...patch } });
+      onConfigChange?.(nodeId, { paramValues: patch });
     },
-    [onConfigChange, nodeId, paramValues],
+    [onConfigChange, nodeId],
   );
 
-  // 视频参考模式(与 Admin VideoTab 一致:paramValues.mode 驱动参考区智能切换)
-  const currentVideoMode = (paramValues?.mode as string) ?? 'image-to-video-first-last-frame';
+  // 模型未选择且渠道已加载出可用模型时,自动选中第一个:
+  // 左侧模型下拉会显示 options[0] 但值仍为空 → 参数面板匹配不到模板显示"无自定义参数",
+  // 用户以为坏了;自动选中后参数面板随模型立即刷新
+  useEffect(() => {
+    if (!model && modelOptions.length > 0 && modelOptions[0]) {
+      onConfigChange?.(nodeId, { model: modelOptions[0].value });
+    }
+  }, [model, modelOptions, nodeId, onConfigChange]);
+
+  // 视频参考模式:仅视频模式且参数中显式选择了模式时才切换参考区
+  // (图片节点永远多模态;视频未在参数面板选择模式时也保持多模态,避免误入首尾帧)
+  const currentVideoMode = mode === 'video' && typeof paramValues?.mode === 'string'
+    ? paramValues.mode
+    : 'multi-modal-reference';
   // 参考素材上限(从模板约束回调读取,与后端 channelConstraints.bounds 对齐)
   const [refBounds, setRefBounds] = useState<VideoReferenceBounds>({});
   const handleConstraintsReady = useCallback((constraints?: ChannelConstraints) => {
@@ -968,10 +997,11 @@ export function NodeGenerateDock({
   const submit = useCallback(() => {
     const text = promptRef.current.trim();
     if (!text || isRunning) return;
-    // 解析 @ 选中引用:badge 文本化为 "@名称",按名称匹配 references;
-    // 明确 @ 到的引用(含堆叠展开卡片)作为 API 资产源输入传给生成
-    const mentioned = references.filter((r) => text.includes(`@${r.name}`));
-    onGenerate(nodeId, mode, text, mentioned);
+    // 输入源 = 全部连入素材(非堆叠节点自动作为 API 输入源,符合用户习惯:连线即输入,无需逐个 @)
+    // + @ 到的堆叠内部卡片(堆叠整体不发送,内部资源需显式 @ 才会作为输入源)
+    const mentionedStacked = references.filter((r) => r.id.includes('::') && text.includes(`@${r.name}`));
+    const nonStacked = references.filter((r) => !r.id.includes('::'));
+    onGenerate(nodeId, mode, text, [...nonStacked, ...mentionedStacked]);
     setPrompt('');
     promptRef.current = '';
   }, [isRunning, onGenerate, nodeId, mode, references]);
@@ -982,6 +1012,15 @@ export function NodeGenerateDock({
   }, [isRunning, onStop, nodeId, submit]);
 
   const typeMeta = TYPE_META[nodeType] ?? TYPE_META.generator!;
+
+  // 堆叠内部卡片未 @ 引用 → 该卡片不发送(仅提示,不禁用生成;非堆叠连入素材自动作为输入源)
+  // 注意:必须在任何条件 return 之前调用(React Hooks 顺序铁律)
+  const stackedRefs = useMemo(() => references.filter((r) => r.id.includes('::')), [references]);
+  const hasMentionedStacked = useMemo(
+    () => stackedRefs.some((r) => prompt.includes(`@${r.name}`)),
+    [stackedRefs, prompt],
+  );
+  const mentionRequired = stackedRefs.length > 0 && !hasMentionedStacked;
 
   // 只读模式整体隐藏（2026-08-25 系统性只读防护）：提示词输入/生成按钮是核心编辑入口，
   // portal 浮层逃逸画布遮罩，必须组件级拦截
@@ -1110,7 +1149,7 @@ export function NodeGenerateDock({
           value={prompt}
           onChange={updatePrompt}
           references={references}
-          placeholder={t('nodeDock.placeholder', '输入提示词... (输入 @ 引用素材)')}
+          placeholder={t('nodeDock.placeholder', '输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)')}
           mentionTypeFilter={mentionTypeFilter}
         />
       </div>
@@ -1130,6 +1169,7 @@ export function NodeGenerateDock({
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}
           onConstraintsReady={handleConstraintsReady}
+          mentionRequired={mentionRequired}
         />
       </div>
       </div>

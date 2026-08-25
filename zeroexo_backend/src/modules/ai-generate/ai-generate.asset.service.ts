@@ -87,7 +87,7 @@ export class AiGenerateAssetService {
       result.mimeType ?? 'application/octet-stream',
     );
 
-    return this.prisma.asset.create({
+    const asset = await this.prisma.asset.create({
       data: {
         ownerId: userId,
         kind: result.kind === 'image' ? 'image' : result.kind === 'video' ? 'video' : 'audio',
@@ -105,6 +105,35 @@ export class AiGenerateAssetService {
         lastSyncedAt: new Date(),
       },
     });
+
+    // 尾帧闭环:return_last_frame 能力产出的尾帧随主资产转存为 image 资产,
+    // 供前端在视频节点旁多出一个尾帧图片节点(连续视频工作流: 尾帧 → 下一段首帧)
+    if (result.lastFrame?.buffer) {
+      const lf = result.lastFrame;
+      const lfExt = lf.ext ?? 'png';
+      const lfStorageKey = `${basePrefix}/${userId}/images/${nanoid()}.${lfExt}`;
+      const { size: lfSize } = await this.minio.putBuffer(
+        lfStorageKey,
+        lf.buffer,
+        lf.mimeType ?? 'image/png',
+      );
+      const lastFrameAsset = await this.prisma.asset.create({
+        data: {
+          ownerId: userId,
+          kind: 'image',
+          filename: this.makeBinaryFilename(dto, lfExt),
+          storageKey: lfStorageKey,
+          mimeType: lf.mimeType ?? 'image/png',
+          size: BigInt(lfSize),
+          tags: [...(dto.tags ?? []), 'last-frame', ...(isTest ? ['devtest'] : [])],
+          category: 'ai-generation',
+          lastSyncedAt: new Date(),
+        },
+      });
+      return { ...asset, lastFrameAsset };
+    }
+
+    return asset;
   }
 
   /** 生成文本结果文件名 */

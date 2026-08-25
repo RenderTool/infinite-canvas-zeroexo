@@ -382,6 +382,7 @@ export function useAiGeneration({
             vquality: fallback.vquality!,
             generateAudio: fallback.generateAudio!,
             watermark: fallback.watermark!,
+            returnLastFrame: fallback.returnLastFrame!,
             referenceImages: refImages.length > 0 ? refImages : undefined,
             inputs: inputRefs,
             signal: ctl.signal,
@@ -427,8 +428,37 @@ export function useAiGeneration({
               }));
             }
           }
-          // 生成成功后自动按层排列
-          triggerAutoLayoutAndFocusRef.current([nodeId]);
+          // 尾帧闭环:勾选「返回尾帧」且后端返回尾帧 → 在视频节点下方创建尾帧图片节点,
+          // 尾帧可直接 @ 引用作为下一段视频的首帧(连续视频工作流)
+          if (result.lastFrameUrl) {
+            const graph = refs.store.getGraph();
+            const videoNode = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
+            if (videoNode) {
+              const lastFrameId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+              const vSize = videoNode.size ?? { width: 340, height: 240 };
+              refs.commandQueue.execute(new AddNodeCommand({
+                id: lastFrameId,
+                type: 'image',
+                position: {
+                  x: videoNode.position.x,
+                  y: videoNode.position.y + (vSize.height ?? 240) + 24,
+                },
+                title: '尾帧',
+                data: {
+                  content: result.lastFrameUrl,
+                  status: 'success',
+                  prompt: `${fullPrompt}\n[尾帧]`,
+                  model: (data?.model as string) ?? '',
+                },
+              }));
+              triggerAutoLayoutAndFocusRef.current([nodeId, lastFrameId]);
+            } else {
+              triggerAutoLayoutAndFocusRef.current([nodeId]);
+            }
+          } else {
+            // 生成成功后自动按层排列
+            triggerAutoLayoutAndFocusRef.current([nodeId]);
+          }
         } else if (mode === 'audio') {
           const data = nodeData;
           const result = await provider.generateAudio({
@@ -644,7 +674,10 @@ export function useAiGeneration({
       const seconds = (genData.seconds as number) ?? 5;
       const vquality = (genData.vquality as string) || '';
       const generateAudio = (genData.generateAudio as boolean) ?? false;
-      const watermark = (genData.watermark as boolean) ?? false;
+      // 水印/返回尾帧:均从模板参数(paramValues)读取(水印默认关闭,2026-08-25 用户拍板)
+      const genPv = ((genData.paramValues ?? {}) as Record<string, any>) ?? {};
+      const watermark = (genPv.watermark as boolean) ?? false;
+      const returnLastFrame = (genPv.returnLastFrame as boolean) ?? false;
       const voice = (genData.voice as string) || '';
       const audioFormat = (genData.audioFormat as string) || '';
       const audioSpeed = (genData.audioSpeed as number) ?? 1;
@@ -705,6 +738,7 @@ export function useAiGeneration({
         vquality,
         generateAudio,
         watermark,
+        returnLastFrame,
         voice,
         audioFormat,
         audioSpeed,
@@ -760,6 +794,7 @@ export function useAiGeneration({
               if (vquality) nodeData.vquality = vquality;
               if (generateAudio) nodeData.generateAudio = generateAudio;
               if (watermark) nodeData.watermark = watermark;
+              if (returnLastFrame) nodeData.returnLastFrame = returnLastFrame;
               if (voice) nodeData.voice = voice;
               if (audioFormat) nodeData.audioFormat = audioFormat;
               if (audioSpeed !== 1) nodeData.audioSpeed = audioSpeed;
@@ -775,7 +810,8 @@ export function useAiGeneration({
                     id: `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     sourceType: targetType,
                     data: { ...nodeData },
-                    title: '',
+                    // 生成成功:标题用提示词摘要(简写截断,2026-08-25 用户拍板)
+                    title: promptTitleSummary(prompt),
                   };
                   const updatedCards = [...cards, newCard];
                   q.execute(new UpdateNodeDataCommand(stackTargetId, {
@@ -793,6 +829,11 @@ export function useAiGeneration({
               } else {
                 const newNodeId = replacePlaceholderWithNode(q, placeholderId, targetType, nodeData, extensions);
                 if (newNodeId) {
+                  // 生成成功:标题替换为提示词摘要(简写截断,2026-08-25 用户拍板)
+                  const titleSummary = promptTitleSummary(prompt);
+                  if (titleSummary) {
+                    q.execute(new UpdateNodeTitleCommand(newNodeId, titleSummary));
+                  }
                   store.setSelection({ selectedNodeIds: new Set([newNodeId]), selectedEdgeIds: new Set() });
                   triggerAutoLayoutAndFocusRef.current([newNodeId]);
                 }

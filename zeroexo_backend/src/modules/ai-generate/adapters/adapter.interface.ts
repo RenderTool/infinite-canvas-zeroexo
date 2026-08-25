@@ -21,6 +21,7 @@ export interface GenerateRequest {
    * 包含:
    *   - paramMapping / valueMapping: 参数名/值映射
    *   - bounds: 渠道约束(像素限制、宽高比限制等)
+   *   - request / sync / task / auth: DSL v2 视频协议描述(可选)
    */
   template?: {
     paramMapping?: Record<string, string>;
@@ -37,12 +38,51 @@ export interface GenerateRequest {
       maxDuration?: number;
       supportsImageToImage?: boolean;
     };
+    /** 请求体结构描述(DSL v2) */
+    request?: {
+      bodyStyle?: 'flat' | 'content';
+      contentRoles?: {
+        image?: string;
+        firstFrame?: string;
+        lastFrame?: string;
+        video?: string;
+        audio?: string;
+        firstLastModes?: string[];
+      };
+      referenceFormat?: 'url' | 'base64';
+    };
+    /** 同步响应解析协议(DSL v2) */
+    sync?: { resultPath: string; field?: string };
+    /** 异步任务协议(DSL v2) */
+    task?: {
+      submitIdPath: string;
+      pollUrlTemplate: string;
+      statusPath: string;
+      successValues: string[];
+      failureValues: string[];
+      resultPath: string;
+      /** 尾帧提取路径(如 content.last_frame_url)。存在时下载尾帧并随结果返回 */
+      lastFramePath?: string;
+      pollIntervalMs?: number;
+      maxPollMs?: number;
+    };
+    /** 认证方式(DSL v2) */
+    auth?: {
+      type: 'bearer' | 'header' | 'kling-hmac';
+      apiKeyHeader?: string;
+      alsoBearer?: boolean;
+      signer?: { headerName: string; format: string; alg: 'hmac-sha256' };
+    };
+    /** 模板 endpoint(提交 URL 后缀,DSL v2) */
+    endpoint?: string;
   };
 }
 
 /** 适配器调用上下文(由 service 解密后传入) */
 export interface AdapterContext {
   apiKey: string;
+  /** 密钥(加密存储于 credentials.secretKey, AK/SK 签名类渠道使用) */
+  secretKey?: string;
   baseUrl: string;
   /** 单次请求超时(ms) */
   timeoutMs: number;
@@ -69,6 +109,12 @@ export interface GenerateResult {
   mimeType?: string;
   /** 二进制扩展名(不含点,如 png/mp4/mp3) */
   ext?: string;
+  /** 尾帧图像(return_last_frame 能力:视频生成完成后额外返回的末帧 PNG,供连续视频工作流) */
+  lastFrame?: {
+    buffer: Buffer;
+    mimeType: string;
+    ext: string;
+  };
   width?: number;
   height?: number;
   /** 时长(秒,音视频) */

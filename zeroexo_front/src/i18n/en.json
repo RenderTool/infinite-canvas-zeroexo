@@ -796,6 +796,10 @@
     "replayDone": "Generation chain restored: new node + {{n}} reference(s) reconnected — review and regenerate",
     "replayPartial": "Generation chain restored, but {{n}} reference(s) could not be recovered (content not archived)",
     "replayModelInvalid": "Generation chain restored, but the original channel/model is unavailable — please reselect a model",
+    "nodeDock": {
+      "placeholder": "Enter a prompt... Connected assets are used as inputs automatically (stack nodes need @ to its items)",
+      "mentionStackedHint": "Stack items are only sent as inputs when @-mentioned"
+    },
     "backToContent": "Back to Content",
     "editContent": "Edit Content",
     "paste": "Paste",
@@ -1026,6 +1030,7 @@
     "stackEject": "Eject",
     "stackEjectTitle": "Eject as an independent node with auto connection",
     "stackOnlyAcceptsMedia": "Stack only accepts image/video inputs",
+    "readonlyAssetNoInput": "AI-generated read-only asset cannot accept upstream connections",
     "stackConvertTo": "Convert to Stack",
     "stackCreateNew": "Create Stack Node",
     "stackSelected": "Stack Selected Nodes",
@@ -1537,7 +1542,8 @@
     "autoModeHint": "In AUTO mode, dimensions are calculated automatically from the resolution and aspect ratio",
     "defaultSummary": "Default",
     "noCustomParams": "No custom parameters",
-    "paramSettings": "{{prefix}} Settings"
+    "paramSettings": "{{prefix}} Settings",
+    "advancedOptions": "Advanced"
   },
   "creative": {
     "heroTitle": "ZEROEXO · Understanding Your Heart, Capturing Every Splendor",

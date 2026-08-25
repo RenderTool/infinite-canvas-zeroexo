@@ -252,7 +252,8 @@ export class AiGenerateService {
       data: { status: 'running' },
     });
 
-    const apiKey = await this.providersService.getDecryptedApiKey(provider.id);
+    const creds = await this.providersService.getDecryptedCredentials(provider.id);
+    const apiKey = creds.apiKey ?? '';
     const cfg = (provider.config as Record<string, any>) || {};
     const baseUrl = cfg.baseUrl || getDefaultBaseUrl(this.config, provider.provider);
     if (!baseUrl) {
@@ -268,6 +269,7 @@ export class AiGenerateService {
 
     const ctx: AdapterContext = {
       apiKey,
+      secretKey: creds.secretKey,
       baseUrl,
       timeoutMs,
       signal: abortController.signal,
@@ -293,6 +295,11 @@ export class AiGenerateService {
             paramMapping: template.channelConstraints?.paramMapping,
             valueMapping: template.channelConstraints?.valueMapping,
             bounds: template.channelConstraints?.bounds,
+            request: template.request,
+            sync: template.sync,
+            task: template.task,
+            auth: template.auth,
+            endpoint: template.endpoint,
           }
         : undefined,
     };
@@ -394,7 +401,8 @@ export class AiGenerateService {
     this.assertProviderAccess(provider, generation.ownerId);
 
     // 构造适配器上下文
-    const apiKey = await this.providersService.getDecryptedApiKey(provider.id);
+    const creds = await this.providersService.getDecryptedCredentials(provider.id);
+    const apiKey = creds.apiKey ?? '';
     const cfg = (provider.config as Record<string, any>) || {};
     const baseUrl = cfg.baseUrl || getDefaultBaseUrl(this.config, provider.provider);
     if (!baseUrl) {
@@ -412,6 +420,7 @@ export class AiGenerateService {
 
     const ctx: AdapterContext = {
       apiKey,
+      secretKey: creds.secretKey,
       baseUrl,
       timeoutMs,
       signal: abortController.signal,
@@ -440,6 +449,11 @@ export class AiGenerateService {
             paramMapping: template.channelConstraints?.paramMapping,
             valueMapping: template.channelConstraints?.valueMapping,
             bounds: template.channelConstraints?.bounds,
+            request: template.request,
+            sync: template.sync,
+            task: template.task,
+            auth: template.auth,
+            endpoint: template.endpoint,
           }
         : undefined,
     };
@@ -476,12 +490,19 @@ export class AiGenerateService {
       if (result.kind !== 'text' && asset.storageKey) {
         assetUrl = await this.minio.presignGet(asset.storageKey, 1800);
       }
+      // 尾帧闭环：尾帧资产同步转存为图片,预签名 URL 透传(前端生成尾帧图片节点)
+      let lastFrameUrl: string | undefined;
+      const lastFrameAsset = (asset as { lastFrameAsset?: { storageKey?: string } }).lastFrameAsset;
+      if (lastFrameAsset?.storageKey) {
+        lastFrameUrl = await this.minio.presignGet(lastFrameAsset.storageKey, 1800);
+      }
 
       // 构造回写 params(保留 _inputs 快照:复原链路依赖,不随 _tags/_isTest 剩离)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _tags: _t, _isTest: _i, ...originalParams } = rawParams;
       const enrichedParams: Record<string, any> = { ...originalParams };
       if (assetUrl) enrichedParams._resultUrl = assetUrl;
+      if (lastFrameUrl) enrichedParams._lastFrameUrl = lastFrameUrl;
       if (result.width) enrichedParams._resultWidth = result.width;
       if (result.height) enrichedParams._resultHeight = result.height;
       if (result.mimeType) enrichedParams._resultMime = result.mimeType;

@@ -603,6 +603,10 @@
     "hintsEnabled": "启用",
     "hintsEnabledToast": "操作提示已开启",
     "hintsDisabledToast": "操作提示已关闭",
+    "generation": "生成设置",
+    "watermark": "水印",
+    "watermarkEnabledToast": "水印已开启,生成时将添加水印",
+    "watermarkDisabledToast": "水印已关闭,生成时不添加水印",
     "nodeStyle": "节点",
     "groupStyle": "分组",
     "pinDefault": "引脚",
@@ -795,6 +799,10 @@
     "replayDone": "已复原生成链路：新节点 + {{n}} 个引用已重连，确认后可重新生成",
     "replayPartial": "已复原生成链路，但 {{n}} 个引用无法还原（内容未存档），其余已重连",
     "replayModelInvalid": "已复原生成链路，但原渠道/模型已失效，请重新选择模型",
+    "nodeDock": {
+      "placeholder": "输入提示词... 连入的素材会自动作为输入源（堆叠节点需 @ 内部资源）",
+      "mentionStackedHint": "堆叠节点需 @ 内部资源才会作为输入源"
+    },
     "backToContent": "回到内容",
     "editContent": "编辑内容",
     "paste": "粘贴",
@@ -1025,6 +1033,7 @@
     "stackEject": "移出",
     "stackEjectTitle": "移出为独立节点并自动连线",
     "stackOnlyAcceptsMedia": "堆叠仅接受图片/视频连入",
+    "readonlyAssetNoInput": "AI 生成的只读素材，不能连入上游（连入没有意义）",
     "stackConvertTo": "转入堆叠",
     "stackCreateNew": "生成堆叠节点",
     "stackSelected": "堆叠所选节点",
@@ -1536,7 +1545,8 @@
     "autoModeHint": "AUTO 模式下由分辨率档位和宽高比自动计算尺寸",
     "defaultSummary": "默认",
     "noCustomParams": "暂无自定义参数",
-    "paramSettings": "{{prefix}}参数设置"
+    "paramSettings": "{{prefix}}参数设置",
+    "advancedOptions": "高级选项"
   },
   "creative": {
     "heroTitle": "ZEROEXO · 懂君心意，演尽风华",

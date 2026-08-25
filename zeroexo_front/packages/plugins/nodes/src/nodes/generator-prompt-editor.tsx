@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Search } from 'lucide-react';
 
 /** 参考素材类型 */
 export interface ReferenceItem {
@@ -102,6 +103,16 @@ export const REF_TYPE_ICON_PATH: Record<string, string> = {
   generator: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
 };
 
+/** 参考素材类型 → 列表副行中文标签(与 Agent MentionPopover 两行行布局一致) */
+const REF_TYPE_LABEL: Record<string, string> = {
+  image: '图片',
+  video: '视频',
+  text: '文本',
+  audio: '音频',
+  script: '剧本',
+  storyboard: '分镜',
+};
+
 /** 生成 lucide 风格内联 SVG 图标 HTML */
 function refTypeIconSvg(type: string, size: number): string {
   const path = REF_TYPE_ICON_PATH[type] ?? REF_TYPE_ICON_PATH.text!;
@@ -147,7 +158,6 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       placeholder,
       maxLength,
       onLengthChange,
-      accentColor = '#1677ff',
       textColor = '#333',
       fontSize = 12,
       lineHeight: lh = 1.6,
@@ -161,6 +171,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
     const promptInputRef = useRef<HTMLDivElement>(null);
     const mentionPopupRef = useRef<HTMLDivElement>(null);
     const [mentionFilter, setMentionFilter] = useState('');
+    const [selectedIndex, setSelectedIndex] = useState(0);
 
     // ref 缓存
     const promptTextRef = useRef('');
@@ -202,6 +213,12 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
           const atIdx = nodeValue.lastIndexOf(toDelete);
           if (atIdx !== -1) {
             textNode.deleteData(atIdx, toDelete.length);
+            break;
+          }
+          // 弹窗搜索框独立输入时正文 @ 词可能不一致:兜底删除最后一个 '@' 起始的整段,避免 @ 残留
+          const rawAt = nodeValue.lastIndexOf('@');
+          if (rawAt !== -1) {
+            textNode.deleteData(rawAt, nodeValue.length - rawAt);
             break;
           }
         }
@@ -487,7 +504,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
               if (inputE.data === '@') {
                 if (!mentionOpenRef.current) {
                   mentionOpenRef.current = true;
-                  if (mentionPopupRef.current) mentionPopupRef.current.style.display = '';
+                  if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'flex';
                 }
               } else {
                 const filtered = s.references.filter((r) =>
@@ -497,7 +514,7 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
                 if (shouldOpen !== mentionOpenRef.current) {
                   mentionOpenRef.current = shouldOpen;
                   if (mentionPopupRef.current)
-                    mentionPopupRef.current.style.display = shouldOpen ? '' : 'none';
+                    mentionPopupRef.current.style.display = shouldOpen ? 'flex' : 'none';
                 }
               }
             } else if (inputE.inputType === 'deleteContentBackward') {
@@ -576,6 +593,57 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
       );
     }, [references, mentionTypeFilter, mentionFilter, value.length, maxLength]);
 
+    // 过滤词变化时重置键盘选中索引
+    useEffect(() => {
+      setSelectedIndex(0);
+    }, [mentionFilter]);
+
+    // 键盘导航(@ 弹窗打开时):上下选择、Enter 确认、Esc 关闭(与 Agent MentionPopover 一致)
+    useEffect(() => {
+      const handleKey = (e: KeyboardEvent) => {
+        if (!mentionOpenRef.current) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.min(i + 1, filteredMentions.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.max(i - 1, 0));
+        } else if (e.key === 'Enter' && filteredMentions[selectedIndex]) {
+          e.preventDefault();
+          insertReference(filteredMentions[selectedIndex].id);
+        } else if (e.key === 'Escape') {
+          mentionOpenRef.current = false;
+          if (mentionPopupRef.current) mentionPopupRef.current.style.display = 'none';
+          mentionFilterRef.current = '';
+          setMentionFilter('');
+        }
+      };
+      document.addEventListener('keydown', handleKey);
+      return () => document.removeEventListener('keydown', handleKey);
+    }, [filteredMentions, selectedIndex, insertReference]);
+
+    // 点击 @ 弹窗/输入框之外关闭
+    useEffect(() => {
+      const handleClick = (e: MouseEvent) => {
+        if (!mentionOpenRef.current) return;
+        const popup = mentionPopupRef.current;
+        const editor = promptInputRef.current;
+        if (!popup || !editor) return;
+        if (!popup.contains(e.target as Node) && !editor.contains(e.target as Node)) {
+          mentionOpenRef.current = false;
+          popup.style.display = 'none';
+          mentionFilterRef.current = '';
+          setMentionFilter('');
+        }
+      };
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }, []);
+
+    // 弹窗行配色(中性表面,与 Agent MentionPopover 的 surface-2 观感一致)
+    const rowHoverBg = isLightTheme ? 'rgba(15,23,42,0.06)' : 'rgba(255,255,255,0.08)';
+    const thumbFallbackBg = isLightTheme ? 'rgba(15,23,42,0.04)' : 'rgba(255,255,255,0.05)';
+
     return (
       <div
         style={{
@@ -605,82 +673,103 @@ const GeneratorPromptEditor = forwardRef<GeneratorPromptEditorHandle, GeneratorP
         )}
         {contentEditableEl}
 
-        {/* @ 提及弹出菜单 — 实心背景 + 缩略图/lucide 二选一 + 类型彩色加粗名称 */}
+        {/* @ 提及弹出菜单 — Agent MentionPopover 同款(2026-08-25 用户拍板):投影无边框 + 搜索头 + 两行列表行 */}
         {!readOnly && references.length > 0 && (
           <div
             ref={mentionPopupRef}
             style={{
               display: 'none',
+              flexDirection: 'column',
               position: 'absolute',
               bottom: '100%',
               left: 0,
               right: 0,
               background: mentionBg,
-              border: `1px solid ${mentionBorder}`,
-              borderRadius: 8,
-              boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
-              maxHeight: 200,
-              overflowY: 'auto',
+              borderRadius: 12,
+              boxShadow: '0 8px 28px rgba(0,0,0,0.22)',
+              maxHeight: 280,
+              overflow: 'hidden',
               zIndex: 1000,
               marginBottom: 6,
               color: textColor,
             }}
           >
-            {filteredMentions.map((refItem) => (
-              <div
-                key={refItem.id}
-                onClick={() => insertReference(refItem.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '7px 10px',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  transition: 'background 0.15s',
+            {/* 搜索头(真实输入框:初始同步 @ 后关键词,之后以框内输入为准) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: thumbFallbackBg }}>
+              <Search size={13} style={{ color: textColor, opacity: 0.6, flexShrink: 0 }} />
+              <input
+                type="text"
+                value={mentionFilter}
+                onChange={(e) => {
+                  mentionFilterRef.current = e.target.value;
+                  setMentionFilter(e.target.value);
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = accentColor ? `${accentColor}18` : 'rgba(0,0,0,0.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                {refItem.url && (refItem.type === 'image' || refItem.type === 'video') ? (
-                  <img
-                    src={refItem.url}
-                    alt={refItem.name}
-                    style={{ width: 22, height: 22, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
-                  />
-                ) : (
-                  <span style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'inherit' }}>
-                    <svg
-                      viewBox="0 0 24 24"
-                      width={14}
-                      height={14}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      style={{ opacity: 0.8 }}
-                      dangerouslySetInnerHTML={{ __html: REF_TYPE_ICON_PATH[refItem.type] ?? REF_TYPE_ICON_PATH.text! }}
-                    />
-                  </span>
-                )}
-                <span style={{ fontWeight: 700, color: REF_TYPE_COLOR[refItem.type] ?? '#3b82f6' }}>
-                  {refItem.name}
-                </span>
-                <span style={{ color: textColor ? `${textColor}99` : '#999', fontSize: 11, marginLeft: 'auto', flexShrink: 0 }}>
-                  {refItem.type === 'image' ? '图片' :
-                   refItem.type === 'video' ? '视频' :
-                   refItem.type === 'text' ? '文本' :
-                   refItem.type === 'audio' ? '音频' :
-                   refItem.type === 'script' ? '剧本' :
-                   refItem.type === 'storyboard' ? '分镜' : '素材'}
-                </span>
-              </div>
-            ))}
+                placeholder="搜索素材…"
+                style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', fontSize: 12, color: textColor, fontFamily: 'inherit' }}
+              />
+            </div>
+            {/* 列表:缩略图(有图/类型图标回退) + 名称/类型两行布局 */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {filteredMentions.length === 0 ? (
+                <div style={{ padding: '20px 14px', textAlign: 'center', fontSize: 12, color: `${textColor}99` }}>
+                  未找到素材
+                </div>
+              ) : (
+                filteredMentions.map((refItem, i) => (
+                  <button
+                    key={refItem.id}
+                    type="button"
+                    onClick={() => insertReference(refItem.id)}
+                    onMouseEnter={() => setSelectedIndex(i)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: i === selectedIndex ? rowHoverBg : 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      textAlign: 'left',
+                      fontFamily: 'inherit',
+                      transition: 'background 0.1s',
+                    }}
+                  >
+                    {refItem.url && (refItem.type === 'image' || refItem.type === 'video') ? (
+                      <img
+                        src={refItem.url}
+                        alt={refItem.name}
+                        draggable={false}
+                        style={{ width: 22, height: 22, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: `1px solid ${mentionBorder}` }}
+                      />
+                    ) : (
+                      <span style={{ width: 22, height: 22, borderRadius: 6, background: thumbFallbackBg, border: `1px solid ${mentionBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: textColor, flexShrink: 0 }}>
+                        <svg
+                          viewBox="0 0 24 24"
+                          width={12}
+                          height={12}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ opacity: 0.8 }}
+                          dangerouslySetInnerHTML={{ __html: REF_TYPE_ICON_PATH[refItem.type] ?? REF_TYPE_ICON_PATH.text! }}
+                        />
+                      </span>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {refItem.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: `${textColor}99` }}>
+                        {REF_TYPE_LABEL[refItem.type] ?? '素材'}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

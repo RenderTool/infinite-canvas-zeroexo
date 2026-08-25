@@ -6,16 +6,21 @@
  *   2. 新增"模板"按钮，打开 TemplateEditor 编辑参数模板
  *   3. 自定义模板支持持久化（localStorage）和删除
  *   4. 官方模板只读不可删除
+ *
+ * 功能变更（2026-08，模板库统一）：
+ *   - 导入入口统一为 ImportTemplateModal（与模板库卡片同一套导入 UI/示例/错误展示）
+ *   - 导入成功后回填参数并刷新「预设模板」（模板库内置 + 用户导入）
+ *   - 旧版 localStorage 模板一次性迁移到模板库（sessionStorage 标记，避免重复）
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Modal, Button, Select, message, Space, Alert, Tooltip } from 'antd';
 import { Trash2, FileText } from 'lucide-react';
-import { apiGet, apiPost } from '@/services/api-client';
+import { apiGet, apiPost, apiDelete, showApiError } from '@/services/api-client';
 import type { ParameterDef, ChannelConstraints } from '../ai-test/param-types';
 import type { PersistedParamConfig } from '../ai-test/param-types';
 import ParamForm from '../ai-test/ParamForm';
 import { createSchemaRegistry } from '../ai-test/registry-factory';
-import TemplateEditor from './TemplateEditor';
+import ImportTemplateModal from './ImportTemplateModal';
 
 interface AiBrandSchemaModalProps {
   open: boolean;
@@ -38,9 +43,11 @@ interface TemplateOption {
   parameters: ParameterDef[];
   channelConstraints?: ChannelConstraints;
   matchKeywords: string[];
+  /** 是否内置（模板库标记；false = 用户导入，可删除） */
+  isBuiltIn?: boolean;
 }
 
-/** 自定义模板类型（localStorage 持久化） */
+/** 旧版自定义模板类型（localStorage，迁移用） */
 interface CustomParamTemplate {
   id: string;
   name: string;
@@ -72,24 +79,11 @@ export default function AiBrandSchemaModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [matching, setMatching] = useState(false);
 
-  // 模板编辑器弹窗
-  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  // 模板库导入弹窗（与模板库卡片同一套 UI）
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
-  // 自定义参数模板（localStorage 持久化）
-  const [customTemplates, setCustomTemplates] = useState<CustomParamTemplate[]>(() => {
-    try {
-      const raw = localStorage.getItem(CUSTOM_TEMPLATES_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  /** 持久化自定义模板到 localStorage */
-  const persistCustomTemplates = (templates: CustomParamTemplate[]) => {
-    setCustomTemplates(templates);
-    localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(templates));
-  };
+  // 模板库中的自定义模板（isBuiltIn=false，随 loadTemplates 一起刷新）
+  const [customTemplates, setCustomTemplates] = useState<TemplateOption[]>([]);
 
   /** 模板的 constraints（从选中的模板提取） */
   const templateConstraints = useMemo(() => {
@@ -167,8 +161,11 @@ export default function AiBrandSchemaModal({
           parameters: t.parameters || [],
           channelConstraints: t.channelConstraints || undefined,
           matchKeywords: t.matchKeywords || [],
+          isBuiltIn: t.isBuiltIn !== undefined ? t.isBuiltIn : undefined,
         }));
         setTemplateOptions(options);
+        // 自定义模板（用户导入模板库的）单独列出，支持加载/删除
+        setCustomTemplates(options.filter((t) => t.isBuiltIn === false));
         setLoadError(null);
       }
     } catch {
@@ -176,6 +173,46 @@ export default function AiBrandSchemaModal({
       setLoadError('加载参数模板失败');
     }
   };
+
+  // ──────────────────────────────────────────────────────
+  // 旧版 localStorage 参数模板 → 模板库 一次性迁移（2026-08 模板库统一）
+  // ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const MIGRATED_KEY = 'custom-param-templates:migrated';
+    if (sessionStorage.getItem(MIGRATED_KEY)) return;
+    let legacy: CustomParamTemplate[] = [];
+    try {
+      const raw = localStorage.getItem(CUSTOM_TEMPLATES_KEY);
+      legacy = raw ? JSON.parse(raw) : [];
+    } catch {
+      /* 忽略损坏数据 */
+    }
+    if (legacy.length === 0) {
+      sessionStorage.setItem(MIGRATED_KEY, '1');
+      return;
+    }
+    (async () => {
+      for (const tpl of legacy) {
+        try {
+          await apiPost('/admin/model-templates', {
+            id: `legacy-${tpl.id}`,
+            name: tpl.name,
+            modelType,
+            parameters: tpl.parameters,
+            channelConstraints: tpl.channelConstraints,
+            matchKeywords: [],
+          });
+        } catch {
+          // 单条失败（如 id 冲突）跳过，不阻塞其余迁移
+        }
+      }
+      localStorage.removeItem(CUSTOM_TEMPLATES_KEY);
+      sessionStorage.setItem(MIGRATED_KEY, '1');
+      loadTemplates();
+      message.info(`已迁移 ${legacy.length} 个旧版本地模板到模板库`);
+    })();
+  }, [open, modelType, loadTemplates]);
 
   // ──────────────────────────────────────────────────────
   // 手动"自动匹配"按钮
@@ -208,48 +245,39 @@ export default function AiBrandSchemaModal({
   };
 
   // ──────────────────────────────────────────────────────
-  // 模板编辑器 — 应用参数模板
+  // 模板导入（统一 ImportTemplateModal）→ 回填参数 + 刷新预设下拉
   // ──────────────────────────────────────────────────────
-  const handleTemplateApply = (parsed: Record<string, any>) => {
-    // 从 JSON 中提取 parameters 和 channelConstraints
-    const newParams: ParameterDef[] = (parsed.parameters as ParameterDef[]) || [];
-    if (newParams.length === 0) {
-      message.warning('模板中未包含有效的 parameters');
-      return;
+  const handleTemplateImported = (template: Record<string, any>) => {
+    const newParams: ParameterDef[] = (template.parameters as ParameterDef[]) || [];
+    if (newParams.length > 0) {
+      setCustomSchema(newParams.map((p) => ({ ...p })));
     }
-    setCustomSchema(newParams.map((p) => ({ ...p })));
-
-    // ★ 保存为自定义模板（持久化）
-    const templateName = (parsed.name as string) || `自定义模板 ${customTemplates.length + 1}`;
-    const customTpl: CustomParamTemplate = {
-      id: `custom-${Date.now()}`,
-      name: templateName,
-      parameters: newParams,
-      channelConstraints: parsed.channelConstraints as ChannelConstraints | undefined,
-      createdAt: new Date().toISOString(),
-    };
-    persistCustomTemplates([...customTemplates, customTpl]);
-    message.success(`模板已应用并保存为"${templateName}"`);
+    loadTemplates();
   };
 
-  /** 删除自定义模板 */
-  const handleDeleteCustomTemplate = (tplId: string) => {
+  /** 删除模板库自定义模板 */
+  const handleDeleteCustomTemplate = (tpl: TemplateOption) => {
     Modal.confirm({
       title: '确认删除',
-      content: '确定删除此自定义模板吗？此操作不可恢复。',
+      content: '确定删除此模板吗？删除后将从全站移除（含其他渠道与生成面板）。此操作不可恢复。',
       centered: true,
       okType: 'danger',
       okText: '确定删除',
       cancelText: '取消',
-      onOk: () => {
-        persistCustomTemplates(customTemplates.filter((t) => t.id !== tplId));
-        message.success('自定义模板已删除');
+      onOk: async () => {
+        try {
+          await apiDelete(`/admin/model-templates/${tpl.id}`);
+          message.success('模板已删除');
+          loadTemplates();
+        } catch (err) {
+          showApiError(err, '删除失败');
+        }
       },
     });
   };
 
-  /** 加载自定义模板的参数 */
-  const handleLoadCustomTemplate = (tpl: CustomParamTemplate) => {
+  /** 加载模板库自定义模板的参数 */
+  const handleLoadCustomTemplate = (tpl: TemplateOption) => {
     setSelectedTemplateId('');
     setCustomSchema(tpl.parameters.map((p) => ({ ...p })));
     message.success(`已加载模板: ${tpl.name}`);
@@ -356,36 +384,47 @@ export default function AiBrandSchemaModal({
         <Button size="small" onClick={handleAutoMatch} loading={matching}>
           自动匹配
         </Button>
-        <Tooltip title="打开模板编辑器，可下载/上传/另存为参数模板">
-          <Button size="small" icon={<FileText size={12} />} onClick={() => setTemplateEditorOpen(true)}>
-            模板
+        <Tooltip title="导入模板到模板库（全站可用），导入后出现在下方「预设模板」中">
+          <Button size="small" icon={<FileText size={12} />} onClick={() => setImportModalOpen(true)}>
+            导入模板
           </Button>
         </Tooltip>
       </div>
 
-      {/* ── 预设模板选择 ── */}
+      {/* ── 预设模板选择（模板库：内置 + 用户导入） ── */}
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: '#595959', marginBottom: 6, fontWeight: 500 }}>
           预设模板
+          <span style={{ fontWeight: 400, color: '#8c8c8c', marginLeft: 6 }}>
+            （模板库：内置 + 用户导入，点「模板」可新建导入）
+          </span>
         </div>
         <Select
           value={selectedTemplateId}
           onChange={handleTemplateChange}
-          options={templateOptions.map((t) => ({
-            value: t.id,
-            label: t.name,
-          }))}
+          options={[
+            {
+              label: '我的模板',
+              options: customTemplates.map((t) => ({ value: t.id, label: t.name })),
+            },
+            {
+              label: '内置模板',
+              options: templateOptions
+                .filter((t) => t.isBuiltIn !== false)
+                .map((t) => ({ value: t.id, label: t.name })),
+            },
+          ].filter((g) => g.options.length > 0)}
           style={{ width: '100%' }}
           size="small"
           placeholder="选择预设模板..."
         />
       </div>
 
-      {/* ── 自定义模板列表 ── */}
+      {/* ── 模板库自定义模板列表 ── */}
       {customTemplates.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12, color: '#595959', marginBottom: 6, fontWeight: 500 }}>
-            自定义模板
+            我的模板（模板库）
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {customTemplates.map((tpl) => (
@@ -410,11 +449,11 @@ export default function AiBrandSchemaModal({
                 <span style={{ color: '#bfbfbf', fontSize: 10 }}>
                   {tpl.parameters.length} 参数
                 </span>
-                <Tooltip title="删除自定义模板">
+                <Tooltip title="删除模板（全站移除）">
                   <Trash2
                     size={12}
                     style={{ cursor: 'pointer', color: '#ff4d4f' }}
-                    onClick={() => handleDeleteCustomTemplate(tpl.id)}
+                    onClick={() => handleDeleteCustomTemplate(tpl)}
                   />
                 </Tooltip>
               </div>
@@ -492,23 +531,12 @@ export default function AiBrandSchemaModal({
         </div>
       )}
 
-      {/* ── 模板编辑器 ── */}
-      <TemplateEditor
-        open={templateEditorOpen}
-        onClose={() => setTemplateEditorOpen(false)}
-        onApply={handleTemplateApply}
+      {/* ── 模板导入（统一 UI：与模板库卡片一致） ── */}
+      <ImportTemplateModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImported={handleTemplateImported}
         presetJson={currentParamJson}
-        title="参数模板编辑器"
-        exampleJson={{
-          name: '我的参数模板',
-          parameters: [
-            { name: 'resolution', type: 'enum', label: '分辨率', default: '2k', values: ['1k', '2k', '4k'], display: 'radio' },
-            { name: 'aspectRatio', type: 'enum', label: '宽高比', default: '1:1', values: ['1:1', '16:9'], display: 'radio' },
-          ],
-          channelConstraints: {
-            bounds: { maxEdgeLength: 4096, minTotalPixels: 921600, maxTotalPixels: 16777216 },
-          },
-        }}
       />
     </Modal>
   );

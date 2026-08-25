@@ -11,11 +11,35 @@
       "type": "enum",
       "label": "音色",
       "default": "alloy",
-      "values": ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"],
+      "values": [
+        "alloy",
+        "ash",
+        "ballad",
+        "coral",
+        "echo",
+        "fable",
+        "nova",
+        "onyx",
+        "sage",
+        "shimmer",
+        "verse",
+        "marin",
+        "cedar"
+      ],
       "labels": {
-        "alloy": "Alloy", "ash": "Ash", "ballad": "Ballad", "coral": "Coral", "echo": "Echo",
-        "fable": "Fable", "nova": "Nova", "onyx": "Onyx", "sage": "Sage", "shimmer": "Shimmer",
-        "verse": "Verse", "marin": "Marin", "cedar": "Cedar"
+        "alloy": "Alloy",
+        "ash": "Ash",
+        "ballad": "Ballad",
+        "coral": "Coral",
+        "echo": "Echo",
+        "fable": "Fable",
+        "nova": "Nova",
+        "onyx": "Onyx",
+        "sage": "Sage",
+        "shimmer": "Shimmer",
+        "verse": "Verse",
+        "marin": "Marin",
+        "cedar": "Cedar"
       },
       "display": "radio",
       "valueTooltips": {
@@ -39,9 +63,24 @@
       "type": "enum",
       "label": "音频格式",
       "default": "mp3",
-      "values": ["mp3", "wav", "opus", "aac", "flac", "pcm"],
-      "labels": { "mp3": "MP3", "wav": "WAV", "opus": "Opus", "aac": "AAC", "flac": "FLAC", "pcm": "PCM" },
-      "display": "radio"
+      "values": [
+        "mp3",
+        "wav",
+        "opus",
+        "aac",
+        "flac",
+        "pcm"
+      ],
+      "labels": {
+        "mp3": "MP3",
+        "wav": "WAV",
+        "opus": "Opus",
+        "aac": "AAC",
+        "flac": "FLAC",
+        "pcm": "PCM"
+      },
+      "display": "radio",
+      "advanced": true
     },
     {
       "name": "audioSpeed",
@@ -58,7 +97,8 @@
       "type": "string",
       "label": "声音指令",
       "placeholder": "可选：控制声音情绪、停顿、发音风格等",
-      "required": false
+      "required": false,
+      "advanced": true
     }
   ],
   "channelConstraints": {
@@ -73,6 +113,17 @@
       "audioInstructions": "instructions"
     }
   },
-  "pricing": { "perChar": 0.015 },
-  "matchKeywords": ["tts", "tts-1", "tts-1-hd", "doubao-tts", "elevenlabs", "azure-tts", "cosyvoice", "speech"]
+  "pricing": {
+    "perChar": 0.015
+  },
+  "matchKeywords": [
+    "tts",
+    "tts-1",
+    "tts-1-hd",
+    "doubao-tts",
+    "elevenlabs",
+    "azure-tts",
+    "cosyvoice",
+    "speech"
+  ]
 }

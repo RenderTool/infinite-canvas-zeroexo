@@ -12,8 +12,12 @@
       "type": "enum",
       "label": "分辨率",
       "default": "1k",
-      "values": ["1k"],
-      "labels": { "1k": "1K" },
+      "values": [
+        "1k"
+      ],
+      "labels": {
+        "1k": "1K"
+      },
       "display": "radio"
     },
     {
@@ -21,12 +25,39 @@
       "type": "enum",
       "label": "宽高比",
       "default": "auto",
-      "values": ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+      "values": [
+        "auto",
+        "1:1",
+        "1:4",
+        "1:8",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:1",
+        "4:3",
+        "4:5",
+        "5:4",
+        "8:1",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
       "labels": {
-        "auto": "AUTO", "1:1": "1:1", "1:4": "1:4", "1:8": "1:8",
-        "2:3": "2:3", "3:2": "3:2", "3:4": "3:4", "4:1": "4:1",
-        "4:3": "4:3", "4:5": "4:5", "5:4": "5:4", "8:1": "8:1",
-        "9:16": "9:16", "16:9": "16:9", "21:9": "21:9"
+        "auto": "AUTO",
+        "1:1": "1:1",
+        "1:4": "1:4",
+        "1:8": "1:8",
+        "2:3": "2:3",
+        "3:2": "3:2",
+        "3:4": "3:4",
+        "4:1": "4:1",
+        "4:3": "4:3",
+        "4:5": "4:5",
+        "5:4": "5:4",
+        "8:1": "8:1",
+        "9:16": "9:16",
+        "16:9": "16:9",
+        "21:9": "21:9"
       },
       "display": "radio"
     },
@@ -34,7 +65,10 @@
       "name": "size",
       "type": "size",
       "label": "尺寸（宽×高）",
-      "default": { "width": 1024, "height": 1024 }
+      "default": {
+        "width": 1024,
+        "height": 1024
+      }
     },
     {
       "name": "watermark",
@@ -59,9 +93,18 @@
       "type": "enum",
       "label": "图片格式",
       "default": "png",
-      "values": ["png", "jpeg", "webp"],
-      "labels": { "png": "PNG", "jpeg": "JPEG", "webp": "WebP" },
-      "display": "select"
+      "values": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "labels": {
+        "png": "PNG",
+        "jpeg": "JPEG",
+        "webp": "WebP"
+      },
+      "display": "select",
+      "advanced": true
     }
   ],
   "channelConstraints": {
@@ -79,9 +122,17 @@
       "aspectRatio": "generationConfig.response_format.image.aspect_ratio"
     },
     "valueMapping": {
-      "resolution": { "1k": "1K" },
-      "aspectRatio": { "auto": "" }
+      "resolution": {
+        "1k": "1K"
+      },
+      "aspectRatio": {
+        "auto": ""
+      }
     }
   },
-  "matchKeywords": ["gemini", "nano-banana", "imagen"]
+  "matchKeywords": [
+    "gemini",
+    "nano-banana",
+    "imagen"
+  ]
 }

@@ -16,13 +16,17 @@ import { Modal, Button, Input, message, Space } from 'antd';
 export interface TemplateEditorProps {
   open: boolean;
   onClose: () => void;
-  onApply: (json: Record<string, any>) => void;
+  onApply: (json: Record<string, any>) => void | Promise<void>;
   /** 预设 JSON 字符串（默认填充到输入框） */
   presetJson?: string;
   /** 弹窗标题 */
   title?: string;
   /** Json 示例格式 */
   exampleJson?: Record<string, any>;
+  /** 多个示例（点击填入编辑框），优先级高于 exampleJson */
+  examples?: Array<{ title: string; json: Record<string, any> }>;
+  /** 应用失败回调：返回 true 表示已自行处理错误（不再显示通用提示），弹窗保持打开 */
+  onApplyError?: (err: unknown) => boolean | Promise<boolean>;
 }
 
 export default function TemplateEditor({
@@ -32,6 +36,8 @@ export default function TemplateEditor({
   presetJson = '',
   title = '模板管理',
   exampleJson,
+  examples,
+  onApplyError,
 }: TemplateEditorProps) {
   const [jsonText, setJsonText] = useState(presetJson);
 
@@ -90,7 +96,7 @@ export default function TemplateEditor({
   };
 
   /** 应用模板 */
-  const handleApply = () => {
+  const handleApply = async () => {
     const trimmed = jsonText.trim();
     if (!trimmed) {
       message.warning('请先输入或上传 JSON 内容');
@@ -99,10 +105,15 @@ export default function TemplateEditor({
     try {
       const parsed = JSON.parse(trimmed);
       if (!parsed || typeof parsed !== 'object') throw new Error('无效 JSON');
-      onApply(parsed);
+      // 支持异步应用（如导入模板库）：失败由调用方 onApplyError 展示，弹窗保持打开
+      await onApply(parsed);
       onClose();
-    } catch {
-      message.error('JSON 解析失败，请检查格式');
+    } catch (err) {
+      // 业务失败（如服务端校验不通过）：由调用方展示具体错误，弹窗保持打开以便修改
+      const handled = onApplyError ? await onApplyError(err) : false;
+      if (!handled) {
+        message.error('JSON 解析失败，请检查格式');
+      }
     }
   };
 
@@ -147,7 +158,24 @@ export default function TemplateEditor({
       />
 
       {/* ── 示例格式（默认折叠） ── */}
-      {exampleJson && (
+      {(examples && examples.length > 0) ? (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#1890ff', userSelect: 'none' }}>
+            查看示例格式（点击示例一键填入）
+          </summary>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            {examples.map((ex) => (
+              <Button
+                key={ex.title}
+                size="small"
+                onClick={() => setJsonText(JSON.stringify(ex.json, null, 2))}
+              >
+                {ex.title}
+              </Button>
+            ))}
+          </div>
+        </details>
+      ) : exampleJson ? (
         <details style={{ marginTop: 10 }}>
           <summary style={{ cursor: 'pointer', fontSize: 12, color: '#1890ff', userSelect: 'none' }}>
             查看示例格式
@@ -168,7 +196,7 @@ export default function TemplateEditor({
             <code>{JSON.stringify(exampleJson, null, 2)}</code>
           </pre>
         </details>
-      )}
+      ) : null}
     </Modal>
   );
 }

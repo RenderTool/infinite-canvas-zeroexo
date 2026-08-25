@@ -1225,3 +1225,30 @@ model AgentSkillProposal {
   @@index([status])
   @@index([skillKey])
 }
+
+/// 用户导入的模型模板（系统级模板库，全站可用）
+/// definition 为完整模板 JSON（ModelTemplate 结构，含 DSL v2 视频协议字段）
+model ModelTemplate {
+  id            String   @id
+  /// 模板显示名
+  name          String
+  /// 模型类型: llm | image | video | audio
+  modelType     String
+  /// 完整模板定义(JSON)
+  definition    Json
+  /// 匹配关键词(冗余存储,便于查询)
+  matchKeywords String[] @default([])
+  /// 是否启用
+  enabled       Boolean  @default(true)
+  /// 是否内置(内置模板存代码仓,不入库; 本表仅存用户导入的自定义模板)
+  isBuiltIn     Boolean  @default(false)
+  /// 导入者用户 ID(null = 系统级)
+  ownerId       String?
+  /// 备注
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([modelType])
+  @@index([enabled])
+}

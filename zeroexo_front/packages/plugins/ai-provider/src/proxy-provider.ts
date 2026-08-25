@@ -62,6 +62,8 @@ interface GenerateResponse {
   costTokens?: number;
   costMs?: number;
   url?: string;
+  /** 尾帧图像 URL(returnLastFrame 能力,存于 params._lastFrameUrl) */
+  lastFrameUrl?: string;
 }
 
 /** /api/ai/generations/:id 响应(轮询异步任务时使用) */
@@ -303,7 +305,7 @@ export class ProxyProvider implements AIProvider {
     const downloadUrl = completed.url ?? (await this.getAssetDownloadUrl(completed.assetId ?? '', req.signal));
     const blob = await fetchBlob(downloadUrl, req.signal, this.tokenGetter?.());
     const video = await readVideoMetaFromBlob(blob);
-    return { ...video, generationId: result.generationId };
+    return { ...video, generationId: result.generationId, lastFrameUrl: completed.lastFrameUrl };
   }
 
   /** 音频生成 */
@@ -482,6 +484,7 @@ export class ProxyProvider implements AIProvider {
           mimeType: (p._resultMime as string | undefined) ?? undefined,
           width: (p._resultWidth as number | undefined) ?? undefined,
           height: (p._resultHeight as number | undefined) ?? undefined,
+          lastFrameUrl: (p._lastFrameUrl as string | undefined) ?? undefined,
         };
       }
       if (record.status === 'failed') {

@@ -26,6 +26,10 @@ export class GenerationInputRefDto {
 
   @IsOptional()
   @IsString()
+  content?: string;
+
+  @IsOptional()
+  @IsString()
   title?: string;
 
   @IsOptional()

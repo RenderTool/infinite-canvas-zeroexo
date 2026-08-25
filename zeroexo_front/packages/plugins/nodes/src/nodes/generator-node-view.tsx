@@ -29,7 +29,7 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Image, Music, X, Text, Film, Clapperboard, Cpu, FileText, Check, Trash2, Upload } from 'lucide-react';
+import { Sparkles, Image, Music, X, Text, Film, Clapperboard, Cpu, FileText, Check, Upload } from 'lucide-react';
 import { getModelIconComponent } from '@zeroexo/shared';
 import type { NodeRendererProps, Pin } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
@@ -268,6 +268,7 @@ export function GeneratorNodeView({
   const textColor = theme.toolbar.text;
   const mutedColor = theme.toolbar.textMuted;
   const isDark = theme.mode === 'dark';
+  const dangerColor = theme.toolbar.danger ?? '#ef4444';
   // 顶部参考栏/底部操作栏配色对齐 StackNode 导航栏(StackBottomNav 同源 token)
   const navBg = isDark ? '#1b1b1b' : '#fafaf7';
   const navBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
@@ -756,7 +757,7 @@ const ReferenceSlot = memo(function ReferenceSlot({
       >
         {label}
       </div>
-      {/* 兼容性指示(左上角) */}
+      {/* 兼容性指示(绿勾/主题红叉;绿 #a4fd01、红=theme.toolbar.danger,2026-08-25 用户拍板) */}
       <div
         style={{
           position: 'absolute',
@@ -765,7 +766,7 @@ const ReferenceSlot = memo(function ReferenceSlot({
           width: 12,
           height: 12,
           borderRadius: '50%',
-          background: isCompatible ? '#3b82f6' : '#ef4444',
+          background: isCompatible ? '#a4fd01' : dangerColor,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -778,33 +779,35 @@ const ReferenceSlot = memo(function ReferenceSlot({
           <X size={7} color="#fff" strokeWidth={3} />
         )}
       </div>
-      {/* 删除按钮(右上角) */}
+      {/* 删除按钮(右上角,Agent ReferenceChip 圆形叉同款:16px 圆 + 半透明底 + muted 叉) */}
       <button
         type="button"
         onClick={onRemove}
+        aria-label="移除参考素材"
         style={{
           position: 'absolute',
           top: 2,
           right: 2,
-          width: 12,
-          height: 12,
-          borderRadius: 2,
-          background: '#ff4d4f',
-          color: '#fff',
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
           border: 'none',
+          background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
+          color: mutedColor,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           padding: 0,
+          lineHeight: 1,
           zIndex: 2,
-          opacity: 0.85,
-          transition: 'opacity 0.12s',
+          transition: 'background 0.1s',
+          flexShrink: 0,
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.14)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)'; }}
       >
-        <Trash2 size={7} />
+        <X size={10} />
       </button>
     </div>
   );
@@ -1003,7 +1006,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                     </div>
                   )}
 
-                  {/* 兼容性指示(勾蓝色/叉红色 - 左上角) */}
+                  {/* 兼容性指示(绿勾/主题红叉 - 左上角;2026-08-25 用户拍板) */}
                   <div
                     style={{
                       position: 'absolute',
@@ -1012,7 +1015,7 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                       width: 12,
                       height: 12,
                       borderRadius: '50%',
-                      background: isCompatible ? '#3b82f6' : '#ef4444',
+                      background: isCompatible ? '#a4fd01' : dangerColor,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1026,33 +1029,35 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
                     )}
                   </div>
 
-                  {/* 删除按钮(方块样式,右上角) */}
+                  {/* 删除按钮(右上角,Agent ReferenceChip 圆形叉同款:16px 圆 + 半透明底 + muted 叉) */}
                   <button
                     type="button"
                     onClick={() => handleRemoveIncoming(incomingNode.id)}
+                    aria-label="移除参考素材"
                     style={{
                       position: 'absolute',
                       top: 2,
                       right: 2,
-                      width: 12,
-                      height: 12,
-                      borderRadius: 2,
-                      background: '#ff4d4f',
-                      color: '#fff',
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
                       border: 'none',
+                      background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)',
+                      color: mutedColor,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       padding: 0,
+                      lineHeight: 1,
                       zIndex: 2,
-                      opacity: 0.85,
-                      transition: 'opacity 0.12s',
+                      transition: 'background 0.1s',
+                      flexShrink: 0,
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.14)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.08)'; }}
                   >
-                    <Trash2 size={7} />
+                    <X size={10} />
                   </button>
                 </div>
               );
@@ -1098,6 +1103,9 @@ const getNodeThumbnail = useCallback((incomingNode: { id: string; type: string; 
             lineHeight={1.6}
             minHeight={44}
             onLengthChange={() => {}}
+            // @ 弹窗主题色:亮色白底/暗色 toolbar.panel(暗色主题下 textColor 是亮色,亮度推断会误判为白底)
+            popupBackground={isDark ? (theme.toolbar.panel ?? '#26262b') : '#ffffff'}
+            popupBorderColor={isDark ? (theme.toolbar.border ?? 'rgba(255,255,255,0.14)') : '#e7e5e4'}
           />
           {isEditing && (
             <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 10, color: mutedColor, pointerEvents: 'none' }}>

@@ -1,10 +1,10 @@
 {
-  "id": "seedance-2-0",
-  "name": "Seedance 2.0",
+  "id": "seedance-2-5",
+  "name": "Seedance 2.5",
   "protocol": "openai",
   "modelType": "video",
   "endpoint": "/contents/generations/tasks",
-  "maxPromptLength": 500,
+  "maxPromptLength": 1000,
   "parameters": [
     {
       "name": "mode",
@@ -39,21 +39,18 @@
       "values": [
         "480p",
         "720p",
-        "1080p",
-        "4k"
+        "1080p"
       ],
       "labels": {
         "480p": "480P",
         "720p": "720P",
-        "1080p": "1080P",
-        "4k": "4K"
+        "1080p": "1080P"
       },
       "display": "radio",
       "valueTooltips": {
         "480p": "480p 分辨率，最快速生成",
         "720p": "720p 分辨率，平衡质量与速度",
-        "1080p": "1080p 全高清（Seedance 2.0 Fast/Mini 不支持）",
-        "4k": "4K 超高清（仅 Seedance 2.0 支持，10bit H.265）"
+        "1080p": "1080p 高清（2.5 公开 API 最高档）"
       }
     },
     {
@@ -90,8 +87,8 @@
       "label": "时长（秒）",
       "default": 5,
       "min": 4,
-      "max": 15,
-      "tooltip": "生成视频时长，4-15秒"
+      "max": 30,
+      "tooltip": "生成视频时长，4-30秒（2.5 单次最长 30 秒，长叙事能力）"
     },
     {
       "name": "generateAudio",
@@ -146,9 +143,9 @@
       "name": "maxReferenceImages",
       "type": "number",
       "label": "参考图上限",
-      "default": 9,
+      "default": 30,
       "min": 0,
-      "max": 9
+      "max": 30
     },
     {
       "name": "referenceImagesEnabled",
@@ -160,9 +157,9 @@
       "name": "maxReferenceVideos",
       "type": "number",
       "label": "参考视频上限",
-      "default": 3,
+      "default": 10,
       "min": 0,
-      "max": 3
+      "max": 10
     },
     {
       "name": "referenceVideosEnabled",
@@ -174,9 +171,9 @@
       "name": "maxReferenceAudios",
       "type": "number",
       "label": "参考音频上限",
-      "default": 3,
+      "default": 10,
       "min": 0,
-      "max": 3
+      "max": 10
     },
     {
       "name": "referenceAudiosEnabled",
@@ -187,11 +184,11 @@
   ],
   "channelConstraints": {
     "bounds": {
-      "maxReferenceImages": 9,
-      "maxReferenceVideos": 3,
-      "maxReferenceAudios": 3,
+      "maxReferenceImages": 30,
+      "maxReferenceVideos": 10,
+      "maxReferenceAudios": 10,
       "minDuration": 4,
-      "maxDuration": 15,
+      "maxDuration": 30,
       "supportsImageToImage": false
     },
     "paramMapping": {
@@ -231,17 +228,19 @@
       "failed"
     ],
     "resultPath": "content.video_url",
+    "lastFramePath": "content.last_frame_url",
     "pollIntervalMs": 5000,
-    "maxPollMs": 600000
+    "maxPollMs": 900000
   },
   "auth": {
     "type": "bearer"
   },
   "pricing": {
-    "perSecond": 0.1
+    "perSecond": 0.15
   },
   "matchKeywords": [
-    "seedance-2-0",
-    "doubao-seedance-2-0"
+    "seedance-2-5",
+    "doubao-seedance-2-5",
+    "doubao-seedance-2-5-260628"
   ]
 }

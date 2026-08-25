@@ -202,7 +202,9 @@ export function MainReplaceButton({ onClick, visible = false }: { onClick: () =>
   // 视觉与 ReplaceButton(left) 对齐:左上角 6,6 · 24×24 · 圆角 6,纯 Upload icon
   // 显隐语义与胶囊工具栏"选中显示"对齐:无论是否空节点,仅节点激活(选中)时显示 —— 保持卡片视觉清爽
   const opacity = visible ? (hover ? 0.85 : 1) : 0;
-  return <button type="button" title="替换当前卡片" aria-label="替换当前卡片" onClick={(event) => { event.stopPropagation(); onClick(); }} onPointerDown={(event) => event.stopPropagation()} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ position: 'absolute', left: 6, top: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer', transition: 'opacity 0.15s', zIndex: 10, opacity }}><Upload size={13} /></button>;
+  // 隐藏时同步屏蔽指针事件(opacity 0 仍接收点击)
+  const pointerEvents = visible ? 'auto' : 'none';
+  return <button type="button" title="替换当前卡片" aria-label="替换当前卡片" onClick={(event) => { event.stopPropagation(); onClick(); }} onPointerDown={(event) => event.stopPropagation()} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ position: 'absolute', left: 6, top: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer', transition: 'opacity 0.15s', zIndex: 10, opacity, pointerEvents }}><Upload size={13} /></button>;
 }
 
 export function StackBottomNav({ cards, activeIndex, onJump, onPrev, onNext }: { cards: StackCard[]; activeIndex: number; onJump: (index: number) => void; onPrev: () => void; onNext: () => void }): React.ReactElement {

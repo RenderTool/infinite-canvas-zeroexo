@@ -39,7 +39,8 @@ export function applyParamMapping(
 
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    if (UI_ONLY_KEYS.has(key)) continue;
+    // UI 专用参数自动排除（模板在 paramMapping 中显式映射的除外，如视频 DSL 的 resolution）
+    if (UI_ONLY_KEYS.has(key) && !mapping?.[key]) continue;
 
     // 有映射用映射，无映射用原 key
     const apiField = mapping?.[key] ?? key;

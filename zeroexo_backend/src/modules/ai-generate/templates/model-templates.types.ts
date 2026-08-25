@@ -82,6 +82,93 @@ export interface ChannelConstraints {
   valueMapping?: Record<string, Record<string, any>>;
 }
 
+// ===== DSL v2：视频生成协议描述（可选，缺省时适配器按默认行为执行） =====
+
+/** 请求体组装风格 */
+export type BodyStyle = 'flat' | 'content';
+
+/** 参考素材传参格式 */
+export type ReferenceFormat = 'url' | 'base64';
+
+/**
+ * 请求体结构描述（DSL v2）
+ * - flat:    现有 paramMapping 平铺模式（默认，无需配置）
+ * - content: Seedance 风格 content:[{type, text/image_url/..., role}] 数组
+ */
+export interface RequestSchema {
+  /** 请求体组装风格，缺省 flat */
+  bodyStyle?: BodyStyle;
+  /** content 风格下各素材类型的 role 名 */
+  contentRoles?: {
+    /** 参考图 role（首尾帧模式的尾帧） */
+    image?: string;
+    /** 首帧 role（首尾帧模式第一张图） */
+    firstFrame?: string;
+    /** 尾帧 role（首尾帧模式第二张图起） */
+    lastFrame?: string;
+    /** 参考视频 role */
+    video?: string;
+    /** 参考音频 role */
+    audio?: string;
+    /** 哪些前端 mode 值使用首尾帧 role 分配（其余 mode 的图用 image role），缺省 ["image-to-video-first-last-frame"] */
+    firstLastModes?: string[];
+  };
+  /** 参考素材传参格式：url 直传（默认）或 base64 内嵌 */
+  referenceFormat?: ReferenceFormat;
+}
+
+/** 同步响应解析协议（DSL v2） */
+export interface SyncProtocol {
+  /** 结果提取路径，如 "data[0].url" / "data[0].b64_json" */
+  resultPath: string;
+  /** 结果字段名（与 resultPath 二选一，取到后写入 GenerateResult） */
+  field?: string;
+}
+
+/** 异步任务协议（DSL v2）：提交 → 轮询 → 提取结果 */
+export interface TaskProtocol {
+  /** 提交响应中任务 ID 的提取路径，如 "id" */
+  submitIdPath: string;
+  /** 轮询 URL 模板（相对 baseUrl），{id} 会被替换为任务 ID，如 "/v1/videos/{id}" */
+  pollUrlTemplate: string;
+  /** 轮询响应中的状态字段路径，如 "status" */
+  statusPath: string;
+  /** 成功状态值列表 */
+  successValues: string[];
+  /** 失败状态值列表 */
+  failureValues: string[];
+  /** 成功响应中结果提取路径，如 "data[0].url" */
+  resultPath: string;
+  /** 轮询间隔（ms），缺省 5000 */
+  pollIntervalMs?: number;
+  /** 最长轮询时间（ms），缺省 600000 */
+  maxPollMs?: number;
+}
+
+/** 认证方式（DSL v2），缺省 Bearer apiKey */
+export type AuthType = 'bearer' | 'header' | 'kling-hmac';
+
+/** HMAC 签名器配置（auth.type=kling-hmac 时生效） */
+export interface SignerConfig {
+  /** 签名结果放入的请求头名，如 "Authorization" */
+  headerName: string;
+  /** 签名值格式模板，占位符 {ak}/{sk}/{timestamp}，如 "{ak}.{timestamp}.{signature}" */
+  format: string;
+  /** 签名算法，目前仅支持 hmac-sha256 */
+  alg: 'hmac-sha256';
+}
+
+export interface AuthConfig {
+  /** 认证类型 */
+  type: AuthType;
+  /** auth.type=header 时的 API Key 请求头名（缺省 X-Api-Key） */
+  apiKeyHeader?: string;
+  /** auth.type=header 时是否同时把 API Key 作为 Bearer 发送（中转常见） */
+  alsoBearer?: boolean;
+  /** auth.type=kling-hmac 时的签名器配置 */
+  signer?: SignerConfig;
+}
+
 /** 模型模板 */
 export interface ModelTemplate {
   id: string;
@@ -96,6 +183,16 @@ export interface ModelTemplate {
   maxPromptLength?: number;
   /** 渠道约束 */
   channelConstraints?: ChannelConstraints;
+
+  // ===== DSL v2（视频生成协议，可选） =====
+  /** 请求体结构描述 */
+  request?: RequestSchema;
+  /** 同步响应解析协议（无 task 时生效） */
+  sync?: SyncProtocol;
+  /** 异步任务协议（提交→轮询→提取） */
+  task?: TaskProtocol;
+  /** 认证方式（缺省 Bearer apiKey） */
+  auth?: AuthConfig;
 
   /** 是否作为兜底模板（协议级模板） */
   fallback?: boolean;
