@@ -197,7 +197,9 @@ export const StackDetailsModal = memo(function StackDetailsModal({
         )}
       </div>
 
-      {/* 征集 #75：卡片点击后的资产查看器（嵌套在本面板之上，关闭回到网格） */}
+      {/* 征集 #75：卡片点击后的资产查看器（嵌套在本面板之上，关闭回到网格）；
+          层级走 antd 嵌套自动升层(全局 zIndexPopupBase=20000)——禁止手动传 zIndex
+          (曾误传 1100 被压到外层之下,征集 #80 三次补修撤销) */}
       {viewerIndex !== null && cards[viewerIndex] && (
         <AssetDetailViewer
           asset={cardToAssetDetail(cards[viewerIndex])}

@@ -13,7 +13,7 @@
  *   #/test/prompt/:promptId  编辑
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -28,12 +28,13 @@ import {
   Pencil,
   ExternalLink,
   Image as ImageIcon,
+  ArrowLeft as ArrowLeftIcon,
+  ArrowRight as ArrowRightIcon,
 } from 'lucide-react';
 import { Button, Input, Select, App as AntdApp, Spin, Tag, Progress, Tooltip } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
-import { addAssets as storeAddAssets } from '@/features/asset-picker/asset-store.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import {
   createPrompt,
@@ -41,7 +42,10 @@ import {
   getPrompt,
   deletePrompt,
   type PromptCategory,
+  type PromptGenerationMode,
 } from './prompts-api.js';
+import { PromptChainCanvas } from './components/prompt-chain-canvas.js';
+import { AssetDetailViewer, type AssetDetailData } from '@/shared/components/asset-detail-viewer.js';
 import { updatePrompt as storeUpdatePrompt, upsertPrompt as storeUpsertPrompt, removePrompt as storeRemovePrompt } from '@/features/prompt-library/prompt-store.js';
 import {
   listPromptImages,
@@ -50,8 +54,6 @@ import {
   type PromptImageRole,
 } from './prompt-images-api.js';
 import { notifyPromptCopied } from './prompt-copy-feedback.js';
-import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/components/image-viewer.js';
-import { useAuthImageUrl } from '@/shared/hooks/use-auth-image.js';
 import { AuthorizedImage } from '@/shared/components/authorized-media.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 
@@ -103,7 +105,8 @@ const CATEGORIES: Array<{ value: PromptCategory; i18nKey: string }> = [
 ];
 
 const ROLES: Array<{ value: PromptImageRole; i18nKey: string }> = [
-  { value: 'reference', i18nKey: 'imageRoleReference' },
+  // 征集 #78 验收:角色文案改输入/输出语义(封面仍由设封面按钮指派)
+  { value: 'reference', i18nKey: 'imageRoleInput' },
   { value: 'output', i18nKey: 'imageRoleOutput' },
   { value: 'cover', i18nKey: 'imageRoleCover' },
 ];
@@ -135,19 +138,27 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   });
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<PromptCategory>('other');
+  // 生成模式(征集 #79/Plan#47):文生图/图生图,存量默认文生图(右侧链路画布据此还原输入/输出)
+  const [generationMode, setGenerationMode] = useState<PromptGenerationMode>('txt2img');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [favorite, setFavorite] = useState(false);
   const [images, setImages] = useState<PromptImage[]>([]);
-  // 当前主预览图索引
+  // 当前主预览图索引(胶片条选中态;主预览已由链路画布接管,征集 #79)
   const [previewIdx, setPreviewIdx] = useState(0);
-  // 图片缩放
-  // 图片缩放/平移(统一图片查看框架)
-  const panZoom = useImagePanZoom();
   // 上传进度映射: 临时id -> 百分比(0-100)
   const [uploadingProgress, setUploadingProgress] = useState<Record<string, number>>({});
   // 本地预览 URL(blob URL),在图片上传后立即显示,直到后端缩略图可访问
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
+  // 链路画布用:本地预览 URL 按 storageKey 索引(上传后即时显示)
+  const localPreviewByStorageKey = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const img of images) {
+      const lp = localPreviews[img.id];
+      if (lp && img.storageKey) m[img.storageKey] = lp;
+    }
+    return m;
+  }, [images, localPreviews]);
   const uploadIdCounter = useRef(0);
 
   // 查看/编辑模式（只读模式始终为 view）
@@ -159,6 +170,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     contentJa: string;
     note: string;
     category: PromptCategory;
+    generationMode: PromptGenerationMode;
     tags: string[];
     favorite: boolean;
     images: PromptImage[];
@@ -191,6 +203,8 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         setContentJa(p.contentJa ?? '');
         setNote(p.note ?? '');
         setCategory(p.category as PromptCategory);
+        // 存量/缺省一律回退文生图(后端 @default 同语义)
+        setGenerationMode(p.generationMode === 'img2img' ? 'img2img' : 'txt2img');
         setTags(p.tags);
         setFavorite(p.favorite);
         setImages(imgs);
@@ -229,13 +243,16 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     setContentEn(props.initialData.contentEn ?? '');
     setContentJa(props.initialData.contentJa ?? '');
     setCategory((props.initialData.category as PromptCategory) || 'other');
+    // 公共提示词无模式字段,一律按文生图展示(征集 #79)
+    setGenerationMode('txt2img');
     setTags(props.initialData.tags ?? []);
     setImages(
       (props.initialData.images ?? []).map((img, i) => ({
         id: `init_${i}`,
         promptId: '',
         storageKey: img.storageKey,
-        role: i === 0 ? 'cover' as PromptImageRole : 'reference' as PromptImageRole,
+        // 征集 #78 验收拍板:公共提示词图片一律默认输出(不再首图转封面/余图转参考)
+        role: 'output' as PromptImageRole,
         sortOrder: i,
         createdAt: '',
       })),
@@ -263,6 +280,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         contentEn: contentEn.trim() || undefined,
         contentJa: contentJa.trim() || undefined,
         category: category as PromptCategory,
+        generationMode,
         tags,
         imageKeys: images.map((i) => i.storageKey),
       });
@@ -274,6 +292,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         contentEn: created.contentEn ?? undefined,
         contentJa: created.contentJa ?? undefined,
         category: created.category,
+        generationMode: created.generationMode ?? 'txt2img',
         tags: created.tags,
         imageKeys: created.imageKeys,
         favorite: created.favorite ?? false,
@@ -313,6 +332,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         contentJa: contentJa.trim() || undefined,
         note: note.trim() || undefined,
         category,
+        generationMode,
         tags,
         favorite,
         imageKeys: sortedImages.map((i) => i.storageKey),
@@ -338,6 +358,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           contentJa: created.contentJa ?? undefined,
           note: created.note ?? undefined,
           category: created.category,
+          generationMode: created.generationMode ?? 'txt2img',
           tags: created.tags,
           imageKeys: created.imageKeys,
           favorite: created.favorite ?? false,
@@ -402,9 +423,9 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   }, [content, contentEn, contentJa, contentLang, antdMessage, t]);
 
   const handleEnterEdit = useCallback(() => {
-    setSavedState({ title, content, contentEn, contentJa, note, category, tags, favorite, images, localPreviews });
+    setSavedState({ title, content, contentEn, contentJa, note, category, generationMode, tags, favorite, images, localPreviews });
     setViewMode('edit');
-  }, [title, content, contentEn, contentJa, note, category, tags, favorite, images, localPreviews]);
+  }, [title, content, contentEn, contentJa, note, category, generationMode, tags, favorite, images, localPreviews]);
 
   const handleCancelEdit = useCallback(() => {
     if (savedState) {
@@ -414,6 +435,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
       setContentJa(savedState.contentJa);
       setNote(savedState.note);
       setCategory(savedState.category);
+      setGenerationMode(savedState.generationMode);
       setTags(savedState.tags);
       setFavorite(savedState.favorite);
       setImages(savedState.images);
@@ -433,6 +455,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
       contentJa !== savedState.contentJa ||
       note !== savedState.note ||
       category !== savedState.category ||
+      generationMode !== savedState.generationMode ||
       favorite !== savedState.favorite ||
       tags.length !== savedState.tags.length ||
       tags.some((tag, i) => tag !== savedState.tags[i]) ||
@@ -508,11 +531,28 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     setPreviewIdx(0);
   }, []);
 
-  // 点击缩略图切换主预览
+  // 点击缩略图切换选中态(主预览已由链路画布接管,仅保留胶片条高亮)
   const handleSelectPreview = useCallback((idx: number) => {
     setPreviewIdx(idx);
-    panZoom.reset();
-  }, [panZoom.reset]);
+  }, []);
+
+  // 节点详情查看器(征集 #78 验收):画布节点右上角按钮 → 调起统一资源浏览器(只读,无删除/重命名)
+  const [viewerImage, setViewerImage] = useState<PromptImage | null>(null);
+  const handleOpenImageDetail = useCallback((storageKey: string) => {
+    const img = images.find((i) => i.storageKey === storageKey);
+    if (img) setViewerImage(img);
+  }, [images]);
+  const viewerAsset: AssetDetailData | null = viewerImage ? {
+    id: viewerImage.id,
+    title: title || '提示词图片',
+    kind: 'image',
+    bytes: 0,
+    data: {
+      kind: 'image',
+      storageKey: viewerImage.storageKey,
+      dataUrl: localPreviews[viewerImage.id],
+    },
+  } : null;
 
   // 添加参考图(先上传到后端 storage,再关联到提示词)
   const handleAddImage = useCallback(
@@ -525,7 +565,10 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
           setUploadingProgress((prev) => ({ ...prev, [uploadId]: pct }));
         });
-        await storeAddAssets([uploaded]);
+        // 征集 #83 修复:提示词附图禁止注册进「我的资产」—— 旧代码 storeAddAssets([uploaded])
+        // 会把每张附图写入资产库并被同步推云(用户反馈"提示词录入时资产库多出图片"的泄漏源)。
+        // 附图仅经 PromptImage(storageKey)关联提示词;展示走 usePreviewImage/getResourceUrl,
+        // 后端键无需本地资产记录也能访问(与画布拖拽上传同契约)。
         const storageKey = uploaded.data.kind === 'image' || uploaded.data.kind === 'video' || uploaded.data.kind === 'audio'
           ? (uploaded.data as { storageKey?: string }).storageKey ?? ''
           : '';
@@ -579,13 +622,6 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     setImages((prev) => prev.map((i) => (i.id === img.id ? { ...i, role } : i)));
   }, []);
 
-  // S2: 后端图片 URL 不拼接 token,预览大图经 useAuthImageUrl 认证(fetch + Authorization header → blob URL)
-  const previewImage = images.length > 0 && previewIdx < images.length ? images[previewIdx]! : undefined;
-  const previewRawSrc = previewImage
-    ? (localPreviews[previewImage.id] || getResourceUrl(previewImage.storageKey, 'full') || '')
-    : '';
-  const authPreviewSrc = useAuthImageUrl(previewRawSrc || undefined);
-
   if (loading) {
     return (
       <div style={pageStyle(theme, !!props.modal)}>
@@ -638,39 +674,17 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           <div style={modalBodyGridStyle(isMobile)}>
             {/* 左侧：图片预览区 - 自适应各种比例(1:1 / 3:2 / 2:3 / 16:9 等) */}
             <div style={previewPanelStyle(isMobile)}>
-              {/* 大图预览舞台 - 居中 contain, 背景棋盘格(统一图片查看框架) */}
-              {images.length > 0 && previewIdx < images.length ? (
-                <ImageViewerStage
-                  src={authPreviewSrc || previewRawSrc}
-                  alt=""
-                  panZoom={panZoom}
-                  containerStyle={previewStageStyle(theme)}
-                  imgStyle={previewImageStyle}
-                  onImgError={(e) => {
-                    e.currentTarget.style.opacity = '0.3';
-                  }}
-                >
-                  {/* 封面标记 */}
-                  {images[previewIdx]?.role === 'cover' && (
-                    <div style={coverBadgeStyle}>
-                      <Star size={11} fill="currentColor" />
-                      {t('promptCreate.imageRoleCover')}
-                    </div>
-                  )}
-                  {/* 图片计数 */}
-                  <div style={imageCounterStyle}>
-                    {previewIdx + 1} / {images.length}
-                  </div>
-                  {/* 垂直缩放工具栏 - 右下角 */}
-                  <ZoomToolbar panZoom={panZoom} orientation="vertical" style={{ position: 'absolute', bottom: 10, right: 10 }} />
-                </ImageViewerStage>
-              ) : (
-                <div style={previewStageStyle(theme)}>
-                  <div style={emptyPreviewStyle}>
-                    <span style={{ fontSize: 12, opacity: 0.5 }}>{t('promptCreate.noImages')}</span>
-                  </div>
-                </div>
-              )}
+              {/* 提示词链路只读画布(征集 #79/Plan#47):参考图→提示词→生成图忠实还原;
+                  节点不可移动、仅视口缩放+平移;选图/角色指派仍走下方胶片条 */}
+              <div style={{ flex: 1, minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
+                <PromptChainCanvas
+                  content={contentLang === 'en' ? contentEn : contentLang === 'ja' ? contentJa : content}
+                  mode={generationMode}
+                  images={images}
+                  localPreviews={localPreviewByStorageKey}
+                  onOpenDetail={handleOpenImageDetail}
+                />
+              </div>
               {/* 缩略图胶片条 */}
               <div style={filmstripStyle()}>
                 {images.map((img, idx) => {
@@ -702,6 +716,17 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                           onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
                           onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; }}
                         >
+                          {/* 输入/输出标记切换(征集 #78 验收):参考图=输入 ↔ 输出;封面由右侧星标按钮单独指派 */}
+                          {!isCover && (
+                            <button
+                              type="button"
+                              style={thumbActionBtnStyle}
+                              onClick={(e) => { e.stopPropagation(); handleChangeImageRole(img, img.role === 'reference' ? 'output' : 'reference'); }}
+                              title={img.role === 'reference' ? t('promptCreate.markOutput') : t('promptCreate.markInput')}
+                            >
+                              {img.role === 'reference' ? <ArrowRightIcon size={11} /> : <ArrowLeftIcon size={11} />}
+                            </button>
+                          )}
                           {!isCover && (
                             <button
                               type="button"
@@ -788,6 +813,25 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                     disabled={viewMode === 'view'}
                     size="small"
                   />
+                </div>
+              </div>
+              {/* 生成模式(征集 #79/Plan#47):征集 #78 验收拍板移除切换控件 —— 布局恒按图生图式展示,
+                  模式字段仅落库留档(存量/公共默认文生图),此处只读展示 */}
+              <div style={formSectionStyle()}>
+                <label style={formLabelStyle(theme)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M12 3l1.9 5.7 5.7 1.9-5.7 1.9L12 18.2l-1.9-5.7-5.7-1.9 5.7-1.9z"/></svg>
+                  {t('promptCreate.generationMode')}
+                </label>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                  color: theme.toolbar.text, opacity: 0.8, padding: '4px 0',
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 9999,
+                    background: `${theme.toolbar.accent}1a`, color: theme.toolbar.accent,
+                  }}>
+                    {generationMode === 'img2img' ? t('promptCreate.modeImg2Img') : t('promptCreate.modeTxt2Img')}
+                  </span>
                 </div>
               </div>
               {/* 备注 */}
@@ -1060,37 +1104,17 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           </>)
       : isMobile ? (
         <div style={contentStyle(true)} className="zx-thin-scroll">
-          {/* 移动端: 大图预览 + 胶片条放在顶部 */}
+          {/* 移动端: 链路画布 + 胶片条放在顶部(征集 #79) */}
           <div style={previewPanelStyle(isMobile)}>
-            {images.length > 0 && previewIdx < images.length ? (
-              <ImageViewerStage
-                src={authPreviewSrc || previewRawSrc}
-                alt=""
-                panZoom={panZoom}
-                containerStyle={previewStageStyle(theme)}
-                imgStyle={previewImageStyle}
-                onImgError={(e) => {
-                  e.currentTarget.style.opacity = '0.3';
-                }}
-              >
-                {images[previewIdx]?.role === 'cover' && (
-                  <div style={coverBadgeStyle}>
-                    <Star size={11} fill="currentColor" />
-                    {t('promptCreate.imageRoleCover')}
-                  </div>
-                )}
-                <div style={imageCounterStyle}>
-                  {previewIdx + 1} / {images.length}
-                </div>
-                <ZoomToolbar panZoom={panZoom} orientation="vertical" style={{ position: 'absolute', bottom: 10, right: 10 }} />
-              </ImageViewerStage>
-            ) : (
-              <div style={previewStageStyle(theme)}>
-                <div style={emptyPreviewStyle}>
-                  <span style={{ fontSize: 12, opacity: 0.5 }}>{t('promptCreate.noImages')}</span>
-                </div>
-              </div>
-            )}
+            <div style={{ flex: 1, minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
+              <PromptChainCanvas
+                content={contentLang === 'en' ? contentEn : contentLang === 'ja' ? contentJa : content}
+                mode={generationMode}
+                images={images}
+                localPreviews={localPreviewByStorageKey}
+                onOpenDetail={handleOpenImageDetail}
+              />
+            </div>
             <div style={filmstripStyle()}>
               {images.map((img, idx) => {
                 const thumbSrc = localPreviews[img.id] || getResourceUrl(img.storageKey, 'preview') || '';
@@ -1418,6 +1442,11 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           )}
         </div>
       )}
+
+      {/* 节点详情查看器(征集 #78 验收):画布节点右上角按钮 → 调起统一资源浏览器(只读,无删除/重命名)。
+          层级约定(征集 #80 三次补修定稿):项目全局 zIndexPopupBase=20000(antd-theme-provider),
+          antd 嵌套弹窗自动升层 —— 禁止手动传 zIndex(传小值如 2000 会被压到外层 Modal 之下,实测遮挡根因) */}
+      {viewerAsset && <AssetDetailViewer asset={viewerAsset} onClose={() => setViewerImage(null)} />}
     </div>
   );
 }
@@ -1774,79 +1803,7 @@ function previewPanelStyle(isMobile?: boolean): CSSProperties {
   };
 }
 
-function previewStageStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    flex: 1,
-    minHeight: 340,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: isDark ? '#1c1917' : '#f5f5f4',
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-    // 棋盘格背景 - 检测透明图片
-    backgroundImage: isDark
-      ? `linear-gradient(45deg, #211d1a 25%, transparent 25%), linear-gradient(-45deg, #211d1a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #211d1a 75%), linear-gradient(-45deg, transparent 75%, #211d1a 75%)`
-      : `linear-gradient(45deg, #e8e6e3 25%, transparent 25%), linear-gradient(-45deg, #e8e6e3 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e8e6e3 75%), linear-gradient(-45deg, transparent 75%, #e8e6e3 75%)`,
-    backgroundSize: '20px 20px',
-    backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
-  };
-}
-
-const previewImageStyle: CSSProperties = {
-  maxWidth: '100%',
-  maxHeight: '100%',
-  objectFit: 'contain',
-  display: 'block',
-  borderRadius: 4,
-  // 阴影让图片在棋盘格上更立体
-  filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.15))',
-};
-
-const coverBadgeStyle: CSSProperties = {
-  position: 'absolute',
-  top: 10,
-  left: 10,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '4px 9px',
-  borderRadius: 6,
-  background: 'rgba(233,69,96,0.92)',
-  color: '#fff',
-  fontSize: 11,
-  fontWeight: 600,
-  letterSpacing: '0.02em',
-  backdropFilter: 'blur(6px)',
-  boxShadow: '0 2px 8px rgba(233,69,96,0.3)',
-};
-
-const imageCounterStyle: CSSProperties = {
-  position: 'absolute',
-  top: 10,
-  right: 10,
-  padding: '3px 8px',
-  borderRadius: 5,
-  background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
-  fontSize: 11,
-  fontWeight: 500,
-  fontFamily: "'JetBrains Mono', monospace",
-  backdropFilter: 'blur(4px)',
-};
-
-const emptyPreviewStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 10,
-  padding: 48,
-  color: '#78716c',
-};
+// 旧单图预览台样式(棋盘格/封面角标/计数器/空态)已随链路画布改造移除(征集 #79/Plan#47)
 
 function filmstripStyle(): CSSProperties {
   return {

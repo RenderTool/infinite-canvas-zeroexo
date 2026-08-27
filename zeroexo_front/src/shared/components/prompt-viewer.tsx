@@ -54,12 +54,12 @@ export function PromptViewer({
   const kindLabel = t('asset.kindPrompt', 'Prompt');
   const titleText = publicItem?.title || kindLabel;
 
-  // ===================== 派生样式 =====================
+  // ===================== 派生样式(征集 #79/Plan#47:Modal 放大,容纳链路画布) =====================
   const modalBodyStyle: React.CSSProperties = {
     padding: 0,
     background: theme.toolbar.background,
     borderRadius: 14,
-    height: 'calc(100vh - 120px)',
+    height: 'calc(100vh - 96px)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -112,8 +112,8 @@ export function PromptViewer({
       open={open}
       onCancel={handleRequestClose}
       footer={null}
-      width="calc(100vw - 48px)"
-      style={{ maxWidth: 1200 }}
+      width="calc(100vw - 32px)"
+      style={{ maxWidth: 1600 }}
       centered
       destroyOnHidden
       title={
@@ -149,8 +149,9 @@ export function PromptViewer({
         </div>
       }
       closeIcon={
+        /* 征集 #78 验收修复：去掉自定义 onClick —— antd 关闭按钮本身已触发 onCancel，
+           双绑定导致 handleRequestClose 被调两次，脏态下弹两个「丢弃未保存」确认框 */
         <span
-          onClick={handleRequestClose}
           onMouseEnter={(e) => { e.currentTarget.style.background = closeHoverBg; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           style={{

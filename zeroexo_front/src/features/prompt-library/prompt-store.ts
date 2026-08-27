@@ -18,6 +18,9 @@ export const PROMPT_DRAG_MIME = 'application/x-canvas-prompt';
 /** 提示词分类 */
 export type PromptCategory = 'role' | 'scene' | 'prop' | 'style' | 'shot' | 'other';
 
+/** 生成模式(征集 #79):文生图/图生图,存量默认文生图 */
+export type PromptGenerationMode = 'txt2img' | 'img2img';
+
 /** 提示词条目 */
 export interface Prompt {
   id: string;
@@ -29,6 +32,8 @@ export interface Prompt {
   category: PromptCategory;
   tags: string[];
   favorite: boolean;
+  /** 生成模式(旧数据缺省→文生图) */
+  generationMode?: PromptGenerationMode;
   imageKeys?: string[];
   source: 'local' | 'remote' | 'public-import';
   sourceRepo?: string;
@@ -52,6 +57,7 @@ export interface CreatePromptInput {
   category: PromptCategory;
   tags?: string[];
   favorite?: boolean;
+  generationMode?: PromptGenerationMode;
   imageKeys?: string[];
   source?: 'local' | 'remote' | 'public-import';
 }
@@ -66,6 +72,7 @@ export interface UpdatePromptInput {
   category?: PromptCategory;
   tags?: string[];
   favorite?: boolean;
+  generationMode?: PromptGenerationMode;
   imageKeys?: string[];
   source?: 'local' | 'remote' | 'public-import';
 }
@@ -131,6 +138,7 @@ export async function addPrompt(input: CreatePromptInput): Promise<Prompt> {
     category: input.category,
     tags: input.tags ?? [],
     favorite: input.favorite ?? false,
+    generationMode: input.generationMode ?? 'txt2img',
     imageKeys: input.imageKeys,
     source: input.source ?? 'local',
     createdAt: ts,
@@ -158,6 +166,7 @@ export async function updatePrompt(id: string, patch: UpdatePromptInput): Promis
     note: patch.note !== undefined ? patch.note : current.note,
     category: patch.category ?? current.category,
     tags: patch.tags ?? current.tags,
+    generationMode: patch.generationMode ?? current.generationMode,
     favorite: patch.favorite ?? current.favorite,
     imageKeys: patch.imageKeys ?? current.imageKeys,
     source: patch.source ?? current.source,

@@ -50,6 +50,9 @@ export interface AssetDetailViewerProps {
   onClose: () => void;
   onDelete?: () => void;
   onRename?: (title: string) => void;
+  /** 弹窗层级——默认不传!项目全局 zIndexPopupBase=20000 且 antd 嵌套弹窗自动升层,
+   *  手动传小值(如 1000/2000)会被外层 Modal 压住(征集 #80 实测教训);仅特殊场景显式传大值 */
+  zIndex?: number;
 }
 
 // ===== 辅助函数 =====
@@ -118,10 +121,11 @@ export function AssetDetailViewer({
   onClose,
   onDelete,
   onRename,
+  zIndex,
 }: AssetDetailViewerProps): React.ReactElement | null {
   const asset: AssetDetailData | null = assetProp ?? (node ? nodeToAssetDetail(node) : null);
   if (!asset) return null;
-  return <AssetDetailViewerInner asset={asset} onClose={onClose} onDelete={onDelete} onRename={onRename} />;
+  return <AssetDetailViewerInner asset={asset} onClose={onClose} onDelete={onDelete} onRename={onRename} zIndex={zIndex} />;
 }
 
 // ===== 内部实现 =====
@@ -131,9 +135,10 @@ interface InnerProps {
   onClose: () => void;
   onDelete?: () => void;
   onRename?: (title: string) => void;
+  zIndex?: number;
 }
 
-function AssetDetailViewerInner({ asset, onClose, onDelete, onRename }: InnerProps): React.ReactElement {
+function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: InnerProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const data = asset.data;
@@ -352,6 +357,7 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename }: InnerPro
         style={{ maxWidth: 1600 }}
         centered
         destroyOnHidden
+        {...(zIndex !== undefined ? { zIndex } : {})}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
             <span style={{

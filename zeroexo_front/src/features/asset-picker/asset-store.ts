@@ -136,7 +136,7 @@ export async function addAssets(inputs: CreateAssetInput[]): Promise<Asset[]> {
 }
 
 /** 提取素材记录/输入的后端 storageKey(文本等纯元数据资产无存储文件,返回 undefined) */
-function getStorageKeyOfAsset(a: Pick<Asset, 'data'> | CreateAssetInput): string | undefined {
+export function getStorageKeyOfAsset(a: Pick<Asset, 'data'> | CreateAssetInput): string | undefined {
   const d = a.data;
   if (d.kind === 'text') return undefined;
   return d.storageKey;
@@ -168,21 +168,20 @@ export async function updateAsset(id: string, patch: UpdateAssetInput): Promise<
 }
 
 /**
- * 删除单个素材元数据
+ * 删除单个素材元数据(级联:同 storageKey/同 cloudId 孪生记录一并删除,征集 #74 防复活)
  * 仅删除素材记录,不删除底层资源文件。
  * 资源生命周期由后端引用计数管理。
  */
 export async function removeAsset(id: string): Promise<Asset | null> {
-  const list = await readAll();
-  const idx = list.findIndex((a) => a.id === id);
-  if (idx === -1) return null;
-  const removed = list.splice(idx, 1);
-  await writeAll(list);
+  const removed = await removeAssets([id]);
   return removed[0] ?? null;
 }
 
 /**
- * 批量删除素材元数据
+ * 批量删除素材元数据(级联删除孪生记录,征集 #74 修复"删不完复活"循环)
+ *
+ * 背景:同一文件可能对应多条本地记录(同 storageKey 的幽灵孪生/同 cloudId 竞态残留),
+ * 只删选中 id 会让孪生幸存 → 下个同步周期把已删云资产原地复活。级联后绝育。
  * @param ids 要删除的素材 id 数组
  * 仅删除素材记录,不删除底层资源文件(由后端引用计数管理)。
  */
@@ -190,10 +189,23 @@ export async function removeAssets(ids: string[]): Promise<Asset[]> {
   if (ids.length === 0) return [];
   const idSet = new Set(ids);
   const list = await readAll();
+  const directTargets = list.filter((a) => idSet.has(a.id));
+  // 级联键:目标记录的同 storageKey / 同 cloudId 孪生一并删除(文本类无 storageKey,仅按 cloudId)
+  const cascadeKeys = new Set<string>();
+  const cascadeCloudIds = new Set<string>();
+  for (const t of directTargets) {
+    const k = getStorageKeyOfAsset(t);
+    if (k) cascadeKeys.add(k);
+    if (t.cloudId) cascadeCloudIds.add(t.cloudId);
+  }
   const deleted: Asset[] = [];
   const remaining: Asset[] = [];
   for (const a of list) {
-    if (idSet.has(a.id)) deleted.push(a);
+    const k = getStorageKeyOfAsset(a);
+    const hit = idSet.has(a.id)
+      || (!!k && cascadeKeys.has(k))
+      || (!!a.cloudId && cascadeCloudIds.has(a.cloudId));
+    if (hit) deleted.push(a);
     else remaining.push(a);
   }
   await writeAll(remaining);
@@ -210,8 +222,9 @@ export async function clearAllAssets(): Promise<void> {
 
 /**
  * 插入或更新素材(同步拉取时使用)
- * 按 cloudId 匹配已有素材,存在则更新,不存在则插入
- * 竞态防御:同一 cloudId 出现多条(云端创建与本地 markAssetSynced 之间的 pull 竞态)时收敛为一条
+ * 按 cloudId 匹配已有素材,存在则更新,不存在则插入;
+ * 无 cloudId 匹配时再按 storageKey 收敛(征集 #74:幽灵记录与云端同文件命中时归并,不再新建孪生)。
+ * 竞态防御:同一 cloudId 出现多条(云端创建与本地 markAssetSynced 之间的 pull 竞态)时收敛为一条。
  */
 export async function upsertAsset(asset: Asset): Promise<void> {
   const list = await readAll();
@@ -232,9 +245,22 @@ export async function upsertAsset(asset: Asset): Promise<void> {
   const idx = list.findIndex((a) => a.cloudId && a.cloudId === asset.cloudId);
   if (idx >= 0) {
     list[idx] = { ...list[idx], ...asset };
-  } else {
-    list.push(asset);
+    await writeAll(list);
+    return;
   }
+  // storageKey 收敛(征集 #74):同文件已有本地记录时归并(保留本地 id,补全云端身份),
+  // 避免无 cloudId 幽灵记录与云端拉取记录同图并存 → 显示重复/删除后复活。
+  const incomingKey = getStorageKeyOfAsset(asset);
+  if (incomingKey) {
+    const keyIdx = list.findIndex((a) => getStorageKeyOfAsset(a) === incomingKey);
+    if (keyIdx >= 0) {
+      const existing = list[keyIdx]!;
+      list[keyIdx] = { ...existing, ...asset, id: existing.id };
+      await writeAll(list);
+      return;
+    }
+  }
+  list.push(asset);
   await writeAll(list);
 }
 

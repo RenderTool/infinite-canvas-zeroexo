@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.0.0-6c5ce7?style=for-the-badge" alt="version">
+  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.2.0-6c5ce7?style=for-the-badge" alt="version">
   <img src="https://img.shields.io/badge/Active_Development-yellow?style=for-the-badge" alt="active development">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
   <img src="https://img.shields.io/badge/NestJS-10-EA2845?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS">
@@ -25,6 +25,12 @@
 - **Infinite canvas** — Self-built React DOM engine, node orchestration, multi-level LOD, grid spatial index
 - **AI film-out pipeline** — Script → storyboard → shots → finished film; every node can chat with AI
 - **Real-time collaboration** — Yjs CRDT + Hocuspocus, offline-first, timestamp-based conflict rebasing
+
+### Latest Previews (v1.2.0)
+
+| Prompt Viewer — generation-chain canvas | Streaming canvas editing |
+|---|---|
+| ![Prompt Viewer](./提示词查看器.jpg) | ![Streaming canvas editing](./流式画布编辑.jpg) |
 
 ## Product Modules
 

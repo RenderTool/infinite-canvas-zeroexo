@@ -735,7 +735,9 @@ export function NodeGenerateDock({
   // 生成类型由宿主节点类型推导(堆叠不作为生成目标,见下方 return null)
   const mode: GenerationMode = defaultMode(nodeType, configMode);
   const [prompt, setPrompt] = useState(initialPrompt.trim());
-  const [collapsed, setCollapsed] = useState(false);
+  // 默认收起(用户验收反馈:选中节点即弹大面板碍眼):点顶栏细条展开,展开态右上角按钮收起;
+  // 聚焦补偿 NODE_DOCK_SCREEN_HEIGHT 仅预留空间,收起态下无副作用
+  const [collapsed, setCollapsed] = useState(true);
 
   // 订阅视口(锚点换算依赖 viewport scale/offset;图变化由 getAnchorBounds 回调驱动)
   const viewport = useViewport(store);

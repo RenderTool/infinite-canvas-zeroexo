@@ -18,6 +18,7 @@ import {
   upsertAsset,
   markAssetSynced,
   removeAsset,
+  getStorageKeyOfAsset,
 } from '@/features/asset-picker/asset-store.js';
 import type { Asset, AssetKind } from '@/features/asset-picker/index.js';
 import { isOnline } from './sync-store.js';
@@ -61,11 +62,15 @@ interface PresignResponse {
 
 async function pullCloudAssets(): Promise<void> {
   const cloudIds = new Set<string>();
-  // 预先构建本地资产映射,避免 mergeCloudAssetToLocal 中每次扫描全量列表
+  // 预先构建本地资产映射,避免 mergeCloudAssetToLocal 中每次扫描全量列表;
+  // 征集 #74:另建无 cloudId 幽灵记录的 storageKey 映射,同文件命中云端时归并而非新建孪生。
   const localAssetMap = new Map<string, Asset>();
+  const localByKey = new Map<string, Asset>();
   const localAssets = await listAssets();
   for (const a of localAssets) {
     if (a.cloudId) localAssetMap.set(a.cloudId, a);
+    const k = getStorageKeyOfAsset(a);
+    if (k && !a.cloudId && !localByKey.has(k)) localByKey.set(k, a);
   }
 
   let cursor: string | null = null;
@@ -84,8 +89,17 @@ async function pullCloudAssets(): Promise<void> {
           await markAssetSynced(matchById.id, cloud.id, cloud.version, cloud.lastSyncedAt ?? new Date().toISOString());
           local = { ...matchById, cloudId: cloud.id, version: cloud.version, lastSyncedAt: cloud.lastSyncedAt };
           localAssetMap.set(cloud.id, local);
-          // 跳过 mergeCloudAssetToLocal,避免云端旧 text 覆盖本地新编辑的 content
+          // 跳过 mergeCloudAssetToLocal,避免云端旧 text 覆盖本地新编辑的 content。
           continue;
+        }
+        // 征集 #74:无 cloudId 幽灵记录按 storageKey 命中云端同文件 → 归并身份,
+        // 不再新建孪生记录(否则同图两条显示 + 删除后幽灵重推复活)。
+        const ghost = cloud.storageKey ? localByKey.get(cloud.storageKey) : undefined;
+        if (ghost) {
+          await markAssetSynced(ghost.id, cloud.id, cloud.version, cloud.lastSyncedAt ?? new Date().toISOString());
+          localByKey.delete(cloud.storageKey);
+          local = { ...ghost, cloudId: cloud.id, version: cloud.version, lastSyncedAt: cloud.lastSyncedAt };
+          localAssetMap.set(cloud.id, local);
         }
       }
       await mergeCloudAssetToLocal(cloud, local);
@@ -215,7 +229,14 @@ async function mergeCloudAssetToLocal(cloud: CloudAsset, local?: Asset): Promise
 }
 
 async function pushLocalAssets(): Promise<void> {
-  const cloudIds = await fetchCloudAssetIds();
+  const cloudMap = await fetchCloudAssetMap();
+  const cloudIds = new Set(cloudMap.keys());
+  // 征集 #74:云端 storageKey → cloudId 映射 —— 幽灵记录(无 cloudId)若与云端同文件,
+  // 只归并身份不重建(修复"用户在资产页删除后 30s 轮询原地复活"循环)。
+  const cloudIdByKey = new Map<string, string>();
+  for (const [cid, key] of cloudMap) {
+    if (key && !cloudIdByKey.has(key)) cloudIdByKey.set(key, cid);
+  }
   const localList = await listAssets();
 
   for (const local of localList) {
@@ -230,6 +251,18 @@ async function pushLocalAssets(): Promise<void> {
     }
 
     if (!local.cloudId) {
+      const key = getStorageKeyOfAsset(local);
+      const existingCloudId = key ? cloudIdByKey.get(key) : undefined;
+      if (existingCloudId) {
+        // 云端已有同文件:归并身份即完成同步,不再 POST /resources 重建
+        try {
+          await markAssetSynced(local.id, existingCloudId, 0, new Date().toISOString());
+          debugLog(`[sync-service] merged ghost asset ${local.id} into existing cloud asset ${existingCloudId} (same storageKey ${key})`);
+        } catch (err) {
+          debugError(`[sync-service] merge ghost asset ${local.id} failed:`, err);
+        }
+        continue;
+      }
       try {
         await pushAssetToCloud(local);
       } catch (err) {
@@ -239,19 +272,19 @@ async function pushLocalAssets(): Promise<void> {
   }
 }
 
-async function fetchCloudAssetIds(): Promise<Set<string>> {
-  const cloudIds = new Set<string>();
+async function fetchCloudAssetMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   let cursor: string | null = null;
   do {
     const baseQuery = 'category=user';
     const queryStr: string = cursor ? `${baseQuery}&cursor=${encodeURIComponent(cursor)}` : baseQuery;
     const res: CloudAssetList = await apiGet<CloudAssetList>(`/resources?${queryStr}`);
     for (const cloud of res.items) {
-      cloudIds.add(cloud.id);
+      map.set(cloud.id, cloud.storageKey ?? '');
     }
     cursor = res.nextCursor;
   } while (cursor);
-  return cloudIds;
+  return map;
 }
 
 async function pushAssetToCloud(asset: Asset): Promise<string | undefined> {

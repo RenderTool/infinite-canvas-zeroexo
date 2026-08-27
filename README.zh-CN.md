@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.0.0-6c5ce7?style=for-the-badge" alt="version">
+  <img src="https://img.shields.io/badge/ZeroExo_Platform-v1.2.0-6c5ce7?style=for-the-badge" alt="version">
   <img src="https://img.shields.io/badge/Active_Development-yellow?style=for-the-badge" alt="active development">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
   <img src="https://img.shields.io/badge/NestJS-10-EA2845?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS">
@@ -25,6 +25,12 @@
 - **无限画布** — 自研 React DOM 引擎，节点编排、多级 LOD、网格空间索引
 - **AI 出片流水线** — 剧本 → 分镜 → 镜头 → 成片；每个节点可 AI 对话
 - **实时协作** — Yjs CRDT + Hocuspocus，离线优先、时间戳冲突变基
+
+### 最新预览（v1.2.0）
+
+| 提示词查看器（生成链路画布） | 流式画布编辑 |
+|---|---|
+| ![提示词查看器](./提示词查看器.jpg) | ![流式画布编辑](./流式画布编辑.jpg) |
 
 ## 产品模块
 

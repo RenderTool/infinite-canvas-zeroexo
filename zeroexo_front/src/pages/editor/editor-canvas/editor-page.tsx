@@ -1171,6 +1171,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             三态:media 资源态(有内容)隐藏,空节点/生成器态/生成中显示 */}
         {!state.loading && state.editor && state.selectedNodeId && state.selectedNodeType && state.selectedNodeType !== 'script' && state.selectedNodeType !== 'storyboard' && state.selectedNodeType !== 'workbench' && nodeDockVisible ? (
           <NodeGenerateDock
+            key={state.selectedNodeId}
             nodeId={state.selectedNodeId}
             nodeType={state.selectedNodeType as 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media'}
             store={state.editor.store}

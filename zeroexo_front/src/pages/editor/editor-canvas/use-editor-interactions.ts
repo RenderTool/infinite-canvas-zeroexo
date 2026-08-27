@@ -18,7 +18,7 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode, resolveContentUrl } from '@zeroexo/plugin-nodes';
 import type { AssetNodePayload, ReferenceItem } from '@zeroexo/plugin-nodes';
 import { duplicateSubtree } from '@zeroexo/preset-default';
 import { apiGet } from '@/services/api-client.js';
@@ -61,13 +61,14 @@ const NODE_OUTPUT_PIN: Record<string, string> = { text: 'output', image: 'image'
 /** 支持下载的类型:文本/图片/视频/音频/剧本 */
 const DOWNLOADABLE_TYPES = ['text', 'image', 'video', 'audio', 'script'];
 
-/** 节点是否可下载(有内容/有剧集) */
+/** 节点是否可下载(有内容/有 storageKey/有剧集;征集 #82:云端图仅有 storageKey 也必须可下载) */
 function isNodeDownloadable(node: NodeRecord): boolean {
   if (!DOWNLOADABLE_TYPES.includes(node.type)) return false;
   const data = (node.data ?? {}) as Record<string, unknown>;
   const hasContent = !!((data.content as string | undefined)?.trim());
+  const hasStorageKey = !!((data.storageKey as string | undefined)?.trim());
   const hasEpisodes = !!((data.episodes as unknown[] | undefined)?.length);
-  return hasContent || (node.type === 'script' && hasEpisodes);
+  return hasContent || hasStorageKey || (node.type === 'script' && hasEpisodes);
 }
 
 /** 触发浏览器下载(锚点点击);revoke=true 时点击后释放临时 blob URL */
@@ -84,7 +85,8 @@ function triggerAnchorDownload(url: string, filename: string, revoke = false): v
 /**
  * 下载单个节点内容:
  * - 剧本: 序列化 episodes 为 .txt;文本: content → .txt
- * - 媒体(image/video/audio): content 二进制(非 blob:/data: 先 fetch 换 blob)
+ * - 媒体(image/video/audio): 有 storageKey 优先经 resolveContentUrl 重建
+ *   (刷新后 blob 失效 / resources 键需认证,征集 #82),回退 content 二进制
  */
 async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
   const data = (node.data ?? {}) as Record<string, unknown>;
@@ -108,10 +110,14 @@ async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
     );
     return;
   }
-  const content = data.content as string | undefined;
-  if (!content) return;
+  const content = (data.content as string | undefined) ?? '';
+  const storageKey = data.storageKey as string | undefined;
+  if (!content && !storageKey) return;
   const mimeType = (data.mimeType as string) || '';
-  const ext = mimeType ? (mimeType.split('/')[1] || 'bin') : 'bin';
+  // 扩展名:优先 mimeType;缺失时按节点类型兜底(截帧节点无 mimeType,征集 #82 防 .bin)
+  const ext = mimeType
+    ? (mimeType.split('/')[1] || 'bin')
+    : (node.type === 'image' ? 'png' : node.type === 'video' ? 'mp4' : node.type === 'audio' ? 'mp3' : 'bin');
   // 文件名:优先节点标题(批量下载时可区分),无标题时时间戳兜底
   const baseName = (node.title ?? '').trim();
   let filename = baseName ? `${baseName}.${ext}` : '';
@@ -120,13 +126,23 @@ async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
     const pad = (n: number): string => n.toString().padStart(2, '0');
     filename = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.${ext}`;
   }
-  const isBlob = content.startsWith('blob:');
-  const isData = content.startsWith('data:');
-  let downloadUrl = content;
+  // 征集 #82:有 storageKey 先重建可用 URL(本地键→新 blob;resources 键→认证后 blob),
+  // 修复刷新后失效 blob 直接下载坏掉的问题(截帧图片节点重灾区)
+  let sourceUrl = content;
+  if (storageKey) {
+    try {
+      const resolved = await resolveContentUrl(storageKey, content);
+      if (resolved) sourceUrl = resolved;
+    } catch { /* 回退 content */ }
+  }
+  if (!sourceUrl) return;
+  const isBlob = sourceUrl.startsWith('blob:');
+  const isData = sourceUrl.startsWith('data:');
+  let downloadUrl = sourceUrl;
   let needsRevoke = false;
   if (!isBlob && !isData) {
     try {
-      const res = await fetch(content);
+      const res = await fetch(sourceUrl);
       const blob = await res.blob();
       downloadUrl = URL.createObjectURL(blob);
       needsRevoke = true;
@@ -660,9 +676,11 @@ export function useEditorInteractions({
         const isAssetNode = nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio' || nodeType === 'script';
         const nodeData = (node?.data ?? {}) as Record<string, unknown>;
         const hasContent = !!((nodeData['content'] as string)?.trim());
+        // 征集 #82:仅有 storageKey 的云端图也必须可下载(截帧/上传/云同步图片全覆盖)
+        const hasStorageKey = !!((nodeData['storageKey'] as string)?.trim());
         const hasEpisodes = !!((nodeData['episodes'] as unknown[])?.length);
-        const canDownload = isAssetNode && (hasContent || (nodeType === 'script' && hasEpisodes));
-        const canSaveAsset = isAssetNode && (hasContent || (nodeType === 'script' && hasEpisodes));
+        const canDownload = isAssetNode && (hasContent || hasStorageKey || (nodeType === 'script' && hasEpisodes));
+        const canSaveAsset = isAssetNode && (hasContent || hasStorageKey || (nodeType === 'script' && hasEpisodes));
 
         const items: ContextMenuItem[] = [
           // ===== 聚焦置顶(测试画布验证最高频;组走 bounds 含空组回退) =====

@@ -1312,6 +1312,9 @@
     "content": "Content",
     "contentPlaceholder": "Enter prompt content",
     "category": "Category",
+    "generationMode": "Generation Mode",
+    "modeTxt2Img": "Text-to-Image",
+    "modeImg2Img": "Image-to-Image",
     "categoryRole": "Character",
     "categoryScene": "Scene",
     "categoryStyle": "Style",
@@ -1323,7 +1326,10 @@
     "favorite": "Favorite",
     "imageRole": "Image role",
     "imageRoleReference": "Reference",
+    "imageRoleInput": "Input",
     "imageRoleOutput": "Output",
+    "markInput": "Mark as input (reference)",
+    "markOutput": "Mark as output (generated)",
     "imageRoleCover": "Cover",
     "imagesTitle": "Reference images",
     "imageEmpty": "No images yet",
@@ -2002,6 +2008,17 @@
     "discardUnsavedContent": "Your current edits have not been saved. Exiting will discard these temporary changes.",
     "discardAndExit": "Discard and Exit",
     "continueEditing": "Continue Editing"
+  },
+  "promptChain": {
+    "modeTxt2Img": "Text-to-Image",
+    "modeImg2Img": "Image-to-Image",
+    "reference": "Reference",
+    "output": "Output",
+    "promptNode": "Prompt",
+    "emptyPrompt": "(Prompt content is empty)",
+    "noReference": "No reference images",
+    "noOutput": "No output images recorded",
+    "tapToExpand": "Click to expand"
   },
   "policyEditor": {
     "insertImage": "Insert Image",

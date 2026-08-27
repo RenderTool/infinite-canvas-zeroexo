@@ -1293,6 +1293,9 @@
     "content": "内容",
     "contentPlaceholder": "プロンプト内容を入力",
     "category": "カテゴリ",
+    "generationMode": "生成モード",
+    "modeTxt2Img": "テキストから画像",
+    "modeImg2Img": "画像から画像",
     "categoryRole": "キャラクター",
     "categoryScene": "シーン",
     "categoryStyle": "スタイル",
@@ -1304,7 +1307,10 @@
     "favorite": "お気に入り",
     "imageRole": "画像用途",
     "imageRoleReference": "参考",
+    "imageRoleInput": "入力",
     "imageRoleOutput": "出力",
+    "markInput": "入力（参照画像）としてマーク",
+    "markOutput": "出力（生成画像）としてマーク",
     "imageRoleCover": "カバー",
     "imagesTitle": "参考画像",
     "imageEmpty": "画像がまだありません",
@@ -1980,6 +1986,17 @@
     "discardUnsavedContent": "現在の編集内容は保存されていません。終了するとこれらの一時的な変更は破棄されます。",
     "discardAndExit": "破棄して終了",
     "continueEditing": "編集を続ける"
+  },
+  "promptChain": {
+    "modeTxt2Img": "テキストから画像",
+    "modeImg2Img": "画像から画像",
+    "reference": "参照画像",
+    "output": "生成画像",
+    "promptNode": "プロンプト",
+    "emptyPrompt": "（プロンプト内容が空です）",
+    "noReference": "参照画像なし",
+    "noOutput": "生成画像が未登録",
+    "tapToExpand": "クリックで展開"
   },
   "policyEditor": {
     "insertImage": "画像を挿入",

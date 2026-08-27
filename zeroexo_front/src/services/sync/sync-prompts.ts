@@ -21,6 +21,8 @@ interface CloudPrompt {
   note?: string | null;
   category: string;
   tags: string[];
+  /** 生成模式(征集 #79):文生图/图生图,旧数据缺省→文生图 */
+  generationMode?: string | null;
   source: string;
   sourceRepo?: string | null;
   favorite: boolean;
@@ -62,6 +64,7 @@ async function pushPromptToCloud(localOrId: Prompt | string): Promise<void> {
       category: local.category,
       tags: local.tags,
       favorite: local.favorite,
+      generationMode: local.generationMode ?? 'txt2img',
       imageKeys: local.imageKeys,
     });
   } else {
@@ -74,6 +77,7 @@ async function pushPromptToCloud(localOrId: Prompt | string): Promise<void> {
       category: local.category,
       tags: local.tags,
       favorite: local.favorite,
+      ...(local.generationMode !== undefined ? { generationMode: local.generationMode } : {}),
       imageKeys: local.imageKeys,
     });
   }
@@ -133,6 +137,7 @@ async function mergeCloudPromptToLocal(cloud: CloudPrompt, local?: Prompt): Prom
       category: cloud.category as Prompt['category'],
       tags: cloud.tags,
       favorite: cloud.favorite,
+      generationMode: (cloud.generationMode === 'img2img' ? 'img2img' : 'txt2img') as Prompt['generationMode'],
       imageKeys: cloud.imageKeys ?? undefined,
       source: cloud.source as 'local' | 'remote',
       sourceRepo: cloud.sourceRepo ?? undefined,
@@ -157,6 +162,7 @@ async function mergeCloudPromptToLocal(cloud: CloudPrompt, local?: Prompt): Prom
       category: cloud.category as Prompt['category'],
       tags: cloud.tags,
       favorite: cloud.favorite,
+      generationMode: (cloud.generationMode === 'img2img' ? 'img2img' : 'txt2img') as Prompt['generationMode'],
       imageKeys: cloud.imageKeys ?? undefined,
       sourceRepo: cloud.sourceRepo ?? undefined,
       version: cloud.version,

@@ -9,6 +9,9 @@ import { apiFetch } from '@/services/api-client.js';
 
 export type PromptCategory = 'role' | 'scene' | 'prop' | 'style' | 'shot' | 'other';
 
+/** 生成模式(征集 #79/Plan#47):文生图/图生图,存量默认文生图 */
+export type PromptGenerationMode = 'txt2img' | 'img2img';
+
 export interface Prompt {
   id: string;
   ownerId: string;
@@ -19,6 +22,8 @@ export interface Prompt {
   note?: string | null;
   category: PromptCategory;
   tags: string[];
+  /** 生成模式(后端缺省/旧数据均回退文生图) */
+  generationMode?: PromptGenerationMode | null;
   imageKeys: string[];
   favorite: boolean;
   folderId: string | null;
@@ -35,6 +40,7 @@ export interface CreatePromptInput {
   note?: string;
   category?: PromptCategory;
   tags?: string[];
+  generationMode?: PromptGenerationMode;
   imageKeys?: string[];
   favorite?: boolean;
   folderId?: string | null;

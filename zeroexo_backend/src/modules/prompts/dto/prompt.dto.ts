@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   MaxLength,
@@ -88,6 +89,14 @@ export class CreatePromptDto {
   @IsArray()
   @IsString({ each: true })
   imageKeys?: string[];
+
+  @ApiPropertyOptional({
+    enum: ['txt2img', 'img2img'],
+    description: '生成模式(征集 #79):文生图/图生图,缺省文生图',
+  })
+  @IsOptional()
+  @IsIn(['txt2img', 'img2img'])
+  generationMode?: 'txt2img' | 'img2img';
 }
 
 /**
@@ -165,6 +174,14 @@ export class UpdatePromptDto {
   @IsArray()
   @IsString({ each: true })
   imageKeys?: string[];
+
+  @ApiPropertyOptional({
+    enum: ['txt2img', 'img2img'],
+    description: '生成模式(征集 #79):文生图/图生图',
+  })
+  @IsOptional()
+  @IsIn(['txt2img', 'img2img'])
+  generationMode?: 'txt2img' | 'img2img';
 }
 
 /**

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Scan } from 'lucide-react';
 import { Tooltip } from 'antd';
 
 // ===== 缩放/平移 Hook =====
@@ -44,7 +44,9 @@ export interface ImagePanZoom {
   imgTransformStyle: CSSProperties;
 }
 
-export function useImagePanZoom(): ImagePanZoom {
+export function useImagePanZoom(options?: { panAlways?: boolean }): ImagePanZoom {
+  // panAlways(征集 #78 验收拍板):任意缩放级别都允许拖拽平移(默认仅 scale>1)
+  const panAlways = options?.panAlways ?? false;
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -89,14 +91,14 @@ export function useImagePanZoom(): ImagePanZoom {
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (scale <= 1) return;
+    if (!panAlways && scale <= 1) return;
     // 阻止浏览器默认行为(图片原生拖拽 / 文本选择),否则 pointermove 会被浏览器长任务阻塞主线程
     e.preventDefault();
     isDragging.current = true;
     // 拖拽期间临时开启 GPU 合成层,结束后移除(避免超大图常驻纹理层导致重传卡顿)
     if (imgRef.current) imgRef.current.style.willChange = 'transform';
     lastMouse.current = { x: e.clientX, y: e.clientY };
-  }, [scale]);
+  }, [scale, panAlways]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isDragging.current) return;
@@ -365,7 +367,8 @@ export function ZoomToolbar({ panZoom, orientation = 'horizontal', style }: Zoom
         <button type="button" onClick={panZoom.zoomIn} style={btnStyle}><ZoomIn size={13} /></button>
       </Tooltip>
       <Tooltip title={t('resourceViewer.reset')}>
-        <button type="button" onClick={panZoom.reset} style={btnStyle}><Maximize2 size={13} /></button>
+        {/* 重置/适配图标改用 Scan(取景框语义):原 Maximize2 与全屏按钮视觉撞车(征集 #78 验收) */}
+        <button type="button" onClick={panZoom.reset} style={btnStyle}><Scan size={13} /></button>
       </Tooltip>
     </div>
   );

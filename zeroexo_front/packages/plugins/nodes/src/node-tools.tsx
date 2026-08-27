@@ -381,6 +381,10 @@ export function getVideoTools(): ToolDefinition[] {
         { key: 'first', label: '截首帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'first'); } },
         { key: 'last', label: '截尾帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'last'); } },
         { key: 'current', label: '截取当前帧', run: (node, ctx) => { void captureAndCreateImageNode(node, ctx, 'current'); } },
+        // 征集 #81:截帧直接下载成图片(不建节点)
+        { key: 'download-first', label: '下载首帧图片', run: (node) => { void captureAndDownloadFrame(node, 'first'); } },
+        { key: 'download-last', label: '下载尾帧图片', run: (node) => { void captureAndDownloadFrame(node, 'last'); } },
+        { key: 'download-current', label: '下载当前帧图片', run: (node) => { void captureAndDownloadFrame(node, 'current'); } },
       ],
       run: () => {},
     },
@@ -529,15 +533,14 @@ export function createStackNode(node: NodeRecord, ctx: ToolContext): void {
   ctx.commandQueue.execute(new AddNodeCommand(stackNode));
 }
 
-/** 截取视频帧并创建新图片节点 */
-async function captureAndCreateImageNode(
+/** 截帧公共管线(征集 #81 抽取):seek + drawImage + toBlob + 帧号标签,建节点与下载共用 */
+async function captureVideoFrame(
   node: NodeRecord,
-  ctx: ToolContext,
   frameType: 'first' | 'last' | 'current',
-): Promise<void> {
+): Promise<{ blob: Blob; width: number; height: number; frameLabel: string } | null> {
   const data = (node.data ?? {}) as Record<string, unknown>;
   const content = data.content as string | undefined;
-  if (!content) return;
+  if (!content) return null;
 
   // 优先用 data-node-id 找到页面上已渲染的 video 元素
   const existingVid = document.querySelector<HTMLVideoElement>(
@@ -575,7 +578,7 @@ async function captureAndCreateImageNode(
       frameSrc = vid;
     } catch {
       vid.remove();
-      return;
+      return null;
     }
   }
 
@@ -585,15 +588,11 @@ async function captureAndCreateImageNode(
   canvas.width = w;
   canvas.height = h;
   const ctx2d = canvas.getContext('2d');
-  if (!ctx2d) return;
+  if (!ctx2d) return null;
   ctx2d.drawImage(frameSrc, 0, 0, w, h);
 
-  // 转为 blob 并存储到 image_files
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) return;
-
-  const storageKey = `image:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const blobUrl = await setImageBlob(storageKey, blob);
+  if (!blob) return null;
 
   // 从页面上已渲染的视频元素读取帧信息(帧号/总帧/fps)
   const srcVid = existingVid;
@@ -611,13 +610,47 @@ async function captureAndCreateImageNode(
     frameNumber = playingCurrent;
   }
 
+  return { blob, width: w, height: h, frameLabel: `帧${frameNumber}_${playingTotal}` };
+}
+
+/** 截取视频帧并直接下载成图片(征集 #81:不建节点,文件名 = 节点标题_帧标签) */
+async function captureAndDownloadFrame(
+  node: NodeRecord,
+  frameType: 'first' | 'last' | 'current',
+): Promise<void> {
+  const frame = await captureVideoFrame(node, frameType);
+  if (!frame) return;
+  const url = URL.createObjectURL(frame.blob);
+  const baseName = (node.title ?? '').trim() || '截帧';
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${baseName}_${frame.frameLabel}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // 延迟释放:确保浏览器已开始读取 blob(立即 revoke 部分浏览器会下载失败)
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** 截取视频帧并创建新图片节点 */
+async function captureAndCreateImageNode(
+  node: NodeRecord,
+  ctx: ToolContext,
+  frameType: 'first' | 'last' | 'current',
+): Promise<void> {
+  const frame = await captureVideoFrame(node, frameType);
+  if (!frame) return;
+  const { blob, width: w, height: h, frameLabel } = frame;
+
+  const storageKey = `image:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const blobUrl = await setImageBlob(storageKey, blob);
+
   // 创建新图片节点,偏移到视频节点右下方
   const nodePos = node.position ?? { x: 0, y: 0 };
   const nodeSize = node.size ?? { width: 420, height: 236 };
   const aspect = h / w;
   const imgWidth = 340;
   const imgHeight = Math.round(imgWidth * aspect);
-  const frameLabel = `帧${frameNumber}_${playingTotal}`;
   const nodeTitle = node.title ? `${node.title}_${frameLabel}` : `截帧_${frameLabel}`;
   const newNodeId = `captured-frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const newNode: NodeRecord = {

@@ -381,6 +381,8 @@ model Prompt {
   note         String?
   category     String
   tags         String[]  @default([])
+  /// 生成模式(征集 #79/Plan#47):txt2img=文生图 / img2img=图生图;存量数据默认文生图(零迁移)
+  generationMode String  @default("txt2img")
   source       String    @default("local")
   sourceRepo   String?
   favorite     Boolean   @default(false)
