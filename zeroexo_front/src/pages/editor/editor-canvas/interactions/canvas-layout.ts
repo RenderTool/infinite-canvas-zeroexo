@@ -22,13 +22,7 @@ export function resolveNodeSize(node: NodeRecord, extensions: Map<string, NodeTy
   return resolveNodeSizeContract(node, extensions.get(node.type));
 }
 
-/** 智能布局:新节点生成后自动布局 + 聚焦
- *
- * 直接使用节点当前尺寸参与排列计算（紧凑尺寸即紧凑排列，不临时切换默认尺寸）。
- * 节点视觉上以紧凑尺寸参与布局，缩放动画由 CSS transform scale 以 GPU 加速方式完成。
- * 生成完成后，ResizeNodeCommand 会将节点尺寸设为默认值，
- * 此时再次调用此函数即可用默认尺寸重新排列，对应节点也通过 transform scale(1,1) 展开。
- */
+/** 智能布局:新节点生成后自动布局 + 聚焦(使用 smart 模式,自动识别组/树/游离节点) */
 export function triggerAutoLayoutAndFocus(newIds: string[], ctx: LayoutContext, containerSize: { width: number; height: number }): void {
   const { store, layoutController, getNodeSize, extensions } = ctx;
   if (!store || !layoutController) return;
@@ -87,7 +81,7 @@ export function triggerAutoLayoutAndFocus(newIds: string[], ctx: LayoutContext, 
   });
 }
 
-/** 对新节点 + 直接邻居执行 auto 布局 */
+/** 对新节点 + 直接邻居执行 smart 布局(自动识别组/树/游离节点) */
 function layoutConnectedIds(newIds: string[], graph: any, layoutController: any): void {
   const connectedIds = new Set(newIds);
   for (const nid of newIds) {
@@ -101,7 +95,7 @@ function layoutConnectedIds(newIds: string[], graph: any, layoutController: any)
     });
   }
   if (connectedIds.size >= 2) {
-    layoutController.arrangeSelection([...connectedIds], 'auto');
+    layoutController.arrangeSelection([...connectedIds], 'smart');
   }
 }
 
@@ -154,7 +148,7 @@ export function applyLayoutToGroupMembers(
   let positions: Map<string, { x: number; y: number }>;
   if (op === 'arrange') {
     let edges: { source: string; target: string }[] | undefined;
-    if (mode === 'tree' || mode === 'dagre' || mode === 'auto') {
+    if (mode === 'tree' || mode === 'dagre' || mode === 'auto' || mode === 'smart' || mode === 'force' || mode === 'radial') {
       const graph = store.getGraph();
       const childIdSet = new Set(children.map((c: any) => c.id));
       edges = graph.edges.filter((e: any) => childIdSet.has(e.source.nodeId) && childIdSet.has(e.target.nodeId)).map((e: any) => ({ source: e.source.nodeId, target: e.target.nodeId }));

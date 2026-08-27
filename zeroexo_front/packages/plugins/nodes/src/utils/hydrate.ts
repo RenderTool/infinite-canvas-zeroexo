@@ -11,9 +11,12 @@
  * 4. 若 storageKey 不存在(如 AI 生成的临时内容),直接用 content
  *
  * 渐进式加载(Phase VI.4):
- * - useProgressiveImage 根据视口缩放决定加载缩略图或原图
+ * - useProgressiveImage 根据视口缩放决定加载缩略图或预览图(画布节点永不加载原图,
+ *   征集 #77 用户拍板:原图只在图片浏览器中使用)
  * - 缩小(invK >= PROGRESSIVE_THRESHOLD)时仅加载缩略图,大幅降低内存占用
- * - 放大时优先加载原图,缩略图作为占位符先行显示
+ * - 放大时加载 preview 级(后端无变体自动回退原图,旧图兼容零迁移)
+ * - usePreviewImage 为大槽位(堆叠详情面板/堆叠活跃卡)提供 preview 级展示图,
+ *   同样永不主动拉原图,旧数据无变体时经后端回退/本地兜底链展示原图(兼容唯一出口)
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -93,10 +96,8 @@ async function authorizeMediaUrl(url: string): Promise<string | null> {
   return task;
 }
 
-/** 缩略图阈值: invK ≥ 4(k ≤ 0.25)时只用缩略图 */
+/** 缩略图阈值: invK ≥ 4(k ≤ 0.25)时只用缩略图;低于阈值一律 preview 级(征集 #77 后无 full 档) */
 const THUMBNAIL_THRESHOLD = 4;
-/** 预览图阈值: invK ≥ 2(k ≤ 0.5)时用中等预览图,默认缩放(k=1,invK=1)也走 preview 而非 full */
-const PREVIEW_THRESHOLD = 2;
 
 /**
  * 后端图片 URL: 根据 storageKey 构造 ?size= 参数 URL
@@ -252,19 +253,71 @@ export async function resolveAnyThumbUrl(
 }
 
 /**
+ * preview 级展示图 hook(大槽位:堆叠详情面板大格子/堆叠活跃卡封面)
+ *
+ * 三档图片契约(征集 #77 用户拍板)的中间档:展示层自适应、永不主动拉原图 ——
+ *   画布节点/堆叠详情 → 自适应档(本 hook / useProgressiveImage)
+ *   图片浏览器(AssetDetailViewer) → 高清原图(useHydratedContent)
+ * - resources/ 键: 后端 ?size=preview 认证链路;旧图无 __preview 变体时后端自动回退原图(零迁移)
+ * - 本地 image: 键: resolvePreviewUrl;无变体时经 useHydratedContent 兜底链展示(原图仅作兼容出口)
+ * - 非图片键(视频/音频): 回退 useHydratedContent 行为(视频无尺寸变体概念)
+ */
+export function usePreviewImage(
+  storageKey: string | undefined,
+  content: string,
+): string {
+  const isImageKey = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
+  const fallbackHydrated = useHydratedContent(isImageKey ? undefined : storageKey, content);
+
+  const backendPreview = buildBackendUrl(
+    isImageKey && storageKey?.startsWith('resources/') ? storageKey : undefined,
+    'preview',
+  );
+  const [authPreview, setAuthPreview] = useState('');
+  const [localPreview, setLocalPreview] = useState('');
+
+  // 后端键: JWT 认证换 blob URL(<img> 无法携带 Authorization header)
+  useEffect(() => {
+    if (!backendPreview) { setAuthPreview(''); return; }
+    let cancelled = false;
+    authorizeMediaUrl(backendPreview).then((u) => { if (!cancelled) setAuthPreview(u ?? ''); });
+    return () => { cancelled = true; };
+  }, [backendPreview]);
+
+  // 本地 image: 键: 解析 :preview 变体(旧上传无变体时为空,走兜底链)
+  useEffect(() => {
+    const isLocalImage = !!storageKey && storageKey.startsWith('image:');
+    if (!isLocalImage) { setLocalPreview(''); return; }
+    let cancelled = false;
+    resolvePreviewUrl(storageKey)
+      .then((url) => { if (!cancelled) setLocalPreview(url ?? ''); })
+      .catch(() => { if (!cancelled) setLocalPreview(''); });
+    return () => { cancelled = true; };
+  }, [storageKey]);
+
+  if (!isImageKey) return fallbackHydrated;
+  // 后端键: preview 认证结果;未就绪/失败时经兜底链(旧数据后端自动回退原图)
+  if (backendPreview) return authPreview || fallbackHydrated;
+  // 本地键: preview 变体 > 兜底链(原图仅作旧数据兼容出口)
+  return localPreview || fallbackHydrated;
+}
+
+/**
  * 渐进式图片加载 hook(Phase VI.4)
  *
  * 根据视口缩放(invK = 1/viewport.k)智能选择加载策略:
- * - invK ≥ PROGRESSIVE_THRESHOLD(k ≤ 0.5,画布缩小):只加载缩略图,跳过原图
+ * - invK ≥ THUMBNAIL_THRESHOLD(k ≤ 0.25,画布大幅缩小):只加载缩略图,跳过原图与预览图
  *   → 大幅降低内存占用,支持画布容纳更多图片节点
- * - invK < PROGRESSIVE_THRESHOLD(k > 0.5,画布放大):加载原图,缩略图作为占位符先行显示
+ * - invK < THUMBNAIL_THRESHOLD(画布放大):加载 preview 级,缩略图作为占位符先行显示;
+ *   画布节点永不主动加载原图(征集 #77 用户拍板:原图只在图片浏览器中使用)
  *
- * 旧数据兼容:若 IndexedDB 中无缩略图(旧上传未生成),回退到原图加载,
+ * 旧数据兼容:本地键无缩略图/预览变体时回退到原图加载(兼容唯一出口),
  * 行为与 useHydratedContent 一致,确保已存在的图片不会因缺少缩略图而无法显示。
  *
  * 渲染优先级:
- *   缩小时: thumbnail > full(回退) > content
- *   放大时: full > thumbnail > content(缩略图先显示,原图加载完成后替换)
+ *   缩小时: thumbnail > preview(回退) > content
+ *   放大时: preview > thumbnail > content(缩略图先显示,预览图加载完成后替换)
+ *   后端键: 无 __preview 变体时后端自动回退原图(旧图零迁移)
  *
  * 注意:仅适用于图片类型(storageKey 前缀 'image:');其他类型回退到 useHydratedContent 行为
  *
@@ -282,9 +335,8 @@ export function useProgressiveImage(
 const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
   const fallbackHydrated = useHydratedContent(isImage ? undefined : storageKey, content);
 
-  // 后端键直接构造 URL(带 ?size= 参数),不经过 localforage
-  // 跨设备/跨浏览器场景下,blob URL 无效,必须使用后端 URL
-  const backendFull   = buildBackendUrl(isImage && storageKey?.startsWith('resources/') ? storageKey : undefined, 'full');
+  // 后端键直接构造 URL(带 ?size= 参数),不经过 localforage;
+  // 画布节点档永不主动拉 full(征集 #77),仅 thumb/preview 两档
   const backendPreview = buildBackendUrl(isImage && storageKey?.startsWith('resources/') ? storageKey : undefined, 'preview');
   const backendThumb   = buildBackendUrl(isImage && storageKey?.startsWith('resources/') ? storageKey : undefined, 'thumb');
 
@@ -293,31 +345,25 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
   const [thumb, setThumb] = useState(backendThumb ?? '');
   const [previewState, setPreviewState] = useState<LoadState>(backendPreview ? 'ready' : 'loading');
   const [preview, setPreview] = useState(backendPreview ?? '');
-  const [full, setFull] = useState(backendFull ?? '');
-  const fullLoadedRef = useRef(!!backendFull);
+  const [full, setFull] = useState('');
+  const fullLoadedRef = useRef(false);
   const prevStorageKeyRef = useRef(storageKey);
 
-  // 后端键(resources/ 前缀)经 JWT 认证换取 blob URL(URL 不携带 token,
+  // 后端键经 JWT 认证换取 blob URL(URL 不携带 token,
   // <img> 标签无法发送 Authorization header,直接使用会 403)。
-  // 初始为空串避免闪现 403 破图,认证完成后替换。
+  // 初始为空串避免闪现 403 破图,认证完成后替换。只认证 thumb/preview 两档,
+  // full 档由图片浏览器(AssetDetailViewer)独占,节点层不发起请求。
   const isBackend = isImage && !!storageKey?.startsWith('resources/');
-  const [authFull, setAuthFull] = useState('');
   const [authPreview, setAuthPreview] = useState('');
   const [authThumb, setAuthThumb] = useState('');
 
   useEffect(() => {
     if (!isBackend) {
-      setAuthFull('');
       setAuthPreview('');
       setAuthThumb('');
       return;
     }
     let cancelled = false;
-    if (backendFull) {
-      authorizeMediaUrl(backendFull).then((u) => { if (!cancelled) setAuthFull(u ?? ''); });
-    } else {
-      setAuthFull('');
-    }
     if (backendPreview) {
       authorizeMediaUrl(backendPreview).then((u) => { if (!cancelled) setAuthPreview(u ?? ''); });
     } else {
@@ -330,17 +376,17 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBackend, backendFull, backendPreview, backendThumb]);
+  }, [isBackend, backendPreview, backendThumb]);
 
   // storageKey 变化时重置所有状态(资源替换后重新加载)
   if (prevStorageKeyRef.current !== storageKey) {
     prevStorageKeyRef.current = storageKey;
-    fullLoadedRef.current = !!backendFull;
+    fullLoadedRef.current = false;
     setThumb(backendThumb ?? '');
     setThumbState(backendThumb ? 'ready' : 'loading');
     setPreview(backendPreview ?? '');
     setPreviewState(backendPreview ? 'ready' : 'loading');
-    setFull(backendFull ?? '');
+    setFull('');
   }
 
   // 后端键已经持有 URL,跳过 localforage 异步加载
@@ -348,8 +394,7 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
   // 优先使用 blob URL 避免后端 404, backend URL 作为后备。
   const hasBlobContent = content.startsWith('blob:');
   const wantThumb = isImage && invK >= THUMBNAIL_THRESHOLD;
-  const wantPreview = isImage && invK >= PREVIEW_THRESHOLD && invK < THUMBNAIL_THRESHOLD;
-  const wantFull = isImage && invK < PREVIEW_THRESHOLD;
+  // 放大档(征集 #77):一律 preview 级,原图只作为旧数据无变体时的兼容出口,不再按缩放主动加载
 
   // 解析缩略图(始终加载,~1-5KB极小)
   useEffect(() => {
@@ -381,14 +426,14 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     };
   }, [isImage, storageKey]);
 
-  // 解析中等预览图(仅当 wantPreview 或缩略图缺失时)
+  // 解析中等预览图(放大档恒加载;缩小时仅在缩略图缺失时兜底)
   useEffect(() => {
     if (!isImage || !storageKey) {
       setPreview('');
       setPreviewState('loading');
       return;
     }
-    const shouldLoad = wantPreview || thumbState === 'missing';
+    const shouldLoad = !wantThumb || thumbState === 'missing';
     if (!shouldLoad) {
       setPreview('');
       setPreviewState('loading');
@@ -415,16 +460,16 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     return () => {
       cancelled = true;
     };
-  }, [isImage, storageKey, wantPreview, thumbState]);
+  }, [isImage, storageKey, wantThumb, thumbState]);
 
-  // 解析原图(仅当 wantFull 或缩略图/预览图都缺失时)
+  // 解析原图(仅限兼容出口:本地键缩略图/预览图变体都缺失时,确保旧数据仍能显示)
   useEffect(() => {
     if (!isImage || !storageKey) {
       setFull('');
       fullLoadedRef.current = false;
       return;
     }
-    const shouldLoad = wantFull || (thumbState === 'missing' && previewState === 'missing');
+    const shouldLoad = thumbState === 'missing' && previewState === 'missing';
     if (!shouldLoad) return;
     if (fullLoadedRef.current) return;
 
@@ -443,35 +488,30 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isImage, storageKey, wantFull, thumbState, previewState, content]);
+  }, [isImage, storageKey, thumbState, previewState, content]);
 
   if (!isImage) return fallbackHydrated;
 
-  // 后端键优先:跳过 localforage 异步解析,使用经 JWT 认证后的 blob URL
-  // 跨设备/跨浏览器场景下,blob URL 无效,必须使用后端 URL
-  if (backendFull) {
+  // 后端键优先:跳过 localforage 异步解析,使用经 JWT 认证后的 blob URL(仅 thumb/preview 两档)。
+  // 跨设备/跨浏览器场景下,blob URL 无效,必须使用后端 URL;
+  // 旧图无 __preview 变体时后端自动回退原图,无需前端拉 full。
+  if (backendPreview) {
     // 仅当 content 是 dataURL(非 blob:)时才优先使用,否则使用后端 URL
     const isDataUrl = content.startsWith('data:');
     if (hasBlobContent && !isDataUrl) {
-      // blob URL 在跨设备场景下无效,降级到后端 URL
-      if (wantThumb) return authThumb || authPreview || authFull || content;
-      if (wantPreview) return authPreview || authFull || authThumb || content;
-      return authFull || authPreview || authThumb || content;
+      // blob URL 在跨设备场景下无效,降级到后端 URL(预览档,永不 full)
+      if (wantThumb) return authThumb || authPreview || content;
+      return authPreview || authThumb || content;
     }
-    if (wantThumb) return authThumb || authPreview || authFull || content;
-    if (wantPreview) return authPreview || authFull || authThumb || content;
-    return authFull || authPreview || authThumb || content;
+    if (wantThumb) return authThumb || authPreview || content;
+    return authPreview || authThumb || content;
   }
 
-  // 缩放级别加载策略:
-  // invK >= 4 (k <= 0.25): 缩略图 > 预览图 > 原图 > content
-  // 1.33 <= invK < 4 (0.25 < k <= 0.75): 预览图 > 原图 > 缩略图 > content
-  // invK < 1.33 (k > 0.75): 原图 > 预览图 > 缩略图 > content
+  // 缩放级别加载策略(本地键,征集 #77 后放大档封顶 preview):
+  // invK >= 4 (k <= 0.25): 缩略图 > 预览图 > 原图(兼容) > content
+  // invK < 4 (k > 0.25): 预览图 > 缩略图 > 原图(兼容) > content
   if (wantThumb) {
     return thumb || preview || full || content;
   }
-  if (wantPreview) {
-    return preview || full || thumb || content;
-  }
-  return full || preview || thumb || content;
+  return preview || thumb || full || content;
 }

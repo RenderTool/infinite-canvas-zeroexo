@@ -120,13 +120,13 @@ export function canvasAddNode(ctx: ToolContext): Tool {
   return {
     name: 'canvas_add_node',
     description:
-      '在画布上创建一个节点。返回 canvasOps 由前端执行。type ∈ script/storyboard/image/video/audio/generator/text/config;可带 data(如分镜数据)',
+      '在画布上创建一个节点。返回 canvasOps 由前端执行，**返回的 nodeId 即新节点 id**（后续 focus/update/连线一律用它）。type ∈ script/storyboard/image/video/audio/generator/text/config;可带 data(如分镜数据)',
     parameters: {
       type: 'object',
       properties: {
-        // 契约(SKILL.md):禁止硬编码 ID——缺省时由前端 CanvasOpExecutor 兜底生成,
-        // 避免 LLM 编造 id 与既有节点冲突导致 AddNodeCommand 静默拒绝(节点不出现)
-        id: { type: 'string', description: '节点唯一 id(可选,缺省由前端生成)' },
+        // 契约(SKILL.md):禁止硬编码 ID——缺省时由后端统一生成并回传模型,
+        // 前端 CanvasOpExecutor 收到非空 id 原样使用(agent-node-id-fallback.md 契约)
+        id: { type: 'string', description: '节点唯一 id(可选,缺省由后端生成并在结果中回传)' },
         type: { type: 'string', description: '节点类型(script/storyboard/image/video/audio/generator/text/config)' },
         position: { type: 'object', description: '画布坐标 {x,y}(可选)' },
         title: { type: 'string', description: '节点标题(可选)' },
@@ -137,10 +137,16 @@ export function canvasAddNode(ctx: ToolContext): Tool {
     execute: async (args: any) => {
       const data = args && typeof args.data === 'object' && args.data !== null ? { ...args.data } : {};
       if (ctx.taskId) data.agentTaskId = ctx.taskId;
+      // Plan#43 R3 修订(2026-08-25 实测：创建后拿不到 id 无法聚焦/复核，画布状态异步落库导致空转重试)：
+      // id 统一后端生成并回传模型；前端执行器收到非空 id 原样使用，不会重复生成。
+      const nodeId = typeof args.id === 'string' && args.id.trim()
+        ? args.id
+        : `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       return {
         ok: true,
-        message: '已请求创建画布节点',
-        canvasOps: [{ op: 'add_node', args: { ...args, data } }] as CanvasOp[],
+        nodeId,
+        message: `已请求创建画布节点（nodeId: ${nodeId}，由前端执行渲染）。注意：新节点由前端异步落库，canvas_get_state 随后一两次读不到属正常延迟——禁止因此重复创建，直接用本 nodeId 继续 focus/update，收尾向用户报告即可。`,
+        canvasOps: [{ op: 'add_node', args: { ...args, id: nodeId, data } }] as CanvasOp[],
       };
     },
   };

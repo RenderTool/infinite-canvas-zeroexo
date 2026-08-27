@@ -69,7 +69,8 @@ export function ImageNodeView({
   const { t } = useTranslation();
   const { theme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  // Phase VI.4: 渐进式加载 — 缩小时仅渲染缩略图,放大时加载原图
+  // Phase VI.4: 渐进式加载 — 缩小时仅渲染缩略图,放大时加载 preview 级;
+  // 画布节点永不加载原图(三档图片契约,征集 #77 用户拍板:原图只在图片浏览器中使用)
   // invK 由 NodeLayer 传入(1/viewport.k),用于判断画布缩放级别
   const hydratedContent = useProgressiveImage(data.storageKey, data.content ?? '', invK ?? 1);
   // 使用 hydratedContent 判断是否有内容,避免异步解析期间渲染 <img src=""> 导致浏览器跳转
@@ -84,16 +85,16 @@ export function ImageNodeView({
   useEffect(() => { setImgSrc(hydratedContent); }, [hydratedContent]);
 
   // 后端缩略图/预览图 404 时的降级链:
-  //   当前 URL → data.content(blob/dataURL) → 后端原图 URL(full)
-  //   均失败则不再循环(guard 防抖),避免无限重试
+  //   当前 URL → data.content(blob/dataURL) → 后端 preview 级 URL(后端无变体自动回退原图)
+  //   节点展示层不直连 full 档(征集 #77 三档契约),均失败则不再循环(guard 防抖)
   const handleImgError = (): void => {
     if (data.content && imgSrc !== data.content) {
       setImgSrc(data.content);
       return;
     }
-    const fullBackendUrl = buildBackendUrl(data.storageKey, 'full');
-    if (fullBackendUrl && imgSrc !== fullBackendUrl) {
-      setImgSrc(fullBackendUrl);
+    const previewBackendUrl = buildBackendUrl(data.storageKey, 'preview');
+    if (previewBackendUrl && imgSrc !== previewBackendUrl) {
+      setImgSrc(previewBackendUrl);
     }
   };
 

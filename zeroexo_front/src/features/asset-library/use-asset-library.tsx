@@ -384,9 +384,10 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     const items: PageItem[] = [];
     if (showPrompts) filteredPrompts.forEach((p) => items.push({ type: 'prompt', data: p }));
     if (showAssets) {
-      filteredAssets
-        .filter((a) => (a.kind as string) !== 'script')
-        .forEach((a) => items.push({ type: 'asset', data: a }));
+      // FIX（2026-08-25 实测：剧本存入资产后「全部」视图不可见）：不再在此滤除 script——
+      // material 组已在 filteredAssets 源头排除剧本（L361），「全部」视图应完整展示包括剧本在内的所有资产；
+      // 发送到画布的真实类型由发送入口按 data.kind 判定（见 asset-library-page）
+      filteredAssets.forEach((a) => items.push({ type: 'asset', data: a }));
     }
     if (showScripts) {
       filteredScripts.forEach((a) => items.push({ type: 'asset', data: a }));

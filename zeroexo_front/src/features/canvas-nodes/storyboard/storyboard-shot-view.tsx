@@ -12,10 +12,11 @@ import { Aperture } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { ThumbNav } from '@zeroexo/plugin-nodes';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import type { Shot } from './storyboard-types';
 import { formatLighting, formatEnvironment, entityDisplayName } from './storyboard-utils';
+import { StoryboardGeneratingLoader } from './components/StoryboardGeneratingLoader';
 
 export interface StoryboardShotViewProps {
   shots: Shot[];
@@ -46,7 +47,8 @@ function ShotCover({ shot, dark }: { shot: Shot; dark: boolean }): React.ReactEl
   const { theme } = useTheme();
   const firstImage = shot.images?.[0];
   const fallback = firstImage?.storageKey ? (getResourceUrl(firstImage.storageKey, 'preview') ?? '') : '';
-  const hydrated = useHydratedContent(firstImage?.storageKey ?? '', fallback);
+  // 节点内展示层三档契约(征集 #77):自适应档不拉原图,原图只在图片浏览器
+  const hydrated = usePreviewImage(firstImage?.storageKey ?? '', fallback);
 
   if (hydrated) {
     return <img src={hydrated} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />;
@@ -124,7 +126,7 @@ export const StoryboardShotView = memo(function StoryboardShotView({
   const dialogue = activeShot?.dialogue?.trim();
   const envText = activeShot ? formatEnvironment(activeShot.environment) : '';
   const lightingText = activeShot ? formatLighting(activeShot.lighting) : '';
-  const entityNames = activeShot?.entities.map((e) => entityDisplayName(e)).filter(Boolean).join('、');
+  const entityNames = (activeShot?.entities ?? []).map((e) => entityDisplayName(e)).filter(Boolean).join('、');
   const promptText = activeShot?.prompt?.trim() ?? activeShot?.promptText?.trim() ?? '';
 
   // 生成中覆盖提示
@@ -148,11 +150,10 @@ export const StoryboardShotView = memo(function StoryboardShotView({
       {/* 右侧主区：封面舞台 + 信息条 */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {generating && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: isDark ? 'rgba(23,23,23,0.55)' : 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 24, height: 24, border: '2px solid', borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(15,23,42,0.15)', borderTopColor: accent, borderRadius: '50%', animation: 'zeroexo-spin 1s linear infinite' }} />
-              <span style={{ fontSize: 11, color: textMuted }}>{t('storyboard.generatingEpisode')} {progress ?? 0}%</span>
-            </div>
+          // 2026-08-25 修复:生成中遮罩由裸环形 spinner 改为分镜同款骨架(脉冲点+阶段文案轮播+shimmer 行+进度),
+          // 与生成图片骨架/表格视图生成态统一(规范:禁止环形/网格涟漪等其他形态)
+          <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: isDark ? 'rgba(23,23,23,0.55)' : 'rgba(255,255,255,0.6)', display: 'flex', pointerEvents: 'none' }}>
+            <StoryboardGeneratingLoader status="generating" progress={progress} />
           </div>
         )}
         {/* 封面舞台 */}

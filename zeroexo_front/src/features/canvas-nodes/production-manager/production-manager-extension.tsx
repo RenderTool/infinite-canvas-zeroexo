@@ -1,16 +1,13 @@
 /**
- * production-manager-extension - 统筹节点扩展（Plan#29 主体系统 V3）
+ * production-manager-extension - 统筹节点扩展
  *
  * 注册 'production-manager' 节点类型：一部剧的资产管理器（演员/场景/道具聚合）。
  * 与主体卡同一套尺寸契约（16:9 uniform 620×348）。
- * 胶囊「编辑」→ emit 'productionManager:fullscreen' → 节点视图打开 ProductionManagerModal。
- * 图标契约：胶囊工具图标统一走 CANVAS_NODE_ICONS 模块 Map（见 ../icons.ts），禁止内联 lucide。
+ * 卡片即编辑器，无胶囊菜单工具。
  */
 import type { NodeTypeExtension, NodeRendererProps, NodeRuntimeContract, NodeCapabilities, ToolDefinition } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
-import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import i18next from 'i18next';
-import { CANVAS_NODE_ICONS } from '../icons.js';
 import { ProductionManagerView } from './ProductionManagerView.js';
 import { createProductionManagerDefaultData } from './production-manager-types.js';
 
@@ -36,17 +33,7 @@ function createRuntime(): NodeRuntimeContract {
 }
 
 function getTools(): ToolDefinition[] {
-  return [
-    {
-      // 2026-08-22 胶囊统一契约: 与剧本/分镜/出片完全一致(id/label/title/icon)
-      id: 'edit',
-      label: '编辑',
-      title: '全屏编辑',
-      icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
-      group: 'basic',
-      run: (node) => { nodeActionBus.emit('productionManager:fullscreen', { nodeId: node.id }); },
-    },
-  ];
+  return [];
 }
 
 export function createProductionManagerExtension(

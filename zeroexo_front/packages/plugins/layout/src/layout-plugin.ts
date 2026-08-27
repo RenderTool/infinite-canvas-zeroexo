@@ -70,7 +70,7 @@ class ReorderNodesCommand implements Command {
 // ===== LayoutController =====
 
 export interface LayoutController {
-  /** 排列选中节点(3 模式,需 ≥2 个节点) */
+  /** 排列选中节点(10 模式,需 ≥2 个节点) */
   arrangeSelection(mode: ArrangeMode): void;
   /** 排列指定节点(外部传入节点 ID 列表,用于 AI 生成后自动布局) */
   arrangeSelection(nodeIds: string[], mode: ArrangeMode): void;
@@ -226,34 +226,42 @@ class LayoutControllerImpl implements LayoutController {
     if (nodes.length < 2) return;
     const layoutNodes = nodes.map((n) => this.toLayoutNodeWithSize(n));
     const layoutNodeIds = new Set(layoutNodes.map((n) => n.id));
-    // tree / dagre / auto 模式需要传入 edges
+
+    // 需要边信息的模式
+    const needsEdges: ArrangeMode[] = ['tree', 'dagre', 'smart', 'force', 'radial', 'auto'];
     let edges: { source: string; target: string }[] | undefined;
-    if (mode === 'tree' || mode === 'dagre' || mode === 'auto') {
+    let groups: Map<string, string[]> | undefined;
+
+    if (needsEdges.includes(mode)) {
       const graph = this.store.getGraph();
-      // 构建子节点→父组映射(被 promoteGroupSelection 排除的组内子节点)
-      // 当组被选中时,其子节点不在 layoutNodes 中,但 edges 可能仍引用它们
-      // 需要将这些边提升到父组,让组作为原子单元参与树状布局
+      // 构建子节点→父组映射
       const childToParent = new Map<string, string>();
+      const parentToChildren = new Map<string, string[]>();
       for (const node of graph.nodes) {
         if (node.type === 'group' && layoutNodeIds.has(node.id)) {
+          parentToChildren.set(node.id, []);
           for (const child of graph.nodes) {
             if (child.parentId === node.id) {
               childToParent.set(child.id, node.id);
+              parentToChildren.get(node.id)!.push(child.id);
             }
           }
         }
       }
+      if (parentToChildren.size > 0) {
+        groups = parentToChildren;
+      }
       edges = graph.edges
         .map((e) => ({ source: e.source.nodeId, target: e.target.nodeId }))
         .map((e) => {
-          // 提升被排除子节点的边到父组
           const source = layoutNodeIds.has(e.source) ? e.source : (childToParent.get(e.source) ?? e.source);
           const target = layoutNodeIds.has(e.target) ? e.target : (childToParent.get(e.target) ?? e.target);
           return { source, target };
         })
-        .filter((e) => e.source !== e.target); // 自环过滤
+        .filter((e) => e.source !== e.target);
     }
-    const positions = arrangeNodes(layoutNodes, mode, edges);
+
+    const positions = arrangeNodes(layoutNodes, mode, edges, { groups });
     this.applyPositions(nodes, positions, 'layout-arrange');
   }
 

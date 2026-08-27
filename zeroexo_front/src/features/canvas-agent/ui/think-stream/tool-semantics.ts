@@ -22,6 +22,7 @@ const TOOL_SEMANTICS: Record<string, ToolSemantic> = {
   canvas_set_selection: { label: '选中节点', icon: 'tool' },
   canvas_focus: { label: '聚焦节点', icon: 'tool' },
   canvas_set_config: { label: '调整画布配置', icon: 'tool' },
+  canvas_layout: { label: '智能排列节点', icon: 'tool' },
   create_script: { label: '创作剧本', icon: 'file' },
   create_storyboard: { label: '生成分镜', icon: 'file' },
   workflow_generate: { label: '创建生成工作链', icon: 'tool' },
@@ -49,6 +50,7 @@ const CANVAS_OP_SEMANTICS: Record<string, string> = {
   set_config: '应用画布配置',
   workflow_chain: '展开工作执行链',
   start_storyboard_generate: '启动分镜生成',
+  arrange: '智能排列画布节点',
 };
 
 export function semanticOfCanvasOp(op: string): string {

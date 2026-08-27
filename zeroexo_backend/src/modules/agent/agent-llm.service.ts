@@ -24,6 +24,7 @@ export class AgentLlmService implements LlmService {
       type: string;
       function: { name: string; description: string; parameters: Record<string, unknown> };
     }>;
+    thinking?: 'enabled' | 'disabled';
   }): Promise<{
     message: {
       role: string;
@@ -48,6 +49,7 @@ export class AgentLlmService implements LlmService {
       type: string;
       function: { name: string; description: string; parameters: Record<string, unknown> };
     }>;
+    thinking?: 'enabled' | 'disabled';
     onDelta?: (delta: string) => void;
     onThinkingDelta?: (delta: string) => void;
   }): Promise<{
@@ -92,7 +94,11 @@ export class AgentLlmService implements LlmService {
       }),
       temperature: cfg.agentTemperature ?? 0.7,
       max_tokens: cfg.agentMaxTokens ?? 8192,
-      ...(provider.provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
+      // DeepSeek 深度思考（用户拍板 2026-08-25）：由调用方按 agent 类型决定——canvas_agent 主对话 enabled（推理进 reasoning_content → 前端 ThinkTree 折叠），
+      // 结构化输出子任务 disabled（reasoning_tokens 挤占 max_tokens 致 JSON 截断，Plan#20 P0）；渠道配置 agentThinking 可覆盖
+      ...(provider.provider === 'deepseek'
+        ? { thinking: { type: ((cfg.agentThinking as string) === 'enabled' || ((cfg.agentThinking as string) !== 'disabled' && params.thinking === 'enabled')) ? 'enabled' : 'disabled' } }
+        : {}),
       ...(cfg.agentExtraBody || {}),
     };
 
@@ -131,6 +137,8 @@ export class AgentLlmService implements LlmService {
       // 组装最终消息：content 逐块累积，tool_calls 按 index 合并（流式分片）
       let role = 'assistant';
       let content = '';
+      // Plan#43 B3: <thinking> 标记分流状态(思考归思考通道,正文归正文通道,标签不输出)
+      const thinkState = { inThinking: false, buf: '' };
       const toolCallsMap = new Map<number, {
         id: string;
         type: string;
@@ -172,8 +180,13 @@ export class AgentLlmService implements LlmService {
           const delta = choice.delta ?? {};
           if (delta.role) role = delta.role;
           if (delta.content) {
-            content += delta.content;
-            params.onDelta?.(delta.content);
+            // Plan#43 B3: <thinking> 标记内的增量归思考通道,标签外归正文;content 只累积正文(思考不进对话历史)
+            this.splitThinkingChunk(
+              delta.content,
+              thinkState,
+              (body) => { if (body) { content += body; params.onDelta?.(body); } },
+              (think) => { if (think) params.onThinkingDelta?.(think); },
+            );
           }
           if (delta.reasoning_content) {
             params.onThinkingDelta?.(delta.reasoning_content);
@@ -198,6 +211,13 @@ export class AgentLlmService implements LlmService {
           }
         }
       }
+
+      // Plan#43 B3: 流结束冲刷残余缓冲(未闭合思考归思考,残缺开始标签前缀丢弃)
+      this.finalizeThinkingSplit(
+        thinkState,
+        (body) => { if (body) { content += body; params.onDelta?.(body); } },
+        (think) => { if (think) params.onThinkingDelta?.(think); },
+      );
 
       const toolCalls = toolCallsMap.size > 0
         ? [...toolCallsMap.values()]
@@ -236,6 +256,7 @@ export class AgentLlmService implements LlmService {
       function: { name: string; description: string; parameters: Record<string, unknown> };
     }>;
     stream?: boolean;
+    thinking?: 'enabled' | 'disabled';
   }): Promise<{
     message: {
       role: string;
@@ -283,9 +304,11 @@ export class AgentLlmService implements LlmService {
       // 分镜等结构化长输出需更大上限,默认 8192 防止 JSON 被截断
       max_tokens: cfg.agentMaxTokens ?? 8192,
       // Plan#20 P0: DeepSeek 推理模型默认关闭 thinking——reasoning_tokens 挤占 max_tokens
-      // 预算导致结构化 JSON 输出被截断(渠道配置可显式覆盖);Plan#9 联调修复④同因,
-      // 但渠道级配置会被重置丢失,故沉淀为代码级默认
-      ...(provider.provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
+      // 预算导致结构化 JSON 输出被截断;2026-08-25 用户拍板改为按调用方传入（canvas_agent 主对话 enabled，见 chatStream）;
+      // 渠道级配置会被重置丢失,故沉淀为代码级默认;渠道配置 agentThinking 可覆盖
+      ...(provider.provider === 'deepseek'
+        ? { thinking: { type: ((cfg.agentThinking as string) === 'enabled' || ((cfg.agentThinking as string) !== 'disabled' && params.thinking === 'enabled')) ? 'enabled' : 'disabled' } }
+        : {}),
       // 渠道可选附加参数(优先级最高,可覆盖上方默认)
       ...(cfg.agentExtraBody || {}),
     };
@@ -351,5 +374,66 @@ export class AgentLlmService implements LlmService {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * <thinking> 标记分流（Plan#43 B3）：把 content chunk 按 <thinking>...</thinking> 拆分。
+   * 标记内 → emitThink（思考通道）；标记外 → emitBody（正文通道）；标签本身不输出。
+   * 跨 chunk 的半截标签保留在 state.buf，等下一个 chunk 拼齐再判定。
+   */
+  private splitThinkingChunk(
+    chunk: string,
+    state: { inThinking: boolean; buf: string },
+    emitBody: (s: string) => void,
+    emitThink: (s: string) => void,
+  ): void {
+    const OPEN = '<thinking>';
+    const CLOSE = '</thinking>';
+    state.buf += chunk;
+    for (;;) {
+      if (state.inThinking) {
+        const idx = state.buf.indexOf(CLOSE);
+        if (idx >= 0) {
+          if (idx > 0) emitThink(state.buf.slice(0, idx));
+          state.buf = state.buf.slice(idx + CLOSE.length);
+          state.inThinking = false;
+          continue;
+        }
+        // 未闭合：末尾可能是被截断的闭合标签，保留至多 CLOSE.length-1 字符
+        const keep = Math.min(state.buf.length, CLOSE.length - 1);
+        const safeEnd = state.buf.length - keep;
+        if (safeEnd > 0) emitThink(state.buf.slice(0, safeEnd));
+        state.buf = state.buf.slice(safeEnd);
+        return;
+      }
+      const idx = state.buf.indexOf(OPEN);
+      if (idx >= 0) {
+        if (idx > 0) emitBody(state.buf.slice(0, idx));
+        state.buf = state.buf.slice(idx + OPEN.length);
+        state.inThinking = true;
+        continue;
+      }
+      // 未开始：末尾可能是被截断的开始标签，保留至多 OPEN.length-1 字符
+      const keep = Math.min(state.buf.length, OPEN.length - 1);
+      const safeEnd = state.buf.length - keep;
+      if (safeEnd > 0) emitBody(state.buf.slice(0, safeEnd));
+      state.buf = state.buf.slice(safeEnd);
+      return;
+    }
+  }
+
+  /** 流结束冲刷：未闭合思考整体归思考；残余是 <thinking> 残缺前缀则丢弃，否则归正文 */
+  private finalizeThinkingSplit(
+    state: { inThinking: boolean; buf: string },
+    emitBody: (s: string) => void,
+    emitThink: (s: string) => void,
+  ): void {
+    if (state.buf.length === 0) return;
+    if (state.inThinking) {
+      emitThink(state.buf);
+    } else if (!'<thinking>'.startsWith(state.buf)) {
+      emitBody(state.buf);
+    }
+    state.buf = '';
   }
 }

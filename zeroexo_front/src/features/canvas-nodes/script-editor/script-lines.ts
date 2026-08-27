@@ -129,8 +129,9 @@ export function serializeScriptLines(lines: ScriptLine[]): string {
 /**
  * 纯文本 → 剧本结构化 HTML（Agent 生成剧本落地用）
  *
- * 启发式识别好莱坞格式：INT./EXT./内景/外景 → 场景标题；"角色: 对白" → 角色+对白两行；
- * 全大写短行 → 角色名；切至/淡入/淡出 → 转场；其余 → 动作段落。
+ * 启发式识别好莱坞格式：INT./EXT./内景/外景 → 场景标题；"角色: 对白" → 角色+对白两行（对白开头（…）拆为括注行）；
+ * 独立（…）行 → 括注；全大写短行 → 角色名；切至/淡入/淡出 → 转场；
+ * 旧式【场景 N: …】/【转场: …】兼容识别；其余 → 动作段落。
  * 无法识别的行统一按 action 保留，保证内容不丢。
  */
 export function plainTextToScriptHtml(text: string): string {
@@ -140,6 +141,49 @@ export function plainTextToScriptHtml(text: string): string {
   for (const raw of rawLines) {
     const lineText = raw.trim();
     if (!lineText) continue;
+    // 旧式场号/转场兼容（【场景 N: 内/外景 地点 - 时间】）：不识别会被对白正则误拆成角色+对白，造成存量剧本渲染崩坏；
+    // 必须在 MD 标题/对白规则之前处理（含冒号会命中对白正则）
+    const bracket = lineText.match(/^【([^【】]*)】$/);
+    if (bracket) {
+      const inner = bracket[1]!.trim();
+      if (/^(场景|场|景)\s*\d*/.test(inner)) {
+        // 剥掉「场景 N:」场号前缀，保留地点时间主体（带内/外景或 INT./EXT. 前缀走下方常规识别）
+        const body = inner.replace(/^(场景|场|景)\s*\d*\s*[:：]?\s*/, '').trim();
+        if (body) {
+          const { location, rest } = parseSceneLocation(body);
+          const isChinese = /^(内景|外景)/.test(body);
+          const restText = isChinese ? body.replace(/^(内景|外景)\s*/i, '') : rest;
+          lines.push({
+            ...createScriptLine('scene-heading', restText.trim()),
+            location: isChinese ? (body.startsWith('外') ? 'exterior' : 'interior') : (location ?? 'interior'),
+          });
+          continue;
+        }
+      }
+      if (/^(转场|淡入|淡出|切至|CUT)/i.test(inner)) {
+        lines.push(createScriptLine('transition', inner.replace(/^(转场)\s*[:：]?\s*/, '').trim() || inner));
+        continue;
+      }
+    }
+    // MD 标题（AI 导入内容常见：# 第一集 / ## 场景一 / ### 内景）→ 场景标题
+    const mdHeading = lineText.match(/^(#{1,6})\s+(.+)$/);
+    if (mdHeading) {
+      const headingText = mdHeading[2]!.trim();
+      // 场景标题:INT./EXT./内景/外景 前缀（含 ## 内景 等）
+      if (/^(INT\.|EXT\.|内景|外景)/i.test(headingText)) {
+        const { location, rest } = parseSceneLocation(headingText);
+        const isChinese = /^(内景|外景)/.test(headingText);
+        const restText = isChinese ? headingText.replace(/^(内景|外景)\s*/i, '') : rest;
+        lines.push({
+          ...createScriptLine('scene-heading', restText.trim()),
+          location: isChinese ? (headingText.startsWith('外') ? 'exterior' : 'interior') : (location ?? 'interior'),
+        });
+      } else {
+        // 普通标题 → 场景标题（居中粗体，视觉上区分章节）
+        lines.push(createScriptLine('scene-heading', headingText));
+      }
+      continue;
+    }
     // 场景标题:INT./EXT./内景/外景 前缀
     if (/^(INT\.|EXT\.|内景|外景)/i.test(lineText)) {
       const { location, rest } = parseSceneLocation(lineText);
@@ -156,11 +200,25 @@ export function plainTextToScriptHtml(text: string): string {
       lines.push(createScriptLine('transition', lineText.replace(/[:：]$/, '')));
       continue;
     }
-    // 对白:"角色名: 对白"
+    // 独立括注行：（低声）/ (whispering) → parenthetical（须在动作兑底前）
+    const standaloneParen = lineText.match(/^[（(]([^（）()]{1,40})[）)]$/);
+    if (standaloneParen) {
+      lines.push(createScriptLine('parenthetical', `（${standaloneParen[1]!.trim()}）`));
+      continue;
+    }
+    // 对白:"角色名: 对白"（对白开头（…）拆为独立括注行，渲染为斜体括注）
     const dialogueMatch = lineText.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
     if (dialogueMatch && dialogueMatch[2]) {
       lines.push(createScriptLine('character', dialogueMatch[1]!.trim()));
-      lines.push(createScriptLine('dialogue', dialogueMatch[2]!.trim()));
+      const dl = dialogueMatch[2]!.trim();
+      const leadingParen = dl.match(/^[（(]([^（）()]{1,40})[）)]\s*/);
+      if (leadingParen) {
+        lines.push(createScriptLine('parenthetical', `（${leadingParen[1]!.trim()}）`));
+        const restDl = dl.slice(leadingParen[0]!.length).trim();
+        if (restDl) lines.push(createScriptLine('dialogue', restDl));
+        continue;
+      }
+      lines.push(createScriptLine('dialogue', dl));
       continue;
     }
     // 独立全大写短行 → 角色名(好莱坞约定)

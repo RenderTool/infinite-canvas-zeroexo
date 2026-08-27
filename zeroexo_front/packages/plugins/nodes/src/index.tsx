@@ -48,7 +48,7 @@ export type { CommentLayerProps } from './comment-layer.js';
 import { getTextTools, getImageTools, getVideoTools, getAudioTools } from './node-tools.js';
 
 // 工具函数 — storageKey → blob URL 重建
-export { useHydratedContent, useProgressiveImage, buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from './utils/hydrate.js';
+export { useHydratedContent, useProgressiveImage, usePreviewImage, buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from './utils/hydrate.js';
 
 // 资产节点工厂 — 拖拽/上传/粘贴时创建节点实例
 export { createAssetNode } from './asset-node-factory.js';
@@ -90,6 +90,7 @@ import { StackedMediaNodeView } from './nodes/stacked-media-node-view.js';
 import { getStackedMediaPins } from './nodes/stacked-media-pins.js';
 import { createStackedMediaDefaultData, parseStackedMediaData } from './nodes/stacked-media-types.js';
 import { ejectCard } from './nodes/stacked-media-model.js';
+import { downloadStackCards } from './utils/download-stack-cards.js';
 // 配置专用节点(Plan#13):hidden 契约类型,仅供配置面板静态挂载,零实例约束
 import { createConfigPreviewExtension } from './config-preview/config-preview-node.js';
 export { ConfigPreviewNodeView, CONFIG_PREVIEW_TYPE } from './config-preview/config-preview-node.js';
@@ -485,6 +486,21 @@ function createStackedMediaExtension(controller: ConnectionController | null, st
           if (data.cards.length === 0) return;
           const result = ejectCard(ctx.commandQueue, node, data, data.activeIndex);
           if (result) ctx.commandQueue.execute(result.command);
+        },
+      });
+
+      // 批量下载(征集 #78):一键下载堆叠内全部卡片(媒体二进制/文本 .txt,逐个错峰触发);
+      // id 复用 download → 胶囊 TOOL_TITLE_I18N_KEY.download 自动提供多语 tooltip,零 i18n 新增
+      tools.push({
+        id: 'download',
+        label: '',
+        title: '',
+        icon: <NODE_ICONS.download size={14} />,
+        visible: () => data.cards.length > 0,
+        run: (n) => {
+          const d = parseStackedMediaData(n.data as Record<string, unknown> | undefined);
+          if (d.cards.length === 0) return;
+          void downloadStackCards(d.cards);
         },
       });
 

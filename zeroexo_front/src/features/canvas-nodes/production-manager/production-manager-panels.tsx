@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/components/image-viewer.js';
 import { AuthorizedImage } from '@/shared/components/authorized-media.js';
@@ -54,7 +54,8 @@ export const ItemImageCard = memo(function ItemImageCard({
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const fallback = localPreview ?? getResourceUrl(storageKey, 'preview') ?? '';
-  const hydrated = useHydratedContent(storageKey, fallback);
+  // 节点内展示层三档契约(征集 #77):自适应档不拉原图,原图只在图片浏览器
+  const hydrated = usePreviewImage(storageKey, fallback);
   const [imgError, setImgError] = useState(false);
 
   return (
@@ -360,10 +361,14 @@ export function ItemNavItem({ index, name, count, isActive, accent, surfaceBg, t
 
 // ===== 节点垂直导航缩略图（首张剧照，无图 → kind 图标骨架） =====
 
-export function ItemThumb({ kind, storageKey, dark }: { kind: ProductionItemKind; storageKey?: string; dark: boolean }): React.ReactElement {
+export function ItemThumb({ kind, storageKey, dark }: {
+  kind: ProductionItemKind;
+  storageKey?: string;
+  dark: boolean;
+}): React.ReactElement {
   const KindIcon = KIND_ICON[kind];
   const fallback = storageKey ? (getResourceUrl(storageKey, 'preview') ?? '') : '';
-  const hydrated = useHydratedContent(storageKey ?? '', fallback);
+  const hydrated = usePreviewImage(storageKey ?? '', fallback);
   if (!hydrated) {
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)', color: dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.35)' }}>

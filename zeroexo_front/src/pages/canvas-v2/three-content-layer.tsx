@@ -25,6 +25,9 @@ import { NodeContentAtlas } from './three-content-atlas.js';
 import { snapshotElementToCanvas } from './three-content-snapshot.js';
 
 const CONTENT_LOD_K = 0.35; // 缩放低于此值不渲染内容（DOM 版 LOD 占位同阈值）
+// [2026-08-27 征集 #75 用户拍板暂时禁用] 与 DOM 版（node-layer.tsx）同步：
+// 稍微缩小就变纯色块的体验差，暂去除「缩小就回退」概念；置回 true 即恢复。
+const CONTENT_LOD_ENABLED: boolean = false;
 const PER_FRAME = 4; // 每帧最多启动的快照批数
 const CONCURRENCY = 4; // 隐藏渲染容器并发数
 const SIG_LEN = 400; // 内容签名 JSON 摘要长度上限
@@ -155,7 +158,7 @@ export function ContentTextureLayer({
     const tick = (): void => {
       raf = requestAnimationFrame(tick);
       const k = adapterRef.current?.getViewport()?.k ?? 1;
-      if (k < CONTENT_LOD_K) {
+      if (CONTENT_LOD_ENABLED && k < CONTENT_LOD_K) {
         // LOD 降级：全部释放（纯色卡，与 DOM 版占位一致）
         for (const id of [...sigRef.current.keys()]) {
           atlas.free(id);

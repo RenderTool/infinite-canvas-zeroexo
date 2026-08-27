@@ -9,6 +9,7 @@ import { ApiThrottlerGuard } from './common/throttler/guards/api-throttler.guard
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { StudioModule } from './modules/studio/studio.module';
 import { PromptsModule } from './modules/prompts/prompts.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { FoldersModule } from './modules/folders/folders.module';
@@ -78,6 +79,7 @@ import { throttlerConfig } from './common/throttler/throttler.config';
     AuthModule,
     UsersModule,
     ProjectsModule,
+    StudioModule,
     PromptsModule,
     AssetsModule,
     FoldersModule,

@@ -281,6 +281,8 @@ export interface LlmService {
         parameters: Record<string, unknown>;
       };
     }>;
+    /** 深度思考（原生推理）：仅 canvas_agent 主对话启用；结构化子任务保持关闭防 reasoning_tokens 挤占 max_tokens 致 JSON 截断 */
+    thinking?: 'enabled' | 'disabled';
   }): Promise<{
     message: {
       role: string;
@@ -308,6 +310,8 @@ export interface LlmService {
         parameters: Record<string, unknown>;
       };
     }>;
+    /** 深度思考（原生推理）开关，同 chat */
+    thinking?: 'enabled' | 'disabled';
     onDelta?: (delta: string) => void;
     onThinkingDelta?: (delta: string) => void;
   }): Promise<{
@@ -440,6 +444,9 @@ export class AgentExecutor {
     const chatParams = {
       messages,
       tools: llmTools.length > 0 ? llmTools : undefined,
+      // 深度思考（用户拍板 2026-08-25）：仅 canvas_agent 主对话启用——推理进 reasoning_content → 前端 ThinkTree（大脑折叠）自然实现「思考进思考、结论进正文」；
+      // storyboard_assistant 等结构化输出子任务保持关闭（reasoning_tokens 挤占 max_tokens 致 JSON 截断，Plan#20 P0 实测）
+      thinking: (this.agentType === 'canvas_agent' ? 'enabled' : 'disabled') as 'enabled' | 'disabled',
     };
 
     if (!this.llmService.chatStream) {

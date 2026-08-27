@@ -25,9 +25,10 @@ import { createPortal } from 'react-dom';
 import { ListVideo } from 'lucide-react';
 import { Button, App } from 'antd';
 import DOMPurify from 'dompurify';
+import ReactMarkdown from 'react-markdown';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { serializeScriptLines, buildSampleLines } from '@/features/canvas-nodes/script-editor/script-lines.js';
+import { serializeScriptLines, buildSampleLines, plainTextToScriptHtml } from '@/features/canvas-nodes/script-editor/script-lines.js';
 import { getEpisodePageCount, splitContentIntoPages } from './hooks/use-episode-manager.js';
 import { ScriptReader, type ReaderPage } from './components/ScriptReader.js';
 import { ScriptImportFlow } from './components/script-import-flow.js';
@@ -217,7 +218,11 @@ export function ScriptEditorSheet({
   const handleImportComplete = useCallback((scriptState: import('./script-types.js').ScriptEditorState | null) => {
     setImportFlowOpen(false);
     if (!scriptState || !scriptState.versions.length) return;
-    const newEpisodes = scriptState.versions[0]!.episodes;
+    // AI 导入内容为 MD/纯文本：统一转为结构化 HTML 序列化，保证编辑/分页/阅读格式正确
+    const newEpisodes = scriptState.versions[0]!.episodes.map((ep) => ({
+      ...ep,
+      content: /<\/?[a-z][\s\S]*>/i.test(ep.content || '') ? ep.content : plainTextToScriptHtml(ep.content || ''),
+    }));
     if (!newEpisodes.length) return;
 
     // 检查是否有历史内容
@@ -279,11 +284,11 @@ export function ScriptEditorSheet({
     try {
       const [asset] = await addAssets([{
         title: assetTitle,
-        kind: 'script' as any,
+        kind: 'script',
         tags: [],
         bytes: new Blob([content]).size,
         mimeType: 'application/json',
-        data: { kind: 'script' as any, content },
+        data: { kind: 'script', content },
       }]);
       if (asset) {
         onAssetCreated(asset.id);
@@ -430,11 +435,7 @@ export function ScriptEditorSheet({
               data-theme={isDark ? 'dark' : 'light'}
               style={{ minHeight: '100%' }}
             >
-              <div
-                className="ql-editor"
-                style={{ minHeight: '100%', boxSizing: 'border-box', cursor: 'default' }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(activeEpisode?.content || '') }}
-              />
+              <ScriptContentView content={activeEpisode?.content || ''} />
             </div>
           </div>
         )}
@@ -489,6 +490,35 @@ export function ScriptEditorSheet({
       />
     );
   }
+}
+
+// ===== ScriptContentView：剧本只读渲染（兼容 MD 与 HTML 序列化） =====
+
+/**
+ * AI 导入的剧本内容多为 Markdown（`# 第一集`、`## 场景`、`**加粗**`），
+ * 而结构化编辑器/旧数据存 HTML（`.ql-editor` 序列化）。
+ * 这里自动识别：含 HTML 标签则原样渲染，否则按 Markdown 渲染，
+ * 保证两种来源都不再显示丑陋的原始标记文本。
+ */
+function ScriptContentView({ content }: { content: string }): React.ReactElement {
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(content);
+  if (looksLikeHtml) {
+    return (
+      <div
+        className="ql-editor"
+        style={{ minHeight: '100%', boxSizing: 'border-box', cursor: 'default' }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}
+      />
+    );
+  }
+  return (
+    <div
+      className="ql-editor zx-script-md"
+      style={{ minHeight: '100%', boxSizing: 'border-box', cursor: 'default' }}
+    >
+      <ReactMarkdown>{content}</ReactMarkdown>
+    </div>
+  );
 }
 
 // ===== Styles =====

@@ -83,33 +83,16 @@ function upsertTimelineStep(_name: string, _kind: 'tool' | 'canvas', _settle?: '
 }
 
 /**
- * 任务收尾时把执行 trace 快照为对话流内消息（R2 返工）：
- * trace 留在对话流原位，不再由 ThinkStream 常驻底部一直显示。
+ * 任务收尾时把执行 trace 快照在思考树中保留（Plan#43 B3）：
+ * 不再创建 timeline 消息（归入 ThinkTree 渲染），
+ * 思考数据保留在 store.thinking 中（active=false），
+ * ThinkTree 在消息流尾部渲染完成态思考树。
  */
-function commitTrace(settle: 'done' | 'failed'): void {
+function commitTrace(_settle: 'done' | 'failed'): void {
+  // Plan#43 B3：不再创建 timeline 消息，思考数据保留在 store 中
+  // 由 ThinkTree 在消息流尾部渲染（完成态也保留）
   const s = useCanvasAgentStore.getState();
-  const { steps } = s.thinking;
-  if (steps.length > 0) {
-    s.addMessage({
-      id: `msg_trace_${Date.now()}`,
-      role: 'agent',
-      type: 'timeline',
-      text: '执行轨迹',
-      timeline: {
-        steps: steps.map((st, i) => ({
-          id: `trace_${i}`,
-          name: st.name,
-          kind: 'tool' as const,
-          // R2：failed 保留红 X；其余未完步骤按收尾态结算；详情随轨迹保留可展开
-          status: st.status === 'failed' ? ('failed' as const) : st.status === 'done' ? ('done' as const) : settle,
-          input: st.input,
-          result: st.result,
-        })),
-      },
-      timestamp: Date.now(),
-    });
-  }
-  s.clearThinking();
+  s.setThinking({ active: false });
 }
 
 // ===== DTO =====
@@ -292,6 +275,9 @@ export async function sendMessage(
   if (!cleanText || store.isGenerating) return;
 
   store.setIsGenerating(true);
+  // Plan#43 B3：新消息开始，清空上一轮的执行计划与思考树
+  store.setCurrentPlan(null);
+  store.setTodoSnapshot(null);
   store.setThinking({ active: true, text: '', steps: [], tools: [], startedAt: Date.now() });
   streamMsgId = null;
   toolStepIndex = new Map();
@@ -481,6 +467,8 @@ export async function sendMessage(
       },
       onPlan: (plan) => {
         commitTrace('done');
+        // Plan#43 B3：写入 currentPlan 驱动 PhaseTimeline
+        useCanvasAgentStore.getState().setCurrentPlan({ ...plan, status: 'pending' });
         useCanvasAgentStore.getState().addMessage({
           id: `msg_plan_${Date.now()}`,
           role: 'agent',

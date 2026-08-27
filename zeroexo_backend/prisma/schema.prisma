@@ -140,9 +140,89 @@ model Project {
   lastSyncedAt   DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  /// 项目类型: canvas=画布项目 | studio=工业化制片项目 (Plan#46, 2026-08-27)
+  type           String    @default("canvas")
+
+  studioAssets   StudioAsset[]
+  studioEpisodes StudioEpisode[]
 
   @@index([ownerId])
   @@index([updatedAt])
+  @@index([type])
+}
+
+/// 工业化制片项目·资产卡（角色/场景/道具，Plan#46）
+model StudioAsset {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// character | scene | prop
+  kind      String
+  name      String
+  /// 外观/剧情意义描述（圣经字段）
+  description  String?
+  /// draft | generating | pending_review | locked
+  status       String   @default("draft")
+  /// 锁定的主图 URL（选中生成图后冻结）
+  mainImageUrl String?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  promptEntries   StudioPromptEntry[]
+  generatedImages StudioGeneratedImage[]
+
+  @@index([projectId, kind])
+}
+
+/// 工业化项目·资产生成提示词条目（含参考素材，Plan#46）
+model StudioPromptEntry {
+  id      String  @id @default(uuid())
+  assetId String
+  asset   StudioAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  promptText String
+  /// 生成参数（模型/比例等，模板驱动）
+  params  Json?
+  /// 参考素材: [{url, purpose: character|style|composition, name?}] 多图、有序、分用途（图生图多输入）
+  referenceImages Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+}
+
+/// 工业化项目·资产生成图结果（Plan#46）
+model StudioGeneratedImage {
+  id            String  @id @default(uuid())
+  assetId       String
+  asset         StudioAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  promptEntryId String?
+  url           String
+  /// 是否被选中为主图（选中后同步至 StudioAsset.mainImageUrl 并锁定）
+  selected      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([assetId])
+}
+
+/// 工业化项目·剧集（出片按集管理，Plan#46）
+model StudioEpisode {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  episodeNumber Int
+  title     String
+  /// 原始剧本行号范围（如 L5-49）
+  sourceRange String?
+  /// draft | split_pending_review | split_reviewed | storyboard_ready | done
+  status    String   @default("draft")
+  /// 拆分稿内容（原文逐字+片段切分，过审门数据）
+  splitDraft Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, episodeNumber])
+  @@index([projectId])
 }
 
 /// 项目版本快照元数据 - 记录画布时间点快照(支持回退)

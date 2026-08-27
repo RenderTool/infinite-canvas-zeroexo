@@ -16,7 +16,7 @@ export const KIND_COLOR: Record<ProductionItemKind, string> = {
   prop: '#a855f7',      // 紫色
 };
 
-/** 剧照（prompt=生成提示词，note=备注，tags=自由标签——对齐资产库提示词 card 标签体系） */
+/** 剧照（prompt=生成提示词，note=备注，tags=自由标签，stateTag=状态标记——对齐资产库提示词 card 标签体系） */
 export interface ProductionItemImage {
   storageKey: string;
   /** 生成/描述提示词（发送到资产的内容源） */
@@ -25,6 +25,8 @@ export interface ProductionItemImage {
   note?: string;
   /** 自由标签（区分不同时期/造型的剧照，显示在 card 上） */
   tags: string[];
+  /** 状态标记（自由文本，如"受伤态"、"成年"、"幼年"等，不约束语义） */
+  stateTag?: string;
 }
 
 /** 统筹条目（一个演员/场景/道具） */

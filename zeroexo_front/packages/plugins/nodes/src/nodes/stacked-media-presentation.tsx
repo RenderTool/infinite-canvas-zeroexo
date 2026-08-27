@@ -6,7 +6,7 @@ import type { NodeRendererProps } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { VideoNodeView } from './video-node-view.js';
 import { SelfRichTextEditor } from '../rich-text-editor/SelfRichTextEditor.js';
-import { useHydratedContent, resolveAnyThumbUrl, resolveContentUrl } from '../utils/hydrate.js';
+import { useHydratedContent, usePreviewImage, resolveAnyThumbUrl, resolveContentUrl } from '../utils/hydrate.js';
 import { resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
 import type { StackCard } from './stacked-media-types.js';
 import { ThumbNav } from './thumb-nav.js';
@@ -51,27 +51,32 @@ function VideoCardThumb({ storageKey, content, dark }: { storageKey?: string; co
   return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)', color: dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.35)' }}><Video size={14} strokeWidth={1.8} /></div>;
 }
 
-function Thumbnail({ card, dark }: { card: StackCard; dark: boolean }): React.ReactElement {
+function Thumbnail({ card, dark, quality = 'sm' }: { card: StackCard; dark: boolean; quality?: 'sm' | 'preview' }): React.ReactElement {
   if (card.sourceType !== 'image' && card.sourceType !== 'video') return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.45)' }}><FileText size={15} /></div>;
   if (card.sourceType === 'video') {
     return <VideoCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} dark={dark} />;
   }
-  return <ImageCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} card={card} dark={dark} />;
+  return <ImageCardThumb storageKey={card.data.storageKey as string | undefined} content={(card.data.content as string | undefined) ?? ''} card={card} dark={dark} quality={quality} />;
 }
 
-/** 供详情面板(StackDetailsModal)/导航复用:卡片缩略图(视频回退链 + 图标骨架) */
+/** 供详情面板(StackDetailsModal)/导航复用:卡片缩略图(视频回退链 + 图标骨架);
+ *  quality:'sm'=导航条小槽位(后端 sm 级省带宽),'preview'=详情面板大格子(预览图级,
+ *  三档图片契约征集 #77:展示层自适应不拉原图,原图只在图片浏览器) */
 export { Thumbnail };
 
-function ImageCardThumb({ storageKey, content, card, dark }: { storageKey?: string; content: string; card: StackCard; dark: boolean }): React.ReactElement {
-  const src = useHydratedContent(storageKey, content);
-  // 34px 槽位优先 thumb 级资源(resources/ 后端 size=thumb),回退全量 hydrate
+function ImageCardThumb({ storageKey, content, card, dark, quality = 'sm' }: { storageKey?: string; content: string; card: StackCard; dark: boolean; quality?: 'sm' | 'preview' }): React.ReactElement {
+  // 大格子走 preview 级(征集 #77 纠正 #75:不再用原图级,后端无变体自动回退原图保证旧图不黑)
+  const previewSrc = usePreviewImage(quality === 'preview' ? storageKey : undefined, quality === 'preview' ? content : '');
+  // 小槽位(导航条 34px)优先 thumb 级资源(resources/ 后端 size=sm),回退全量 hydrate;
+  const fallbackSrc = useHydratedContent(quality === 'sm' ? storageKey : undefined, quality === 'sm' ? content : '');
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
+    if (quality !== 'sm') { setThumb(null); return; }
     let cancelled = false;
     resolveAnyThumbUrl(storageKey).then((u) => { if (!cancelled) setThumb(u); });
     return () => { cancelled = true; };
-  }, [storageKey]);
-  const final = thumb || src;
+  }, [storageKey, quality]);
+  const final = quality === 'preview' ? previewSrc : (thumb || fallbackSrc);
   if (!final) return <ThumbSkeleton card={card} dark={dark} />;
   return <img src={final} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />;
 }
@@ -185,7 +190,9 @@ export function StackMediaContent({ card, width, height, isDark = false, onTextC
 }
 
 function StackImageContent({ src, storageKey, isDark = false }: { src: string; storageKey?: string; isDark?: boolean }): React.ReactElement {
-  const hydrated = useHydratedContent(storageKey, src);
+  // 堆叠活跃卡封面:三档契约(征集 #77)展示层自适应 — preview 级,不拉原图,
+  // 原图仅在点击后的图片浏览器(AssetDetailViewer)中使用
+  const hydrated = usePreviewImage(storageKey, src);
   // 未 hydrate 时显示图标骨架而非空白
   if (!hydrated) {
     return (

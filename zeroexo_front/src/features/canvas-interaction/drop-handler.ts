@@ -190,7 +190,8 @@ export function useDropHandler({
  */
 function createPayloadFromInput(input: CreateAssetInput): InsertAssetPayload {
   const d = input.data;
-  if (d.kind === 'text') {
+  if (d.kind === 'text' || d.kind === 'script') {
+    // script 资产不走文件拖入链路,此分支仅为类型穷举兜底(文本化插入)
     return { kind: 'text', content: d.content, title: input.title };
   }
   if (d.kind === 'video') {

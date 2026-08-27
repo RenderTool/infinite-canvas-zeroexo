@@ -42,12 +42,12 @@
 - `read_node(nodeId)`：按 id 读单节点完整数据。**修改任何节点内容前必须先读**，禁止凭总览摘要猜字段；超长会截断，按提示分块处理
 
 ### 写 / 改（各节点 data 结构）
-- `canvas_add_node(type, title, data)` 新建；`canvas_update_node(id, patch)` 外科手术式修改（patch.data 与现有 data 合并，只改给的字段）
-- **script 剧本节点**：`data = { episodes: [{id, number, title, content: 剧本HTML}], activeEpisodeId, status:'ready' }`（前端标准格式，**前端按 episodes 分页——一集一页**，content 为好莱坞格式剧本 HTML）
+- `canvas_add_node(type, title, data)` 新建（**返回的 nodeId 即新节点 id**，后续 focus/update/连线一律用它，禁止另编 id）；`canvas_update_node(id, patch)` 外科手术式修改（patch.data 与现有 data 合并，只改给的字段）。新节点由前端异步落库，canvas_get_state 随后短暂无它属正常延迟，禁止重复创建
+- **script 剧本节点**：`data = { episodes: [{id, number, title, content: 剧本正文}], activeEpisodeId, status:'ready' }`（前端标准格式，**前端按 episodes 分页——一集一页**；content 直接写好莱坞格式纯文本即可，前端自动转结构化剧本 HTML）
   - **单集**：create_script 的 content 参数由前端自动转为第 1 集(episodes)落地
-  - **多集（分集剧本）**：用 `canvas_add_node(type='script', title, data={episodes:[每集一条目{id:'ep-1',number:1,title:'第 1 集…',content:该集完整好莱坞格式HTML}, …], activeEpisodeId:'ep-1', status:'ready'})` 直建；**严禁把多集内容塞进单一 episode**（Plan#43 A 拍板）
+  - **多集（分集剧本）**：用 `canvas_add_node(type='script', title, data={episodes:[每集一条目{id:'ep-1',number:1,title:'第 1 集…',content:该集完整好莱坞格式正文}, …], activeEpisodeId:'ep-1', status:'ready'})` 直建；**严禁把多集内容塞进单一 episode**（Plan#43 A 拍板）
   - **改内容**：read_node → canvas_update_node(patch={data:{episodes:[完整数组]}})
-  - **content 格式铁律**：场景头（场号+内/外景+地点+日/夜）/ 动作行 / 角色名 + 对白，结构化段落；**禁止大段落裸文本/原样搬运输入素材**；杂乱素材必须重排为标准结构
+  - **content 格式铁律**：好莱坞格式纯文本——场景标题 `INT./EXT. 地点 - 时间` 独立成行 / 动作段落 / `角色名: 对白`（情绪提示写对白开头 `角色名: （低声）…`）/ 场尾 `CUT TO:` 转场；**禁止大段落裸文本/原样搬运输入素材**；杂乱素材必须重排为标准结构。**零 markdown**：严禁 `**`/`*`/`#`/`|`/反引号等任何 markdown 符号；**禁用 `【场景 N: …】` 旧式场号**（前端渲染器不识别会误判成对白）。完整范文与剔除铁律见 SYSTEM_PROMPT「剧本标准结构与格式铁律」
 - **text 文本节点**：`data = { content: 文本 }`。读写方式同剧本节点
 - **storyboard 分镜节点**：`data = { shots: Shot[], entities: [], status }`；Shot 字段：id/number/sceneId/dayNight/duration/description/shotType/cameraMovement/dialogue/images/entities
   - **新增单镜头**：`storyboard_add_shot(nodeId, description, shotType?, cameraMovement?, dialogue?, duration?)`，自动编号、直写

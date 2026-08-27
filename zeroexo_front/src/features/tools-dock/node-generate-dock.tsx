@@ -354,7 +354,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
           width: d.width,
           height: d.height,
         });
-      } else {
+      } else if (d.kind === 'audio') {
         nodeActionBus.emit('nodeDock:addReferenceNode', {
           ...base,
           kind: d.kind,
@@ -362,6 +362,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
           content: d.url,
         });
       }
+      // script 不会从文件上传产生(detectKind 仅出 image/video/audio/text),无需处理
     } catch {
       // 上传失败静默(不打断当前编辑)
     }

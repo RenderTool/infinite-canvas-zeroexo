@@ -41,6 +41,7 @@ export async function downloadAsset(asset: Asset): Promise<void> {
   const data = asset.data;
   const ext = (() => {
     if (data.kind === 'text') return 'txt';
+    if (data.kind === 'script') return 'json'; // 剧本资产 content 为 episodes JSON
     if (data.kind === 'image') {
       if (asset.mimeType?.includes('png')) return 'png';
       if (asset.mimeType?.includes('jpeg') || asset.mimeType?.includes('jpg')) return 'jpg';
@@ -62,7 +63,7 @@ export async function downloadAsset(asset: Asset): Promise<void> {
   })();
   const filename = `${asset.title}.${ext}`;
 
-  if (data.kind === 'text') {
+  if (data.kind === 'text' || data.kind === 'script') {
     downloadText(data.content, filename);
   } else if (data.kind === 'image') {
     downloadDataUrl(data.dataUrl, filename);

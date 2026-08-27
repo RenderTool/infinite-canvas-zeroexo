@@ -7,8 +7,24 @@
 
 // ===== 模式枚举(18 项) =====
 
-/** 排列(6): 宫格 / 水平 / 垂直 / 树状 / dagre / auto(统一布局:有连线→组织图,无连线→宫格) */
-export type ArrangeMode = 'grid' | 'horizontal' | 'vertical' | 'tree' | 'dagre' | 'auto';
+/**
+ * 排列模式:
+ * - grid: 宫格排列 (按类型分组)
+ * - horizontal: 水平排列
+ * - vertical: 垂直排列
+ * - tree: 树状布局 (dagre 增强)
+ * - dagre: 分层布局 (真实 dagre 库)
+ * - smart: 智能复合布局 (自动识别组/树/游离节点, 适合混合场景)
+ * - force: 力导向布局 (有机图/探索式)
+ * - radial: 径向布局 (根节点聚焦)
+ * - compact: 紧凑打包 (MaxRects 装箱)
+ * - auto: 自动选择 (有连线→tree, 无连线→grid)
+ */
+export type ArrangeMode =
+  | 'grid' | 'horizontal' | 'vertical'
+  | 'tree' | 'dagre'
+  | 'smart' | 'force' | 'radial' | 'compact'
+  | 'auto';
 
 /** 对齐(6): 左 / 水平居中 / 右 / 顶 / 垂直居中 / 底 */
 export type AlignMode = 'left' | 'hCenter' | 'right' | 'top' | 'vCenter' | 'bottom';

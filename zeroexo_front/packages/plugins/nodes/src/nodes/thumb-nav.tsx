@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 
 /** 最大缩略图数(容器长度充足时) */
@@ -42,6 +42,8 @@ export interface ThumbNavItem {
   title?: string;
   /** 缩略图槽位内容(调用方渲染,34px 圆形内自适应) */
   thumb: React.ReactNode;
+  /** 删除回调（提供后在缩略图右上角渲染气泡红点删除按钮） */
+  onDelete?: () => void;
 }
 
 export interface ThumbNavProps {
@@ -151,20 +153,36 @@ export function ThumbNav({
         const index = start + offset;
         const item = items[index];
         return item ? (
-          <button
-            key={item.id}
-            type="button"
-            title={item.title}
-            aria-label={`切换到 ${item.title ?? ''}`}
-            onClick={() => onJump(index)}
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              ...thumbBtnBase,
-              outline: index === activeIndex ? `2px solid var(--color-primary, #e94560)` : 'none',
-              outlineOffset: 2,
-              boxShadow: index === activeIndex ? `0 0 0 2px ${navBg}, 0 0 0 3.5px var(--color-primary, #e94560)` : 'none',
-            }}
-          >{item.thumb}</button>
+          <div key={item.id} style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
+            <button
+              type="button"
+              title={item.title}
+              aria-label={`切换到 ${item.title ?? ''}`}
+              onClick={() => onJump(index)}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                ...thumbBtnBase,
+                outline: index === activeIndex ? `2px solid var(--color-primary, #e94560)` : 'none',
+                outlineOffset: 2,
+                boxShadow: index === activeIndex ? `0 0 0 2px ${navBg}, 0 0 0 3.5px var(--color-primary, #e94560)` : 'none',
+              }}
+            >{item.thumb}</button>
+            {item.onDelete && (
+              <button
+                type="button"
+                title="删除"
+                aria-label="删除"
+                onClick={(e) => { e.stopPropagation(); item.onDelete?.(); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: '50%',
+                  background: '#dc2626', border: '2px solid ' + navBg, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 0, color: '#fff',
+                }}
+              ><X size={9} strokeWidth={3} /></button>
+            )}
+          </div>
         ) : <div key={`empty-${offset}`} style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 999, border: `1px dashed ${borderSubtle}`, background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)' }} />;
       })}</div>
       <button

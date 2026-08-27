@@ -150,3 +150,62 @@
 .zx-script-page.zx-page-compact.zx-page-compact-preview .ql-editor .script-page-break::before {
   background: transparent !important;
 }
+
+/* ── MD 渲染（AI 导入内容为 Markdown：`# 标题`/`## 场景`/`**加粗**`） ── */
+.zx-script-page .ql-editor.zx-script-md {
+  font-family: var(--font-family, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif) !important;
+  font-size: 12pt !important;
+  line-height: 1.7 !important;
+  color: var(--script-text) !important;
+}
+.zx-script-page .ql-editor.zx-script-md h1,
+.zx-script-page .ql-editor.zx-script-md h2,
+.zx-script-page .ql-editor.zx-script-md h3 {
+  font-family: inherit !important;
+  font-weight: 700 !important;
+  margin: 18px 0 10px 0 !important;
+  line-height: 1.4 !important;
+}
+.zx-script-page .ql-editor.zx-script-md h1 {
+  font-size: 1.5em !important;
+  text-align: center !important;
+  border-bottom: 2px solid var(--script-rule-bg) !important;
+  padding-bottom: 8px !important;
+}
+.zx-script-page .ql-editor.zx-script-md h2 {
+  font-size: 1.22em !important;
+  text-align: center !important;
+  border-bottom: 1px solid var(--script-rule-bg) !important;
+  padding-bottom: 6px !important;
+}
+.zx-script-page .ql-editor.zx-script-md h3 {
+  font-size: 1.05em !important;
+  color: var(--script-accent) !important;
+}
+.zx-script-page .ql-editor.zx-script-md strong {
+  font-weight: 700 !important;
+  color: var(--script-character) !important;
+}
+.zx-script-page .ql-editor.zx-script-md em {
+  font-style: italic !important;
+}
+.zx-script-page .ql-editor.zx-script-md ul,
+.zx-script-page .ql-editor.zx-script-md ol {
+  padding-left: 1.6em !important;
+  margin: 6px 0 10px 0 !important;
+}
+.zx-script-page .ql-editor.zx-script-md li {
+  margin: 3px 0 !important;
+}
+.zx-script-page .ql-editor.zx-script-md blockquote {
+  border-left: 3px solid var(--script-accent) !important;
+  margin: 8px 0 !important;
+  padding: 2px 12px !important;
+  color: var(--script-text) !important;
+  opacity: 0.88 !important;
+}
+.zx-script-page .ql-editor.zx-script-md hr {
+  border: none !important;
+  border-top: 1px dashed var(--script-line-color) !important;
+  margin: 16px 0 !important;
+}

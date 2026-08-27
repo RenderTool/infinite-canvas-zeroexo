@@ -271,6 +271,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // 卸载时清理,非画布页(AgentDock 在首页等处的复用)保持未注入 → agent-session 回退文本展示
   const bridgeStateRef = useRef(state);
   bridgeStateRef.current = state;
+  // 布局控制器 ref（Agent 智能排列需要）
+  const bridgeRefsRef = useRef(refs);
+  bridgeRefsRef.current = refs;
   // R2-3: 画布配置桥接需要最新 dialogs 状态（set_config 应用+持久化）
   const dialogsRef = useRef(dialogs);
   dialogsRef.current = dialogs;
@@ -301,6 +304,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       },
       // Agent 批量操作结束后单次 flush Yjs 图推送
       onBatchEnd: () => batchEndRef.current?.(),
+      // Agent 智能排列入口
+      getLayoutController: () => bridgeRefsRef.current.layoutController ?? null,
     });
     return () => setCanvasOpBridge(null);
   }, []);
@@ -1103,10 +1108,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             getAnchorBounds={interactions.getAnchorBounds}
             node={state.isGroupPreviewing ? interactions.previewGroupNode : undefined}
             onGroup={actions.groupSelected}
+            onArrangeSmart={() => interactions.handleArrange('smart')}
             onArrangeGrid={() => interactions.handleArrange('grid')}
             onArrangeHorizontal={() => interactions.handleArrange('horizontal')}
             onArrangeVertical={() => interactions.handleArrange('vertical')}
-            onArrangeAuto={() => interactions.handleArrange('auto')}
             onAlign={(type: string) => interactions.handleAlign(type as any)}
             onUnifySizes={(type: string) => interactions.handleUnifySizes(type as any)}
             onSort={(type: string) => refs.layoutController?.sortSelection(type as any)}

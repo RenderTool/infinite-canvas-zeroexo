@@ -7,7 +7,8 @@
  * Phase D2: 扩展 audio 类型支持,接入真实数据(AssetStore)。
  */
 
-export type AssetKind = 'text' | 'image' | 'video' | 'audio';
+/** 资产类型；script 为剧本资产（content 存 episodes JSON，资产库按剧本分组展示） */
+export type AssetKind = 'text' | 'image' | 'video' | 'audio' | 'script';
 
 export interface Asset {
   id: string;
@@ -26,6 +27,7 @@ export interface Asset {
   favorite?: boolean;
   data:
     | { kind: 'text'; content: string }
+    | { kind: 'script'; content: string; storageKey?: string }
     | { kind: 'image'; dataUrl: string; storageKey?: string; width?: number; height?: number }
     | { kind: 'video'; url: string; storageKey?: string; width?: number; height?: number; durationMs?: number }
     | { kind: 'audio'; url: string; storageKey?: string; durationMs?: number };

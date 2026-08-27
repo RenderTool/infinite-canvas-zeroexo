@@ -265,6 +265,20 @@ export class CanvasOpExecutor {
   }
 
   /**
+   * Agent 纯文本 episodes 兑底：直建 episodes 但 content 为纯文本（无 HTML 标签）时，
+   * 统一转结构化剧本 HTML，否则剧本节点按裸文本渲染版式崩坏（与纯文本 content 路径同源）
+   */
+  private normalizeScriptEpisodes(nodeData: Record<string, unknown>): Record<string, unknown> {
+    if (!Array.isArray(nodeData.episodes)) return nodeData;
+    const episodes = (nodeData.episodes as Array<Record<string, unknown>>).map((ep) =>
+      typeof ep?.content === 'string' && ep.content.trim() && !/<\/?[a-z][\s\S]*>/i.test(ep.content)
+        ? { ...ep, content: plainTextToScriptHtml(ep.content) }
+        : ep,
+    );
+    return { ...nodeData, episodes };
+  }
+
+  /**
    * 将单个 CanvasOp 转换为 Command 实例
    */
   private toCommand(op: CanvasOp): Command | null {
@@ -286,6 +300,8 @@ export class CanvasOpExecutor {
             status: 'ready',
           };
         }
+        // 纯文本 episodes 兑底：Agent 直建 episodes 但 content 是纯文本时同样转结构化 HTML
+        if (type === 'script') nodeData = this.normalizeScriptEpisodes(nodeData);
         return new AddNodeCommand({
           id: nodeId,
           type,
@@ -313,6 +329,11 @@ export class CanvasOpExecutor {
               status: 'ready',
             };
           }
+        }
+        // 纯文本 episodes 兑底（与 add_node 同源）：patch 直携 episodes 且 content 为纯文本时统一转换
+        const finalDataPatch = (patch.data ?? {}) as Record<string, unknown> | undefined;
+        if (finalDataPatch && Array.isArray(finalDataPatch.episodes)) {
+          patch.data = this.normalizeScriptEpisodes(finalDataPatch);
         }
         return new UpdateNodeDataCommand(id, patch);
       }

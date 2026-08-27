@@ -19,6 +19,7 @@
  */
 
 import type { CommandQueue, NodeRecord, NodeTypeExtension } from '@zeroexo/core';
+import type { LayoutController } from '@zeroexo/plugin-layout';
 import { CanvasOpExecutor, type CanvasOp } from '@/pages/editor/editor-canvas/interactions/canvas-op-executor.js';
 import { showAgentCursor } from './agent-cursor.js';
 import {
@@ -82,6 +83,8 @@ export interface CanvasOpBridge {
   openAssetLibrary?: () => boolean;
   /** Agent 批量操作结束后单次 flush Yjs 图推送（editor-page 注入） */
   onBatchEnd?: () => void;
+  /** 布局控制器（Agent 智能排列入口） */
+  getLayoutController?: () => LayoutController | null;
 }
 
 /** 单条 Agent 画布操作(后端 CanvasOp 的松散形态) */
@@ -385,6 +388,29 @@ async function executeCanvasOpNow(op: AgentCanvasOp): Promise<boolean> {
               51,
             );
             pulseAgentCursor(bridge, { nodeId: sbNodeId, label: '分镜就绪' });
+          }
+        }
+        return true;
+      }
+
+      case 'arrange': {
+        // Agent 智能排列：让 agent 能调用 smart/force/radial 等布局模式
+        const lc = bridge.getLayoutController?.();
+        const mode = (typeof op.args.mode === 'string' ? op.args.mode : 'smart') as any;
+        const nodeIds = Array.isArray(op.args.nodeIds)
+          ? (op.args.nodeIds as string[]).filter((x) => typeof x === 'string')
+          : undefined;
+        if (lc) {
+          if (nodeIds && nodeIds.length >= 2) {
+            lc.arrangeSelection(nodeIds, mode);
+          } else {
+            lc.arrangeSelection(mode);
+          }
+          // 选中首个节点聚焦
+          const targetId = nodeIds?.[0] ?? (store.getGraph().nodes.find(() => true)?.id);
+          if (targetId) {
+            store.setSelection({ selectedNodeIds: new Set([targetId]), selectedEdgeIds: new Set() });
+            pulseAgentCursor(bridge, { nodeId: targetId, label: '已排列' });
           }
         }
         return true;

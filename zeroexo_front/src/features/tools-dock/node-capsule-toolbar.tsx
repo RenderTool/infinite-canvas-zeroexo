@@ -26,10 +26,10 @@ import type { NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from 
 import { resolveNodeSize } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
 import {
-  LayoutGrid, Rows, Columns, GitBranch,
+  LayoutGrid, Rows, Columns,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
-  Maximize2,
+  Maximize2, Zap,
   Layers, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, Scaling,
   Compass,
   } from 'lucide-react';
@@ -53,10 +53,10 @@ export interface NodeCapsuleToolbarProps {
   getAnchorBounds?: () => { x: number; y: number; width: number; height: number } | null;
   node?: NodeRecord;
   onGroup: () => void;
+  onArrangeSmart: () => void;
   onArrangeGrid: () => void;
   onArrangeHorizontal: () => void;
   onArrangeVertical: () => void;
-  onArrangeAuto: () => void;
   onAlign: (type: string) => void;
   onUnifySizes: (type: string) => void;
   onSort: (type: string) => void;
@@ -179,10 +179,10 @@ export function NodeCapsuleToolbar({
   getAnchorBounds,
   node: nodeProp,
   onGroup,
+  onArrangeSmart,
   onArrangeGrid,
   onArrangeHorizontal,
   onArrangeVertical,
-  onArrangeAuto,
   onAlign,
   onUnifySizes,
   onSort,
@@ -302,12 +302,13 @@ export function NodeCapsuleToolbar({
   const hasAgg = showGroupAgg || showArrangeAgg || showAlignAgg || showSizeAgg || showLayerAgg || !!showMoveOut;
   if (!hasAny && !hasAgg && !showNavButton) return null;
 
-  // 排列: 仅包含排列模式
+  // 排列: 智能排列为首选, 展开可选基础模式
   const arrangeItems: MenuItem[] = [
+    { key: 'smart', label: t('toolsDock.smart'), icon: <Zap size={16} />, onClick: onArrangeSmart },
+    { key: 'div-a1', divider: true },
     { key: 'grid', label: t('toolsDock.grid'), icon: <LayoutGrid size={16} />, onClick: onArrangeGrid },
     { key: 'horizontal', label: t('toolsDock.horizontal'), icon: <Rows size={16} />, onClick: onArrangeHorizontal },
     { key: 'vertical', label: t('toolsDock.vertical'), icon: <Columns size={16} />, onClick: onArrangeVertical },
-    { key: 'auto', label: t('toolsDock.auto'), icon: <GitBranch size={16} />, onClick: onArrangeAuto },
   ];
   // 对齐: 仅包含对齐模式
   // 文案与图标朝向一致:竖线图标(AlignCenterVertical)=沿竖线排列=垂直居中;

@@ -116,7 +116,9 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       }},
     ];
     if (props.onSendToCanvas) {
-      items.push({ key: 'send-to-canvas', label: t('assetLibrary.sendToCanvas'), icon: null, onClick: () => props.onSendToCanvas!({ type: ItemType as any, id: item.data.id, data: item.data }) });
+      // FIX（2026-08-25 实测：剧本资产无法回发画布）：剧本在 PageItem 中以 type='asset' 存储（类型体系限制），
+      // 发送时必须按 data.kind 还原真实类型 'script'，否则画布侧 handleAssetInsert 误入媒体资产分支导致创建失败。
+      items.push({ key: 'send-to-canvas', label: t('assetLibrary.sendToCanvas'), icon: null, onClick: () => props.onSendToCanvas!({ type: ((item.data as any)?.kind === 'script' ? 'script' : ItemType) as any, id: item.data.id, data: item.data }) });
     }
     setCtxMenuItems(items);
   }, [setCtxMenuPosition, setCtxMenuItems, ctx.handleOpenItem, ctx.setRenameItemTarget, ctx.setRenameItemName, ctx.setRenameItemOpen, ctx.handleDownloadItem, ctx.setConfirmDelete, t, props.onSendToCanvas]);

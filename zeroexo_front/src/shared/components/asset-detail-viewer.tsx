@@ -16,7 +16,7 @@ import { Modal, Tag } from 'antd';
 import Editor from '@monaco-editor/react';
 import type { NodeRecord } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { useHydratedContent, useProgressiveImage } from '@zeroexo/plugin-nodes';
+import { useHydratedContent } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/components/image-viewer.js';
@@ -157,13 +157,13 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename }: InnerPro
 
   const cover = isImage ? data.dataUrl : isVideo ? data.url : undefined;
   const storageKeyForHydrate = data.kind === 'text' ? undefined : data.storageKey;
-  // 图片查看器使用预览图(preview)而非原图(full):原图在拖拽时父组件重渲染会触发
-  // useHydratedContent 重新 fetch+解码,主线程被长任务阻塞导致严重卡顿。
-  // invK=2 使 useProgressiveImage 返回 preview 尺寸(远小于原图,解码快、内存小)。
-  // 非图片类型(video/audio)由 useProgressiveImage 内部回退到 useHydratedContent,行为不变。
-  const hydrated = isImage
-    ? useProgressiveImage(storageKeyForHydrate, cover ?? '', 2)
-    : useHydratedContent(storageKeyForHydrate, cover ?? '');
+  // 图片查看器一律使用原图(征集 #75 用户拍板;#77 三档图片契约重申:原图只在图片浏览器)。
+  // 三档契约(征集 #77):画布节点/堆叠详情 → 自适应档(thumb/preview,永不拉原图);
+  // 图片浏览器(本组件) → 高清原图档。
+  // 历史背景(2026-08-27 改回):曾为避免拖拽时父组件重渲染触发重新 fetch+解码卡顿,
+  // 用 useProgressiveImage(invK=2) 降为 preview 级;现优先清晰度,卡顿问题另从渲染层优化。
+  // 非图片类型(video/audio)行为不变,均由 useHydratedContent 重建全量内容。
+  const hydrated = useHydratedContent(storageKeyForHydrate, cover ?? '');
   const kindLabel = t(`asset.kind${asset.kind.charAt(0).toUpperCase()}${asset.kind.slice(1)}`);
   const dim = (isImage || isVideo) && data.width ? { width: data.width, height: data.height } : null;
 

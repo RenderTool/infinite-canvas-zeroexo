@@ -264,11 +264,12 @@ export async function uploadAsset(
 }
 
 export function getAssetStorageKey(asset: Asset): string | undefined {
-  if (asset.data.kind === 'text') return undefined;
+  // text/script 均为纯元数据资产,无存储文件,不参与存储键/引用计数链路(同 storageKey 治理契约)
+  if (asset.data.kind === 'text' || asset.data.kind === 'script') return undefined;
   return asset.data.storageKey;
 }
 
-/** 将剧本节点的 episodes 序列化为纯文本(用于存入资产/下载) */
+/** 将剧本节点的 episodes 序列化为纯文本(用于下载) */
 export function serializeScriptContent(node: NodeRecord): string {
   const data = (node.data ?? {}) as Record<string, unknown>;
   const episodes = (data.episodes as Array<{ title?: string; content?: string }> | undefined) ?? [];
@@ -283,6 +284,20 @@ export function serializeScriptContent(node: NodeRecord): string {
       return `${heading}\n\n${body}`;
     })
     .join('\n\n---\n\n');
+}
+
+/** 将剧本节点的 episodes 序列化为剧本资产契约 JSON(存入 kind='script' 资产的 content);
+ *  与剧本编辑器「加入资产」链路同契约(资产库 script-card/handleOpenScriptAsset 按此解析集数) */
+export function serializeScriptEpisodesJson(node: NodeRecord): string | null {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const episodes = (data.episodes as Array<{ id?: string; number?: number; title?: string; content?: string }> | undefined) ?? [];
+  if (episodes.length === 0) return null;
+  return JSON.stringify(episodes.map((ep, idx) => ({
+    id: ep.id ?? `ep-${idx}`,
+    number: ep.number ?? idx + 1,
+    title: ep.title ?? '',
+    content: ep.content ?? '',
+  })));
 }
 
 export function assetInputFromNode(node: NodeRecord): CreateAssetInput | null {
@@ -307,6 +322,21 @@ export function assetInputFromNode(node: NodeRecord): CreateAssetInput | null {
   }
 
   if (node.type === 'script') {
+    // 剧本节点 → 剧本资产(非文本):content 存 episodes JSON,资产库按剧本分组展示,
+    // 可经剧本编辑器回读/回发画布(修复用户反馈:发送剧本节点到资产却变成文本)
+    const scriptJson = serializeScriptEpisodesJson(node);
+    if (scriptJson) {
+      const scriptTitle = (node.title ?? '剧本').slice(0, 24);
+      return {
+        title: scriptTitle,
+        kind: 'script',
+        coverUrl: undefined,
+        bytes: new Blob([scriptJson]).size,
+        mimeType: 'application/json',
+        data: { kind: 'script', content: scriptJson },
+      };
+    }
+    // 无 episodes(旧数据/空节点)降级纯文本,避免保存失败无反馈;空内容仍拒保(返回 null)
     const scriptText = serializeScriptContent(node);
     if (!scriptText.trim()) return null;
     const scriptTitle = (node.title ?? '剧本').slice(0, 24);

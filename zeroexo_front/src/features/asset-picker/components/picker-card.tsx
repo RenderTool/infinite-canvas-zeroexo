@@ -27,8 +27,8 @@ const DRAG_MIME = 'application/x-canvas-asset';
 /** 将 Asset 转换为可插入画布的 payload(同时用于点击插入与拖拽)。 */
 export function toInsertPayload(asset: Asset): InsertAssetPayload {
   const data = asset.data;
-  if (data.kind === 'text') {
-    // md 格式发送到画布时还原为纯文本
+  if (data.kind === 'text' || data.kind === 'script') {
+    // md 格式发送到画布时还原为纯文本；script 插入画布有专属链路(资产库剧本分组),此处文本化兜底
     const content = asset.mimeType === 'text/markdown' ? stripMarkdown(data.content) : data.content;
     return { kind: 'text', content, title: asset.title };
   }

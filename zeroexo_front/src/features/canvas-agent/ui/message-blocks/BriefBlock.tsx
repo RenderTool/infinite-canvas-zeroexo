@@ -2,14 +2,17 @@
  * BriefBlock - 任务简报卡（Plan#36 R2-5 emit_brief 协议）
  *
  * 任务完成交付的结构化呈现：
- * - 成果摘要 + 产出节点引用（点击聚焦画布节点，走 focusOnBounds 契约 经验 #16）
+ * - 成果摘要（MD 渲染，支持标题/列表/表格/代码块等）+ 产出节点引用
  * - 待审核声明 + 「继续提问」引导
  */
 
 import { Sparkles, Crosshair } from 'lucide-react';
 import { App as AntdApp } from 'antd';
+import ReactMarkdown from 'react-markdown';
 import type { CanvasAgentMessage } from '../types.js';
 import { executeCanvasOp } from '../canvas-op-bridge.js';
+import { mdComponents } from './MarkdownBlock.js';
+import { linkifyNodeIds } from './node-ref.js';
 
 export function BriefBlock(props: { message: CanvasAgentMessage }): React.ReactElement {
   const { message } = props;
@@ -50,9 +53,18 @@ export function BriefBlock(props: { message: CanvasAgentMessage }): React.ReactE
         </span>
       </div>
 
-      {/* 成果摘要 */}
-      <div style={{ fontSize: 13, color: 'var(--agent-text)', lineHeight: 1.65 }}>
-        {brief.summary}
+      {/* 成果摘要（MD 渲染，Plan#43：避免丑陋原始文本） */}
+      <div
+        style={{
+          fontSize: 13,
+          color: 'var(--agent-text)',
+          lineHeight: 1.7,
+          wordBreak: 'break-word',
+        }}
+      >
+        <ReactMarkdown components={mdComponents as never}>
+          {linkifyNodeIds(brief.summary ?? '')}
+        </ReactMarkdown>
       </div>
 
       {/* 产出节点引用 */}
@@ -87,10 +99,20 @@ export function BriefBlock(props: { message: CanvasAgentMessage }): React.ReactE
         </div>
       )}
 
-      {/* 待审核声明 */}
+      {/* 待审核声明（也走 MD 渲染以统一格式） */}
       {brief.note && (
-        <div style={{ fontSize: 11.5, color: 'var(--agent-muted)', marginTop: 8, lineHeight: 1.5 }}>
-          {brief.note}
+        <div
+          style={{
+            fontSize: 11.5,
+            color: 'var(--agent-muted)',
+            marginTop: 8,
+            lineHeight: 1.6,
+            wordBreak: 'break-word',
+          }}
+        >
+          <ReactMarkdown components={mdComponents as never}>
+            {linkifyNodeIds(brief.note)}
+          </ReactMarkdown>
         </div>
       )}
     </div>

@@ -160,7 +160,10 @@ const NodeItem = React.memo(
     // 去标题文本: 全视图(k<0.35)时节点屏幕尺寸小,标题本就不可读(k=0.35 时
     // 16px 标题 ≈ 5.6px);而 3000 节点全视图时文本布局/绘制成本随节点数翻倍
     // (每节点 div+span 两个 DOM),是大量节点掉帧的主因之一 —— 占位改为纯色块。
-    const isLowZoom = invK > 1 / 0.35; // invK = 1/k, 所以 k < 0.35 时 invK > 2.857
+    // [2026-08-27 征集 #75 用户拍板暂时禁用] 反馈：稍微缩小一点就变 LOD 色块，
+    // 体验差；暂去除「缩小就回退」概念。功能代码全部保留，置回 true 即恢复。
+    const LOW_ZOOM_LOD_ENABLED: boolean = false;
+    const isLowZoom = LOW_ZOOM_LOD_ENABLED && invK > 1 / 0.35; // invK = 1/k, 所以 k < 0.35 时 invK > 2.857
     if (isLowZoom) {
       // 使用节点底色(与 NodeShell shellColor 优先级一致: fillColor 优先于 ext.color)
       const nodeColor = node.backgroundColor ?? node.nodeColor ?? nodeDefaults.fillColor ?? ext?.color ?? '#16213e';

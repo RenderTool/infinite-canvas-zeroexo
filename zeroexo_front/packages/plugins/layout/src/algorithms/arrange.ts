@@ -1,5 +1,5 @@
 /**
- * 排列算法入口(宫格 / 水平 / 垂直 / 树状 / dagre / auto)
+ * 排列算法入口
  *
  * 排列策略:
  * 每个算法自身保证不重叠,所有节点从指定起点 (origMinX, origMinY) 开始排列。
@@ -10,7 +10,11 @@
  * - horizontal: 按类型归类后,全部节点一起横向排列(同类型节点相邻)
  * - vertical: 按类型归类后,全部节点一起竖向排列(同类型节点相邻)
  * - tree: 根据 edges 构建树状结构,层级左→右布局,同层节点垂直堆叠
- * - dagre: 基于 Sugiyama 框架的有向图自动布局
+ * - dagre: 基于真实 dagre 库的 Sugiyama 分层布局
+ * - smart: 智能复合布局 — 自动识别组/树/游离节点,三阶段管线
+ * - force: 力导向布局 — Fruchterman-Reingold 算法
+ * - radial: 径向布局 — 根节点居中,子节点按层径向排列
+ * - compact: 紧凑打包 — MaxRects 装箱算法
  * - auto: 无连线时按类型归类后宫格排列,有连线时走树状布局
  */
 
@@ -20,6 +24,9 @@ import { ARRANGE_GAP } from '../types.js';
 import { maxRectsPacking } from './packing.js';
 import { tidyTreeLayout } from './tree-layout.js';
 import { arrangeDagre } from './dagre-layout.js';
+import { smartLayout } from './smart-layout.js';
+import { forceLayout } from './force-layout.js';
+import { radialLayout } from './radial-layout.js';
 
 // ===== NodeRecord → LayoutNode 转换 =====
 
@@ -42,6 +49,10 @@ export function arrangeNodes(
   nodes: LayoutNode[],
   mode: ArrangeMode,
   edges?: { source: string; target: string }[],
+  options?: {
+    /** 组 ID → 子节点 ID 列表映射 (smart 模式使用) */
+    groups?: Map<string, string[]>;
+  },
 ): PositionResult {
   if (nodes.length === 0) return new Map();
 
@@ -63,6 +74,14 @@ export function arrangeNodes(
       return edges ? tidyTreeLayout(sorted, edges) : maxRectsPacking(nodes, ARRANGE_GAP);
     case 'dagre':
       return arrangeDagre(sorted, edges ?? []);
+    case 'smart':
+      return smartLayout(sorted, edges ?? [], { groups: options?.groups });
+    case 'force':
+      return forceLayout(sorted, edges ?? []);
+    case 'radial':
+      return radialLayout(sorted, edges ?? []);
+    case 'compact':
+      return maxRectsPacking(sorted, ARRANGE_GAP);
     case 'auto': {
       const hasEdges = edges && edges.length > 0 && edges.some((e) =>
         nodes.some((n) => n.id === e.source) && nodes.some((n) => n.id === e.target),
@@ -71,7 +90,6 @@ export function arrangeNodes(
         return tidyTreeLayout(sorted, edges!);
       }
       // 无连线:按类型分组宫格排列 + 中心锚点对齐
-      // 计算原节点包围盒中心,使排列后节点中心不变,留在当前区域
       const origCenter = computeNodesCenter(nodes);
       const gridPositions = arrangeGroupedGrid(sorted);
       return alignPositionsToCenter(nodes, gridPositions, origCenter);

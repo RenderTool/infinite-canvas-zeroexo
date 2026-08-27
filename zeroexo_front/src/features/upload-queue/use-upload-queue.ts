@@ -232,7 +232,8 @@ export function useAssetUploadQueue(
  */
 function createPayloadFromInput(input: CreateAssetInput) {
   const d = input.data;
-  if (d.kind === 'text') {
+  if (d.kind === 'text' || d.kind === 'script') {
+    // script 资产不走上传队列链路,此分支仅为类型穷举兜底(文本化插入)
     return { kind: 'text' as const, content: d.content as string, title: input.title };
   }
   if (d.kind === 'video') {

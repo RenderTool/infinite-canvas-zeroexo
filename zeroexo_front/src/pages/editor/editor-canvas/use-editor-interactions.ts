@@ -18,7 +18,7 @@ import type {
 } from '@zeroexo/plugin-ai-provider';
 import { AiError, classifyError } from '@zeroexo/plugin-ai-provider';
 import type { AiErrorType } from '@zeroexo/plugin-ai-provider';
-import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, convertToStack, createStackNode, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
+import { nodeActionBus, replaceNodeImage, replaceNodeVideo, replaceNodeAudio, stackSelectedNodes, resolveStackSpawnPosition, createAssetNode } from '@zeroexo/plugin-nodes';
 import type { AssetNodePayload, ReferenceItem } from '@zeroexo/plugin-nodes';
 import { duplicateSubtree } from '@zeroexo/preset-default';
 import { apiGet } from '@/services/api-client.js';
@@ -55,6 +55,107 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 // 节点类型 → 输入/输出引脚 id(NodeGenerateDock 参考素材连线用;image/video/audio 的输入引脚是 prompt,输出引脚按类型命名)
 const NODE_INPUT_PIN: Record<string, string> = { text: 'input', image: 'prompt', video: 'prompt', audio: 'prompt' };
 const NODE_OUTPUT_PIN: Record<string, string> = { text: 'output', image: 'image', video: 'video', audio: 'audio' };
+
+// ===== 节点下载(右键单项/批量共用,征集 #78) =====
+
+/** 支持下载的类型:文本/图片/视频/音频/剧本 */
+const DOWNLOADABLE_TYPES = ['text', 'image', 'video', 'audio', 'script'];
+
+/** 节点是否可下载(有内容/有剧集) */
+function isNodeDownloadable(node: NodeRecord): boolean {
+  if (!DOWNLOADABLE_TYPES.includes(node.type)) return false;
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const hasContent = !!((data.content as string | undefined)?.trim());
+  const hasEpisodes = !!((data.episodes as unknown[] | undefined)?.length);
+  return hasContent || (node.type === 'script' && hasEpisodes);
+}
+
+/** 触发浏览器下载(锚点点击);revoke=true 时点击后释放临时 blob URL */
+function triggerAnchorDownload(url: string, filename: string, revoke = false): void {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  if (revoke) URL.revokeObjectURL(url);
+}
+
+/**
+ * 下载单个节点内容:
+ * - 剧本: 序列化 episodes 为 .txt;文本: content → .txt
+ * - 媒体(image/video/audio): content 二进制(非 blob:/data: 先 fetch 换 blob)
+ */
+async function downloadNodeAsFile(node: NodeRecord): Promise<void> {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (node.type === 'script') {
+    const text = serializeScriptContent(node);
+    if (!text.trim()) return;
+    triggerAnchorDownload(
+      URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })),
+      `${(node.title ?? '剧本').trim() || '剧本'}.txt`,
+      true,
+    );
+    return;
+  }
+  if (node.type === 'text') {
+    const text = (data.content as string) ?? '';
+    if (!text.trim()) return;
+    triggerAnchorDownload(
+      URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })),
+      `${(node.title ?? '文本').trim() || '文本'}.txt`,
+      true,
+    );
+    return;
+  }
+  const content = data.content as string | undefined;
+  if (!content) return;
+  const mimeType = (data.mimeType as string) || '';
+  const ext = mimeType ? (mimeType.split('/')[1] || 'bin') : 'bin';
+  // 文件名:优先节点标题(批量下载时可区分),无标题时时间戳兜底
+  const baseName = (node.title ?? '').trim();
+  let filename = baseName ? `${baseName}.${ext}` : '';
+  if (!filename) {
+    const now = new Date();
+    const pad = (n: number): string => n.toString().padStart(2, '0');
+    filename = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.${ext}`;
+  }
+  const isBlob = content.startsWith('blob:');
+  const isData = content.startsWith('data:');
+  let downloadUrl = content;
+  let needsRevoke = false;
+  if (!isBlob && !isData) {
+    try {
+      const res = await fetch(content);
+      const blob = await res.blob();
+      downloadUrl = URL.createObjectURL(blob);
+      needsRevoke = true;
+    } catch { /* 保留原 URL 兜底 */ }
+  }
+  triggerAnchorDownload(downloadUrl, filename, needsRevoke);
+}
+
+/** 分镜列锚点(征集 #78):取剧本下游已连分镜中最靠下的一个,无则返回剧本自身 ——
+ *  新分镜在其正下方继续堆叠成列(原位生成 + 上下排版,不参考周围节点) */
+function storyboardColumnAnchor(
+  graph: { nodes: Array<{ id: string; type: string; position: { x: number; y: number }; size?: { width: number; height: number } }>; edges: Array<{ source: unknown; target: unknown }> },
+  scriptNode: { id: string; position: { x: number; y: number }; size?: { width: number; height: number } },
+): { position: { x: number; y: number }; size?: { width: number; height: number } } {
+  const downstream = new Set<string>();
+  for (const e of graph.edges) {
+    const src = typeof e.source === 'object' && e.source !== null ? (e.source as { nodeId?: string }).nodeId : e.source;
+    if (src !== scriptNode.id) continue;
+    const tgt = typeof e.target === 'object' && e.target !== null ? (e.target as { nodeId?: string }).nodeId : e.target;
+    if (typeof tgt === 'string') downstream.add(tgt);
+  }
+  let bottom: { position: { x: number; y: number }; size?: { width: number; height: number } } | null = null;
+  for (const n of graph.nodes) {
+    if (n.type !== 'storyboard' || !downstream.has(n.id)) continue;
+    const bottomEdge = (bottom?.position.y ?? -Infinity) + (bottom?.size?.height ?? 0);
+    if (!bottom || (n.position.y + (n.size?.height ?? 0)) > bottomEdge) bottom = n;
+  }
+  return bottom ?? scriptNode;
+}
 
 /** 将 content(blob:/data:/http URL)转为 dataUrl(base64),供 AI referenceImages 使用 */
 async function contentToDataUrl(content: string): Promise<string> {
@@ -678,66 +779,7 @@ export function useEditorInteractions({
           items.push({
             key: 'download', label: t('common.download'), icon: createElement(EDITOR_ICONS.download, { size: 14 }), onClick: () => {
               if (!node) return;
-              void (async () => {
-                const data = node.data as Record<string, unknown> | undefined;
-                // 剧本节点:序列化 episodes 为文本
-                if (node.type === 'script') {
-                  const text = serializeScriptContent(node);
-                  if (!text.trim()) return;
-                  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${(node.title ?? '剧本').trim() || '剧本'}.txt`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                  return;
-                }
-                // 文本节点:直接下载 content
-                if (node.type === 'text') {
-                  const text = (data?.content as string) ?? '';
-                  if (!text.trim()) return;
-                  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${(node.title ?? '文本').trim() || '文本'}.txt`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                  return;
-                }
-                // 媒体节点(图片/视频/音频):下载二进制内容
-                const content = data?.content as string | undefined;
-                if (!content) return;
-                const mimeType = (data?.mimeType as string) || '';
-                const ext = mimeType ? (mimeType.split('/')[1] || 'bin') : 'bin';
-                const now = new Date();
-                const pad = (n: number): string => n.toString().padStart(2, '0');
-                const filename = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.${ext}`;
-                const isBlob = content.startsWith('blob:');
-                const isData = content.startsWith('data:');
-                let downloadUrl = content;
-                let needsRevoke = false;
-                if (!isBlob && !isData) {
-                  try {
-                    const res = await fetch(content);
-                    const blob = await res.blob();
-                    downloadUrl = URL.createObjectURL(blob);
-                    needsRevoke = true;
-                  } catch { /* fall through */ }
-                }
-                const a = document.createElement('a');
-                a.href = downloadUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                if (needsRevoke) URL.revokeObjectURL(downloadUrl);
-              })();
+              void downloadNodeAsFile(node);
             },
           });
         }
@@ -746,6 +788,24 @@ export function useEditorInteractions({
         const selection = refs.store?.getSelection();
         const selectedIds = selection?.selectedNodeIds;
         if (node && selectedIds && selectedIds.has(nodeId) && selectedIds.size >= 2) {
+          // 批量下载(征集 #78):对选择集内全部可下载节点逐个错峰下载(避免浏览器拦截多文件)
+          const graphForBatch = refs.store?.getGraph();
+          const downloadable = (graphForBatch?.nodes ?? []).filter((n) => selectedIds.has(n.id) && isNodeDownloadable(n as NodeRecord));
+          if (downloadable.length > 0) {
+            items.push({
+              key: 'download-selected',
+              label: t('editor.downloadSelected', { count: downloadable.length }),
+              icon: createElement(EDITOR_ICONS.download, { size: 14 }),
+              onClick: () => {
+                void (async () => {
+                  for (let i = 0; i < downloadable.length; i++) {
+                    await downloadNodeAsFile(downloadable[i]! as NodeRecord);
+                    if (i < downloadable.length - 1) await new Promise((r) => setTimeout(r, 350));
+                  }
+                })();
+              },
+            });
+          }
           // 成组(与胶囊 onGroup 同源:创建预览 → 立即确认,二段式合并一步)
           items.push({ key: 'divider-group-selected', divider: true, label: '', onClick: () => {} });
           items.push({
@@ -778,23 +838,8 @@ export function useEditorInteractions({
           }
         }
 
-        // ===== StackNode 操作组(仅图片/视频节点) =====
-        if (nodeType === 'image' || nodeType === 'video') {
-          items.push({ key: 'divider-stack', divider: true, label: '', onClick: () => {} });
-          const stackCtx = { commandQueue: refs.commandQueue } as ToolContext;
-          items.push({
-            key: 'convertToStack',
-            label: t('nodes.stackConvertTo'),
-            icon: createElement(EDITOR_ICONS.stack, { size: 14 }),
-            onClick: () => { if (node) convertToStack(node, stackCtx); },
-          });
-          items.push({
-            key: 'createStackNode',
-            label: t('nodes.stackCreateNew'),
-            icon: createElement(EDITOR_ICONS.stack, { size: 14 }),
-            onClick: () => { if (node) createStackNode(node, stackCtx); },
-          });
-        }
+        // ===== 堆叠入口简化(征集 #78 用户拍板):只保留多选「堆叠所选」(上方多选块),
+        // 单节点的「转入堆叠/生成堆叠节点」右键项已删除(胶囊单节点工具入口不动) =====
 
         // ===== 危险操作组(分割线分隔) =====
         items.push({ key: 'divider-delete', divider: true, label: '', onClick: () => {} });
@@ -1530,14 +1575,15 @@ export function useEditorInteractions({
       const scriptNode = graph.nodes.find((n: any) => n.id === event.nodeId);
       if (!scriptNode) return;
 
-      // 新建分镜节点 + 连线(2026-08-22: 走布局契约 resolvePlacement, 默认右侧 + 垂直整理避让)
+      // 新建分镜节点 + 连线(征集 #78 用户拍板:原位正下方生成 + 多分镜向下堆叠成列;
+      // 关闭重叠避让、不参考周围节点 —— 锚点取剧本下游分镜列最底节点,无则剧本自身)
       const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
       const title = `分镜${sameTypeCount + 1}`;
       const sbPos = resolvePlacement({
-        anchor: scriptNode,
+        anchor: storyboardColumnAnchor(graph, scriptNode),
         ext: state.extensions.get('storyboard'),
-        existingNodes: graph.nodes,
+        overrides: { direction: 'down', avoidOverlap: false },
       });
       q.execute(new AddNodeCommand({
         id,
@@ -1562,6 +1608,9 @@ export function useEditorInteractions({
           aiSubjects: SAMPLE_SUBJECTS,
         };
         q.execute(new UpdateNodeDataCommand(id, patch as Record<string, unknown>));
+        // 征集 #78(推翻征集 #71 范文 auto 排列):生成后不再触发智能排列 ——
+        // arrangeSelection 会移动剧本与周围节点(用户报告的"跑位"根因);
+        // 位置已由下方堆叠契约保证(原位正下方 + 多分镜成列)
         return;
       }
 
@@ -1640,13 +1689,20 @@ export function useEditorInteractions({
         return;
       }
       const epIds = Array.isArray(event.episodeIds) ? event.episodeIds : [];
-      // 2026-08-22: 批量位置走布局契约(同列垂直错开 + 避让, 修复 batchPosY 24px 重叠问题)
-      const batchPosY = (i: number) => resolvePlacement({
-        anchor: scriptNode,
-        ext: state.extensions.get('storyboard'),
-        existingNodes: graph.nodes,
-        index: i,
-      });
+      // 征集 #78: 原位正下方逐集向下堆叠(锚点链式下移), 不避让周围节点;
+      // 起始锚点 = 剧本下游分镜列最底节点(无则剧本自身)
+      const sbExt = state.extensions.get('storyboard');
+      const sbSize = sbExt?.defaultSize ?? { width: 200, height: 100 };
+      let batchAnchor: { position: { x: number; y: number }; size?: { width: number; height: number } } = storyboardColumnAnchor(graph, scriptNode);
+      const nextBatchPos = (): { x: number; y: number } => {
+        const pos = resolvePlacement({
+          anchor: batchAnchor,
+          ext: sbExt,
+          overrides: { direction: 'down', avoidOverlap: false },
+        });
+        batchAnchor = { position: pos, size: sbSize };
+        return pos;
+      };
 
       if (event.targetNodeId) {
         // 已有分镜节点:断开旧的剧本连线 → 建立新连线 + 写 sourceScriptId
@@ -1704,12 +1760,12 @@ export function useEditorInteractions({
         return;
       }
 
-      // 新建分镜节点(剧本侧批量):每个选集一个节点, 位置走布局契约(同列垂直错开)
+      // 新建分镜节点(剧本侧批量):每个选集一个节点, 位置向下堆叠成列(征集 #78)
       epIds.forEach((epId: string, i: number) => {
         const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`;
         const sameTypeCount = graph.nodes.filter((n: any) => n.type === 'storyboard').length;
         const title = `分镜${sameTypeCount + i + 1}`;
-        const pos = batchPosY(i);
+        const pos = nextBatchPos();
         q.execute(new AddNodeCommand({
           id,
           type: 'storyboard',
@@ -2079,7 +2135,7 @@ export function useEditorInteractions({
       let positions: Map<string, { x: number; y: number }>;
       if (op === 'arrange') {
         let edges: { source: string; target: string }[] | undefined;
-        if (mode === 'auto' || mode === 'tree' || mode === 'dagre') {
+        if (mode === 'auto' || mode === 'tree' || mode === 'dagre' || mode === 'smart' || mode === 'force' || mode === 'radial') {
           const graph = refs.store.getGraph();
           const childIdSet = new Set(children.map((c: any) => c.id));
           edges = graph.edges

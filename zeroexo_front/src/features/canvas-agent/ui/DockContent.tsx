@@ -11,13 +11,14 @@
  * 页签状态提升到 canvas-agent store（dockTab），TopBar 协作聊天按钮可直接切到聊天页签。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, LogOut, MessageSquare, Plus, Sparkles, Trash2, Users, Volume2, VolumeX, Bot, User, X, Search } from 'lucide-react';
 import { Button, App as AntdApp } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useCanvasAgentStore } from './store.js';
-import { ThinkTreeLive } from './think-stream/ThinkTree.js';
+import { ThinkTree } from './think-stream/ThinkTree.js';
+import { PhaseTimeline, derivePhases } from './think-stream/PhaseTimeline.js';
 import { MessageRenderer } from './message-blocks/MessageRenderer.js';
 import { ComposerInput } from './composer/ComposerInput.js';
 import { PinnedTodoSlot } from './PinnedTodoSlot.js';
@@ -39,6 +40,8 @@ import type {
   UploadCardData,
   ParamsRequestData,
   BriefCardData,
+  ThinkingState,
+  TodoSnapshot,
 } from './types.js';
 import { CollaborationChat } from '@/features/collaboration/collaboration-chat.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
@@ -101,11 +104,19 @@ function dtoToStoreMessage(dto: ConversationMessageDto): CanvasAgentMessage | nu
       if (attachments) {
         // 剥离标记行
         text = text.slice(manifestMatch[0].length);
-        // 剥离附件预览正文段（文本："[附件 x（size）内容预览]\n预览...（原文共 N 字…）"；非文本："[附件 x（size，非文本文件，按需处理）]"）
-        text = text
-          .replace(/\n\[附件 [^\]]+（[^\]]+，非文本文件，按需处理）\]/g, '')
-          .replace(/\n\[附件 [^\]]+（[^\]]+）内容预览\][\s\S]*?（原文共 [^\n]+）\n?/g, '')
-          .trim();
+        // 剥离附件预览正文段（用户多次强调：附件绝不展开进聊天）。
+        // 2026-08-25 修复：旧正则强依赖「（原文共 N 字…）」尾巴，非截断附件无此尾巴 → 剥离失效 → 预览全文平铺进气泡。
+        // 改为结构性宽剥离：预览段从「[附件 …内容预览]」起，到下一个附件标记/「@ 引用」行/文末为止，不依赖任何尾部格式。
+        // 按行结构性剥离（不依赖尾部格式；预览段 = 从「[附件 …内容预览]」标记行到下一个结构化标记行）
+        const stripped: string[] = [];
+        let inPreview = false;
+        for (const ln of text.split('\n')) {
+          if (/^\[附件 .*内容预览\]\s*$/.test(ln)) { inPreview = true; continue; }
+          if (/^\[附件 .*非文本文件，按需处理）\]\s*$/.test(ln)) { continue; }
+          if (inPreview && ln.trimStart().startsWith('[')) inPreview = false;
+          if (!inPreview) stripped.push(ln);
+        }
+        text = stripped.join('\n').trim();
       }
     }
     return {
@@ -244,6 +255,105 @@ export interface DockContentProps {
 
 type DockTab = 'chat' | 'collab' | 'members';
 
+/** 消息流切片窗口参数（Plan#43 B8，征集#72）：默认渲染最近 N 回合，上滑分批加载更早回合 */
+const TURN_WINDOW = 24;
+const TURN_LOAD_STEP = 12;
+const EMPTY_STEPS: ThinkingState['steps'] = [];
+
+/**
+ * TurnBlock - 回合渲染块（memo，长会话性能关键，Plan#43 B8）
+ *
+ * 流式更新时只有末回合 props 变化（尾消息/思考/计划），历史回合 props 稳定 → 跳过重渲染。
+ * 保持 R2 回合归组的紧凑对话流：一组一个角色头 + 尾部整块复制。
+ */
+const TurnBlock = memo(function TurnBlock({
+  group,
+  showThinking,
+  showPhase,
+  thinkingText,
+  thinkingSteps,
+  thinkingStartedAt,
+  currentPlan,
+  todoSnapshot,
+}: {
+  group: CanvasAgentMessage[];
+  showThinking: boolean;
+  showPhase: boolean;
+  /** 仅末回合（showThinking/showPhase）传真实值，其余传稳定空值保证 memo 命中 */
+  thinkingText: string;
+  thinkingSteps: ThinkingState['steps'];
+  thinkingStartedAt?: number;
+  currentPlan: AgentPlanData | null;
+  todoSnapshot: TodoSnapshot | null;
+}): React.ReactElement {
+  const isAgent = group[0]!.role === 'agent';
+  // 整块复制内容：回合内全部文本/MD 消息拼接
+  const turnText = group
+    .filter((m) => m.type === 'text' || m.type === 'md')
+    .map((m) => m.text ?? '')
+    .filter(Boolean)
+    .join('\n\n');
+  return (
+    <div>
+      {group.map((m, mIdx) => {
+        const isFirst = mIdx === 0;
+        return (
+          <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : 'assistant'}`}>
+            {isFirst && (
+              <div className="role">
+                {isAgent && (
+                  <span className="agent-avatar">
+                    <Bot size={16} />
+                  </span>
+                )}
+                <span>{m.role === 'user' ? '你' : 'Agent'}</span>
+                <span className="msg-time">{formatMsgTime(m.timestamp)}</span>
+              </div>
+            )}
+            {/* Plan#43 修订（2026-08-25 实测反馈）：完成态思考树/计划流挂在角色行之后、正文结论之前（原挂角色头之前，视觉上出现在头像上方） */}
+            {isFirst && showThinking ? (
+              <ThinkTree
+                steps={thinkingSteps}
+                thinkingText={thinkingText}
+                active={false}
+                startedAt={thinkingStartedAt}
+                defaultCollapsed
+              />
+            ) : null}
+            {isFirst && showPhase && currentPlan ? (
+              <PhaseTimeline
+                plan={currentPlan}
+                phases={derivePhases(currentPlan, todoSnapshot)}
+              />
+            ) : null}
+            {m.role === 'user' ? (
+              /* R4：用户消息 = 气泡 + 最右侧头像（仅回合首条带头像，与角色行一致） */
+              <div className="user-main">
+                <div className="user-text">{m.text}</div>
+                {isFirst && (
+                  <span className="user-avatar">
+                    <User size={16} />
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="ai-body">
+                <MessageRenderer message={m} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {/* R2：回合结束后整块复制（GPT 式，一组只有一个复制钮） */}
+      {isAgent && turnText && (
+        <div className="msg-actions">
+          <CopyButton getText={() => turnText} />
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function DockContent({ projectId }: DockContentProps): React.ReactElement {
   const readOnly = useReadOnly();
   const messages = useCanvasAgentStore((s) => s.messages);
@@ -251,6 +361,16 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
   // 思考流文本:思考块随流增长时保持滚动到底部
   const thinkingText = useCanvasAgentStore((s) => s.thinking.text);
   const activeConversationId = useCanvasAgentStore((s) => s.activeConversationId);
+  // Plan#43 B3：执行计划与快照（PhaseTimeline 驱动）
+  const currentPlan = useCanvasAgentStore((s) => s.currentPlan);
+  const todoSnapshot = useCanvasAgentStore((s) => s.todoSnapshot);
+  const thinking = useCanvasAgentStore((s) => s.thinking);
+  const phaseLabel = useCanvasAgentStore((s) => s.phaseLabel);
+  // 实时思考树可见：生成中且已有思考内容（文本或步骤）→ 常驻动效，绝不静止
+  const liveThinkingVisible =
+    isGenerating &&
+    thinking.active &&
+    (thinking.text.trim().length > 0 || thinking.steps.length > 0);
   // 页签状态提升到 store:TopBar 协作聊天按钮可直接切到 collab
   const tab = useCanvasAgentStore((s) => s.dockTab);
   const setTab = useCanvasAgentStore((s) => s.setDockTab);
@@ -261,6 +381,58 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
   const { message, modal } = AntdApp.useApp();
   const themeCfg = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ===== Plan#43 B8 消息流切片窗口（虚拟化轻量版，征集#72：长会话卡顿根除） =====
+  // R2 返工：按回合归组（useMemo + 旧引用复用：回合内容未变则保持同一数组引用 → TurnBlock memo 命中）
+  const prevGroupsRef = useRef<CanvasAgentMessage[][]>([]);
+  const groups = useMemo(() => {
+    const gs: CanvasAgentMessage[][] = [];
+    for (const m of messages) {
+      const last = gs[gs.length - 1];
+      if (last && last[0]!.role === m.role) last.push(m);
+      else gs.push([m]);
+    }
+    const prev = prevGroupsRef.current;
+    const reused = gs.map((g, i) => {
+      const p = prev[i];
+      return p && p.length === g.length && p[0] === g[0] && p[p.length - 1] === g[g.length - 1] ? p : g;
+    });
+    prevGroupsRef.current = reused;
+    return reused;
+  }, [messages]);
+
+  // windowStart = -1 → 贴底（只渲染最近 TURN_WINDOW 回合）；切换会话重置回贴底
+  const [windowStart, setWindowStart] = useState(-1);
+  useEffect(() => { setWindowStart(-1); }, [activeConversationId]);
+  const effWindowStart = windowStart < 0
+    ? Math.max(0, groups.length - TURN_WINDOW)
+    : Math.min(windowStart, groups.length);
+  const effWindowStartRef = useRef(effWindowStart);
+  effWindowStartRef.current = effWindowStart;
+  const visibleGroups = groups.slice(effWindowStart);
+
+  // 上滑近顶（<80px）分批加载更早回合；贴底/自动滚底时 scrollTop 大，不会误触发
+  const handleConversationScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > 80) return;
+    setWindowStart((w) => {
+      const cur = w < 0 ? effWindowStartRef.current : w;
+      if (cur <= 0) return w;
+      return Math.max(0, cur - TURN_LOAD_STEP);
+    });
+  }, []);
+
+  // prepend 后的滚动位置补偿：新内容插入顶部时，可视内容保持原位（不跳）
+  const convMetricsRef = useRef({ start: -1, height: 0 });
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const prev = convMetricsRef.current;
+    if (prev.start > effWindowStart && prev.height > 0) {
+      el.scrollTop += el.scrollHeight - prev.height;
+    }
+    convMetricsRef.current = { start: effWindowStart, height: el.scrollHeight };
+  });
 
   const [convs, setConvs] = useState<ConversationSummary[]>([]);
   const [convOpen, setConvOpen] = useState(false);
@@ -832,7 +1004,7 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
 
       {/* ===== 内容区 ===== */}
       {tab === 'chat' ? (
-        <div className="conversation" ref={scrollRef}>
+        <div className="conversation" ref={scrollRef} onScroll={handleConversationScroll}>
           {messages.length === 0 ? (
             <div className="welcome-wrap">
               <div className="welcome-icon">
@@ -849,66 +1021,53 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             </div>
           ) : (
             // R2 返工：按回合归组渲染——一组一个角色头，回合结束后整块复制（不是每小块一个复制钮）
-            (() => {
-              const groups: CanvasAgentMessage[][] = [];
-              for (const m of messages) {
-                const last = groups[groups.length - 1];
-                if (last && last[0]!.role === m.role) last.push(m);
-                else groups.push([m]);
-              }
-              return groups.map((group) => {
+            // Plan#43 B8：切片窗口渲染（默认最近 TURN_WINDOW 回合，上滑分批加载）+ TurnBlock memo（流式期只重渲染末回合）
+            <>
+              {effWindowStart > 0 && (
+                <div style={{ textAlign: 'center', padding: '2px 0 6px', fontSize: 11, color: 'var(--agent-muted)', userSelect: 'none' }}>
+                  上滑加载更早消息…
+                </div>
+              )}
+              {visibleGroups.map((group, idx) => {
+                const groupIdx = effWindowStart + idx;
                 const isAgent = group[0]!.role === 'agent';
-                // 整块复制内容：回合内全部文本/MD 消息拼接
-                const turnText = group
-                  .filter((m) => m.type === 'text' || m.type === 'md')
-                  .map((m) => m.text ?? '')
-                  .filter(Boolean)
-                  .join('\n\n');
+                // Plan#43：思考树/PhaseTimeline 只挂在最后一个 agent 回合前（当前活跃或刚完成的一轮）
+                // 实时思考树（active）不在此渲染——统一挂在消息流尾部（见下方 GeneratingIndicator），
+                // 否则生成中若最后一条是用户消息/无 agent group 时思考树无处挂载 → 界面静止
+                const isLastGroup = groupIdx === groups.length - 1;
+                const showThinking = isAgent && isLastGroup && !thinking.active && (thinking.text.length > 0 || thinking.steps.length > 0);
+                const showPhase = isAgent && isLastGroup && !!currentPlan && !!todoSnapshot;
                 return (
-                  <div key={group[0]!.id}>
-                    {group.map((m) => (
-                      <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : 'assistant'}`}>
-                        {m === group[0] && (
-                          <div className="role">
-                            {isAgent && (
-                              <span className="agent-avatar">
-                                <Bot size={16} />
-                              </span>
-                            )}
-                            <span>{m.role === 'user' ? '你' : 'Agent'}</span>
-                            <span className="msg-time">{formatMsgTime(m.timestamp)}</span>
-                          </div>
-                        )}
-                        {m.role === 'user' ? (
-                          /* R4：用户消息 = 气泡 + 最右侧头像（仅回合首条带头像，与角色行一致） */
-                          <div className="user-main">
-                            <div className="user-text">{m.text}</div>
-                            {m === group[0] && (
-                              <span className="user-avatar">
-                                <User size={16} />
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="ai-body">
-                            <MessageRenderer message={m} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {/* R2：回合结束后整块复制（GPT 式，一组只有一个复制钮） */}
-                    {isAgent && turnText && (
-                      <div className="msg-actions">
-                        <CopyButton getText={() => turnText} />
-                      </div>
-                    )}
-                  </div>
+                  <TurnBlock
+                    key={group[0]!.id}
+                    group={group}
+                    showThinking={showThinking}
+                    showPhase={showPhase}
+                    thinkingText={showThinking ? thinking.text : ''}
+                    thinkingSteps={showThinking ? thinking.steps : EMPTY_STEPS}
+                    thinkingStartedAt={showThinking ? thinking.startedAt : undefined}
+                    currentPlan={showPhase ? currentPlan : null}
+                    todoSnapshot={showPhase ? todoSnapshot : null}
+                  />
                 );
-              });
-            })()
+              })}
+            </>
           )}
-          {/* Plan#43 B1：思考树融入消息流（默认折叠，过程收进树内；替代旧底部常驻 ThinkStream） */}
-          <ThinkTreeLive />
+
+          {/* ===== 生成中常驻动效（Plan#43：任何生成过程都不允许静态，后端无增量事件时也必须有可见动效） ===== */}
+          {isGenerating && liveThinkingVisible ? (
+            <ThinkTree
+              steps={thinking.steps}
+              thinkingText={thinking.text}
+              active
+              startedAt={thinking.startedAt}
+              statusText={phaseLabel ?? undefined}
+              defaultCollapsed={false}
+            />
+          ) : null}
+          {isGenerating && !liveThinkingVisible && (
+            <GeneratingIndicator phaseLabel={phaseLabel} />
+          )}
         </div>
       ) : tab === 'collab' ? (
         /* ===== 协作聊天 Tab ===== */
@@ -1052,6 +1211,60 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
       {tab === 'chat' && !readOnly && <PinnedTodoSlot />}
       {tab === 'chat' && !readOnly && <LocalAgentConnector />}
       {tab === 'chat' && !readOnly && <ComposerInput />}
+    </div>
+  );
+}
+
+/**
+ * GeneratingIndicator - 生成中常驻动效指示器（Plan#43）
+ *
+ * 用户多次强调"任何生成中都要有动效，绝不允许静态/疑似卡死"。
+ * 该组件在后端无增量事件（thinking_delta/message_delta 缺席）时兜底：
+ * 三颗呼吸脉冲点 + 阶段文案 + 微光骨架行，永不静止。
+ */
+function GeneratingIndicator({ phaseLabel }: { phaseLabel: string | null }): React.ReactElement {
+  const phaseText = phaseLabel || '正在生成…';
+  return (
+    <div
+      style={{
+        width: '100%',
+        padding: '14px 4px 6px',
+        animation: 'agentFadeUp 0.3s ease',
+      }}
+    >
+      {/* 头部：脉冲点 + 阶段文案 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <span className="agent-dots">
+          <span className="agent-dots-i" />
+          <span className="agent-dots-i" />
+          <span className="agent-dots-i" />
+        </span>
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: 'var(--agent-muted)',
+            animation: 'agentFadeUp 0.4s ease',
+          }}
+        >
+          {phaseText}
+        </span>
+      </div>
+      {/* 微光骨架行：模拟流式输出 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {['92%', '84%', '96%', '55%'].map((w, i) => (
+          <div
+            key={i}
+            className="agent-shimmer"
+            style={{
+              width: w,
+              height: 13,
+              borderRadius: 6,
+              animationDelay: `${i * 0.14}s`,
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 }

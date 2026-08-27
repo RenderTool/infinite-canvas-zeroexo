@@ -19,6 +19,7 @@ import type {
   AgentStrategy,
   TodoSnapshot,
   AgentPhase,
+  AgentPlanData,
 } from './types.js';
 
 /** 模拟器回调，由 simulator 注入 */
@@ -105,6 +106,10 @@ export interface CanvasAgentState {
   // ---- 当前任务（真连层使用: 协议事件回执需要 taskId） ----
   currentTaskId: string | null;
   setCurrentTaskId: (id: string | null) => void;
+
+  // ---- Plan#43 B3：当前执行计划（PhaseTimeline 驱动） ----
+  currentPlan: AgentPlanData | null;
+  setCurrentPlan: (plan: AgentPlanData | null) => void;
 
   // ---- 重置 ----
   reset: () => void;
@@ -221,6 +226,10 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   currentTaskId: null,
   setCurrentTaskId: (id) => set({ currentTaskId: id }),
 
+  // 当前执行计划
+  currentPlan: null,
+  setCurrentPlan: (plan) => set({ currentPlan: plan }),
+
   // 重置
   reset: () =>
     set({
@@ -235,6 +244,7 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
       references: [],
       selectedNodeId: null,
       currentTaskId: null,
+      currentPlan: null,
       phase: null,
       phaseLabel: null,
     }),
