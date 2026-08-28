@@ -34,7 +34,7 @@ const MAX_MEDIA_FETCH = 6;
 let activeMediaFetch = 0;
 const mediaFetchQueue: Array<() => void> = [];
 
-function runWithMediaLimit<T>(fn: () => Promise<T>): Promise<T> {
+function runWithMediaLimit<T>(fn: () => Promise<T>, priority = false): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const start = (): void => {
       activeMediaFetch++;
@@ -43,7 +43,8 @@ function runWithMediaLimit<T>(fn: () => Promise<T>): Promise<T> {
         (e) => { activeMediaFetch--; mediaFetchQueue.shift()?.(); reject(e); },
       );
     };
-    if (activeMediaFetch < MAX_MEDIA_FETCH) start();
+    // priority(图片浏览器等交互主路径)插队立即执行,避免被画布节点的批量拉取饿死(征集 #84 黑屏根因之一)
+    if (priority || activeMediaFetch < MAX_MEDIA_FETCH) start();
     else mediaFetchQueue.push(start);
   });
 }
@@ -67,7 +68,7 @@ async function fetchMediaWithRetry(url: string, init: RequestInit, retries = 2):
  * 失败返回 null,由调用方降级到 content(可能是 blob/data URL)。
  * 护栏:全局并发上限 + 同 URL 去重 + 429 退避重试(按需加载下可见节点可能很多)。
  */
-async function authorizeMediaUrl(url: string): Promise<string | null> {
+async function authorizeMediaUrl(url: string, priority = false): Promise<string | null> {
   const cached = backendUrlCache.get(url);
   if (cached) return cached;
   const pending = inflightAuth.get(url);
@@ -79,7 +80,7 @@ async function authorizeMediaUrl(url: string): Promise<string | null> {
       const res = await runWithMediaLimit(() => {
         const token = getToken();
         return fetchMediaWithRetry(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      });
+      }, priority);
       if (!res.ok) return null;
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -98,6 +99,75 @@ async function authorizeMediaUrl(url: string): Promise<string | null> {
 
 /** 缩略图阈值: invK ≥ 4(k ≤ 0.25)时只用缩略图;低于阈值一律 preview 级(征集 #77 后无 full 档) */
 const THUMBNAIL_THRESHOLD = 4;
+
+/** 像素预算档位(Plan#48 纯前端方案):thumb/sm 用后端既有变体,w256/w512 由前端 createImageBitmap 缩放补桶 */
+export type ImageTier = 'thumb' | 'sm' | 'w256' | 'w512' | 'preview';
+
+/**
+ * 像素预算 → 档位映射(离散桶,阈值取桶上限×1.1 左右留余量)
+ * budgetPx = 节点屏幕实际占用宽度(节点尺寸 × viewport.k × DPR),null 时回退旧 invK 两档行为
+ */
+export function resolveBudgetTier(budgetPx: number | null, wantThumb: boolean): ImageTier {
+  if (budgetPx == null || !Number.isFinite(budgetPx) || budgetPx <= 0) return wantThumb ? 'thumb' : 'preview';
+  if (budgetPx <= 56) return 'thumb';
+  if (budgetPx <= 190) return 'sm';
+  if (budgetPx <= 300) return 'w256';
+  if (budgetPx <= 560) return 'w512';
+  return 'preview';
+}
+
+/** 前端缩放变体缓存(key = `${bucket}|${sourceUrl}`, value = 缩放后 blob URL),LRU 上限防内存泄漏 */
+const resizedVariantCache = new Map<string, string>();
+const RESIZED_CACHE_MAX = 240;
+
+/**
+ * 前端像素桶:将 preview 源图缩放到桶位宽度(解码线程 createImageBitmap,不阻塞主线程),
+ * 经 OffscreenCanvas 转 JPEG blob URL 供 <img> 渲染。源图不大于桶位时直接返回源 URL。
+ * 失败(不支持 OffscreenCanvas/解码失败)返回 null,由调用方回退 preview 档。
+ */
+async function makeResizedVariant(sourceUrl: string, bucket: number): Promise<string | null> {
+  const cacheKey = `${bucket}|${sourceUrl}`;
+  const hit = resizedVariantCache.get(cacheKey);
+  if (hit) {
+    // LRU 触碰
+    resizedVariantCache.delete(cacheKey);
+    resizedVariantCache.set(cacheKey, hit);
+    return hit;
+  }
+  try {
+    if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') return null;
+    const blob = await (await fetch(sourceUrl)).blob();
+    const probe = await createImageBitmap(blob);
+    if (probe.width <= bucket) {
+      probe.close();
+      return sourceUrl;
+    }
+    probe.close();
+    const resized = await createImageBitmap(blob, { resizeWidth: bucket, resizeQuality: 'medium' });
+    const canvas = new OffscreenCanvas(resized.width, resized.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      resized.close();
+      return null;
+    }
+    ctx.drawImage(resized, 0, 0);
+    resized.close();
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    const url = URL.createObjectURL(out);
+    resizedVariantCache.set(cacheKey, url);
+    if (resizedVariantCache.size > RESIZED_CACHE_MAX) {
+      const oldest = resizedVariantCache.keys().next().value;
+      if (oldest) {
+        const oldUrl = resizedVariantCache.get(oldest);
+        resizedVariantCache.delete(oldest);
+        if (oldUrl) URL.revokeObjectURL(oldUrl);
+      }
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 后端图片 URL: 根据 storageKey 构造 ?size= 参数 URL
@@ -141,7 +211,9 @@ export function buildBackendUrl(storageKey?: string, size: 'sm' | 'thumb' | 'pre
 export function useHydratedContent(
   storageKey: string | undefined,
   content: string,
+  opts?: { mediaPriority?: boolean },
 ): string {
+  const mediaPriority = opts?.mediaPriority ?? false;
   // 有 storageKey 且 content 是 blob: URL 时,可能是刷新后失效的 URL,
   // 不立即使用(避免 ERR_FILE_NOT_FOUND),等异步解析重建。
   // 无 storageKey 或 content 非 blob:(如 dataURL)时可直接使用。
@@ -163,7 +235,7 @@ export function useHydratedContent(
     if (storageKey.startsWith('resources/')) {
       const backendUrl = buildBackendUrl(storageKey, 'full');
       if (backendUrl) {
-        authorizeMediaUrl(backendUrl).then((url) => {
+        authorizeMediaUrl(backendUrl, mediaPriority).then((url) => {
           if (cancelled) return;
           setHydrated(url ?? content);
         });
@@ -200,7 +272,7 @@ export function useHydratedContent(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, content]);
+  }, [storageKey, content, mediaPriority]);
 
   return hydrated;
 }
@@ -265,7 +337,9 @@ export async function resolveAnyThumbUrl(
 export function usePreviewImage(
   storageKey: string | undefined,
   content: string,
+  opts?: { mediaPriority?: boolean },
 ): string {
+  const mediaPriority = opts?.mediaPriority ?? false;
   const isImageKey = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
   const fallbackHydrated = useHydratedContent(isImageKey ? undefined : storageKey, content);
 
@@ -280,9 +354,9 @@ export function usePreviewImage(
   useEffect(() => {
     if (!backendPreview) { setAuthPreview(''); return; }
     let cancelled = false;
-    authorizeMediaUrl(backendPreview).then((u) => { if (!cancelled) setAuthPreview(u ?? ''); });
+    authorizeMediaUrl(backendPreview, mediaPriority).then((u) => { if (!cancelled) setAuthPreview(u ?? ''); });
     return () => { cancelled = true; };
-  }, [backendPreview]);
+  }, [backendPreview, mediaPriority]);
 
   // 本地 image: 键: 解析 :preview 变体(旧上传无变体时为空,走兜底链)
   useEffect(() => {
@@ -324,12 +398,14 @@ export function usePreviewImage(
  * @param storageKey 持久化 key(如 'image:xxx')
  * @param content 当前 content(可能是失效的 blob URL,作为 fallback)
  * @param invK 1/viewport.k(节点视口缩放倒数,由 NodeLayer 传入)
+ * @param budgetPx 像素预算(Plan#48:节点屏幕实际占用宽度,节点宽×k×DPR);null 时回退旧 invK 两档行为
  * @returns 可用于渲染的 URL
  */
 export function useProgressiveImage(
   storageKey: string | undefined,
   content: string,
   invK: number,
+  budgetPx: number | null = null,
 ): string {
   // 非 image: 前缀且非 resources/ 前缀(后端图片) → 回退到普通 hydrate 行为(视频/音频等)
 const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.startsWith('resources/'));
@@ -356,6 +432,12 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
   const isBackend = isImage && !!storageKey?.startsWith('resources/');
   const [authPreview, setAuthPreview] = useState('');
   const [authThumb, setAuthThumb] = useState('');
+  const [authSm, setAuthSm] = useState('');
+  const [resized, setResized] = useState('');
+
+  const wantThumb = isImage && invK >= THUMBNAIL_THRESHOLD;
+  // 像素预算档位(Plan#48):由节点屏幕占用宽度决定;档位离散变化,避免连续缩放造成 effect 抖动
+  const tier = resolveBudgetTier(budgetPx, wantThumb);
 
   useEffect(() => {
     if (!isBackend) {
@@ -378,6 +460,29 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBackend, backendPreview, backendThumb]);
 
+  // sm 档认证(仅档位需要时发起;结果进 backendUrlCache 全局复用,多节点同图不重复请求)
+  const backendSm = buildBackendUrl(isBackend ? storageKey : undefined, 'sm');
+  useEffect(() => {
+    if (!backendSm || tier !== 'sm') { setAuthSm(''); return; }
+    let cancelled = false;
+    authorizeMediaUrl(backendSm).then((u) => { if (!cancelled) setAuthSm(u ?? ''); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendSm, tier]);
+
+  // 前端像素桶(Plan#48 C2):preview 源图在解码线程缩到 w256/w512,
+  // OffscreenCanvas 不可用/失败时置空自动回退 preview 档
+  useEffect(() => {
+    if (tier !== 'w256' && tier !== 'w512') { setResized(''); return; }
+    const sourceUrl = backendPreview ? authPreview : preview;
+    if (!sourceUrl) { setResized(''); return; }
+    let cancelled = false;
+    makeResizedVariant(sourceUrl, tier === 'w256' ? 256 : 512).then((u) => {
+      if (!cancelled) setResized(u ?? '');
+    });
+    return () => { cancelled = true; };
+  }, [tier, backendPreview, authPreview, preview]);
+
   // storageKey 变化时重置所有状态(资源替换后重新加载)
   if (prevStorageKeyRef.current !== storageKey) {
     prevStorageKeyRef.current = storageKey;
@@ -388,13 +493,6 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
     setPreviewState(backendPreview ? 'ready' : 'loading');
     setFull('');
   }
-
-  // 后端键已经持有 URL,跳过 localforage 异步加载
-  // 但若 content 已是有效 blob URL(由 syncProjectResourcesFromCloud 下载后设置),
-  // 优先使用 blob URL 避免后端 404, backend URL 作为后备。
-  const hasBlobContent = content.startsWith('blob:');
-  const wantThumb = isImage && invK >= THUMBNAIL_THRESHOLD;
-  // 放大档(征集 #77):一律 preview 级,原图只作为旧数据无变体时的兼容出口,不再按缩放主动加载
 
   // 解析缩略图(始终加载,~1-5KB极小)
   useEffect(() => {
@@ -492,26 +590,28 @@ const isImage = !!storageKey && (storageKey.startsWith('image:') || storageKey.s
 
   if (!isImage) return fallbackHydrated;
 
-  // 后端键优先:跳过 localforage 异步解析,使用经 JWT 认证后的 blob URL(仅 thumb/preview 两档)。
-  // 跨设备/跨浏览器场景下,blob URL 无效,必须使用后端 URL;
-  // 旧图无 __preview 变体时后端自动回退原图,无需前端拉 full。
-  if (backendPreview) {
-    // 仅当 content 是 dataURL(非 blob:)时才优先使用,否则使用后端 URL
-    const isDataUrl = content.startsWith('data:');
-    if (hasBlobContent && !isDataUrl) {
-      // blob URL 在跨设备场景下无效,降级到后端 URL(预览档,永不 full)
-      if (wantThumb) return authThumb || authPreview || content;
-      return authPreview || authThumb || content;
-    }
-    if (wantThumb) return authThumb || authPreview || content;
-    return authPreview || authThumb || content;
-  }
+  // 档位优先级链(Plan#48 像素预算):预算越小的节点用越小的源图,
+  // 逐级回退保证任何档位缺失(旧图无变体/OffscreenCanvas 不可用)时仍能显示。
+  // 三档契约(征集 #77)不破坏:全链无 full,原图仍只作为本地键无变体时的兼容出口。
+  const backendChain: Record<ImageTier, string[]> = {
+    thumb: [authThumb, authPreview],
+    sm: [authSm, authThumb, authPreview],
+    w256: [resized, authSm, authPreview],
+    w512: [resized, authPreview],
+    preview: [authPreview, authThumb],
+  };
+  const localChain: Record<ImageTier, string[]> = {
+    thumb: [thumb, preview],
+    sm: [thumb, preview],
+    w256: [resized, thumb, preview],
+    w512: [resized, preview],
+    preview: [preview, thumb],
+  };
+  const chain = backendPreview ? backendChain[tier] : localChain[tier];
 
-  // 缩放级别加载策略(本地键,征集 #77 后放大档封顶 preview):
-  // invK >= 4 (k <= 0.25): 缩略图 > 预览图 > 原图(兼容) > content
-  // invK < 4 (k > 0.25): 预览图 > 缩略图 > 原图(兼容) > content
-  if (wantThumb) {
-    return thumb || preview || full || content;
+  if (backendPreview) {
+    return chain.find(Boolean) || content;
   }
-  return preview || thumb || full || content;
+  // 本地键:原图(full)仍仅作旧数据无变体时的兼容出口(征集 #77)
+  return chain.find(Boolean) || full || content;
 }

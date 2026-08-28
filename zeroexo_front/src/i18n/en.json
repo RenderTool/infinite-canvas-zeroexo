@@ -15,6 +15,7 @@
     "distribute": "Distribute",
     "unify": "Size",
     "more": "More",
+    "addNode": "Add node",
     "moreSettings": "More Settings",
     "background": "Background",
     "clear": "Clear Canvas",
@@ -449,6 +450,32 @@
     "typeFix": "Fix"
   },
   "changelogEntries": {
+    "v1_3_0": {
+      "title": "Dual-Mode Hierarchy & Assets Panel + Pixel-Budget Canvas Rendering",
+      "body": "The asset library is merged into the hierarchy panel (hierarchy tree / asset library toggle), canvas images render through a new pixel-budget pipeline, assets drag straight onto the canvas, plus dozens of polish rounds.",
+      "items": [
+        "Dual-mode panel: dedicated hierarchy tree list + asset/prompt/script grid cards in one panel; delete/rename/batch-delete/send-to-canvas all migrated in",
+        "Drag & drop upgrade: asset/prompt/script cards drop directly onto the canvas (position follows drop point); dragging onto the library itself no longer re-uploads",
+        "Pixel-budget rendering pipeline: five screen-pixel tiers, three image tiers fully utilized, createImageBitmap fallback",
+        "Hierarchy panel open performance: deferred list mounting + will-change fix + local preview-first chain + thumbnail tier cap",
+        "Context menu edge clipping fix: portal rendering + edge correction by real size, works in canvas/drawer/home",
+        "Top bar refresh: hierarchy/assets buttons back beside the LOGO, editable title on the right (compact, right-aligned), LOGO matches the home page",
+        "Visual unification: hierarchy filter pills / multi-select checkboxes / divider spacing match asset cards item by item; mobile drawer title centered",
+        "Bottom-right zoom control: ±0.25 steps clamped 0.05–5, same style as the prompt canvas"
+      ]
+    },
+    "v1_2_0": {
+      "title": "Prompt Viewer Chain Canvas Redesign + Canvas Interaction Polish",
+      "body": "Prompt viewing upgraded from a single image preview to a dedicated read-only canvas faithfully reproducing the generation chain, plus a dozen verified fixes.",
+      "items": [
+        "Read-only chain canvas: reference image → prompt → generated image faithfully reproduced, nodes locked, pan/zoom at any level",
+        "Generation mode persisted: backend Prompt.generationMode (txt2img/img2img), zero migration for existing data (default txt2img)",
+        "Prompt nodes collapse by default (62px mini card), main canvas generation dock collapses too",
+        "Three-tier image contract: adaptive preview tier for nodes/stacked details, original images only in the viewer",
+        "Simplified context menu + batch download (incl. video frame grabs) + storyboard in-place stacking",
+        "Prompt attachments no longer leak into the asset library; ghost record merge hardening for asset sync"
+      ]
+    },
     "v1_1_0": {
       "title": "Sync Channel Revolution: Yjs Single Write Backbone + Approval-Based Collaboration",
       "body": "The canvas sync channel is fully converged: edits now write through Yjs as the single write backbone with the dual-write coordination removed — smoother collaboration with far less bandwidth. The join flow is upgraded with two-tier permissions and approval-based joining.",
@@ -698,8 +725,8 @@
     "moveDown": "Move Down"
   },
   "canvasControls": {
-    "hierarchyOpen": "Collapse Hierarchy",
-    "hierarchyClosed": "Hierarchy",
+    "hierarchyOpen": "Collapse Asset Library",
+    "hierarchyClosed": "Asset Library",
     "miniMapOpen": "Close Minimap",
     "miniMapClosed": "Open Minimap",
     "resetView": "Reset View",
@@ -935,7 +962,9 @@
     "batchSelect": "Batch Select",
     "selectedCount": "{{count}} selected",
     "selectAll": "Select All",
+    "deselectAll": "Deselect All",
     "downloadZip": "Download ZIP",
+    "tabHierarchy": "Layers",
     "filter": {
       "all": "All",
       "text": "Text",
@@ -2611,3 +2640,4 @@
     "noEntities": "No linked entities"
   }
 }
+

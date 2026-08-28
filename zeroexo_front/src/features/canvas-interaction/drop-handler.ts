@@ -19,13 +19,19 @@ import { AddNodeCommand } from '@zeroexo/core';
 import type { NodeRecord } from '@zeroexo/core';
 import type { EditorRefs } from '@/pages/editor/editor-canvas/use-editor-state.js';
 import { createAssetNode } from '@zeroexo/plugin-nodes';
-import type { InsertAssetPayload } from '../asset-picker/index.js';
+import type { InsertAssetPayload, Asset } from '../asset-picker/index.js';
 import { uploadAsset, UnsupportedFileTypeError, FileTooLargeError } from '../asset-picker/services/upload-asset.js';
 import type { CreateAssetInput } from '../asset-picker/asset-store.js';
 import { PROMPT_DRAG_MIME, type InsertPromptPayload } from '../prompt-library/prompt-store.js';
+import { toInsertPayload } from '../asset-picker/components/picker-card.js';
+import { TEXT_MAX_LENGTH } from '@/shared/constants/text-limits.js';
+import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 
 /** 拖拽 MIME 类型(与 picker-card.tsx 的 DRAG_MIME 保持一致) */
 const ASSET_DRAG_MIME = 'application/x-canvas-asset';
+
+/** 素材库卡片拖拽 MIME(与 asset-card/script-card/prompt-card 的 onDragStart 保持一致) */
+const LIB_DRAG_MIME = 'application/x-testlib-item';
 
 export interface UseDropHandlerOptions {
   refs: EditorRefs;
@@ -106,6 +112,26 @@ export function useDropHandler({
       const pos = screenToWorld(e.clientX, e.clientY);
       if (!pos) return;
 
+      // 0. 素材库卡片拖拽(x-testlib-item):资产/提示词/剧本三类型直接导入(与 handleAssetInsert 同逻辑,含超长拦截)
+      const libData = e.dataTransfer.getData(LIB_DRAG_MIME);
+      if (libData) {
+        try {
+          const item = JSON.parse(libData) as { type: 'asset' | 'prompt' | 'script'; id: string; name?: string; data: any };
+          const node = await buildNodeFromLibraryItem(item, pos, (msg) => onError?.(msg));
+          if (node) {
+            insertNodeAt(node);
+            refs.store?.setSelection({
+              selectedNodeIds: new Set([node.id]),
+              selectedEdgeIds: new Set(),
+            });
+          }
+        } catch (err) {
+          console.error('[drop-handler] failed to parse library item payload:', err);
+          onError?.('素材拖入画布失败：数据解析异常');
+        }
+        return;
+      }
+
       // 1. 优先读取 AssetPicker 拖拽的素材数据
       const assetData = e.dataTransfer.getData(ASSET_DRAG_MIME);
       if (assetData) {
@@ -182,6 +208,73 @@ export function useDropHandler({
   );
 
   return { onDrop, onDragOver };
+}
+
+/**
+ * 素材库卡片拖拽建节点（资产/提示词/剧本三类型，与 use-editor-dialogs handleAssetInsert 同逻辑）。
+ *
+ * 验收轮二十一：素材库卡片拖到画布直接导入；超长文本/空剧本经 onBlocked 回调拦截提示。
+ */
+export async function buildNodeFromLibraryItem(
+  item: { type: 'asset' | 'prompt' | 'script'; id: string; name?: string; data: any },
+  pos: { x: number; y: number },
+  onBlocked?: (message: string) => void,
+): Promise<NodeRecord | null> {
+  // 提示词 → text 节点（内容即提示词正文）
+  if (item.type === 'prompt') {
+    const prompt = item.data as { title?: string; content?: string };
+    const content = prompt?.content ?? '';
+    if (content.length > TEXT_MAX_LENGTH) {
+      onBlocked?.(`提示词内容过长（${content.length.toLocaleString()} 字，上限 ${TEXT_MAX_LENGTH.toLocaleString()} 字），无法直接放入画布。建议精简后重试。`);
+      return null;
+    }
+    return createAssetNode({ kind: 'text', content, title: prompt?.title ?? '提示词' }, pos);
+  }
+
+  // 剧本 → script 节点（解析 episodes JSON 还原剧集，随画布 Yjs 同步）
+  if (item.type === 'script') {
+    const asset = item.data as { title?: string; data?: { content?: string } };
+    const raw = asset?.data?.content ?? '';
+    let episodes: Episode[] = [];
+    try {
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : ((parsed?.episodes as unknown[]) ?? []);
+      episodes = (list as Array<Partial<Episode>>).map((ep, idx) => ({
+        id: ep.id ?? `ep-import-${Date.now()}-${idx}`,
+        number: typeof ep.number === 'number' ? ep.number : idx + 1,
+        title: ep.title ?? `第${idx + 1}集`,
+        content: ep.content ?? '',
+      }));
+    } catch {
+      episodes = [];
+    }
+    if (episodes.length === 0) {
+      onBlocked?.('剧本内容为空或格式无法解析，无法拖入画布');
+      return null;
+    }
+    return {
+      id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'script',
+      position: pos,
+      title: asset?.title ?? '剧本',
+      data: {
+        title: asset?.title ?? '剧本',
+        status: 'ready',
+        episodes,
+        activeEpisodeId: episodes[0]!.id,
+      },
+    };
+  }
+
+  // 常规资产（图片/视频/音频/文本）
+  const asset = item.data as Asset;
+  const payload = toInsertPayload(asset);
+  // 超长拦截（防超大文本塞进节点拖垮协作同步）
+  if (payload.kind === 'text' && payload.content.length > TEXT_MAX_LENGTH) {
+    onBlocked?.(`文本内容过长（${payload.content.length.toLocaleString()} 字，上限 ${TEXT_MAX_LENGTH.toLocaleString()} 字），无法直接放入画布。建议通过 Agent 分段整理，或使用「小说导入」分集导入。`);
+    return null;
+  }
+  return createAssetNode(payload, pos);
 }
 
 /**

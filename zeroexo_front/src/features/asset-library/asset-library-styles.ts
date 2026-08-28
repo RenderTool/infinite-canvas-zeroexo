@@ -1,4 +1,4 @@
-/**
+﻿/**
  * asset-library-styles - 资产库页面样式工厂函数
  *
  * 从 asset-library-page.tsx 抽离，保持相同签名。
@@ -48,7 +48,8 @@ export function toolbarRowStyle(isMobile: boolean): CSSProperties {
   return {
     display: 'flex',
     alignItems: 'center',
-    flexWrap: isMobile ? 'wrap' : 'nowrap',
+    // 征集 #87 验收轮十二:工具栏始终单行(筛选/上传/新建与搜索同行,不换行)
+    flexWrap: 'nowrap',
     gap: 8,
     padding: isMobile ? '10px 12px' : '12px 20px',
     flexShrink: 0,
@@ -63,7 +64,7 @@ export function gridContainerStyle(isMobile: boolean): CSSProperties {
     minHeight: 0,
     overflowY: 'auto',
     overflowX: 'hidden',
-    padding: isMobile ? '12px' : '20px',
+    padding: isMobile ? '0 12px 12px' : '0 20px 20px',
   };
 }
 

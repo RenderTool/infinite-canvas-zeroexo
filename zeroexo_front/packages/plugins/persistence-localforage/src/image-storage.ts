@@ -45,8 +45,9 @@ const previewUrls = new Map<string, string>();
 
 // ===== 缩略图参数 =====
 
-/** 缩略图最大边长(像素)— 48px 足以支撑画布缩略图渲染 */
-const THUMBNAIL_MAX_SIZE = 48;
+/** 缩略图最大边长(像素)— 96px:覆盖 2x DPR 下小槽位(层级面板 36px 需 72px)与画布小节点;
+ * 存量 48px 缩略图不迁移,展示层由 preview 档兜底(Plan#48-T7) */
+const THUMBNAIL_MAX_SIZE = 96;
 /** 缩略图 JPEG 质量(0-1)— 0.6 在视觉与体积间平衡 */
 const THUMBNAIL_QUALITY = 0.6;
 /** 生成缩略图的源图最小尺寸阈值 — 源图本身小于此尺寸则不生成缩略图(避免放大) */

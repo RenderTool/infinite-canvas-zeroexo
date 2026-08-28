@@ -38,6 +38,8 @@ export interface NodeCreateMenuProps {
    * 空白右键菜单与加号菜单共用本组件,通过此 prop 注入场景专属操作。
    */
   extraItems?: Array<{ key: string; label: string; icon?: React.ReactNode; onClick: () => void }>;
+  /** 显式向上弹出(触发器在屏幕底部时,如底部工具栏;征集 #87 验收轮:侧边栏统一底部布局后 PC 也需向上弹) */
+  alignUp?: boolean;
 }
 
 /** 节点类型定义 */
@@ -75,6 +77,7 @@ export function NodeCreateMenu({
   theme,
   width = 200,
   extraItems,
+  alignUp,
 }: NodeCreateMenuProps): React.ReactElement {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -93,8 +96,8 @@ export function NodeCreateMenu({
     return () => el.removeEventListener('wheel', stopWheel, { capture: true } as EventListenerOptions);
   }, []);
 
-  // 检测移动端(菜单向上弹出)
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+  // 检测移动端(菜单向上弹出);alignUp 显式指定时优先(底部工具栏场景,征集 #87 验收轮)
+  const isMobile = alignUp ?? (typeof window !== 'undefined' && window.innerWidth <= 768);
 
   // 弹出动画:useLayoutEffect + 双 rAF 触发入场,生产模式更流畅
   useLayoutEffect(() => {

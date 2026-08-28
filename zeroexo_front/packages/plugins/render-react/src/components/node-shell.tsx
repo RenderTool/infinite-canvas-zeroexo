@@ -340,8 +340,9 @@ export function NodeShell({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 4,
-            // fontSize 视觉 = fontSize × k:按连续 --zx-invk 折算保持屏幕恒定(下限 8px 同步折算)
-            fontSize: `max(${8 * invK}px, calc(13px * ${invKVar}))`,
+            // fontSize 视觉 = fontSize × k:按连续 --zx-invk 折算以保持屏幕恒定(下限 7px 同步折算)
+            // 征集 #87 验收轮三:标题基准 13→11px(用户要求缩小)
+            fontSize: `max(${7 * invK}px, calc(11px * ${invKVar}))`,
             color: titleColor,
             fontWeight: 600,
             userSelect: 'none',
@@ -390,7 +391,7 @@ export function NodeShell({
           )}
           {/* 右:尺寸规格 — 使用连续 --zx-invk 自适应视口缩放，保持与标题文本的相对比例 */}
           {titleSize ? (
-            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: `max(${6 * invK}px, calc(10px * ${invKVar}))` }}>{titleSize}</span>
+            <span style={{ flexShrink: 0, opacity: 0.7, fontSize: `max(${5.5 * invK}px, calc(8.5px * ${invKVar}))` }}>{titleSize}</span>
           ) : null}
         </div>
       ) : null}

@@ -18,7 +18,7 @@
  * 弹窗状态和交互回调已提取到 use-editor-dialogs 和 use-editor-interactions 两个 Hook。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -50,7 +50,7 @@ import { useCollaborationStore } from '@/features/collaboration/use-collaboratio
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
 import { NodeGenerateDock } from '@/features/tools-dock/node-generate-dock.js';
-import { AssetLibraryModal } from '@/features/asset-library/index.js';
+// 征集 #87:外部资产页(AssetLibraryModal)已移除——资产收编进层级面板资产模式
 import { AgentDock, MobileAgentDrawer, CanvasContextProvider } from '@/features/canvas-agent/ui/index.js';
 import { setCanvasOpBridge, setAgentReadOnly, type CanvasOpStore } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
 import { autoReconnectLocalAgent } from '@/features/canvas-agent/ui/local-agent-bridge.js';
@@ -60,6 +60,8 @@ import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js
 import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-agent-prompt.js';
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
+import { ZoomToolbar } from '@/shared/components/image-viewer.js';
+import type { ImagePanZoom } from '@/shared/components/image-viewer.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -373,6 +375,34 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       51,
     );
   }, [state.editor, state.containerSize, interactions]);
+
+  // 征集 #87:右下角缩放组件适配器——把主画布 viewport 缩放桥接成 ZoomToolbar 的 ImagePanZoom 语义。
+  // ZoomToolbar 只消费 scale/zoomIn/zoomOut/reset 四字段,其余手势字段给 no-op 占位(主画布手势由 interaction 插件接管)。
+  const canvasZoomAdapter = useMemo<ImagePanZoom>(() => {
+    const noopContainerRef = (): void => undefined;
+    const noopImgRef = (): void => undefined;
+    const noopHandler = (() => undefined) as unknown as ImagePanZoom['containerHandlers']['onMouseDown'];
+    const noopTouchHandler = (() => undefined) as unknown as ImagePanZoom['containerHandlers']['onTouchStart'];
+    return {
+      scale: state.scale,
+      position: { x: 0, y: 0 },
+      zoomIn: () => actions.setScale(Math.min(state.scale + 0.25, 5)),
+      zoomOut: () => actions.setScale(Math.max(state.scale - 0.25, 0.05)),
+      reset: handleResetView,
+      containerRef: noopContainerRef,
+      imgRef: noopImgRef,
+      containerHandlers: {
+        onMouseDown: noopHandler,
+        onMouseMove: noopHandler,
+        onMouseUp: noopHandler,
+        onMouseLeave: noopHandler,
+        onTouchStart: noopTouchHandler,
+        onTouchMove: noopTouchHandler,
+        onTouchEnd: noopTouchHandler,
+      },
+      imgTransformStyle: {},
+    };
+  }, [state.scale, actions, handleResetView]);
 
   // 从 persistence 加载画布标题
   useEffect(() => {
@@ -765,6 +795,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           store={state.editor.store}
           groupPlugin={refs.groupPlugin}
           theme={theme}
+          onSendToCanvas={dialogs.handleAssetInsert}
           onClose={dialogs.toggleHierarchy}
           onFocusNode={(nodeId) => {
             const store = state.editor?.store;
@@ -851,54 +882,18 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           onOpenCollaboration={dialogs.onOpenCollaboration}
           // R2-8: 协作聊天面板入口已并入 AgentDock 页签，Nav 按钮移除
           onOpenVersionHistory={dialogs.onOpenVersionHistory}
-          keyboardShortcuts={keyboardShortcuts}
-          syncBadge={
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <CreationSyncBadge
-                status={status === 'syncing' ? 'saving' : status === 'error' ? 'error' : status === 'inactive' ? 'unsaved' : 'idle'}
-                lastSavedAt={null}
-                theme={theme}
-                compact
-              />
-              {/* 云端更新红点徽标 */}
-              {cloudUpdateAvailable && (
-                <Tooltip title={t('editor.cloudUpdateTooltip')}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          await fullSync();
-                          clearCloudUpdateAvailable();
-                        } catch (err) {
-                          console.error('[EditorPage] sync failed:', err);
-                        }
-                      })();
-                    }}
-                    style={{
-                      width: 8, height: 8, borderRadius: '50%',
-                      backgroundColor: '#ef4444', border: 'none',
-                      cursor: 'pointer', flexShrink: 0, padding: 0,
-                    }}
-                    aria-label={t('editor.cloudUpdateAvailable')}
-                  />
-                </Tooltip>
-              )}
-            </div>
-          }
-          canUndo={state.canUndo}
-          canRedo={state.canRedo}
-          onUndo={actions.undo}
-          onRedo={actions.redo}
           canvasMenu={
             <CanvasMenu
               theme={theme}
+              keyboardShortcuts={keyboardShortcuts}
               onHome={onBack}
               onNewProject={() => void dialogs.handleNewProject()}
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
             />
           }
+          isHierarchyOpen={dialogs.isHierarchyOpen}
+          onToggleHierarchy={dialogs.toggleHierarchy}
         />
       </div>
 
@@ -1081,10 +1076,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           onScaleChange={actions.setScale}
           isMiniMapOpen={dialogs.isMiniMapOpen}
           onToggleMiniMap={() => dialogs.setIsMiniMapOpen((v: boolean) => !v)}
-          isHierarchyOpen={dialogs.isHierarchyOpen}
-          onToggleHierarchy={dialogs.toggleHierarchy}
           onClear={dialogs.handleClearCanvasClick}
-          onOpenMyAssets={() => dialogs.setAssetPickerOpen(true)}
           interactionMode={state.interactionMode}
           onToggleInteractionMode={actions.toggleInteractionMode}
           isMobile={isMobile}
@@ -1190,11 +1182,55 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           />
         ) : null}
 
-        <AssetLibraryModal
-          open={dialogs.assetPickerOpen}
-          onClose={() => dialogs.setAssetPickerOpen(false)}
-          onSendToCanvas={dialogs.handleAssetInsert as unknown as (item: any) => void}
-        />
+        {/* 征集 #87 验收轮三:保存状态徽章贴画布最底部(原 bottom:64 上移要求改贴底) */}
+        {!state.loading && (
+          <div style={{
+            position: 'absolute', left: 12, bottom: 'max(12px, env(safe-area-inset-bottom))', zIndex: 30,
+            display: 'inline-flex', alignItems: 'center', gap: 6, pointerEvents: 'auto',
+          }}>
+            <CreationSyncBadge
+              status={status === 'syncing' ? 'saving' : status === 'error' ? 'error' : status === 'inactive' ? 'unsaved' : 'idle'}
+              lastSavedAt={null}
+              theme={theme}
+              compact
+            />
+            {/* 云端更新红点徽章 */}
+            {cloudUpdateAvailable && (
+              <Tooltip title={t('editor.cloudUpdateTooltip')}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await fullSync();
+                        clearCloudUpdateAvailable();
+                      } catch (err) {
+                        console.error('[EditorPage] sync failed:', err);
+                      }
+                    })();
+                  }}
+                  style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    backgroundColor: '#ef4444', border: 'none',
+                    cursor: 'pointer', flexShrink: 0, padding: 0,
+                  }}
+                  aria-label={t('editor.cloudUpdateAvailable')}
+                />
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {/* 征集 #87:右下角缩放组件(提示词链路画布同款 ZoomToolbar,适配主画布 viewport) */}
+        {!state.loading && state.editor ? (
+          <ZoomToolbar
+            panZoom={canvasZoomAdapter}
+            orientation="vertical"
+            style={isMobile
+              ? { position: 'absolute', right: 12, bottom: 20, zIndex: 40 }
+              : { position: 'absolute', right: 20, bottom: dialogs.isMiniMapOpen ? 196 : 20, zIndex: 40 }}
+          />
+        ) : null}
 
         <AssetDetailViewer
           node={dialogs.detailNode}

@@ -5,8 +5,8 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-/** 资产分类分组 */
-export type AssetCategoryGroup = 'character' | 'prop' | 'scene' | 'prompt' | 'material' | 'subject' | 'script';
+/** 资产分类分组（hierarchy = 画布节点注册进资产面板的分组,征集 #87 验收轮九） */
+export type AssetCategoryGroup = 'character' | 'prop' | 'scene' | 'prompt' | 'material' | 'subject' | 'script' | 'hierarchy';
 
 /** 资产分类子项 */
 export interface AssetCategoryChild {

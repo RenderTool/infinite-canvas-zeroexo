@@ -1,0 +1,104 @@
+{
+  "id": "qwen-image",
+  "name": "Qwen-Image",
+  "protocol": "dashscope",
+  "modelType": "image",
+  "endpoint": "/services/aigc/multimodal-generation/generation",
+  "request": {
+    "bodyStyle": "dashscope"
+  },
+  "maxPromptLength": 800,
+  "parameters": [
+    {
+      "name": "aspectRatio",
+      "type": "enum",
+      "label": "宽高比",
+      "default": "1:1",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3"
+      ],
+      "labels": {
+        "1:1": "1:1",
+        "16:9": "16:9",
+        "9:16": "9:16",
+        "4:3": "4:3",
+        "3:4": "3:4",
+        "3:2": "3:2",
+        "2:3": "2:3"
+      },
+      "display": "radio"
+    },
+    {
+      "name": "size",
+      "type": "size",
+      "label": "尺寸（宽×高）",
+      "default": {
+        "width": 1328,
+        "height": 1328
+      }
+    },
+    {
+      "name": "watermark",
+      "type": "boolean",
+      "label": "水印",
+      "default": false
+    },
+    {
+      "name": "promptExtend",
+      "type": "boolean",
+      "label": "智能改写",
+      "default": true,
+      "advanced": true
+    },
+    {
+      "name": "maxReferenceImages",
+      "type": "number",
+      "label": "参考图上限",
+      "default": 1,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "name": "referenceImagesEnabled",
+      "type": "boolean",
+      "label": "参考图",
+      "default": true
+    },
+    {
+      "name": "negativePrompt",
+      "type": "string",
+      "label": "负面提示词",
+      "advanced": true
+    }
+  ],
+  "channelConstraints": {
+    "bounds": {
+      "minTotalPixels": 65536,
+      "maxTotalPixels": 4112640,
+      "minAspectRatio": 0.5,
+      "maxAspectRatio": 2.0,
+      "maxReferenceImages": 3,
+      "supportsImageToImage": true,
+      "maxEdgeLength": 2688
+    },
+    "paramMapping": {
+      "size": "size",
+      "watermark": "watermark",
+      "promptExtend": "prompt_extend",
+      "negativePrompt": "negative_prompt",
+      "referenceImages": "image"
+    }
+  },
+  "pricing": {
+    "perImage": 0.02
+  },
+  "matchKeywords": [
+    "qwen-image"
+  ]
+}

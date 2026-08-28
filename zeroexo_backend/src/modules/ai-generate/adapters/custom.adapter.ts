@@ -32,9 +32,110 @@ export class CustomAdapter extends OpenAiAdapter implements AiProviderAdapter {
       return executeVideoByTemplate(req, ctx, req.template);
     }
     if (req.kind === 'image') {
+      // DashScope 原生接口模板(如 qwen-image):不支持 OpenAI compatible 模式,
+      // 走 input.messages + parameters 契约(征集 #83 验收修复)
+      if ((req.template as Record<string, any>)?.request?.bodyStyle === 'dashscope') {
+        return this.generateImageDashscope(req, ctx);
+      }
       return this.generateImageCustom(req, ctx);
     }
     return super.generate(req, ctx);
+  }
+
+  /**
+   * DashScope 原生文生图/图生图(千问 Qwen-Image 系列)
+   * - 请求: POST { model, input: { messages: [{ role, content: [{ text } / { image }] }] }, parameters: {...} }
+   * - 响应: output.choices[0].message.content[0].image(24h 有效 URL)
+   * - 参数映射: paramMapping(size/watermark/prompt_extend/negative_prompt 等)写入 parameters
+   */
+  private async generateImageDashscope(
+    req: GenerateRequest,
+    ctx: AdapterContext,
+  ): Promise<GenerateResult> {
+    const tpl = req.template as Record<string, any> | undefined;
+    const endpoint = tpl?.endpoint || '/services/aigc/multimodal-generation/generation';
+    const baseUrl = (() => {
+      const b = ctx.baseUrl.endsWith('/') ? ctx.baseUrl.slice(0, -1) : ctx.baseUrl;
+      // DashScope 原生接口在 api/v1 下;渠道 baseUrl 多为 compatible-mode/v1(OpenAI 兼容),
+      // 此处自动归一为 api/v1(征集 #83:兼容百炼渠道共用配置)
+      return b.replace(/\/compatible-mode(?:\/v\d+)?$/i, '/api/v1');
+    })();
+    const url = `${baseUrl}${endpoint}`;
+
+    // 参考图(图生图):base64 data URL 写入 messages.content
+    const refImages = req.params.referenceImages;
+    const refEntries: Array<Record<string, string>> = [];
+    if (Array.isArray(refImages) && refImages.length > 0) {
+      for (const imageUrl of refImages as string[]) {
+        const buf = await this.resolveImageBuffer(imageUrl, ctx);
+        refEntries.push({ image: `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}` });
+      }
+    }
+
+    // 参数映射:前端 key → DashScope parameters(size 归一为 "宽*高" 字符串)
+    const mapped = applyParamMapping(req.params, req.template);
+    delete mapped.referenceImages;
+    if (typeof mapped.size === 'string') {
+      mapped.size = mapped.size.replace(/[x×]/i, '*');
+    } else if (mapped.size && typeof mapped.size === 'object') {
+      const s = mapped.size as { width?: number; height?: number };
+      if (s.width && s.height) mapped.size = `${s.width}*${s.height}`;
+      else delete mapped.size;
+    }
+
+    const body = {
+      model: req.model,
+      input: {
+        messages: [
+          { role: 'user', content: [...refEntries, { text: req.prompt }] },
+        ],
+      },
+      parameters: mapped,
+    };
+
+    const json = await this.postJson(url, body, ctx);
+
+    // 响应提取: output.choices[0].message.content[].image
+    const content = json?.output?.choices?.[0]?.message?.content;
+    const imageItem = Array.isArray(content) ? content.find((c: Record<string, unknown>) => !!c?.image) : undefined;
+    const imageUrl = imageItem?.image as string | undefined;
+    if (!imageUrl) {
+      const errInfo = json?.message ?? json?.code ?? '';
+      const preview = JSON.stringify(json).slice(0, 500);
+      throw new Error(
+        errInfo
+          ? `DashScope 返回错误: ${errInfo}`
+          : `DashScope 响应缺失 output.choices[0].message.content[].image (响应预览: ${preview})`,
+      );
+    }
+
+    const buffer = await this.fetchBinary(imageUrl, ctx);
+
+    // 尺寸:优先 usage.output_width/height,其次解析 size 参数(“宽*高”)
+    let width = Number(json?.usage?.output_width) || 0;
+    let height = Number(json?.usage?.output_height) || 0;
+    if (!width || !height) {
+      const m = /^(\d+)\s*[*x×]\s*(\d+)$/i.exec(String(mapped.size ?? ''));
+      if (m) {
+        width = Number(m[1]);
+        height = Number(m[2]);
+      } else {
+        width = 1328;
+        height = 1328;
+      }
+    }
+
+    return {
+      kind: 'image',
+      buffer,
+      mimeType: 'image/png',
+      ext: 'png',
+      width,
+      height,
+      costTokens: (json?.usage?.total_tokens as number) ?? undefined,
+      inputTokens: (json?.usage?.input_tokens as number) ?? undefined,
+      outputTokens: (json?.usage?.output_tokens as number) ?? undefined,
+    };
   }
 
   /**

@@ -165,6 +165,8 @@ export function useEditorDialogs({
     }
   }, [isHierarchyOpen, isMobile]);
 
+  // 征集 #87 验收轮七:层级/资产库合一抽屉(四 Tab),模式状态改为面板内部管理,原 hierarchyMode 双轨状态已删除
+
   // 打开设置弹窗
   const onOpenSettings = useCallback(() => {
     setSettingsOpen(true);

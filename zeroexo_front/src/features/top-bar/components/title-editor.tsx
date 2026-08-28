@@ -22,6 +22,8 @@ export interface TitleEditorProps {
   onCancelTitleEditing: () => void;
   /** 是否允许编辑(参与者标题归房主,false 时只读展示,无双击/hover/提示) */
   editable?: boolean;
+  /** 紧凑模式(征集 #87:字号缩小 + 右对齐,顶栏右侧窄空间) */
+  compact?: boolean;
 }
 
 export function TitleEditor({
@@ -34,6 +36,7 @@ export function TitleEditor({
   onFinishTitleEditing,
   onCancelTitleEditing,
   editable = true,
+  compact = false,
 }: TitleEditorProps): React.ReactElement {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +54,8 @@ export function TitleEditor({
 
   const wrapperStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 };
 
+  const titleFontSize = compact ? 13 : 18;
+
   if (isTitleEditing) {
     const inputStyle: CSSProperties = {
       maxWidth: 280,
@@ -58,9 +63,10 @@ export function TitleEditor({
       border: 'none',
       outline: 'none',
       padding: 0,
-      fontSize: 18,
+      fontSize: titleFontSize,
       fontWeight: 600,
       color: theme.toolbar.text,
+      textAlign: compact ? 'right' : undefined,
     };
     return (
       <div ref={containerRef} style={wrapperStyle}>
@@ -88,9 +94,10 @@ export function TitleEditor({
     borderBottom: '1px dashed transparent',
     background: 'transparent',
     padding: 0,
-    fontSize: 18,
+    fontSize: titleFontSize,
     fontWeight: 600,
     color: theme.toolbar.text,
+    textAlign: compact ? 'right' : undefined,
     cursor: editable ? 'pointer' : 'default',
     transition: 'border-color 0.15s',
   };

@@ -253,6 +253,8 @@ export interface ImageViewerStageProps {
   /** 图片附加样式(objectFit/圆角/阴影等),与 transform 样式合并 */
   imgStyle?: CSSProperties;
   onImgError?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+  /** 图片加载完成回调(blur-up 场景:调用方据此淡出占位层) */
+  onImgLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
   /** 双击重置视角(节点查看大图场景) */
   resetOnDoubleClick?: boolean;
   /** 容器附加属性(onMouseEnter/Leave 等浮层控制),手势事件自动与内部合并 */
@@ -268,6 +270,7 @@ export function ImageViewerStage({
   containerStyle,
   imgStyle,
   onImgError,
+  onImgLoad,
   resetOnDoubleClick = false,
   containerProps,
   children,
@@ -304,6 +307,7 @@ export function ImageViewerStage({
         alt={alt}
         draggable={false}
         onError={onImgError}
+        onLoad={onImgLoad}
         style={{
           width: '100%',
           height: '100%',

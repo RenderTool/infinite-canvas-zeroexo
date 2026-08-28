@@ -30,7 +30,7 @@
 
 | Prompt Viewer — generation-chain canvas | Streaming canvas editing |
 |---|---|
-| ![Prompt Viewer](./提示词查看器.jpg) | ![Streaming canvas editing](./流式画布编辑.jpg) |
+| ![Prompt Viewer](./docs/screenshots/canvas/提示词查看器.jpg) | ![Streaming canvas editing](./docs/screenshots/canvas/流式画布编辑.jpg) |
 
 ## Product Modules
 

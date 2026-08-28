@@ -1,15 +1,11 @@
-/**
- * CanvasPage - 画布项目列表页
- *
- * 从原 HomePage 提取的画布项目列表功能。
- * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。
- */
+﻿/** * CanvasPage - 画布项目列表页 * * 从原 HomePage 提取的画布项目列表功能。 * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。 */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Trash2, CheckSquare, Square, Download, Upload, Users, LogOut } from 'lucide-react';
-import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip, Select } from 'antd';
+import { Plus, Trash2, CheckSquare, Square, Download, Upload, Users, LogOut } from 'lucide-react';
+import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
+import { SearchButton } from '@/shared/components/search-button.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AntdThemeProvider, ProjectCard, CoverUploadModal } from '@/shared/components/index.js';
 import type { ProjectCardAction } from '@/shared/components/index.js';
@@ -36,16 +32,15 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const { message, modal } = App.useApp();
   const isMobile = useIsMobile();
   const { projects, loading, error, createProject, copyProject, deleteProjects, renameProject, refresh } = useProjects();
-
   const [search, setSearch] = useState('');
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-
   // 协作入口（发起协作模式 + 我参与的协作画布 + 协作筛选）
   const [collabMode, setCollabMode] = useState(false);
-  const [collabFilter, setCollabFilter] = useState<'all' | 'mine' | 'joined'>('all');
+  // 协作筛选状态保留（筛选 UI 已移出工具栏，恒为 all；筛选逻辑分支保留供后续恢复）
+  const collabFilter = 'all' as 'all' | 'mine' | 'joined';
   const [myCanvases, setMyCanvases] = useState<MyCanvasItem[]>([]);
   const [participating, setParticipating] = useState<ParticipatingCanvasItem[]>([]);
   const [collabModalOpen, setCollabModalOpen] = useState(false);
@@ -123,7 +118,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
 
   // 封面上传 (使用共享 hook，与 HomePage 保持同一逻辑)
   const { coverState, openCoverUpload, closeCoverUpload, confirmCoverUpload } = useCoverUpload();
-
   const [busy, setBusy] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -173,7 +167,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
 
   /** 选择模式可批量操作的自有画布（参与的画布不可批量操作） */
   const displayForSelect = searchFilteredAll;
-
   const listForRender = selectMode ? displayForSelect : displayOwnProjects;
   const isEmpty = listForRender.length === 0 && (selectMode || displayParticipating.length === 0);
 
@@ -426,125 +419,102 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             画布
           </Title>
 
-          {/* 移动端适配（对齐资产库搜索行模式）：搜索框独占一行；
-              其余下拉筛选与按钮在下方容器内自动换行；桌面端保持单行布局 */}
           <div style={{
             display: 'flex',
-            flexDirection: isMobile ? 'column' : 'row',
-            alignItems: isMobile ? 'stretch' : 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
             gap: 8,
             minWidth: 0,
           }}>
-            <div style={{ width: isMobile ? '100%' : 180, flexShrink: 0 }}>
-              <Tooltip title={t('home.searchPlaceholder')}>
-                <Input
-                  prefix={<Search size={14} style={{ opacity: 0.5 }} />}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t('home.searchPlaceholder')}
-                  allowClear
-                  style={{ width: '100%' }}
-                  size="small"
-                />
-              </Tooltip>
-            </div>
+            <SearchButton
+              value={search}
+              onChange={setSearch}
+              placeholder={t('home.searchPlaceholder')}
+              theme={theme}
+            />
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', minWidth: 0 }}>
-            {!collabMode && !selectMode && (
-              <Select
-                size="small"
-                value={collabFilter}
-                onChange={(v) => setCollabFilter((v ?? 'all') as 'all' | 'mine' | 'joined')}
-                allowClear
-                style={{ width: 140 }}
-                options={[
-                  { value: 'all', label: t('home.collabFilterAll') },
-                  { value: 'mine', label: t('home.collabFilterMine') },
-                  { value: 'joined', label: t('home.collabFilterJoined') },
-                ]}
-              />
-            )}
+            <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 8, alignItems: 'center', minWidth: 0 }}>
+              {/* 新建按钮（首位） */}
+              {!collabMode && (
+                <Tooltip title={t('home.newCanvas')}>
+                  <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
+                </Tooltip>
+              )}
 
-            {allProjects.length > 0 && (
-              <Tooltip title={selectMode ? t('home.exitSelect') : t('home.selectMode')}>
+              {allProjects.length > 0 && (
+                <Tooltip title={collabMode ? t('home.exitCollaborationMode') : t('home.startCollaboration')}>
+                  <Button
+                    icon={<Users size={14} />}
+                    size="small"
+                    type={collabMode ? 'primary' : 'default'}
+                    ghost={collabMode}
+                    onClick={toggleCollabMode}
+                    style={collabMode ? { animation: 'zeroexo-collab-pulse 1.5s ease-in-out infinite' } : undefined}
+                  />
+                </Tooltip>
+              )}
+              {collabMode && (
+                <>
+                  <style>{`@keyframes zeroexo-collab-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(22,119,255,0.6); opacity: 1; } 50% { box-shadow: 0 0 0 7px rgba(22,119,255,0); opacity: 0.75; } }`}</style>
+                  <span style={{ fontSize: 12, color: theme.toolbar.textMuted, marginLeft: 2 }}>
+                    {t('home.collabModeHint')}
+                  </span>
+                </>
+              )}
+
+              {selectMode && displayForSelect.length > 0 && (
                 <Button
-                  icon={selectMode ? <CheckSquare size={14} /> : <Square size={14} />}
                   size="small"
-                  onClick={selectMode ? exitSelectMode : enterSelectMode}
-                />
-              </Tooltip>
-            )}
+                  onClick={() => {
+                    if (selectedIds.size === displayForSelect.length) {
+                      setSelectedIds(new Set());
+                    } else {
+                      setSelectedIds(new Set(displayForSelect.map((p) => p.id)));
+                    }
+                  }}
+                >
+                  {selectedIds.size === displayForSelect.length ? '取消全选' : '全选'}
+                </Button>
+              )}
 
-            {allProjects.length > 0 && (
-              <Tooltip title={collabMode ? t('home.exitCollaborationMode') : t('home.startCollaboration')}>
-                <Button
-                  icon={<Users size={14} />}
-                  size="small"
-                  type={collabMode ? 'primary' : 'default'}
-                  ghost={collabMode}
-                  onClick={toggleCollabMode}
-                  // Phase 9.7：激活态呼吸闪烁，提醒用户仍处于发起协作模式（再次点击可退出）
-                  style={collabMode ? { animation: 'zeroexo-collab-pulse 1.5s ease-in-out infinite' } : undefined}
-                />
-              </Tooltip>
-            )}
-            {collabMode && (
-              <>
-                <style>{`@keyframes zeroexo-collab-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(22,119,255,0.6); opacity: 1; } 50% { box-shadow: 0 0 0 7px rgba(22,119,255,0); opacity: 0.75; } }`}</style>
-                <span style={{ fontSize: 12, color: theme.toolbar.textMuted, marginLeft: 2 }}>
-                  {t('home.collabModeHint')}
-                </span>
-              </>
-            )}
+              {selectMode && hasSelection && (
+                <Tooltip title={`${t('home.deleteSelected')}(${selectedIds.size})`}>
+                  <Button
+                    icon={<Trash2 size={14} />}
+                    size="small"
+                    danger
+                    onClick={handleBatchDelete}
+                  />
+                </Tooltip>
+              )}
 
-            {selectMode && displayForSelect.length > 0 && (
-              <Button
-                size="small"
-                onClick={() => {
-                  if (selectedIds.size === displayForSelect.length) {
-                    setSelectedIds(new Set());
-                  } else {
-                    setSelectedIds(new Set(displayForSelect.map((p) => p.id)));
-                  }
-                }}
-              >
-                {selectedIds.size === displayForSelect.length ? '取消全选' : '全选'}
-              </Button>
-            )}
+              {selectMode && hasSelection && (
+                <Tooltip title={t('home.exportZip')}>
+                  <Button
+                    icon={<Download size={14} />}
+                    size="small"
+                    onClick={refreshProjects}
+                    disabled={busy}
+                  />
+                </Tooltip>
+              )}
 
-            {selectMode && hasSelection && (
-              <Tooltip title={`${t('home.deleteSelected')}(${selectedIds.size})`}>
-                <Button
-                  icon={<Trash2 size={14} />}
-                  size="small"
-                  danger
-                  onClick={handleBatchDelete}
-                />
-              </Tooltip>
-            )}
+              {!collabMode && (
+                <Tooltip title={t('home.importZip')}>
+                  <Button icon={<Upload size={14} />} size="small" onClick={handleImportClick} disabled={busy} />
+                </Tooltip>
+              )}
 
-            {selectMode && hasSelection && (
-              <Tooltip title={t('home.exportZip')}>
-                <Button
-                  icon={<Download size={14} />}
-                  size="small"
-                  onClick={refreshProjects}
-                  disabled={busy}
-                />
-              </Tooltip>
-            )}
-
-            {!collabMode && (
-              <Tooltip title={t('home.importZip')}>
-                <Button icon={<Upload size={14} />} size="small" onClick={handleImportClick} disabled={busy} />
-              </Tooltip>
-            )}
-
-            {!collabMode && (
-              <Tooltip title={t('home.newCanvas')}>
-                <Button type="primary" icon={<Plus size={14} />} size="small" onClick={handleCreate} disabled={busy} />
-              </Tooltip>
-            )}
+              {/* 多选按钮（末位） */}
+              {allProjects.length > 0 && (
+                <Tooltip title={selectMode ? t('home.exitSelect') : t('home.selectMode')}>
+                  <Button
+                    icon={selectMode ? <CheckSquare size={14} /> : <Square size={14} />}
+                    size="small"
+                    onClick={selectMode ? exitSelectMode : enterSelectMode}
+                  />
+                </Tooltip>
+              )}
             </div>
           </div>
         </div>
@@ -791,12 +761,12 @@ const contentScrollStyle: CSSProperties = {
 function toolbarStyle(_theme: { toolbar: { border: string } }, isMobile: boolean): CSSProperties {
   return {
     display: 'flex',
-    flexDirection: isMobile ? 'column' : 'row',
-    alignItems: isMobile ? 'stretch' : 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'flex-start',
     padding: isMobile ? '10px 12px' : '12px 20px',
     flexShrink: 0,
-    gap: isMobile ? 8 : 16,
+    gap: 16,
   };
 }
 

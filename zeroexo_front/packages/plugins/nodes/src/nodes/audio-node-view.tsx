@@ -226,7 +226,7 @@ export function AudioNodeView({
   const timeLabel = formatTime(isPlaying ? Math.max(0, duration - currentTime) : (currentTime || duration));
 
   // T10: 图标尺寸 CSS 连续化(与标题 fontSize 同源 --zx-invk),消除量化跨桶跳变
-  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const TITLE_ICON_CLAMP = 'clamp(8px, calc(11px * var(--zx-invk, 1)), 14px)';
   const titleIconEl = (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }}>
       <path d="M2 10v3"/>

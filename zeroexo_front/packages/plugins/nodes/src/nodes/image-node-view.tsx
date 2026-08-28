@@ -71,8 +71,14 @@ export function ImageNodeView({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Phase VI.4: 渐进式加载 — 缩小时仅渲染缩略图,放大时加载 preview 级;
   // 画布节点永不加载原图(三档图片契约,征集 #77 用户拍板:原图只在图片浏览器中使用)
-  // invK 由 NodeLayer 传入(1/viewport.k),用于判断画布缩放级别
-  const hydratedContent = useProgressiveImage(data.storageKey, data.content ?? '', invK ?? 1);
+  // Plan#48 像素预算:节点屏幕实际占用宽度(节点宽 × 缩放 × DPR)决定加载档位,
+  // 同屏多节点时只解码/渲染看得清所需的像素;无尺寸信息时回退旧 invK 两档行为
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const viewportK = invK && invK > 0 ? 1 / invK : 1;
+  const budgetPx = node.size?.width
+    ? Math.min(Math.round(node.size.width * viewportK * dpr), 2048)
+    : null;
+  const hydratedContent = useProgressiveImage(data.storageKey, data.content ?? '', invK ?? 1, budgetPx);
   // 使用 hydratedContent 判断是否有内容,避免异步解析期间渲染 <img src=""> 导致浏览器跳转
   const hasContent = !!hydratedContent;
   // 生成节点语义(2026-08-25 用户拍板):只要连入上游即生成节点态(隐藏替换按钮,避免"既是生成器又是资源器"二义态);
@@ -144,7 +150,7 @@ export function ImageNodeView({
     ? `${data.naturalWidth} × ${data.naturalHeight}`
     : `${node.size?.width ?? 340} × ${node.size?.height ?? 240}`;
   // T10: 图标尺寸 CSS 连续化(与标题 fontSize 同源 --zx-invk),消除量化跨桶跳变
-  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const TITLE_ICON_CLAMP = 'clamp(8px, calc(11px * var(--zx-invk, 1)), 14px)';
   const titleIconEl = <ImageIcon size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
 
   // contentOnly 模式:跳过 BaseNodeView 外壳,仅渲染媒体内容

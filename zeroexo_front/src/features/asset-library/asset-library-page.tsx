@@ -22,10 +22,12 @@ import './cards/index.js';
 // 导入子组件
 import { AssetLibraryToolbar } from './components/asset-library-toolbar.js';
 import { AssetLibraryGridView } from './components/asset-library-grid-view.js';
-import { AssetLibraryListView } from './components/asset-library-list-view.js';
 import { AssetLibraryModals } from './components/asset-library-modals.js';
 import type { PageItem } from './types.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
+import { HierarchyListView } from '@/features/hierarchy/components/hierarchy-list-view.js';
+import type { HierarchyListDataProps } from '@/features/hierarchy/components/hierarchy-list-view.js';
+import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 
 export interface AssetLibraryPageProps {
   onNavigateHome?: () => void;
@@ -39,14 +41,31 @@ export interface AssetLibraryPageProps {
   defaultChild?: string;
   /** 需要聚焦高亮的卡片 id（复制提示词后跳转定位） */
   focusId?: string;
+  /** 强制移动端布局(征集 #87 验收轮七:画布内抽屉嵌入时使用主页移动端同款单列卡片布局) */
+  forceMobile?: boolean;
+  /** 层级分组数据(征集 #87 验收轮九:画布节点注册进资产面板) */
+  hierarchyItems?: { id: string; title: string; nodeType: string }[];
+  /** 层级分组专属视图(征集 #87 验收轮十:层级按原树形列表渲染,列表视图层级专属) */
+  hierarchyListView?: {
+    store: ReactGraphStore;
+    data: HierarchyListDataProps;
+    onFocusNode?: (nodeId: string) => void;
+  };
 }
 
 export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
-  const isMobile = useIsMobile();
+  // forceMobile(征集 #87 验收轮七):画布抽屉嵌入时强制移动端布局;未指定时按视口宽度自适应
+  const isMobileAuto = useIsMobile();
+  const isMobile = props.forceMobile ?? isMobileAuto;
 
-  const ctx = useAssetLibrary({ ...props, defaultGroup: props.defaultGroup, defaultChild: props.defaultChild });
+  const ctx = useAssetLibrary({
+    ...props,
+    defaultGroup: props.defaultGroup,
+    defaultChild: props.defaultChild,
+    hierarchyItems: props.hierarchyItems,
+  });
 
   // ── 右键菜单（本地状态，不与 ctx 耦合，避免右键触发整个页面重渲染） ──
   const [ctxMenuPosition, setCtxMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -98,6 +117,13 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     e.stopPropagation();
     const ItemType = item.type;
     setCtxMenuPosition({ x: e.clientX, y: e.clientY });
+    // 征集 #87 验收轮九:层级条目仅支持打开(节点生命周期归画布,无重命名/下载/删除)
+    if (ItemType === 'hierarchy') {
+      setCtxMenuItems([
+        { key: 'open', label: t('common.open'), icon: null, onClick: () => ctx.handleOpenItem(item) },
+      ]);
+      return;
+    }
     const items: ContextMenuItem[] = [
       { key: 'open', label: t('common.open'), icon: null, onClick: () => ctx.handleOpenItem(item) },
       { key: 'rename', label: t('assetLibrary.rename'), icon: null, onClick: () => {
@@ -115,9 +141,10 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         ctx.setConfirmDelete({ type: ItemType as any, id: item.data.id, name: item.data.title });
       }},
     ];
+    // 征集 #87 验收轮七:资产库页重新嵌入画布抽屉,恢复「发送到画布」右键入口。
+    // 剧本在 PageItem 中以 type='asset' 存储(类型体系限制),发送时按 data.kind 还原真实类型 'script',
+    // 否则画布侧 handleAssetInsert 误入媒体资产分支导致创建失败(2026-08-25 实测教训)。
     if (props.onSendToCanvas) {
-      // FIX（2026-08-25 实测：剧本资产无法回发画布）：剧本在 PageItem 中以 type='asset' 存储（类型体系限制），
-      // 发送时必须按 data.kind 还原真实类型 'script'，否则画布侧 handleAssetInsert 误入媒体资产分支导致创建失败。
       items.push({ key: 'send-to-canvas', label: t('assetLibrary.sendToCanvas'), icon: null, onClick: () => props.onSendToCanvas!({ type: ((item.data as any)?.kind === 'script' ? 'script' : ItemType) as any, id: item.data.id, data: item.data }) });
     }
     setCtxMenuItems(items);
@@ -136,8 +163,11 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     void ctx.handleUpload(dt.files);
   }, [ctx.handleUpload]);
 
-  // 稳定化 Toolbar 回调，避免重新渲染导致选项卡闪烁
-  const handleGroupClick = useCallback((group: string) => ctx.setActiveGroup(group), [ctx.setActiveGroup]);
+  // 稳定化 Toolbar 回调，避免重新渲染导致选项卡闪烁；切换分组时重置多选(防状态残留到下一分组)
+  const handleGroupClick = useCallback((group: string) => {
+    ctx.setActiveGroup(group);
+    ctx.setMultiSelectEnabled(false);
+  }, [ctx.setActiveGroup, ctx.setMultiSelectEnabled]);
   const handleChildClick = useCallback((key: string | null) => { ctx.setActiveChild(key); ctx.setPage(1); }, [ctx.setActiveChild, ctx.setPage]);
   const handleNewPrompt = useCallback(() => { ctx.setPromptCreateId(undefined); ctx.setPromptCreateOpen(true); }, [ctx.setPromptCreateId, ctx.setPromptCreateOpen]);
   const handleMultiSelectToggle = useCallback(() => ctx.setMultiSelectEnabled(!ctx.multiSelectEnabled), [ctx.multiSelectEnabled, ctx.setMultiSelectEnabled]);
@@ -156,6 +186,13 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
   const handleDownloadItem = useCallback((item: PageItem) => {
     ctx.handleDownloadItem({ type: item.type as any, data: item.data });
   }, [ctx.handleDownloadItem]);
+
+  // 征集 #87 验收轮十三:卡片发送到画布(画布内嵌入时提供;剧本类型按 data.kind 还原)
+  const handleSendItemToCanvas = useCallback((item: PageItem) => {
+    if (!props.onSendToCanvas) return;
+    const type = (item.data as any)?.kind === 'script' ? 'script' : item.type;
+    props.onSendToCanvas({ type: type as 'asset' | 'prompt' | 'script', id: item.data.id, data: item.data });
+  }, [props.onSendToCanvas]);
 
   const handleFavoriteItem = useCallback((item: PageItem) => {
     ctx.handleToggleFavorite({ type: item.type as any, id: item.data.id, data: { ...item.data, favorite: false } });
@@ -184,7 +221,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       activeGroup={ctx.activeGroup}
       activeChild={ctx.activeChild}
       search={ctx.search}
-      viewMode={ctx.viewMode}
       multiSelectEnabled={ctx.multiSelectEnabled}
       scanningProgress={ctx.scanningProgress}
       scanningMessage={ctx.scanningMessage}
@@ -193,7 +229,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       onGroupClick={handleGroupClick}
       onChildClick={handleChildClick}
       onSearchChange={ctx.setSearch}
-      onViewModeChange={ctx.setViewMode}
       onMultiSelectToggle={handleMultiSelectToggle}
       onUploadMaterial={handleUploadMaterial}
       materialFileInputRef={materialFileInputRef}
@@ -202,11 +237,11 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     />
   ), [
     ctx.categories, ctx.activeGroup, ctx.activeChild,
-    ctx.search, ctx.viewMode, ctx.multiSelectEnabled,
+    ctx.search, ctx.multiSelectEnabled,
     ctx.scanningProgress, ctx.scanningMessage,
     isMobile, theme,
     handleGroupClick, handleChildClick,
-    ctx.setSearch, ctx.setViewMode,
+    ctx.setSearch,
     handleMultiSelectToggle, handleUploadMaterial,
     handleNewPrompt, ctx.handleNewScript,
   ]);
@@ -218,7 +253,18 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       <div style={contentAreaStyle()}>
         {toolbar}
 
-        {ctx.viewMode === 'grid' ? (
+        {/* 征集 #87 验收轮十:视图由分组决定——层级 = 原树形列表(层级专属);其余 = 网格卡片(视图切换已全局移除) */}
+        {ctx.activeGroup === 'hierarchy' && props.hierarchyListView ? (
+          <HierarchyListView
+            theme={theme}
+            store={props.hierarchyListView.store}
+            data={props.hierarchyListView.data}
+            onFocusNode={props.hierarchyListView.onFocusNode}
+            search={ctx.search}
+            multiSelectEnabled={ctx.multiSelectEnabled}
+            onMultiSelectToggle={() => ctx.setMultiSelectEnabled(!ctx.multiSelectEnabled)}
+          />
+        ) : (
           <AssetLibraryGridView
             pageItems={ctx.pageItems}
             loading={ctx.loadingPrompts || ctx.loadingAssets}
@@ -237,22 +283,17 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
             onFavoriteItem={handleFavoriteItem}
             onUnfavoriteItem={handleUnfavoriteItem}
             onContextMenu={handleItemContextMenu}
+            onSendToCanvas={props.onSendToCanvas ? handleSendItemToCanvas : undefined}
             onDragEnter={ctx.handleDragEnter}
             onDragLeave={ctx.handleDragLeave}
             onDragOver={ctx.handleDragOver}
             onDrop={ctx.handleDrop}
             onCtxMenu={handleGridCtxMenu}
           />
-        ) : (
-          <AssetLibraryListView
-            pageItems={ctx.pageItems}
-            theme={theme}
-            onOpenItem={ctx.handleOpenItem}
-          />
         )}
 
-        {/* 多选操作栏 */}
-        {ctx.multiSelectEnabled && (
+        {/* 多选操作栏(层级分组除外:树形列表自带批量选择) */}
+        {ctx.multiSelectEnabled && ctx.activeGroup !== 'hierarchy' && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -282,8 +323,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
           </div>
         )}
 
-        {/* 分页器 */}
-        {ctx.allItems.length > ctx.PAGE_SIZE && (
+        {/* 分页器(层级分组除外:树形列表不分页) */}
+        {ctx.activeGroup !== 'hierarchy' && ctx.allItems.length > ctx.PAGE_SIZE && (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0', flexShrink: 0 }}>
             <Pagination
               current={ctx.page}
@@ -298,7 +339,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       </div>
     </div>
   ), [
-    isMobile, toolbar, ctx.viewMode, ctx.pageItems,
+    isMobile, toolbar, ctx.activeGroup, props.hierarchyListView, props.onSendToCanvas, handleSendItemToCanvas, ctx.pageItems,
     ctx.loadingPrompts, ctx.loadingAssets,
     ctx.multiSelectEnabled, ctx.selectedIds, highlightId, theme,
     ctx.dragOver, ctx.dragCounterRef, ctx.handleToggleSelect,
@@ -308,6 +349,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.handleDragOver, ctx.handleDrop, handleGridCtxMenu,
     ctx.allItems, ctx.PAGE_SIZE, ctx.page, ctx.setPage,
     ctx.handleToggleSelectAll, ctx.handleBatchDelete, ctx.setMultiSelectEnabled,
+    ctx.search,
   ]);
 
   return (

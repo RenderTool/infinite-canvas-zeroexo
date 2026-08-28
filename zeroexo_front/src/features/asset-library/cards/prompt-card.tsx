@@ -29,10 +29,12 @@ function PromptCardGrid({
       onContextMenu={onContextMenu}
       draggable
       onDragStart={(e) => {
+        // 验收轮二十一:payload 携带完整数据 → 画布 drop 直接建 text 节点(内容即提示词正文)
         e.dataTransfer.setData('application/x-testlib-item', JSON.stringify({
           type: 'prompt',
           id: prompt.id,
           name: prompt.title,
+          data: prompt,
         }));
       }}
     >

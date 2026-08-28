@@ -1,4 +1,4 @@
-// TODO(拆分): 该文件超过 1000 行，计划按「状态层/交互层/渲染层」拆分，见 DESIGN.md
+﻿// TODO(拆分): 该文件超过 1000 行，计划按「状态层/交互层/渲染层」拆分，见 DESIGN.md
 /**
  * use-asset-library - 资产库业务逻辑 Hook
  *
@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App as AntdApp } from 'antd';
-import { Package, FileText, BookOpen } from 'lucide-react';
+import { Package, FileText, BookOpen, Layers } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
@@ -32,6 +32,7 @@ import type {
   ConfirmDeleteState,
   RenameItemTarget,
   SendToCanvasItem,
+  HierarchyLibraryItem,
 } from './types.js';
 
 // ===== Hook 返回类型 =====
@@ -155,6 +156,10 @@ export interface UseAssetLibraryProps {
   defaultGroup?: string;
   defaultChild?: string;
   onSendToCanvas?: (item: SendToCanvasItem) => void;
+  /** 层级分组数据(征集 #87 验收轮九:画布节点注册进资产面板;传入时显示「层级」分组) */
+  hierarchyItems?: HierarchyLibraryItem[];
+  /** 层级条目打开回调(点击节点卡片 → 画布聚焦) */
+  onOpenHierarchyNode?: (nodeId: string) => void;
 }
 
 // ===== 辅助 =====
@@ -257,6 +262,16 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
 
   // ── 分类定义 ──
   const categories: AssetCategory[] = useMemo(() => [
+    // 征集 #87 验收轮九:层级分组(仅画布内抽屉传入 hierarchyItems 时显示,置顶)
+    ...(props.hierarchyItems ? [{
+      group: 'hierarchy' as const,
+      label: t('hierarchy.tabHierarchy'),
+      icon: <Layers size={16} />,
+      color: '#3b82f6',
+      // 层级不计总数(count: 0 不显示计数)
+      count: 0,
+      children: [],
+    }] : []),
     {
       group: 'material',
       label: t('assetLibrary.filterMaterial'),
@@ -298,7 +313,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       count: assets.filter((a) => (a.kind as string) === 'script').length,
       children: [],
     },
-  ], [prompts, assets, t]);
+  ], [prompts, assets, t, props.hierarchyItems]);
 
   // ── 分类筛选逻辑（子分类值做合法性校验，非法残留值回退 all） ──
   const filteredByGroup = useMemo(() => {
@@ -306,6 +321,8 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       return { contentType: 'all' as ContentType, assetKind: 'all' as AssetKindFilter };
     }
     switch (activeGroup) {
+      case 'hierarchy':
+        return { contentType: 'hierarchy' as ContentType, assetKind: 'all' as AssetKindFilter };
       case 'prompt':
         return { contentType: 'prompt' as ContentType, assetKind: 'all' as AssetKindFilter };
       case 'material': {
@@ -375,6 +392,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const showPrompts = filteredByGroup.contentType === 'all' || filteredByGroup.contentType === 'prompt';
   const showAssets = filteredByGroup.contentType === 'all' || filteredByGroup.contentType === 'asset';
   const showScripts = filteredByGroup.contentType === 'script';
+  // 征集 #87 验收轮十:层级分组由专属树形列表渲染(自带搜索过滤),不再派生平铺条目
 
   const filteredScripts = useMemo(() => {
     return filteredAssets.filter((a) => (a.kind as string) === 'script');
@@ -392,6 +410,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     if (showScripts) {
       filteredScripts.forEach((a) => items.push({ type: 'asset', data: a }));
     }
+    // 征集 #87 验收轮十:层级分组不走 pageItems(专属树形列表渲染,不参与网格/分页)
     return items;
   }, [showPrompts, filteredPrompts, showAssets, filteredAssets, showScripts, filteredScripts]);
 
@@ -483,6 +502,8 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 验收轮二十一:素材库自身卡片拖拽(自定义 MIME)不触发上传提示(防自己拖自己)
+    if (e.dataTransfer.types?.includes('application/x-testlib-item')) return;
     dragCounterRef.current++;
     if (e.dataTransfer.types?.includes('Files')) {
       setDragOver(true);
@@ -509,6 +530,8 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     e.stopPropagation();
     dragCounterRef.current = 0;
     setDragOver(false);
+    // 验收轮二十一:素材库自身卡片拖拽不上传(防自己拖自己循环上传;卡片封面 img 已禁拖双保险)
+    if (e.dataTransfer.types?.includes('application/x-testlib-item')) return;
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       void handleUpload(e.dataTransfer.files);
     }
@@ -844,8 +867,11 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       } else {
         setAssetDetail(item.data);
       }
+    } else if (item.type === 'hierarchy') {
+      // 征集 #87 验收轮九:层级条目打开 = 画布聚焦该节点(不回弹抽屉,支持连续浏览定位)
+      props.onOpenHierarchyNode?.(item.data.id);
     }
-  }, [handleOpenScriptAsset]);
+  }, [handleOpenScriptAsset, props]);
 
   // ── 分类/搜索变化时重置分页（筛选维度已派生，无需多 effect 同步） ──
   useEffect(() => {

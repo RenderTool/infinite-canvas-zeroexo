@@ -84,6 +84,11 @@ export function getAdapter(provider: string): AiProviderAdapter {
       adapter = new VolcengineAdapter();
       break;
     case 'custom':
+    // 百炼/DashScope(通义千问):模板 DSL 驱动(如 qwen-image 的 dashscope bodyStyle),
+    // 无 DSL 时按 CustomAdapter 的 OpenAI 兼容兜底(征集 #83:渠道类型兼容)
+    case 'bailian':
+    case 'dashscope':
+    case 'qwen':
       adapter = new CustomAdapter();
       break;
     case 'mock':

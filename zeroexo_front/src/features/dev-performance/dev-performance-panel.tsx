@@ -584,10 +584,13 @@ export function DevPerformancePanel({ store, commandQueue, syncStatus }: DevPerf
     <div
       data-dev-performance
       style={{
+        // 征集 #87 验收轮:移画布左下角(原左上角 top:62 碍眼);展开时向上生长,限高内部滚动
         position: 'fixed',
-        top: 62,
+        bottom: 64,
         left: 12,
         zIndex: 1200,
+        maxHeight: 'calc(100vh - 160px)',
+        overflowY: 'auto',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11,
         color: '#e8edf2',

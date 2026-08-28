@@ -1,21 +1,20 @@
 /**
  * TopBar - 顶部工具栏容器(画布编辑器专用)
  *
- * 左侧:可编辑标题(CanvasMenu 已移至 CanvasControls 的 menuSlot);
- * 右侧:外观设置(与主页换肤为同一组件变体,文案一致)+ 独立按钮(文档/快捷键/语言/配置)
- *      + 版本快照(保存版本/版本历史)+ 协作 + Agent。
+ * 左侧:LOGO 下拉 + 层级/资产按钮(征集 #87:回归 LOGO 侧,激活态 accent 高亮);
+ * 右侧:可编辑标题(compact 13px 右对齐)+ 外观设置 + 语言/配置 + 版本快照 + 协作 + Agent。
  * 账号信息与退出登录已移入左上角 CanvasMenu。
  * 主题由 useTheme() 注入;外观浮层开关内部管理;设置弹窗由父组件控制(通过 onOpenSettings)。
  * 左侧 padding 预留 CanvasControls(左上角竖向控件)的宽度,避免重叠。
  *
- * 移动端仅渲染标题 + 撤销/重做 + 同步徽标(精简视图);
+ * 移动端仅渲染层级按钮 + 标题 + 同步徽标(精简视图);
  * 移动端导航抽屉(MobileNavDrawer)改由 EditorPage 注入,统一与主页/创作/画布列表保持一致。
  */
 
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Bot, BookOpen, Undo2, Redo2, Keyboard, Users,
+  Bot, Layers, Users,
   History, SquareMousePointer,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -24,11 +23,10 @@ import { Badge, Button as AntdButton, Tooltip } from 'antd';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
-import { AppearanceDialog, ShortcutsDialog, LanguageSwitcher } from '@/shared/components/index.js';
+import { AppearanceDialog, LanguageSwitcher } from '@/shared/components/index.js';
 import type { GridStyle } from '@/shared/components/index.js';
 import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
-import type { ShortcutEntry } from '@zeroexo/plugin-keyboard';
 
 /** 换肤图标(sun-moon),与主页 AppTopBar 保持同一图标,体现"同一组件变体" */
 function SunMoonIcon(): React.ReactElement {
@@ -63,11 +61,9 @@ export interface TopBarProps {
   isMobile?: boolean;
   /** 云同步状态徽章(渲染在标题右侧,垂直居中对齐) */
   syncBadge?: React.ReactNode;
-  /** Bug3: 撤销/重做(移到 topbar,云同步旁) */
-  canUndo: boolean;
-  canRedo: boolean;
-  onUndo: () => void;
-  onRedo: () => void;
+  /** 层级/资产抽屉开关(征集 #87:按钮回归 LOGO 侧,激活态 accent 高亮) */
+  isHierarchyOpen: boolean;
+  onToggleHierarchy: () => void;
   /** LOGO下拉菜单(画布编辑器左上角,桌面端显示) */
   canvasMenu?: React.ReactNode;
   /** 移动端导航按钮打开 */
@@ -76,8 +72,6 @@ export interface TopBarProps {
   onOpenCollaboration?: () => void;
   /** 打开版本快照面板(保存+历史合并单页面) */
   onOpenVersionHistory?: () => void;
-  /** 快捷键注册表(键盘插件实例;透传给快捷键弹窗自动映射) */
-  keyboardShortcuts?: readonly ShortcutEntry[];
 }
 
 export function TopBar({
@@ -96,14 +90,11 @@ export function TopBar({
   onOpenSettings,
   isMobile,
   syncBadge,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
+  isHierarchyOpen,
+  onToggleHierarchy,
   canvasMenu,
   onOpenCollaboration,
   onOpenVersionHistory,
-  keyboardShortcuts,
 }: TopBarProps): React.ReactElement {
   const { theme, mode } = useTheme();
   const { t } = useTranslation();
@@ -117,7 +108,6 @@ export function TopBar({
   const agentUnread = useCanvasAgentStore((s) => s.agentUnread);
 
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const barStyle: CSSProperties = {
     display: 'flex',
@@ -155,61 +145,68 @@ export function TopBar({
     color: theme.toolbar.text,
   };
 
-  const undoRedoBtnStyle = (enabled: boolean): CSSProperties => ({
+  /** 层级/资产按钮(征集 #87:激活态 = 抽屉开,accent 高亮) */
+  const hierarchyBtnStyle = (open: boolean): CSSProperties => ({
     ...iconBtnInHeader,
-    opacity: enabled ? 0.6 : 0.25,
-    cursor: enabled ? 'pointer' : 'default',
+    color: open ? theme.toolbar.accent : theme.toolbar.text,
+    background: open ? `${theme.toolbar.accent}14` : 'transparent',
   });
-
-  /** 文档按钮:文档即将上线,先占位 */
-  const handleOpenDocs = (): void => {
-    // 文档即将上线,先占位(入口保留,便于后续接入文档站点)
-  };
 
   /** 版本快照:点按钮直接打开合并面板(保存+历史),无下拉 */
   const handleOpenVersion = (): void => {
     onOpenVersionHistory?.();
   };
 
+  /** 可编辑标题(compact 13px;桌面端右侧组,移动端居中容器) */
+  const titleEditor = (
+    <TitleEditor
+      compact
+      theme={theme}
+      title={title}
+      titleDraft={titleDraft}
+      isTitleEditing={isTitleEditing}
+      editable={titleEditable}
+      onTitleDraftChange={onTitleDraftChange}
+      onStartTitleEditing={onStartTitleEditing}
+      onFinishTitleEditing={onFinishTitleEditing}
+      onCancelTitleEditing={onCancelTitleEditing}
+    />
+  );
+
   return (
     <div style={barStyle}>
       <div style={leftStyle}>
         {!mobile && canvasMenu}
-        <TitleEditor
-          theme={theme}
-          title={title}
-          titleDraft={titleDraft}
-          isTitleEditing={isTitleEditing}
-          editable={titleEditable}
-          onTitleDraftChange={onTitleDraftChange}
-          onStartTitleEditing={onStartTitleEditing}
-          onFinishTitleEditing={onFinishTitleEditing}
-          onCancelTitleEditing={onCancelTitleEditing}
-        />
-        {/* 撤销/重做（只读禁用：2026-08-25 系统性只读防护，viewer 不得回滚/重放编辑） */}
-        <Tooltip title={t('topbar.undo')}>
+        {/* LOGO 与层级按钮竖向分割线(桌面端;征集 #87 验收轮十八) */}
+        {!mobile && (
+          <div style={{ width: 1, height: 20, background: theme.toolbar.border || 'rgba(128,128,128,0.2)' }} />
+        )}
+        {/* 层级/资产按钮(征集 #87:回归 LOGO 侧;激活态 = 抽屉开,accent 高亮) */}
+        <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}>
           <AntdButton
             type="text"
-            icon={<Undo2 size={16} />}
-            disabled={!canUndo || readOnly}
-            onClick={onUndo}
-            style={undoRedoBtnStyle(canUndo && !readOnly)}
+            icon={<Layers size={16} />}
+            onClick={onToggleHierarchy}
+            style={hierarchyBtnStyle(isHierarchyOpen)}
           />
         </Tooltip>
-        <Tooltip title={t('topbar.redo')}>
-          <AntdButton
-            type="text"
-            icon={<Redo2 size={16} />}
-            disabled={!canRedo || readOnly}
-            onClick={onRedo}
-            style={undoRedoBtnStyle(canRedo && !readOnly)}
-          />
-        </Tooltip>
-        {/* 保存状态指示器(标题旁,与创作页统一) */}
-        {syncBadge}
       </div>
+      {/* 移动端:标题 + 同步徽标居中(征集 #87 验收轮十八) */}
+      {mobile && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minWidth: 0 }}>
+          {titleEditor}
+          {syncBadge}
+        </div>
+      )}
       <div style={rightStyle}>
-        {/* 桌面端:外观设置 + 文档/快捷键/语言/配置 + 版本快照 */}
+        {/* 桌面端:可编辑标题(compact 13px 右对齐) + 保存状态指示器(移动端标题居中见中间容器) */}
+        {!mobile && (
+          <>
+            {titleEditor}
+            {syncBadge}
+          </>
+        )}
+        {/* 桌面端:外观设置 + 语言/配置 + 版本快照 */}
         {!mobile && (
           <>
             {/* 外观设置(与主页换肤为同一组件变体,文案一致) */}
@@ -218,26 +215,6 @@ export function TopBar({
                 type="text"
                 icon={<SunMoonIcon />}
                 onClick={() => setAppearanceOpen(true)}
-                style={iconBtnInHeader}
-              />
-            </Tooltip>
-
-            {/* 文档(即将上线,先占位) */}
-            <Tooltip title={t('topbar.docsComingSoon')}>
-              <AntdButton
-                type="text"
-                icon={<BookOpen size={16} />}
-                onClick={handleOpenDocs}
-                style={iconBtnInHeader}
-              />
-            </Tooltip>
-
-            {/* 快捷键 */}
-            <Tooltip title={t('menu.shortcuts')}>
-              <AntdButton
-                type="text"
-                icon={<Keyboard size={16} />}
-                onClick={() => setShortcutsOpen(true)}
                 style={iconBtnInHeader}
               />
             </Tooltip>
@@ -314,14 +291,6 @@ export function TopBar({
         )}
       </div>
 
-      {/* 快捷键对话框 */}
-      {shortcutsOpen ? (
-        <ShortcutsDialog
-          theme={theme}
-          onClose={() => setShortcutsOpen(false)}
-          shortcuts={keyboardShortcuts}
-        />
-      ) : null}
     </div>
   );
 }

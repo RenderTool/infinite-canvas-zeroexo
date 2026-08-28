@@ -247,10 +247,8 @@ export function CanvasV2Page({ onBack }: CanvasV2PageProps): React.ReactElement 
               gridStyle="dots"
               onGridStyleChange={() => undefined}
               onOpenSettings={() => undefined}
-              canUndo={false}
-              canRedo={false}
-              onUndo={() => undefined}
-              onRedo={() => undefined}
+              isHierarchyOpen={hierarchyOpen}
+              onToggleHierarchy={() => setHierarchyOpen((v) => !v)}
             />
           </div>
           <Layout.Content style={contentLayoutStyle}>
@@ -580,10 +578,7 @@ opacity: ${style.opacity};`}
                   onScaleChange={handleScaleChange}
                   isMiniMapOpen={miniMapOpen}
                   onToggleMiniMap={() => setMiniMapOpen((v) => !v)}
-                  isHierarchyOpen={hierarchyOpen}
-                  onToggleHierarchy={() => setHierarchyOpen((v) => !v)}
                   onClear={handleClear}
-                  onOpenMyAssets={() => undefined}
                   interactionMode={interactionMode}
                   onToggleInteractionMode={() => setInteractionMode((m) => (m === 'select' ? 'pan' : 'select'))}
                   onAddNode={() => handleAddNodes(1, false)}

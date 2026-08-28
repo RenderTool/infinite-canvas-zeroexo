@@ -1,6 +1,6 @@
 {
   "name": "@zeroexo/app-canvas",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "ZeroExo Canvas - Visual node editor",

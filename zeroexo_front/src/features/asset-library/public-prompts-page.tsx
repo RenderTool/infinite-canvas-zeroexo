@@ -10,10 +10,11 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { App as AntdApp, Input, Pagination } from 'antd';
-import { Globe, Search } from 'lucide-react';
+import { App as AntdApp, Pagination } from 'antd';
+import { Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PromptCard } from '@/shared/components/index.js';
+import { SearchButton } from '@/shared/components/search-button.js';
 import { PromptViewer } from '@/shared/components/prompt-viewer.js';
 import { apiFetch } from '@/services/api-client.js';
 import { useAuth } from '@/features/auth/auth-store.js';
@@ -115,9 +116,9 @@ function filterChipStyle(theme: any, active: boolean): CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
-    height: 28,
-    padding: '0 10px',
-    fontSize: 12,
+    height: 24,
+    padding: '0 8px',
+    fontSize: 11,
     fontWeight: active ? 600 : 400,
     borderRadius: 6,
     cursor: 'pointer',
@@ -314,14 +315,11 @@ export function PublicPromptsPage(): React.ReactElement {
         <div style={toolbarTitleStyle(theme)}>
           {t('common.publicPrompts')}
         </div>
-        <Input
-          size="small"
-          prefix={<Search size={14} style={{ opacity: 0.5 }} />}
-          placeholder="搜索提示词..."
+        <SearchButton
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 240 }}
-          allowClear
+          onChange={setSearch}
+          placeholder="搜索提示词..."
+          theme={theme}
         />
       </div>
 

@@ -205,7 +205,7 @@ export const GroupItem = React.memo(
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: `calc(8px * ${invKVar})`,
+              fontSize: `calc(7px * ${invKVar})`,
               fontWeight: 500,
               lineHeight: 1,
               pointerEvents: 'none',
@@ -227,7 +227,8 @@ export const GroupItem = React.memo(
             padding: `0 calc(8px * ${invKVar})`,
             display: 'flex',
             alignItems: 'center',
-            fontSize: `calc(11px * ${invKVar})`,
+            // 征集 #87 验收轮三:组标题基准 11→10px(用户要求缩小)
+            fontSize: `calc(10px * ${invKVar})`,
             color: groupDefaults?.titleColor ?? (isSelected ? 'rgba(233, 69, 96, 0.95)' : (isLight ? '#1c1917' : 'rgba(245, 245, 244, 0.9)')),
             fontWeight: 600,
             userSelect: 'none',
@@ -260,7 +261,7 @@ export const GroupItem = React.memo(
               style={{
                 width: '100%',
                 height: '100%',
-                fontSize: `calc(12px * ${invKVar})`,
+                fontSize: `calc(11px * ${invKVar})`,
                 background: 'rgba(30, 40, 60, 0.95)',
                 border: `calc(1px * ${invKVar}) solid rgba(100, 180, 255, 0.8)`,
                 borderRadius: `calc(3px * ${invKVar})`,

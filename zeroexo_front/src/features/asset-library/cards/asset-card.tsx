@@ -17,13 +17,13 @@ import {
   Download,
   Pencil,
   Trash2,
+  Send,
 } from 'lucide-react';
 import { Tooltip } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { TFunction } from 'i18next';
 import { useHydratedContent } from '@zeroexo/plugin-nodes';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
-import { actionBtnStyle } from '../asset-library-styles.js';
 
 // ===== 辅助 =====
 
@@ -55,6 +55,7 @@ function AssetCardGrid({
   onDelete,
   onDownload,
   onContextMenu,
+  onSendToCanvas,
   theme,
   t,
 }: GridCardRendererProps<any>): React.ReactElement {
@@ -104,10 +105,12 @@ function AssetCardGrid({
       onContextMenu={onContextMenu}
       draggable
       onDragStart={(e) => {
+        // 验收轮二十一:payload 携带完整数据 → 画布 drop 直接建节点;封面 img/video 已禁拖(防浏览器附带文件)
         e.dataTransfer.setData('application/x-testlib-item', JSON.stringify({
           type: 'asset',
           id: asset.id,
           name: asset.title,
+          data: asset,
         }));
       }}
     >
@@ -128,6 +131,7 @@ function AssetCardGrid({
             ref={videoRef}
             src={hydrated}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            draggable={false}
             muted
             playsInline
             preload="metadata"
@@ -137,6 +141,7 @@ function AssetCardGrid({
             src={hydrated}
             alt={asset.title}
             loading="lazy"
+            draggable={false}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             onError={() => setCoverError(true)}
           />
@@ -225,33 +230,36 @@ function AssetCardGrid({
         </div>
       </div>
 
-      {/* Hover 操作按钮 */}
+      {/* Hover 操作按钮(征集 #87 验收轮十三:改提示词卡同款竖排风格;画布内额外飞机图标发送到画布) */}
       {hovered && (
         <div style={{
           position: 'absolute',
           top: 8,
           right: 8,
           display: 'flex',
+          flexDirection: 'column',
           gap: 4,
-          background: theme.toolbar.background,
-          border: `1px solid ${theme.toolbar.border}`,
-          borderRadius: 8,
-          padding: '2px 4px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
           zIndex: 10,
         }} onClick={(e) => e.stopPropagation()}>
+          {onSendToCanvas && (
+            <Tooltip title={t('assetLibrary.sendToCanvas')}>
+              <button type="button" onClick={onSendToCanvas} style={cardActionBtnStyle}>
+                <Send size={13} />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip title={t('common.download')}>
-            <button type="button" onClick={() => onDownload?.()} style={actionBtnStyle()}>
+            <button type="button" onClick={() => onDownload?.()} style={cardActionBtnStyle}>
               <Download size={13} />
             </button>
           </Tooltip>
           <Tooltip title={t('assetLibrary.rename')}>
-            <button type="button" onClick={onRename} style={actionBtnStyle()}>
+            <button type="button" onClick={onRename} style={cardActionBtnStyle}>
               <Pencil size={13} />
             </button>
           </Tooltip>
           <Tooltip title={t('assetLibrary.delete')}>
-            <button type="button" onClick={onDelete} style={actionBtnStyle()}>
+            <button type="button" onClick={onDelete} style={cardActionBtnStyle}>
               <Trash2 size={13} />
             </button>
           </Tooltip>
@@ -303,6 +311,23 @@ function AssetCardList({
     </>
   );
 }
+
+// ===== 竖排操作按钮样式(提示词卡同款:28×28 半透明黑) =====
+
+const cardActionBtnStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  padding: 0,
+  border: 'none',
+  borderRadius: 6,
+  background: 'rgba(0,0,0,0.45)',
+  color: '#fff',
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'background 0.15s',
+};
 
 // ===== 注册 =====
 

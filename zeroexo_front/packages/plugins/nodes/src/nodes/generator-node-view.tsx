@@ -628,7 +628,7 @@ export function GeneratorNodeView({
   // ===== 标题图标 =====
   // T10: 图标尺寸 CSS 连续化——原 JS 量化(Math.max/min + 量化 invK)缩放跨桶瞬间跳变,
   // 改 clamp(9, 13×--zx-invk, 16) 与标题 fontSize 同源连续,桶内漂移/跨桶猛跳一并消除
-  const TITLE_ICON_CLAMP = 'clamp(9px, calc(13px * var(--zx-invk, 1)), 16px)';
+  const TITLE_ICON_CLAMP = 'clamp(8px, calc(11px * var(--zx-invk, 1)), 14px)';
   const modeIcon = <Sparkles size={16} style={{ width: TITLE_ICON_CLAMP, height: TITLE_ICON_CLAMP }} />;
 
   // ===== 视频缩略图组件(回退链:持久化缩略图→后端 thumb→重建内容 URL video 首帧,不加载全量视频;无缩略图时回退图标) =====

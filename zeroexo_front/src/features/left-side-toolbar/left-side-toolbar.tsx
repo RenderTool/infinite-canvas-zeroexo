@@ -1,18 +1,14 @@
 /**
- * LeftSideToolBar - 画布左侧工具栏(竖向布局)
+ * LeftSideToolBar - 画布工具栏(征集 #87 验收轮:默认统一底部横向布局)
  *
- * 布局结构(桌面端,从上到下):
- * - LOGO slot(始终在顶部,由父组件传入)
- * - 工具区(垂直居中于 100vh - header):
- *   - 加号按钮(最上方,透明按钮样式,点击弹出 ConnectionDropMenu 同款创建面板)
- *   - 分隔线
- *   - 上半部分:模式切换 / 撤销 / 重做 / 清空画布 / 我的素材
- *   - 分隔线
- *   - 缩放百分比(点击弹出下拉菜单,无下拉箭头) / 重置视图
- *   - 分隔线
- *   - 小地图开关 / 画布结构开关
+ * 布局(默认 'bottom',桌面/移动端一致 —— 移动端行为即默认行为):
+ * - 底部居中悬浮条,与右下角缩放组件(ZoomToolbar)同款底色(半透明黑 + 毛玻璃)
+ * - 按钮顺序:[小地图 / 模式切换 / 清空画布] ┃ [加号(最右,单独隔开)]
+ * - 加号创建菜单向上弹出(对齐按钮右缘)
+ * - 缩放控件已移除(由画布右下角 ZoomToolbar 承担,征集 #87 验收轮)
  *
- * 移动端:LOGO slot 不渲染,工具栏底部横向居中。
+ * 预留接口:layout='left' 恢复改造前的竖向布局(桌面左缘垂直居中 / 移动端底部横向),
+ * 当前不再使用,仅保留切回能力。
  *
  * 受控模式:所有状态和回调由父组件管理;主题由 useTheme() 注入。
  */
@@ -22,157 +18,94 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { Button, Dropdown } from 'antd';
-import type { MenuProps } from 'antd';
+import { Button } from 'antd';
 import { Tooltip, NodeCreateMenu } from '@/shared/components/index.js';
 import type { AddNodeType } from '@/shared/components/index.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import {
   Map,
-  FolderTree,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
   Eraser,
-  TentTree,
   Hand,
   MousePointer2,
   Plus,
 } from 'lucide-react';
 
 export interface LeftSideToolBarProps {
+  /** 缩放值(征集 #87 验收轮:缩放控件已移除,仅为旧调用方保留接口) */
   scale: number;
   onScaleChange: (scale: number) => void;
   isMiniMapOpen: boolean;
   onToggleMiniMap: () => void;
-  isHierarchyOpen: boolean;
-  onToggleHierarchy: () => void;
   onClear: () => void;
-  onOpenMyAssets: () => void;
   interactionMode: 'select' | 'pan';
   onToggleInteractionMode: () => void;
   isMobile?: boolean;
   /** 添加节点回调(点击加号菜单项时触发) */
   onAddNode: (type: AddNodeType) => void;
+  /** 布局:bottom = 底部横向悬浮条(默认,双端一致);left = 旧版竖向布局(预留切回,当前不使用) */
+  layout?: 'bottom' | 'left';
 }
 
 interface LeftSideToolBarViewProps extends LeftSideToolBarProps {
   theme: ThemeConfig;
 }
 
-const MAX_SCALE = 5;
-const MIN_SCALE = 0.05;
+/** 底部悬浮条按钮文字色(与 ZoomToolbar 同款) */
+const BAR_TEXT = 'rgba(255,255,255,0.85)';
+/** 底部悬浮条底色(与画布右下角缩放组件同款:半透明黑 + 毛玻璃) */
+const bottomBarStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 2,
+  padding: '4px 6px',
+  borderRadius: 12,
+  background: 'rgba(0,0,0,0.55)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+  pointerEvents: 'auto',
+};
 
 function LeftSideToolBarView({
-  scale,
-  onScaleChange,
   isMiniMapOpen,
   onToggleMiniMap,
-  isHierarchyOpen,
-  onToggleHierarchy,
   onClear,
-  onOpenMyAssets,
   interactionMode,
   onToggleInteractionMode,
   isMobile,
   onAddNode,
   theme,
+  layout = 'bottom',
 }: LeftSideToolBarViewProps): React.ReactElement {
   const { t } = useTranslation();
   const readOnly = useReadOnly();
-  const [zoomOpen, setZoomOpen] = useState(false);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodePos, setAddNodePos] = useState<{ x: number; y: number }>({ x: 56, y: 72 });
   const plusButtonRef = useRef<HTMLElement>(null);
-  const percent = Math.round(scale * 100);
   const isPan = interactionMode === 'pan';
-  const dividerBg = theme.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-  // 移动端:竖向分隔线;桌面端:横向分隔线
-  const dividerStyle: CSSProperties = isMobile
-    ? { width: 1, height: 20, backgroundColor: dividerBg, flexShrink: 0 }
-    : { width: 20, height: 1, backgroundColor: dividerBg };
 
-  const wrapperStyle: CSSProperties = isMobile ? mobileWrapperStyle : desktopWrapperStyle;
-  const toolsWrapStyle: CSSProperties = isMobile
-    ? { display: 'flex', alignItems: 'center', minWidth: 0 }
-    : { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0, minHeight: 0 };
-  const innerDockStyle: CSSProperties = isMobile
-    ? { ...dockStyle, flexDirection: 'row', flexWrap: 'nowrap', overflow: 'visible', maxWidth: '100%' }
-    : dockStyle;
+  const isBottom = layout === 'bottom';
 
-  // 桌面端工具区布局样式:每组垂直排列
-  const sectionGroupStyle: CSSProperties = isMobile
-    ? { display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4 }
-    : { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 };
+  // 底部条内的竖向分隔线
+  const dividerStyle: CSSProperties = {
+    width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.15)', flexShrink: 0, margin: '0 2px',
+  };
 
-  // 缩放下拉菜单 items
-  const zoomItems: MenuProps['items'] = [
-    {
-      key: 'zoomIn',
-      label: t('canvasControls.zoomIn'),
-      icon: <ZoomIn size={14} />,
-      onClick: () => onScaleChange(Math.min(scale * 1.25, MAX_SCALE)),
-    },
-    {
-      key: 'zoomOut',
-      label: t('canvasControls.zoomOut'),
-      icon: <ZoomOut size={14} />,
-      onClick: () => onScaleChange(Math.max(scale / 1.25, MIN_SCALE)),
-    },
-    { type: 'divider' },
-    {
-      key: '50',
-      label: '50%',
-      onClick: () => onScaleChange(0.5),
-    },
-    {
-      key: '100',
-      label: '100%',
-      onClick: () => onScaleChange(1),
-    },
-    {
-      key: '500',
-      label: '500%',
-      onClick: () => onScaleChange(5),
-    },
-    { type: 'divider' },
-    {
-      key: 'fit',
-      label: t('canvasControls.fitScreen'),
-      icon: <Maximize2 size={14} />,
-      onClick: () => onScaleChange(1),
-    },
-  ];
+  // 底部条按钮样式(32×32,与顶栏按钮组同尺寸)
+  const barBtnStyle = (active = false): CSSProperties => ({
+    width: 32, height: 32, padding: 0,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    color: active ? theme.toolbar.accent : BAR_TEXT,
+    background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+    borderRadius: 8,
+  });
 
-  // 缩放下拉菜单触发器(无下拉箭头,点击弹出菜单)
-  const zoomTrigger = (
-    <div
-      className="zx-toolbar-btn"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: 52,
-        height: 36,
-        padding: '0 8px',
-        borderRadius: 8,
-        cursor: 'pointer',
-        fontSize: 12,
-        fontWeight: 500,
-        color: theme.toolbar.text,
-        background: 'transparent',
-        border: 'none',
-        userSelect: 'none',
-      }}
-    >
-      <span>{percent}%</span>
-    </div>
-  );
-
-  // 加号按钮(透明,和其他按钮一样样式)
-  // 只读模式隐藏（2026-08-25 系统性只读防护）：加号创建节点是核心编辑入口
+  // 加号按钮(只读隐藏:创建节点是核心编辑入口)
+  // 菜单位置:底部布局统一向上弹出,右缘对齐按钮(加号在条最右,防菜单溢出屏幕)
   const plusButton = readOnly ? null : (
-    <Tooltip title={t('toolbar.more')} theme={theme}>
+    <Tooltip title={t('toolbar.addNode')} theme={theme}>
       <Button
         ref={plusButtonRef as React.Ref<HTMLButtonElement>}
         type="text"
@@ -180,127 +113,149 @@ function LeftSideToolBarView({
           const el = plusButtonRef.current;
           if (el) {
             const rect = el.getBoundingClientRect();
-            if (isMobile) {
-              // 移动端:菜单在按钮上方弹出
+            if (isBottom) {
+              setAddNodePos({ x: rect.right - 200, y: rect.top - 8 });
+            } else if (isMobile) {
+              // 旧版布局移动端:菜单在按钮上方弹出
               setAddNodePos({ x: rect.left, y: rect.top - 8 });
             } else {
-              // 桌面端:菜单顶部对齐按钮顶部,左侧紧贴按钮右侧
+              // 旧版布局桌面端:菜单顶部对齐按钮顶部,左侧紧贴按钮右侧
               setAddNodePos({ x: rect.right + 4, y: rect.top });
             }
           }
           setAddNodeOpen((v) => !v);
         }}
         aria-label={t('toolbar.more')}
-        style={{ width: 32, height: 32, padding: 0, color: theme.toolbar.text }}
-        className="zx-toolbar-btn"
+        style={barBtnStyle()}
       >
         <Plus size={18} />
       </Button>
     </Tooltip>
   );
 
-  // 加号菜单:使用通用 NodeCreateMenu 组件,顶部对齐加号按钮向右下弹出
+  // 加号菜单:使用通用 NodeCreateMenu 组件(底部布局显式向上弹出)
   const addNodePanel = addNodeOpen ? (
     <NodeCreateMenu
       position={addNodePos}
       onSelect={onAddNode}
       onClose={() => setAddNodeOpen(false)}
       theme={theme}
+      alignUp={isBottom ? true : undefined}
     />
   ) : null;
 
+  // ===== 底部布局(默认):双端一致的悬浮条 =====
+  if (isBottom) {
+    return (<>
+      <div style={bottomWrapperStyle}>
+        <div style={bottomBarStyle} onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+          {/* 小地图开关 */}
+          <Tooltip title={isMiniMapOpen ? t('canvasControls.miniMapOpen') : t('canvasControls.miniMapClosed')} theme={theme}>
+            <Button
+              type="text"
+              onClick={onToggleMiniMap}
+              aria-label={isMiniMapOpen ? t('canvasControls.miniMapOpen') : t('canvasControls.miniMapClosed')}
+              style={barBtnStyle(isMiniMapOpen)}
+            >
+              <Map size={18} />
+            </Button>
+          </Tooltip>
+          {/* 模式切换(select/pan) */}
+          <Tooltip title={isPan ? t('toolbar.pan') : t('toolbar.select')} theme={theme}>
+            <Button
+              type="text"
+              onClick={onToggleInteractionMode}
+              aria-label={isPan ? t('toolbar.pan') : t('toolbar.select')}
+              style={barBtnStyle(isPan)}
+            >
+              {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
+            </Button>
+          </Tooltip>
+          {/* 清空画布(只读隐藏:2026-08-25 系统性只读防护) */}
+          {!readOnly && (
+            <Tooltip title={t('toolbar.clear')} theme={theme}>
+              <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} style={barBtnStyle()}>
+                <Eraser size={18} />
+              </Button>
+            </Tooltip>
+          )}
+          {/* 征集 #87 验收轮:加号移到最右,与清空画布单独隔开 */}
+          {plusButton && (
+            <>
+              <div style={dividerStyle} />
+              {plusButton}
+            </>
+          )}
+        </div>
+      </div>
+      {/* 征集 #87 验收轮三(修复"无法正确上弹"根因):菜单必须渲染在带 transform 的 wrapper 之外——
+          wrapper 的 translateX(-50%) 会使其内部 position:fixed 退化为相对 wrapper 定位(坐标基准漂移)
+          并继承 pointerEvents:none(菜单点不动);移到外层兄弟节点后 fixed 正确参照视口 */}
+      {addNodePanel}
+    </>);
+  }
+
+  // ===== 旧版竖向布局(预留切回接口,当前不使用) =====
+  const legacyWrapperStyle: CSSProperties = isMobile ? legacyMobileWrapperStyle : legacyDesktopWrapperStyle;
+  const legacyDividerStyle: CSSProperties = isMobile
+    ? { width: 1, height: 20, backgroundColor: 'rgba(128,128,128,0.2)', flexShrink: 0 }
+    : { width: 20, height: 1, backgroundColor: 'rgba(128,128,128,0.2)' };
+  const legacyGroupStyle: CSSProperties = isMobile
+    ? { display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4 }
+    : { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 };
+
   return (<>
-      <style>{`
-        .zx-toolbar-btn { transition: transform 0.15s ease; }
-        .zx-toolbar-btn:hover { transform: scale(1.1); }
-      `}</style>
-      <div
-        style={wrapperStyle}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-      {/* 工具区:桌面端垂直居中(TopBar 下方到底部),移动端横向排列 */}
-      <div style={toolsWrapStyle}>
-        <div style={innerDockStyle}>
-          {/* ===== 加号按钮(最上方,透明按钮样式) ===== */}
+    <div
+      style={legacyWrapperStyle}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div style={isMobile
+        ? { display: 'flex', alignItems: 'center', minWidth: 0 }
+        : { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0, minHeight: 0 }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: isMobile ? 'row' : 'column',
+          alignItems: 'center',
+          gap: 4,
+          padding: 8,
+          pointerEvents: 'auto',
+        }}>
           {plusButton}
-          {addNodePanel}
-
-          <div style={dividerStyle} />
-
-          {/* ===== 组1: 我的资产 + 画布层级 ===== */}
-          <div style={sectionGroupStyle}>
-            {/* 我的资产(主页同款 TentTree 图标，征集#14) */}
-            <Tooltip title={t('toolbar.myAssets')} theme={theme}>
-              <Button type="text" onClick={onOpenMyAssets} aria-label={t('toolbar.myAssets')} className="zx-toolbar-btn" style={{ width: 32, height: 32, padding: 0 }}>
-                <TentTree size={18} />
-              </Button>
-            </Tooltip>
-            {/* 画布结构开关 */}
-            <Tooltip title={isHierarchyOpen ? t('canvasControls.hierarchyOpen') : t('canvasControls.hierarchyClosed')} theme={theme}>
-              <Button
-                type="text"
-                onClick={onToggleHierarchy}
-                aria-label={isHierarchyOpen ? t('canvasControls.hierarchyOpen') : t('canvasControls.hierarchyClosed')}
-                className="zx-toolbar-btn"
-                style={{ width: 32, height: 32, padding: 0, background: isHierarchyOpen ? 'rgba(255,255,255,0.1)' : undefined }}
-              >
-                <FolderTree size={18} />
-              </Button>
-            </Tooltip>
-          </div>
-
-          <div style={dividerStyle} />
-
-          {/* ===== 组2: 小地图 + 缩放百分比 ===== */}
-          <div style={sectionGroupStyle}>
-            {/* 小地图开关 */}
+          <div style={legacyDividerStyle} />
+          <div style={legacyGroupStyle}>
             <Tooltip title={isMiniMapOpen ? t('canvasControls.miniMapOpen') : t('canvasControls.miniMapClosed')} theme={theme}>
               <Button
                 type="text"
                 onClick={onToggleMiniMap}
                 aria-label={isMiniMapOpen ? t('canvasControls.miniMapOpen') : t('canvasControls.miniMapClosed')}
-                className="zx-toolbar-btn"
                 style={{ width: 32, height: 32, padding: 0, background: isMiniMapOpen ? 'rgba(255,255,255,0.1)' : undefined }}
               >
                 <Map size={18} />
               </Button>
             </Tooltip>
-            {/* 缩放下拉菜单 */}
-            <Dropdown
-              open={zoomOpen}
-              onOpenChange={setZoomOpen}
-              menu={{ items: zoomItems }}
-              placement={isMobile ? 'top' : 'right'}
-            >
-              {zoomTrigger}
-            </Dropdown>
           </div>
-
-          <div style={dividerStyle} />
-
-          {/* ===== 组3: 其他(模式切换 + 清空) ===== */}
-          <div style={sectionGroupStyle}>
-            {/* 模式切换(select/pan) */}
+          <div style={legacyDividerStyle} />
+          <div style={legacyGroupStyle}>
             <Tooltip title={isPan ? t('toolbar.pan') : t('toolbar.select')} theme={theme}>
-              <Button type="text" onClick={onToggleInteractionMode} aria-label={isPan ? t('toolbar.pan') : t('toolbar.select')} className="zx-toolbar-btn" style={{ width: 32, height: 32, padding: 0, background: isPan ? 'rgba(255,255,255,0.1)' : undefined }}>
+              <Button type="text" onClick={onToggleInteractionMode} aria-label={isPan ? t('toolbar.pan') : t('toolbar.select')} style={{ width: 32, height: 32, padding: 0, background: isPan ? 'rgba(255,255,255,0.1)' : undefined }}>
                 {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
               </Button>
             </Tooltip>
-            {/* 清空画布（只读隐藏：2026-08-25 系统性只读防护） */}
             {!readOnly && (
-            <Tooltip title={t('toolbar.clear')} theme={theme}>
-              <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} className="zx-toolbar-btn" style={{ width: 32, height: 32, padding: 0 }}>
-                <Eraser size={18} />
-              </Button>
-            </Tooltip>
+              <Tooltip title={t('toolbar.clear')} theme={theme}>
+                <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} style={{ width: 32, height: 32, padding: 0 }}>
+                  <Eraser size={18} />
+                </Button>
+              </Tooltip>
             )}
           </div>
         </div>
       </div>
     </div>
-    </>
-  );
+    {/* 同底部布局:菜单渲染在带 transform 的旧版 wrapper 之外,避免 fixed 退化 */}
+    {addNodePanel}
+  </>);
 }
 
 export function LeftSideToolBar(props: LeftSideToolBarProps): React.ReactElement {
@@ -308,9 +263,23 @@ export function LeftSideToolBar(props: LeftSideToolBarProps): React.ReactElement
   return <LeftSideToolBarView {...props} theme={theme} />;
 }
 
-// 桌面端:从 TopBar 下方开始(64px),竖向列,工具垂直居中
-// pointerEvents:'none' 让空白区域不遮挡小地图,dock 内部恢复 'auto'
-const desktopWrapperStyle: CSSProperties = {
+// ===== 定位样式 =====
+
+// 底部悬浮条:底部居中(双端一致;移动端留 Apple 安全区域)
+// zIndex 200,确保向上弹出的创建菜单不被遮挡
+const bottomWrapperStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  bottom: 'max(12px, env(safe-area-inset-bottom))',
+  zIndex: 200,
+  display: 'flex',
+  alignItems: 'center',
+  pointerEvents: 'none',
+};
+
+// 旧版(预留):桌面端左缘垂直居中,从顶栏下方开始
+const legacyDesktopWrapperStyle: CSSProperties = {
   position: 'absolute',
   left: 12,
   top: 64,
@@ -323,9 +292,8 @@ const desktopWrapperStyle: CSSProperties = {
   pointerEvents: 'none',
 };
 
-// 移动端:底部横向居中(留 Apple 安全区域)
-// zIndex 提高到 200,确保下拉菜单(dropUp)不被 TopBar 等元素遮挡
-const mobileWrapperStyle: CSSProperties = {
+// 旧版(预留):移动端底部横向居中
+const legacyMobileWrapperStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
   transform: 'translateX(-50%)',
@@ -336,18 +304,4 @@ const mobileWrapperStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   pointerEvents: 'none',
-};
-
-// dock 本身恢复 pointerEvents:'auto'(wrapper 设为 none 不遮挡小地图)
-// gap 收紧到 4 以容纳更多节点快捷按钮
-const dockStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  gap: 4,
-  padding: 8,
-  background: 'transparent',
-  border: 'none',
-  boxShadow: 'none',
-  pointerEvents: 'auto',
 };

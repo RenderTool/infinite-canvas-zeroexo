@@ -1,40 +1,25 @@
 /**
- * HierarchyPanelSidebar - 画布结构(层级)侧边栏
+ * HierarchyPanelSidebar - 画布结构/资产库合一抽屉（征集 #87 验收轮九重设计）
  *
- * 抽屉式动画:外层 width+opacity(控制 flex 占位),内层 translate3d(GPU 加速滑入滑出)
- * - 展开:width 0→280 + translate3d(-280,0,0)→translate3d(0,0,0)(从左侧滑入)
- * - 收起:width 280→0 + translate3d(0,0,0)→translate3d(-280,0,0)(向左侧滑出)
- * - useLayoutEffect + 双 rAF 确保初始 DOM 提交后再触发 transition(React 18 生产模式兼容)
- * - will-change 提示浏览器提前创建 GPU 合成层,translate3d 强制硬件加速
- * - flex 布局固定占位,画布区域 flex-1 自适应
+ * 布局：宽 450px，内容 = 主页资产库同款页面（forceMobile 移动端同款单列卡片布局）。
+ * 视图由分组决定（征集 #87 验收轮十用户拍板）：
+ * - 层级分组 = 原树形列表（HierarchyListView，层级专属；虚拟滚动/键盘导航/批量选择/ZIP 全保留）
+ * - 素材/提示词/剧本分组 = 网格卡片（主页同款，上传/删除/重命名/收藏/右键发送到画布）
  *
- * 数据/回调来自 useHierarchyPanelProps(group 插件 hook);
- * 渲染样式: stone 暖色 + Lucide 图标 + 44px 行高 + 选中 alpha 态。
+ * 抽屉式动画：外层 width+opacity（控制 flex 占位），内层 translate3d（GPU 加速滑入滑出）。
+ * 打开性能（Plan#48-T6 重带）：动画期间延迟挂载资产库页，避免与滑入动画同帧竞争。
  */
 
-import { useRef, useState, useLayoutEffect, useCallback, useMemo, useEffect, memo, createContext, useContext } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { Virtuoso } from 'react-virtuoso';
-import type { VirtuosoHandle } from 'react-virtuoso';
+import { useState, useLayoutEffect, useEffect, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Select, Tooltip } from 'antd';
-import {
-  ChevronDown, ChevronRight, FolderOpen, Image as ImageIcon,
-  Settings2, Type as TypeIcon, File, FileText, Aperture, Film,
-  Layers, X, Search, Download, CheckSquare, Square,
-  Lock, Video,
-} from 'lucide-react';
-import { HIERARCHY_ICONS } from './icons.js';
-import JSZip from 'jszip';
+import { X } from 'lucide-react';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useHierarchyPanelProps } from '@zeroexo/plugin-group';
-import type { GroupPlugin, HierarchyTreeNode } from '@zeroexo/plugin-group';
-import type { SceneNode } from '@zeroexo/core';
+import type { GroupPlugin } from '@zeroexo/plugin-group';
 import type { ThemeConfig } from '@zeroexo/shared';
-import { resolveThumbnailUrl, resolveVideoThumbnail } from '@zeroexo/plugin-persistence';
-import { buildBackendUrl, resolveAnyThumbUrl, resolveContentUrl } from '@zeroexo/plugin-nodes';
-import { AuthorizedImage, AuthorizedVideo } from '@/shared/components/authorized-media.js';
-import { useReadOnly } from '@/shared/readonly-context.js';
+import { AssetLibraryPage } from '@/features/asset-library/asset-library-page.js';
+import type { HierarchyLibraryItem } from '@/features/asset-library/types.js';
 
 export interface HierarchyPanelSidebarProps {
   closing: boolean;
@@ -45,519 +30,25 @@ export interface HierarchyPanelSidebarProps {
   modal?: boolean;
   /** 关闭按钮回调 */
   onClose?: () => void;
-  /** 点击节点时聚焦(使用双击同款 focusOnNode 代码) */
+  /** 点击节点时聚焦(层级分组卡片点击回调) */
   onFocusNode?: (nodeId: string) => void;
+  /** 资产库发送到画布(接编辑器 handleAssetInsert) */
+  onSendToCanvas?: (item: { type: 'asset' | 'prompt' | 'script'; id: string; data: unknown }) => void;
 }
 
-const PANEL_WIDTH = 280;
+// 征集 #87 验收轮七:抽屉加宽至 450(容纳主页资产库同款卡片布局)
+const PANEL_WIDTH = 450;
 // 抽屉式动画:统一 0.35s cubic-bezier(0.22, 1, 0.36, 1),展开收起同节奏
 const DRAWER_TRANSITION = '0.35s cubic-bezier(0.22, 1, 0.36, 1)';
 
-// 类型 → 图标映射(与节点左上角图标一致)
-function getTypeIcon(node: SceneNode): ReactNode {
-  const cls = { size: 14, style: { opacity: 0.6 } } as const;
-  switch (node.type) {
-    case 'group': return <FolderOpen {...cls} />;
-    case 'image': return <ImageIcon {...cls} />;
-    case 'text': return <TypeIcon {...cls} />;
-    case 'video': return <Video {...cls} />;
-    case 'audio': return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>;
-    case 'generator': return <Settings2 {...cls} />;
-    case 'stacked-media': {
-      // 堆叠节点:显示活跃卡片类型图标(空堆叠回退 stack 语义图标)
-      const data = node.data as Record<string, unknown> | undefined;
-      const cards = (data?.cards as Array<{ sourceType: string }>) ?? [];
-      const activeIndex = (data?.activeIndex as number) ?? 0;
-      const activeCard = cards[activeIndex];
-      if (!activeCard) return <HIERARCHY_ICONS.stack {...cls} />;
-      if (activeCard.sourceType === 'video') return <Video {...cls} />;
-      if (activeCard.sourceType === 'image') return <ImageIcon {...cls} />;
-      if (activeCard.sourceType === 'text') return <TypeIcon {...cls} />;
-      return <HIERARCHY_ICONS.stack {...cls} />;
-    }
-    case 'script': return <FileText {...cls} />;
-    case 'storyboard': return <Aperture {...cls} />;
-    case 'workbench': return <Film {...cls} />;
-    default: return <File {...cls} />;
-  }
-}
-
-// T2: 缩略图解析结果 LRU 缓存 —— 滚动时行挂载/卸载频繁,每次挂载重复异步解析
-// IndexedDB + createObjectURL 是滚动卡顿与 blob URL 泄漏来源;命中缓存同步恢复,
-// 淘汰时 revoke blob URL(避免内存泄漏)。
-const thumbCache = new Map<string, { thumbSrc: string; videoSrc: string }>();
-const THUMB_CACHE_LIMIT = 256;
-
-function evictThumb(key: string): void {
-  const entry = thumbCache.get(key);
-  if (entry) {
-    if (entry.thumbSrc.startsWith('blob:')) URL.revokeObjectURL(entry.thumbSrc);
-    if (entry.videoSrc.startsWith('blob:')) URL.revokeObjectURL(entry.videoSrc);
-  }
-  thumbCache.delete(key);
-}
-
-function cacheThumb(key: string, entry: { thumbSrc: string; videoSrc: string }): void {
-  thumbCache.delete(key); // 更新顺序(近似 LRU)
-  thumbCache.set(key, entry);
-  if (thumbCache.size > THUMB_CACHE_LIMIT) {
-    const oldest = thumbCache.keys().next().value;
-    if (oldest !== undefined) evictThumb(oldest);
-  }
-}
-
-/**
- * 层级面板缩略图 — 仅加载缩略图,绝不加载原图
- * 后端键(resources/): 同步构造 ?size=thumb URL
- * 本地键(image:/video:): 异步解析 IndexedDB 缩略图 blob URL
- * 视频无缩略图时回退到 <video preload="metadata">(仅拉头部,不下载全片)
- */
-function HierarchyThumbnail({
-  storageKey,
-  content,
-  isVideo,
-  borderColor,
-  mutedColor,
-}: {
-  storageKey?: string;
-  content?: string;
-  isVideo: boolean;
-  borderColor: string;
-  mutedColor: string;
-}): React.ReactElement {
-  // T2: 渲染期同步读缓存 —— 滚动回滚时首帧即显示(useEffect 之前),避免闪烁
-  const cacheKey0 = storageKey ? `${isVideo ? 'v' : 'i'}|${storageKey}` : '';
-  const cached0 = cacheKey0 ? thumbCache.get(cacheKey0) : undefined;
-  const [thumbSrc, setThumbSrc] = useState(cached0?.thumbSrc ?? '');
-  // 重建后的有效内容 URL(刷新后 blob URL 失效场景,video 回退用)
-  const [videoSrc, setVideoSrc] = useState(cached0?.videoSrc ?? '');
-
-  useEffect(() => {
-    // 无 storageKey(AI 生成未保存): content 通常是 dataURL,直接用(不缓存,避免大字符串驻留)
-    if (!storageKey) {
-      setThumbSrc(content || '');
-      setVideoSrc(content || '');
-      return;
-    }
-    // T2: 命中缓存直接恢复(滚动回滚零异步等待 + 零重复 createObjectURL)
-    const cacheKey = `${isVideo ? 'v' : 'i'}|${storageKey}`;
-    const cached = thumbCache.get(cacheKey);
-    if (cached) {
-      setThumbSrc(cached.thumbSrc);
-      setVideoSrc(cached.videoSrc);
-      return;
-    }
-    // 视频: 优先 localforage 首帧(video-node-view 上传/播放时经 storeVideoThumbnail 存入);
-    // 无首帧时用 resolveContentUrl 重建内容 URL(video preload=metadata 回退显示首帧)
-    if (isVideo) {
-      let cancelled = false;
-      (async () => {
-        try {
-          const persisted = await resolveVideoThumbnail(storageKey);
-          if (persisted && !cancelled) {
-            setThumbSrc(persisted);
-            cacheThumb(cacheKey, { thumbSrc: persisted, videoSrc: '' });
-            return;
-          }
-        } catch { /* 继续 */ }
-        // 无持久化首帧: 重建内容 URL(本地键从 IndexedDB 读,后端键走认证链路)
-        const src = await resolveContentUrl(storageKey, content ?? '');
-        if (!cancelled) {
-          setVideoSrc(src || '');
-          cacheThumb(cacheKey, { thumbSrc: '', videoSrc: src || '' });
-        }
-      })();
-      return () => { cancelled = true; };
-    }
-    // 图片后端键: 同步构造 ?size=sm URL(sharp 管道生成过该变体;旧图无 __sm 时后端回退原图,仍清晰)
-    const backendUrl = buildBackendUrl(storageKey, 'sm');
-    if (backendUrl) {
-      setThumbSrc(backendUrl);
-      return;
-    }
-    // 图片本地键: 缩略图回退链(持久化缩略图 → 后端 thumb 级资源)
-    let cancelled = false;
-    (async () => {
-      try {
-        const persisted = await resolveThumbnailUrl(storageKey);
-        if (persisted && !cancelled) {
-          setThumbSrc(persisted);
-          cacheThumb(cacheKey, { thumbSrc: persisted, videoSrc: '' });
-          return;
-        }
-      } catch { /* 继续下一级 */ }
-      const thumb = await resolveAnyThumbUrl(storageKey);
-      if (!cancelled) {
-        setThumbSrc(thumb || '');
-        cacheThumb(cacheKey, { thumbSrc: thumb || '', videoSrc: '' });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [storageKey, content, isVideo]);
-
-  // 视频无缩略图帧时回退到 <video preload="metadata">(仅拉头部,本地键零网络开销)
-  const useVideoElement = isVideo && !thumbSrc && !!videoSrc;
-
-  return (
-    <div
-      style={{
-        width: 36, height: 36, flexShrink: 0, borderRadius: 4, overflow: 'hidden',
-        background: borderColor + '33',
-      }}
-    >
-      {useVideoElement ? (
-        <AuthorizedVideo
-          src={videoSrc}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted
-          playsInline
-          preload="metadata"
-          onError={(e) => { (e.currentTarget as HTMLVideoElement).style.display = 'none'; }}
-        />
-      ) : thumbSrc ? (
-        <AuthorizedImage
-          src={thumbSrc}
-          alt=""
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-        />
-      ) : (
-        // 无缩略图时回退图标(避免空白)
-        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: mutedColor, opacity: 0.6 }}>
-          {isVideo ? <Video size={14} /> : <ImageIcon size={14} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 引导线配置(每列14px,使用CSS border绘制树形连接线)
-const GUIDE_COL_WIDTH = 14;
-const LINE_COLOR = 'rgba(128,128,128,0.2)';
-
-// 渲染树形引导线(CSS 实现,参照目录结构.html 同款样式)
-// T2: 从组件内提升到模块级 —— 组件内定义每次渲染重建函数引用,行 memo 无法共享。
-function renderGuideLines(info: { continues: boolean[]; isLastChild: boolean }): ReactNode {
-    const cols: ReactNode[] = [];
-
-    // 祖先层竖线（仅延续可见）
-    for (let i = 0; i < info.continues.length; i++) {
-      cols.push(
-        <div
-          key={`v-${i}`}
-          style={{
-            width: GUIDE_COL_WIDTH, flexShrink: 0, alignSelf: 'stretch',
-            position: 'relative',
-          }}
-        >
-          {info.continues[i] && (
-            <div
-              style={{
-                position: 'absolute', left: '50%', top: 0, bottom: 0,
-                width: 1, background: LINE_COLOR,
-                transform: 'translateX(-50%)',
-              }}
-            />
-          )}
-        </div>
-      );
-    }
-
-    // 最后连接列（├─ 或 └─）
-    if (info.continues.length > 0) {
-      cols.push(
-        <div
-          key="connector"
-          style={{
-            width: GUIDE_COL_WIDTH, flexShrink: 0, alignSelf: 'stretch',
-            position: 'relative',
-          }}
-        >
-          {/* 向上竖线（从行顶到中心） */}
-          <div
-            style={{
-              position: 'absolute', left: '50%', top: 0, bottom: '50%',
-              width: 1, background: LINE_COLOR,
-              transform: 'translateX(-50%)',
-            }}
-          />
-          {/* 向下竖线（从中心到行底，非最后子节点） */}
-          {!info.isLastChild && (
-            <div
-              style={{
-                position: 'absolute', left: '50%', top: '50%', bottom: 0,
-                width: 1, background: LINE_COLOR,
-                transform: 'translateX(-50%)',
-              }}
-            />
-          )}
-          {/* 水平连接线（从中心到右边缘） */}
-          <div
-            style={{
-              position: 'absolute', left: '50%', top: '50%',
-              width: '50%', height: 1, background: LINE_COLOR,
-            }}
-          />
-        </div>
-      );
-    }
-
-    return <>{cols}</>;
-  }
-
-// ===== T2: 重命名状态 context =====
-// renamingValue 每次按键变化,若作为 props 传入所有行,memo 浅比较会整体失效(每键全量重渲染);
-// context 化后仅重命名输入框消费,输入时只有该输入框重渲染(context 更新独立于 props 通道)。
-interface RenameContextValue {
-  value: string;
-  onRenameChange: (value: string) => void;
-  onCommitRename: () => void;
-  onCancelRename: () => void;
-}
-const RenameContext = createContext<RenameContextValue | null>(null);
-
-function RenameInput({ accent }: { accent: string }): React.ReactElement {
-  const ctx = useContext(RenameContext);
-  // context 未提供时降级为只读(正常路径总在 Provider 内)
-  const onRenameChange = ctx?.onRenameChange ?? (() => {});
-  const onCommitRename = ctx?.onCommitRename ?? (() => {});
-  const onCancelRename = ctx?.onCancelRename ?? (() => {});
-  return (
-    <input
-      autoFocus
-      value={ctx?.value ?? ''}
-      onChange={(e) => onRenameChange(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') { e.preventDefault(); onCommitRename(); }
-        else if (e.key === 'Escape') { e.preventDefault(); onCancelRename(); }
-      }}
-      onBlur={onCommitRename}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      style={{
-        flex: 1, minWidth: 0, fontSize: 12, borderRadius: 4,
-        border: `1px solid ${accent}`, background: 'transparent',
-        color: 'inherit', padding: '0 4px', outline: 'none',
-      }}
-    />
-  );
-}
-
-// ===== T2: 行组件 memo 化 =====
-// 滚动/焦点/选中变化时仅受影响行重渲染:
-// - props 原子化(boolean/字符串/稳定引用),theme 对象不传入(引用不稳定会全量失效)
-// - 回调来自 useHierarchyPanelProps(useCallback 稳定)或经 ref 稳定化(onFocusNode)
-// - 重命名状态经 RenameContext 传递,输入时仅输入框重渲染
-interface HierarchyRowProps {
-  node: SceneNode;
-  depth: number;
-  hasChildren: boolean;
-  childrenCount: number;
-  guide?: { continues: boolean[]; isLastChild: boolean };
-  isSelected: boolean;
-  isCollapsed: boolean;
-  isRenaming: boolean;
-  isFocused: boolean;
-  selectMode: boolean;
-  inSelectIds: boolean;
-  store: ReactGraphStore;
-  // theme 原子值(行内用到的派生字符串)
-  accent: string;
-  selectedBg: string;
-  accentSoft: string;
-  text: string;
-  textMuted: string;
-  border: string;
-  // 稳定回调
-  onSelect: (id: string, additive: boolean) => void;
-  onToggleCollapse: (id: string) => void;
-  onStartRename: (id: string) => void;
-  onReparent: (nodeId: string, newParentId: string | null) => void;
-  onFocusNode: (id: string) => void;
-  toggleSelectId: (id: string) => void;
-  dragIdRef: { current: string | null };
-}
-
-const HierarchyRow = memo(function HierarchyRow({
-  node, depth, hasChildren, childrenCount, guide,
-  isSelected, isCollapsed, isRenaming, isFocused, selectMode, inSelectIds, store,
-  accent, selectedBg, accentSoft, text, textMuted, border,
-  onSelect, onToggleCollapse, onStartRename, onReparent, onFocusNode, toggleSelectId, dragIdRef,
-}: HierarchyRowProps): React.ReactElement {
-  const { t } = useTranslation();
-  const readOnly = useReadOnly();
-  const hidden = node.hidden ?? false;
-  const locked = node.locked ?? false;
-
-  // O-1: 使用 P0-2 节点索引 O(1) 查找,替代 O(n) nodes.find()
-  const fullNode = store.getNode(node.id);
-  const nodeData = fullNode?.data as Record<string, unknown> | undefined;
-  const contentUrl = nodeData?.content as string | undefined;
-  const storageKey = nodeData?.storageKey as string | undefined;
-  const isImage = node.type === 'image';
-  const isVideo = node.type === 'video';
-  const isStackedMedia = node.type === 'stacked-media';
-
-  // 堆叠节点:从活跃卡片提取缩略图信息
-  let stackThumbContent: string | undefined;
-  let stackThumbStorageKey: string | undefined;
-  let stackThumbIsVideo = false;
-  if (isStackedMedia && nodeData) {
-    const cards = (nodeData.cards as Array<{ sourceType: string; data?: Record<string, unknown> }>) ?? [];
-    const activeIndex = (nodeData.activeIndex as number) ?? 0;
-    const activeCard = cards[activeIndex];
-    if (activeCard?.data) {
-      stackThumbContent = activeCard.data.content as string | undefined;
-      stackThumbStorageKey = activeCard.data.storageKey as string | undefined;
-      stackThumbIsVideo = activeCard.sourceType === 'video';
-    }
-  }
-
-  const showThumbnail = (isImage || isVideo) && (!!storageKey || !!contentUrl)
-    || (isStackedMedia && (!!stackThumbStorageKey || !!stackThumbContent));
-
-  const rowStyle: CSSProperties = {
-    display: 'flex', alignItems: 'stretch', gap: 0,
-    margin: '2px 8px', padding: 0,
-    minHeight: 44, cursor: 'pointer', borderRadius: 6,
-    backgroundColor: isSelected ? selectedBg : (isFocused ? accentSoft : 'transparent'),
-    color: isSelected ? accent : hidden ? textMuted : text,
-    fontWeight: isSelected || node.type === 'group' ? 500 : 400,
-    opacity: hidden ? 0.5 : 1,
-    fontSize: 12, userSelect: 'none',
-    transition: 'background-color 0.12s ease',
-    boxShadow: isSelected ? `inset 2px 0 0 ${accent}` : undefined,
-  };
-
-  return (
-    <div
-      className="hierarchy-row"
-      data-hierarchy-id={node.id}
-      draggable={!isRenaming && !selectMode && !readOnly}
-      onDragStart={(e) => {
-        if (readOnly) { e.preventDefault(); return; }
-        dragIdRef.current = node.id; e.dataTransfer.effectAllowed = 'move';
-      }}
-      onDragOver={(e) => {
-        if (readOnly || node.type !== 'group') return;
-        if (node.type === 'group' && dragIdRef.current && dragIdRef.current !== node.id) {
-          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-        }
-      }}
-      onDrop={(e) => {
-        if (readOnly) return;
-        if (node.type !== 'group') return;
-        e.preventDefault(); e.stopPropagation();
-        if (dragIdRef.current && dragIdRef.current !== node.id) {
-          onReparent(dragIdRef.current, node.id);
-        }
-        dragIdRef.current = null;
-      }}
-      onClick={(e) => {
-        if (selectMode) {
-          e.stopPropagation();
-          toggleSelectId(node.id);
-          return;
-        }
-        onSelect(node.id, e.shiftKey);
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => onFocusNode(node.id));
-        });
-      }}
-      onDoubleClick={() => { if (!selectMode && !readOnly) onStartRename(node.id); }}
-      style={rowStyle}
-    >
-      {/* 树形引导线(类似目录结构) */}
-      {depth > 0 && guide && renderGuideLines(guide)}
-
-      {/* 内容区域(垂直居中) */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        flex: 1, minWidth: 0, padding: '0 6px', alignSelf: 'stretch',
-      }}>
-        {/* 选择模式复选框 */}
-        {selectMode && (
-          <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {inSelectIds ? <CheckSquare size={14} color={accent} /> : <Square size={14} style={{ opacity: 0.4 }} />}
-          </span>
-        )}
-        {/* 折叠/展开箭头 */}
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleCollapse(node.id); }}
-            style={{
-              width: 14, height: 14, flexShrink: 0, border: 'none', background: 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', opacity: 0.5, color: 'inherit', padding: 0, borderRadius: 3,
-            }}
-          >
-            {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-          </button>
-        ) : (
-          <span style={{ width: 14, flexShrink: 0 }} />
-        )}
-
-        {/* 类型缩略图/图标 — 图片/视频/堆叠用缩略图,其余用纯图标(无装饰容器,用户验收反馈保持简洁) */}
-        {showThumbnail ? (
-          <HierarchyThumbnail
-            storageKey={isStackedMedia ? stackThumbStorageKey : storageKey}
-            content={isStackedMedia ? stackThumbContent : contentUrl}
-            isVideo={isStackedMedia ? stackThumbIsVideo : isVideo}
-            borderColor={border}
-            mutedColor={textMuted}
-          />
-        ) : (
-          <span style={{ width: 36, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {getTypeIcon(node)}
-          </span>
-        )}
-
-        {/* 标题 / 重命名输入(RenameInput 经 context 取状态,输入时仅其重渲染) */}
-        {isRenaming ? (
-          <RenameInput accent={accent} />
-        ) : (
-          <span style={{
-            flex: 1, minWidth: 0, marginLeft: 4,
-            overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
-          }}>
-            {node.type === 'group'
-              ? (node.title?.trim() ? node.title : t('hierarchy.defaultGroup'))
-              : (node.title?.trim()
-                  ? node.title
-                  : t(`nodeTypes.${node.type.replace('ai.', '')}`, { defaultValue: node.type }))}
-          </span>
-        )}
-
-        {/* 子节点计数(组且未重命名时) */}
-        {node.type === 'group' && !isRenaming && childrenCount > 0 ? (
-          <span style={{ flexShrink: 0, fontSize: 10, opacity: 0.4, fontVariantNumeric: 'tabular-nums' }}>
-            {childrenCount}
-          </span>
-        ) : null}
-
-        {/* 锁定状态指示(纯展示不可点;hover 操作按钮已按用户验收要求移除) */}
-        {locked && (
-          <span style={{ width: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-            <Lock size={11} />
-          </span>
-        )}
-      </div>
-    </div>
-  );
-});
-
 export function HierarchyPanelSidebar({
   closing, store, groupPlugin, theme, modal, onClose, onFocusNode,
+  onSendToCanvas,
 }: HierarchyPanelSidebarProps): React.ReactElement {
   const props = useHierarchyPanelProps(store, groupPlugin.getController());
-  const dragIdRef = useRef<string | null>(null);
   const { t } = useTranslation();
 
   // 展开动画:useLayoutEffect 确保初始 DOM 状态提交后再触发过渡
-  // React 18 生产模式下,useEffect 的批处理可能导致双 rAF 不稳定
-  // useLayoutEffect 在 paint 前同步执行,配合单次 rAF 即可可靠触发 transition
   const [expanded, setExpanded] = useState(false);
   useLayoutEffect(() => {
     if (closing) { setExpanded(false); return; }
@@ -568,227 +59,49 @@ export function HierarchyPanelSidebar({
     return () => { cancelAnimationFrame(id); cancelAnimationFrame(rafId); };
   }, [closing]);
 
-  // 本地类型筛选(不依赖插件 HierarchyFilter.typeFilter 的 'all'|'group'|'node' 限制)
-  const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
-
-  // 选择模式（类似主页批量选择）
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectIds, setSelectIds] = useState<Set<string>>(new Set());
-
-  const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
-    setSelectIds(new Set());
-  }, []);
-
-  // T2: onCommitRename 依赖 renamingValue(输入时引用变化),直接作行 props 会随按键全量重渲染;
-  // ref 模式稳定引用,行 memo 只按 isRenaming 原子值决定重渲染。
-  const commitRenameRef = useRef(props.onCommitRename);
-  commitRenameRef.current = props.onCommitRename;
-  const onCommitRenameStable = useCallback(() => { commitRenameRef.current(); }, []);
-
-  // T2: onFocusNode 为外部回调(调用方可能内联,引用不稳定),ref 稳定化避免行 memo 失效。
-  const focusNodeRef = useRef(onFocusNode);
-  focusNodeRef.current = onFocusNode;
-  const onFocusNodeStable = useCallback((id: string) => { focusNodeRef.current?.(id); }, []);
-
-  // T2: 重命名状态经 context 传递 —— 仅重命名输入框消费,输入时其余行不重渲染。
-  const renameContextValue = useMemo<RenameContextValue>(() => ({
-    value: props.renamingValue,
-    onRenameChange: props.onRenameChange,
-    onCommitRename: onCommitRenameStable,
-    onCancelRename: props.onCancelRename,
-  }), [props.renamingValue, props.onRenameChange, onCommitRenameStable, props.onCancelRename]);
-
-  // T2: 批量选择切换回调(稳定,行组件用)
-  const toggleSelectId = useCallback((id: string) => {
-    setSelectIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  // 键盘导航(底部快捷键栏 ↑↓/Enter/Esc):焦点行索引 + Virtuoso 滚动跟随
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const [focusIndex, setFocusIndex] = useState(-1);
-
-  // 对 props.tree 做本地类型过滤
-  // T2: useMemo 稳定引用 —— 原内联 filter 每次渲染新建数组,Virtuoso data 引用变化
-  // 会触发列表项全量重建(即使内容相同);typeFilter/tree 不变时直接复用。
-  const filteredTree = useMemo(
-    () => localTypeFilter === 'all'
-      ? props.tree
-      : props.tree.filter((item) => item.node.type === localTypeFilter),
-    [localTypeFilter, props.tree],
-  );
-
-  // 键盘导航:筛选结果变化后钳制/重置焦点索引
+  // Plan#48-T6 打开性能(重带):资产库页延迟挂载 —— 0.35s width 过渡期间不挂载重页面,
+  // 420ms 后再挂;避免树/卡片数据加载 + antd 控件挂载与滑入动画同帧竞争。
+  const [contentReady, setContentReady] = useState(false);
   useEffect(() => {
-    setFocusIndex((prev) => (filteredTree.length === 0 ? -1 : Math.min(prev, filteredTree.length - 1)));
-  }, [filteredTree.length]);
+    if (closing || !expanded || contentReady) return;
+    const timer = window.setTimeout(() => setContentReady(true), 420);
+    return () => window.clearTimeout(timer);
+  }, [closing, expanded, contentReady]);
 
-  // ↑↓ 导航 / Enter 定位 / Esc 退出:仅展开且事件源非输入控件时消费(不与重命名/搜索/画布快捷键冲突)
-  useEffect(() => {
-    if (closing || !expanded) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (filteredTree.length === 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const base = focusIndex < 0 ? 0 : focusIndex;
-        const next = e.key === 'ArrowDown'
-          ? Math.min(base + 1, filteredTree.length - 1)
-          : Math.max(base - 1, 0);
-        setFocusIndex(next);
-        virtuosoRef.current?.scrollToIndex({ index: next, behavior: 'smooth', align: 'center' });
-      } else if (e.key === 'Enter') {
-        const item = focusIndex >= 0 ? filteredTree[focusIndex] : undefined;
-        if (!item) return;
-        e.preventDefault();
-        e.stopPropagation();
-        props.onSelect(item.node.id, false);
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => onFocusNode?.(item.node.id));
-        });
-      } else if (e.key === 'Escape') {
-        // 选择模式下 Esc 先退出选择,再退出面板
-        if (selectMode) { e.preventDefault(); e.stopPropagation(); exitSelectMode(); return; }
-        if (onClose) { e.preventDefault(); e.stopPropagation(); onClose(); }
-      }
+  // 征集 #87 验收轮九:画布节点 → 层级分组条目(平铺;含媒体节点封面所需的 storageKey/content)
+  const hierarchyItems = useMemo<HierarchyLibraryItem[]>(() => props.tree.map((item) => {
+    const n = item.node;
+    const full = store.getNode(n.id);
+    const d = full?.data as Record<string, unknown> | undefined;
+    const title = n.title?.trim()
+      || t(`nodeTypes.${n.type.replace('ai.', '')}`, { defaultValue: n.type });
+    return {
+      id: n.id,
+      title,
+      nodeType: n.type,
+      storageKey: typeof d?.storageKey === 'string' ? d.storageKey : undefined,
+      content: typeof d?.content === 'string' ? d.content : undefined,
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closing, expanded, filteredTree, focusIndex, selectMode, exitSelectMode, onClose, onFocusNode, props]);
-
-  // T1: childrenCount 已并入树构建(HierarchyTreeNode.childrenCount,group 插件一次算好),
-  // 删除此处独立 useMemo —— 原实现每次 graph 变化全量 O(N) 重扫,与树构建重复计算。
-
-  // 预计算每个节点的引导线信息(祖先竖线延续 + 是否最后子节点)
-  // T1: 线性化 —— 原实现每行向后扫描(O(N²)),深树 3000 节点时展开/折叠/筛选一次即百万级比较。
-  // 改为反向单遍:维护「已见深度集合」判竖线延续(等价旧语义)+「下一个 depth≤d 位置」判最后子节点。
-  const guideLineInfo = useMemo(() => {
-    const items = filteredTree;
-    const n = items.length;
-    const result: Array<{ continues: boolean[]; isLastChild: boolean }> = new Array(n);
-    const seenDepth = new Set<number>();
-    // nextShallower[d]: 当前下标之后第一个 depth ≤ d 的 item 下标(-1 = 无)
-    const nextShallower: number[] = [];
-    for (let i = n - 1; i >= 0; i--) {
-      const depth = items[i]!.depth;
-      const ns = depth < nextShallower.length ? nextShallower[depth]! : -1;
-      const isLastChild = ns === -1 || items[ns]!.depth < depth;
-      const continues: boolean[] = new Array(depth);
-      for (let d = 0; d < depth; d++) continues[d] = seenDepth.has(d);
-      result[i] = { continues, isLastChild };
-      seenDepth.add(depth);
-      // 阈值 ≥ depth 的最近位置更新为 i
-      for (let d = depth; d < nextShallower.length; d++) nextShallower[d] = i;
-      for (let d = nextShallower.length; d <= depth; d++) nextShallower.push(i);
-    }
-    return result;
-  }, [filteredTree]);
-
-  // 类型筛选下拉选项
-  const FILTER_OPTIONS = [
-    { value: 'all', label: t('hierarchy.filter.all') },
-    { value: 'text', label: t('hierarchy.filter.text') },
-    { value: 'image', label: t('hierarchy.filter.image') },
-    { value: 'video', label: t('hierarchy.filter.video') },
-    { value: 'audio', label: t('hierarchy.filter.audio') },
-    { value: 'generator', label: t('hierarchy.filter.generator') },
-    { value: 'script', label: t('hierarchy.filter.script') },
-    { value: 'storyboard', label: t('hierarchy.filter.storyboard') },
-    { value: 'group', label: t('hierarchy.filter.group') },
-  ];
-
-  // ZIP 下载:收集选中节点资源(组=文件夹,无组=ROOT)
-  const handleZipDownload = useCallback(async () => {
-    const graph = store.getGraph();
-    const targetIds = selectIds.size > 0 ? selectIds : new Set(graph.nodes.map((n) => n.id));
-    if (targetIds.size === 0) return;
-
-    const zip = new JSZip();
-    // 先收集所有组节点(用于文件夹映射)
-    const groupMap = new Map<string, SceneNode>();
-    const nodeMap = new Map<string, SceneNode>();
-    for (const n of graph.nodes) {
-      nodeMap.set(n.id, n);
-      if (n.type === 'group') groupMap.set(n.id, n);
-    }
-
-    // 递归获取节点在 ZIP 中的路径
-    const getNodePath = (n: SceneNode): string => {
-      if (n.parentId && groupMap.has(n.parentId)) {
-        const parent = groupMap.get(n.parentId)!;
-        const parentPath = getNodePath(parent);
-        const folderName = parent.title?.trim() || parent.id;
-        return `${parentPath}/${folderName}`;
-      }
-      return 'ROOT';
-    };
-
-    for (const nid of targetIds) {
-      const n = nodeMap.get(nid);
-      if (!n || n.type === 'group') continue; // 跳过组节点本身(组作为文件夹)
-      const folder = getNodePath(n);
-      const title = n.title?.trim() || n.id;
-      // 序列化节点数据
-      const data = JSON.stringify({ id: n.id, type: n.type, title: n.title, data: n.data }, null, 2);
-      zip.file(`${folder}/${title}.json`, data);
-      // 如果有资源内容(blob URL),尝试 fetch 并加入
-      const nd = n.data as Record<string, unknown> | undefined;
-      const content = nd?.content as string | undefined;
-      if (content && (content.startsWith('blob:') || content.startsWith('data:') || content.startsWith('http'))) {
-        try {
-          const resp = await fetch(content);
-          const blob = await resp.blob();
-          const ext = blob.type.split('/')[1] || 'bin';
-          zip.file(`${folder}/${title}.${ext}`, blob);
-        } catch { /* 跳过无法 fetch 的资源 */ }
-      }
-    }
-
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'nodes-export.zip';
-    a.click();
-    URL.revokeObjectURL(url);
-    exitSelectMode();
-  }, [store, selectIds, exitSelectMode]);
+  }), [props.tree, store, t]);
 
   const width = closing ? 0 : expanded ? PANEL_WIDTH : 0;
   const opacity = closing ? 0 : expanded ? 1 : 0;
   // translate3d 触发 GPU 合成层,生产环境动画更流畅
   const translate3d = closing ? `translate3d(${-PANEL_WIDTH}px, 0, 0)` : expanded ? 'translate3d(0, 0, 0)' : `translate3d(${-PANEL_WIDTH}px, 0, 0)`;
 
-  // 快捷键栏键帽样式(footer 三段式提示)
-  const keycapStyle: CSSProperties = {
-    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    minWidth: 16, height: 16, padding: '0 4px', borderRadius: 4,
-    border: `1px solid ${theme.toolbar.border}`, background: theme.toolbar.panel,
-    color: theme.toolbar.text, fontSize: 9, fontWeight: 600, fontFamily: 'inherit',
-  };
-
-  // 抽屉式动画:展开收起统一节奏
-  // will-change 提示浏览器提前创建 GPU 合成层,避免首帧卡顿
+  // 抽屉式动画:展开收起统一节奏。
+  // 外层不加 will-change:width 非合成属性,无效提示反而诱发多余分层(征集 #85/Plan#48-T6 教训)。
   const outerStyle: CSSProperties = modal
     ? {
         width: '100%', height: '100%',
         opacity: closing ? 0 : (expanded ? 1 : 0),
         pointerEvents: closing || !expanded ? 'none' : 'auto',
         transition: `opacity ${DRAWER_TRANSITION}`,
-        willChange: 'opacity',
       }
     : {
         flexShrink: 0, width, opacity, overflow: 'clip',
         pointerEvents: closing || !expanded ? 'none' : undefined,
         transition: `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
-        willChange: 'width, opacity',
       };
   const innerStyle: CSSProperties = modal
     ? {
@@ -812,247 +125,51 @@ export function HierarchyPanelSidebar({
         boxShadow: expanded ? '8px 0 24px -14px rgba(0,0,0,0.35)' : 'none',
         willChange: 'transform',
       };
-  const listStyle: CSSProperties = {
-    flex: 1, minHeight: 0, padding: '8px 0',
-  };
-  const emptyStyle: CSSProperties = {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    padding: '64px 0', opacity: 0.8,
-  };
-
-  // 键盘焦点行(高亮 + Virtuoso 跟随目标)
-  const focusedId = focusIndex >= 0 && focusIndex < filteredTree.length
-    ? filteredTree[focusIndex]!.node.id
-    : undefined;
-
-  // T2: itemContent 稳定化 —— 行组件已 memo 化,仅受影响行重渲染。
-  // props 原子化(selected/collapsed/renaming/focus 均传 boolean),theme 拆字符串传。
-  const itemContent = useCallback((index: number, item: HierarchyTreeNode) => (
-    <HierarchyRow
-      key={item.node.id}
-      node={item.node}
-      depth={item.depth}
-      hasChildren={item.hasChildren}
-      childrenCount={item.childrenCount}
-      guide={guideLineInfo[index]}
-      isSelected={props.selectedIds.has(item.node.id)}
-      isCollapsed={props.collapsedIds.has(item.node.id)}
-      isRenaming={props.renamingId === item.node.id}
-      isFocused={item.node.id === focusedId}
-      selectMode={selectMode}
-      inSelectIds={selectIds.has(item.node.id)}
-      store={store}
-      accent={theme.toolbar.accent}
-      selectedBg={theme.toolbar.accent + '22'}
-      accentSoft={theme.toolbar.accent + '12'}
-      text={theme.toolbar.text}
-      textMuted={theme.toolbar.textMuted}
-      border={theme.toolbar.border}
-      onSelect={props.onSelect}
-      onToggleCollapse={props.onToggleCollapse}
-      onStartRename={props.onStartRename}
-      onReparent={props.onReparent}
-      onFocusNode={onFocusNodeStable}
-      toggleSelectId={toggleSelectId}
-      dragIdRef={dragIdRef}
-    />
-  ), [guideLineInfo, props.selectedIds, props.collapsedIds, props.renamingId, props.onSelect, props.onToggleCollapse, props.onStartRename, props.onReparent, selectMode, selectIds, focusedId, theme, onFocusNodeStable, toggleSelectId, dragIdRef, store]);
 
   return (
     <div style={outerStyle}>
-      <style>{`.hierarchy-row:hover{background-color:rgba(128,128,128,0.09)}.hierarchy-close-btn:hover{opacity:.85!important;background:rgba(128,128,128,0.15)!important}.hierarchy-search:focus-within{box-shadow:0 0 0 1px ${theme.toolbar.accent}55}.hierarchy-icon-btn:hover{background:rgba(128,128,128,0.15)!important;opacity:.9!important}`}</style>
       <div style={innerStyle}>
-        {/* 顶部工具栏：搜索 + 类型筛选 + 批量选择 + 关闭按钮并排（关闭收入流式布局，避免 absolute 浮层遮挡 Select/批量按钮） */}
-        <div style={{
-          padding: '8px 10px 10px',
-          flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          {/* 搜索框 */}
-          <div className="hierarchy-search" style={{
-            flex: 1, minWidth: 0,
-            display: 'flex', alignItems: 'center', gap: 4,
-            borderRadius: 6, padding: '0 8px',
-            background: 'transparent',
-            transition: 'box-shadow 0.15s ease, background 0.15s ease',
-          }}>
-            <Search size={13} style={{ flexShrink: 0, opacity: 0.4 }} />
-            <input
-              type="text"
-              placeholder={t('hierarchy.searchPlaceholder')}
-              value={props.filter.search}
-              onChange={(e) => props.onFilterChange({ search: e.target.value })}
-              style={{
-                flex: 1, minWidth: 0, height: 28, border: 'none', background: 'transparent',
-                outline: 'none', color: theme.toolbar.text, fontSize: 12,
-              }}
-            />
-            {props.filter.search && (
-              <button
-                type="button"
-                onClick={() => props.onFilterChange({ search: '' })}
-                style={{ width: 16, height: 16, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.4, color: theme.toolbar.text }}
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-          {/* 类型筛选(borderless Select,与搜索/批量选择并排) */}
-          <Select
-            value={localTypeFilter}
-            onChange={(val) => setLocalTypeFilter(val)}
-            options={FILTER_OPTIONS}
-            size="small"
-            variant="borderless"
-            popupMatchSelectWidth={false}
-            style={{ width: 64, fontSize: 11, flexShrink: 0 }}
-            styles={{ popup: { root: { fontSize: 11, minWidth: 80 } } }}
-          />
-          {/* 批量选择开关（激活时再点一次退出） */}
-          <Tooltip title={t('hierarchy.batchSelect')}>
-            <button
-              type="button"
-              className="hierarchy-icon-btn"
-              onClick={() => { if (selectMode) exitSelectMode(); else setSelectMode(true); }}
-              style={{
-                width: 24, height: 24, flexShrink: 0, border: 'none',
-                background: selectMode ? theme.toolbar.accent + '22' : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', color: selectMode ? theme.toolbar.accent : theme.toolbar.textMuted,
-                opacity: selectMode ? 1 : 0.55, padding: 0, borderRadius: 4,
-                transition: 'opacity 0.15s, background 0.15s',
-              }}
-            >
-              <CheckSquare size={13} />
-            </button>
-          </Tooltip>
-          {/* 关闭按钮(桌面端；原 header 已删,收入工具行末尾流式占位,不再遮挡任何控件) */}
-          {!modal && onClose && (
-            <Tooltip title={t('hierarchy.close')}>
-              <button
-                type="button"
-                onClick={onClose}
-                className="hierarchy-close-btn"
-                style={{
-                  width: 22, height: 22, flexShrink: 0, border: 'none', background: 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', color: theme.toolbar.text, opacity: 0.5, padding: 0, borderRadius: 4,
-                  transition: 'opacity 0.15s, background 0.15s',
-                }}
-              >
-                <X size={14} />
-              </button>
-            </Tooltip>
-          )}
-        </div>
-
-        {/* 选择模式工具栏 */}
-        {selectMode && (
-          <div style={{
-            margin: '0 10px 6px', padding: '4px 8px', borderRadius: 6,
-            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
-            background: theme.toolbar.accent + '15',
-          }}>
-            <span style={{ flex: 1, fontSize: 11, color: theme.toolbar.text, fontWeight: 500 }}>
-              {t('hierarchy.selectedCount', { count: selectIds.size })}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectIds(new Set(filteredTree.map((item) => item.node.id)));
-              }}
-              style={{
-                padding: '2px 8px', fontSize: 10, borderRadius: 4, border: 'none',
-                cursor: 'pointer', background: theme.toolbar.accent + '33',
-                color: theme.toolbar.accent, fontWeight: 500,
-              }}
-            >
-              {t('hierarchy.selectAll')}
-            </button>
-            <Tooltip title={t('hierarchy.downloadZip')}>
-              <button
-                type="button"
-                onClick={handleZipDownload}
-                style={{
-                  padding: '2px 10px', fontSize: 10, borderRadius: 4, border: 'none',
-                  cursor: 'pointer', background: theme.toolbar.accent,
-                  color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
-                }}
-              >
-                <Download size={11} />
-                {t('hierarchy.downloadZip')}
-              </button>
-              </Tooltip>
-            <button
-              type="button"
-              onClick={exitSelectMode}
-              style={{
-                padding: '2px 8px', fontSize: 10, borderRadius: 4, border: 'none',
-                cursor: 'pointer', background: 'transparent',
-                color: theme.toolbar.textMuted,
-              }}
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
+        {/* 关闭按钮(桌面端悬浮右上角;移动端由 MobileHierarchyDrawer 自带头部关闭) */}
+        {!modal && onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('hierarchy.close')}
+            title={t('hierarchy.close')}
+            style={{
+              position: 'absolute', top: 8, right: 8, zIndex: 20,
+              width: 24, height: 24, border: 'none', background: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: theme.toolbar.text, opacity: 0.5,
+              padding: 0, borderRadius: 4, transition: 'opacity 0.15s, background 0.15s',
+            }}
+          >
+            <X size={14} />
+          </button>
         )}
-
-        {/* 列表 */}
-        <div
-          style={listStyle}
-          onDragOver={(e) => { if (dragIdRef.current) e.preventDefault(); }}
-          onDrop={() => {
-            if (dragIdRef.current) {
-              props.onReparent(dragIdRef.current, null);
-              dragIdRef.current = null;
-            }
-          }}
-        >
-          {filteredTree.length === 0 ? (
-            <div style={emptyStyle}>
-              <Layers size={36} style={{ marginBottom: 10, opacity: 0.5 }} />
-              <span style={{ fontSize: 12, color: theme.toolbar.textMuted }}>{props.filter.search ? t('hierarchy.noSearchResults') : t('hierarchy.empty')}</span>
-            </div>
-          ) : (
-            <RenameContext.Provider value={renameContextValue}>
-              <Virtuoso
-                ref={virtuosoRef}
-                style={listStyle}
-                data={filteredTree}
-                itemContent={itemContent}
-                computeItemKey={(_index, item) => item.node.id}
-                increaseViewportBy={200}
-                overscan={5}
-              />
-            </RenameContext.Provider>
-          )}
-        </div>
-
-        {/* 底部快捷键栏(参照卡 card-footer:三段式键帽 + 右侧节点总数徽标,自原 header 迁入) */}
-        {!modal && (
-          <div style={{
-            height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12,
-            padding: '0 10px', background: theme.toolbar.border + '33',
-            fontSize: 10, color: theme.toolbar.textMuted,
-          }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <kbd style={keycapStyle}>↑</kbd>
-              <kbd style={keycapStyle}>↓</kbd>
-              {t('hierarchy.hints.navigate')}
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <kbd style={keycapStyle}>Enter</kbd>
-              {t('hierarchy.hints.locate')}
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <kbd style={keycapStyle}>Esc</kbd>
-              {t('hierarchy.hints.quit')}
-            </span>
-            <span style={{
-              marginLeft: 'auto', flexShrink: 0, fontSize: 10, padding: '1px 7px', borderRadius: 999,
-              background: theme.toolbar.border + '55', fontVariantNumeric: 'tabular-nums',
-            }}>
-              {props.tree.length}
-            </span>
+        {/* 征集 #87 验收轮九/十:内嵌主页资产库同款页面;层级分组置顶且默认激活;
+            层级分组 = 原树形列表(层级专属),其余分组 = 网格卡片 */}
+        {contentReady ? (
+          <AssetLibraryPage
+            forceMobile
+            defaultGroup="hierarchy"
+            hierarchyItems={hierarchyItems}
+            hierarchyListView={{
+              store,
+              data: props,
+              onFocusNode,
+            }}
+            onSendToCanvas={onSendToCanvas as ((item: { type: 'asset' | 'prompt' | 'script'; id: string; data: any }) => void) | undefined}
+          />
+        ) : (
+          // 过渡期间静态骨架(轻量)
+          <div style={{ padding: 12 }}>
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} style={{
+                height: 120, marginBottom: 10, borderRadius: 12,
+                background: 'rgba(128,128,128,0.08)',
+              }} />
+            ))}
           </div>
         )}
       </div>

@@ -6,17 +6,17 @@
  * 可接收 asset 对象或 node 记录，统一展示。
  * 沉浸模式：全出血 + 深色剧场背景 + 悬浮工具栏。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Download, X,
-  Music as MusicIcon, FileText, Trash2, Pencil,
+  Music as MusicIcon, FileText, Trash2, Pencil, ImagePlus,
 } from 'lucide-react';
 import { Modal, Tag } from 'antd';
 import Editor from '@monaco-editor/react';
 import type { NodeRecord } from '@zeroexo/core';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { useHydratedContent, usePreviewImage } from '@zeroexo/plugin-nodes';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog.js';
 import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/components/image-viewer.js';
@@ -50,6 +50,8 @@ export interface AssetDetailViewerProps {
   onClose: () => void;
   onDelete?: () => void;
   onRename?: (title: string) => void;
+  /** 发送到画布(征集 #87 验收轮:层级面板资产模式点击资源后由此发送;不传则不显示按钮) */
+  onSendToCanvas?: () => void;
   /** 弹窗层级——默认不传!项目全局 zIndexPopupBase=20000 且 antd 嵌套弹窗自动升层,
    *  手动传小值(如 1000/2000)会被外层 Modal 压住(征集 #80 实测教训);仅特殊场景显式传大值 */
   zIndex?: number;
@@ -121,11 +123,12 @@ export function AssetDetailViewer({
   onClose,
   onDelete,
   onRename,
+  onSendToCanvas,
   zIndex,
 }: AssetDetailViewerProps): React.ReactElement | null {
   const asset: AssetDetailData | null = assetProp ?? (node ? nodeToAssetDetail(node) : null);
   if (!asset) return null;
-  return <AssetDetailViewerInner asset={asset} onClose={onClose} onDelete={onDelete} onRename={onRename} zIndex={zIndex} />;
+  return <AssetDetailViewerInner asset={asset} onClose={onClose} onDelete={onDelete} onRename={onRename} onSendToCanvas={onSendToCanvas} zIndex={zIndex} />;
 }
 
 // ===== 内部实现 =====
@@ -135,10 +138,11 @@ interface InnerProps {
   onClose: () => void;
   onDelete?: () => void;
   onRename?: (title: string) => void;
+  onSendToCanvas?: () => void;
   zIndex?: number;
 }
 
-function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: InnerProps): React.ReactElement {
+function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCanvas, zIndex }: InnerProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const data = asset.data;
@@ -149,6 +153,8 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: 
 
   // ===== 状态 =====
   const [textMode, setTextMode] = useState<TextRenderMode>(() => detectTextMode(data.content ?? '', asset.mimeType));
+  // 黑屏修复(征集 #84):full 原图 onLoad(已解码)后才淡出 blur-up 占位层
+  const [fullReady, setFullReady] = useState(false);
   // 始终使用 plaintext 避免语法着色（黄色高亮），模式仅用于下载文件扩展名
   const monacoLanguage = 'plaintext';
 
@@ -168,7 +174,13 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: 
   // 历史背景(2026-08-27 改回):曾为避免拖拽时父组件重渲染触发重新 fetch+解码卡顿,
   // 用 useProgressiveImage(invK=2) 降为 preview 级;现优先清晰度,卡顿问题另从渲染层优化。
   // 非图片类型(video/audio)行为不变,均由 useHydratedContent 重建全量内容。
-  const hydrated = useHydratedContent(storageKeyForHydrate, cover ?? '');
+  // mediaPriority(征集 #84):full 原图 fetch 插队,避免被画布节点批量拉取饿死导致长时间黑屏。
+  const hydrated = useHydratedContent(storageKeyForHydrate, cover ?? '', { mediaPriority: true });
+  // blur-up 占位(征集 #84):full 原图 fetch+解码期间先展示 preview 档,不再整块黑屏;
+  // 旧图无变体时 usePreviewImage 内部兜底链自动回退,失败静默(占位层缺席不影响主图)。
+  const placeholder = usePreviewImage(storageKeyForHydrate, cover ?? '', { mediaPriority: true });
+  // 切换资产时重置占位层状态
+  useEffect(() => { setFullReady(false); }, [data.storageKey]);
   const kindLabel = t(`asset.kind${asset.kind.charAt(0).toUpperCase()}${asset.kind.slice(1)}`);
   const dim = (isImage || isVideo) && data.width ? { width: data.width, height: data.height } : null;
 
@@ -301,6 +313,29 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: 
     background: '#0a0a0a',      // ✅ 深色沉浸
     position: 'relative',
     overflow: 'hidden',
+    isolation: 'isolate',       // blur-up 占位层 zIndex:-1 需要独立堆叠上下文,避免被背景色盖住(征集 #84)
+  };
+
+  // blur-up 占位层:绝对定位 + zIndex -1,垫在主图下方;full 原图解码完成后淡出
+  const placeholderLayer = isImage && placeholder ? (
+    <div aria-hidden style={{
+      position: 'absolute', inset: 0, zIndex: -1,
+      backgroundImage: `url("${placeholder}")`,
+      backgroundSize: 'cover', backgroundPosition: 'center',
+      filter: 'blur(24px)', transform: 'scale(1.08)',
+      opacity: fullReady ? 0 : 1, transition: 'opacity 0.3s',
+      pointerEvents: 'none',
+    }} />
+  ) : null;
+
+  // 主图加载完成:恢复错误态降掉的透明度;仅当完成的 src 就是 full 原图(hydrated)时才淡出占位层
+  const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>): void => {
+    e.currentTarget.style.opacity = '';
+    if (hydrated && e.currentTarget.getAttribute('src') === hydrated) setFullReady(true);
+  };
+  // 加载失败隐藏主图层,blur-up 占位层兜底,不再永久黑屏(征集 #84)
+  const handleImgError = (e: React.SyntheticEvent<HTMLImageElement>): void => {
+    e.currentTarget.style.opacity = '0';
   };
 
   // 右侧操作按钮浮层(图片/非图片分支共用)
@@ -309,6 +344,11 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: 
       position: 'absolute', bottom: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4,
       opacity: overlayOpacity, transition: 'opacity 0.2s',
     }}>
+      {onSendToCanvas && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', color: theme.toolbar.accent, cursor: 'pointer' }} title={t('assetLibrary.sendToCanvas')}>
+          <ImagePlus size={13} />
+        </button>
+      )}
       {onDelete && (
         <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', color: '#ff6b6b', cursor: 'pointer' }} title={t('common.delete')}>
           <Trash2 size={13} />
@@ -409,11 +449,11 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, zIndex }: 
               onMouseEnter: () => setHovering(true),
               onMouseLeave: () => setHovering(false),
             }}
-            onImgError={(e) => {
-              // 加载失败降透明度兑底(与提示词预览台同款)
-              e.currentTarget.style.opacity = '0.3';
-            }}
+            onImgLoad={handleImgLoad}
+            onImgError={handleImgError}
           >
+            {/* blur-up 占位层(zIndex:-1 垫底,full 原图就绪后淡出) */}
+            {placeholderLayer}
             {/* 缩放工具栏 — 悬浮半透明 */}
             <ZoomToolbar
               panZoom={panZoom}

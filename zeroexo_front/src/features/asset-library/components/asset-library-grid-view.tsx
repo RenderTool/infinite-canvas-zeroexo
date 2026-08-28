@@ -39,6 +39,8 @@ interface GridContextValue {
   onFavoriteItem?: (item: PageItem) => void;
   onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
+  /** 发送到画布(征集 #87 验收轮十三:仅画布内嵌入时提供) */
+  onSendToCanvas?: (item: PageItem) => void;
 }
 
 const GridContext = createContext<GridContextValue>(null as any);
@@ -63,6 +65,7 @@ const CardItem = memo(function CardItem({ index }: { index: number }) {
     onFavoriteItem: ctxOnFavoriteItem,
     onUnfavoriteItem: ctxOnUnfavoriteItem,
     onContextMenu: ctxOnContextMenu,
+    onSendToCanvas: ctxOnSendToCanvas,
   } = ctx;
 
   const item = ctxPageItems[index];
@@ -95,6 +98,7 @@ const CardItem = memo(function CardItem({ index }: { index: number }) {
         onFavorite={ctxOnFavoriteItem ? () => ctxOnFavoriteItem(item) : undefined}
         onUnfavorite={ctxOnUnfavoriteItem ? () => ctxOnUnfavoriteItem(item) : undefined}
         onContextMenu={(e) => ctxOnContextMenu(e, item)}
+        onSendToCanvas={ctxOnSendToCanvas ? () => ctxOnSendToCanvas(item) : undefined}
         theme={ctxTheme}
         t={ctxT}
       />
@@ -120,6 +124,7 @@ interface VirtuosoGridInnerProps {
   onFavoriteItem?: (item: PageItem) => void;
   onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
+  onSendToCanvas?: (item: PageItem) => void;
 }
 
 const VirtuosoGridInner = memo(function VirtuosoGridInner({
@@ -138,6 +143,7 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
   onFavoriteItem,
   onUnfavoriteItem,
   onContextMenu,
+  onSendToCanvas,
 }: VirtuosoGridInnerProps): React.ReactElement {
   // 稳定化 VirtuosoGrid components，避免每次重渲染重建 forwardRef
   const components = useMemo(() => ({
@@ -177,6 +183,7 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
     onFavoriteItem,
     onUnfavoriteItem,
     onContextMenu,
+    onSendToCanvas,
   };
 
   return (
@@ -214,6 +221,7 @@ interface AssetLibraryGridViewProps {
   onFavoriteItem?: (item: PageItem) => void;
   onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
+  onSendToCanvas?: (item: PageItem) => void;
   onDragEnter: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -238,6 +246,7 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
   onFavoriteItem,
   onUnfavoriteItem,
   onContextMenu,
+  onSendToCanvas,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -290,6 +299,7 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
             onFavoriteItem={onFavoriteItem}
             onUnfavoriteItem={onUnfavoriteItem}
             onContextMenu={onContextMenu}
+            onSendToCanvas={onSendToCanvas}
           />
 
           {/* 拖拽上传覆盖层 */}
@@ -310,8 +320,16 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
               }}
             >
               <div style={{ textAlign: 'center', color: theme.toolbar.accent }}>
-                <Upload size={48} strokeWidth={1.5} />
-                <div style={{ marginTop: 12, fontSize: 16, fontWeight: 600 }}>
+                {/* 验收轮二十一:图标精致化(22px 圆形底) + 文字小巧(13px/500),整体垂直居中 */}
+                <div style={{
+                  width: 44, height: 44, margin: '0 auto',
+                  borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: theme.mode === 'dark' ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.1)',
+                }}>
+                  <Upload size={22} strokeWidth={2} />
+                </div>
+                <div style={{ marginTop: 10, fontSize: 13, fontWeight: 500 }}>
                   {t('assetLibrary.dropToUpload') ?? '拖拽文件到此处上传'}
                 </div>
               </div>

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * editor-mobile-drawer - 移动端层级面板抽屉(从右侧滑入)
  *
  * 从 editor-page.tsx 提取的独立组件,用于移动端展示画布层级结构。
@@ -31,7 +31,6 @@ export function MobileHierarchyDrawer({
   onFocusNode,
 }: MobileHierarchyDrawerProps): React.ReactElement {
   const { t } = useTranslation();
-
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -55,7 +54,7 @@ export function MobileHierarchyDrawer({
           boxShadow: '-6px 0 20px rgba(0,0,0,0.08)',
         }}
       >
-        {/* 头部 */}
+        {/* 头部：标题 + 关闭按钮同行（验收轮十八：关闭按钮在标题右边，不单独占行） */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 16px 10px',
@@ -91,3 +90,4 @@ export function MobileHierarchyDrawer({
     </MobileDrawerWrapper>
   );
 }
+

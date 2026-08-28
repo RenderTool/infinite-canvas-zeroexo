@@ -14,6 +14,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useTheme } from '@zeroexo/plugin-theme';
 
 export interface ContextMenuItem {
@@ -54,6 +55,27 @@ export function ContextMenu({
     lastPosition.current = position;
   }
   const pos = position || lastPosition.current;
+
+  // 征集 #87 验收轮十一:边缘修正——靠右/靠下时菜单回移避免超出视口被裁剪。
+  // 挂载后按实际尺寸测量一次(高度依赖菜单项数量)。
+  const [adjusted, setAdjusted] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!mounted || !pos || !menuRef.current) {
+      setAdjusted(null);
+      return;
+    }
+    const el = menuRef.current;
+    const w = el.offsetWidth || 200;
+    const h = el.offsetHeight || 200;
+    let x = pos.x;
+    let y = pos.y;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (x + w > vw - 8) x = Math.max(8, vw - w - 8);
+    if (y + h > vh - 8) y = Math.max(8, vh - h - 8);
+    setAdjusted((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
+  }, [mounted, pos, items]);
+  const finalPos = adjusted ?? pos;
 
   // 打开/关闭动画控制
   // useLayoutEffect 确保在 paint 前完成初始 DOM 提交,React 18 生产模式下动画更可靠
@@ -125,8 +147,8 @@ export function ContextMenu({
 
   const menuStyle: CSSProperties = {
     position: 'fixed',
-    left: pos ? pos.x : 0,
-    top: pos ? pos.y : 0,
+    left: finalPos ? finalPos.x : 0,
+    top: finalPos ? finalPos.y : 0,
     zIndex: 999,
     minWidth: 170,
     maxWidth: 'calc(100vw - 16px)',
@@ -195,7 +217,8 @@ export function ContextMenu({
   return (
     <div onContextMenu={handleContextMenu} style={{ display: 'contents' }}>
       {children}
-      {mounted && pos ? (
+      {/* 征集 #87 验收轮十一:portal 到 body——避免祖先 transform 使 fixed 退化/被容器裁剪(抽屉/画布边缘场景) */}
+      {mounted && finalPos ? createPortal(
         <ul
           ref={menuRef}
           style={menuStyle}
@@ -229,7 +252,8 @@ export function ContextMenu({
               </li>
             ),
           )}
-        </ul>
+        </ul>,
+        document.body,
       ) : null}
     </div>
   );
