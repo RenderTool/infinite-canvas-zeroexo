@@ -52,10 +52,10 @@ export function toInsertPayload(asset: Asset): InsertAssetPayload {
       durationMs: data.durationMs,
     };
   }
-  // image
+  // image（plan 等无媒体字段的类型不会走到此分支，dataUrl 恒有值）
   return {
     kind: 'image',
-    dataUrl: data.dataUrl,
+    dataUrl: data.dataUrl ?? '',
     storageKey: data.storageKey,
     title: asset.title,
     width: data.width,

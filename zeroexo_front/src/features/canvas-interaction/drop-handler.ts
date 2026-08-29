@@ -307,10 +307,10 @@ function createPayloadFromInput(input: CreateAssetInput): InsertAssetPayload {
       durationMs: d.durationMs,
     };
   }
-  // image
+  // image（plan 等无媒体字段的类型不会走到此分支，dataUrl 恒有值）
   return {
     kind: 'image',
-    dataUrl: d.dataUrl,
+    dataUrl: d.dataUrl ?? '',
     storageKey: d.storageKey,
     title: input.title,
     width: d.width,

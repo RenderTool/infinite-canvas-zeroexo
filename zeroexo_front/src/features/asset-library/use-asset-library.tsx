@@ -24,6 +24,7 @@ import { notifyPromptCopied } from './prompt-copy-feedback.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { apiPost, getToken } from '@/services/api-client.js';
 import { chapterDetectPipeline } from '@/shared/utils/chapter-detect-pipeline.js';
+import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import type { AssetCategory, ViewMode } from '@/shared/components/index.js';
 import type {
@@ -844,7 +845,10 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     if (item.type === 'prompt') {
       setPromptViewId(item.data.id);
     } else if (item.type === 'asset') {
-      if (item.data.kind === 'script') {
+      if (item.data.kind === 'plan') {
+        // Plan#51：制作计划走画布顶部页签（幂等 key plan:<assetId>）
+        openCanvasTab({ kind: 'plan', id: item.data.id, title: item.data.title });
+      } else if (item.data.kind === 'script') {
         handleOpenScriptAsset(item.data);
       } else {
         setAssetDetail(item.data);

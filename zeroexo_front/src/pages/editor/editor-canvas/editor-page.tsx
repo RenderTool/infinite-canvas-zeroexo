@@ -60,6 +60,9 @@ import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-ag
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
 import { CANVAS_TAB_KEY, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { PlanWorkbench } from '@/features/plan/index.js';
+import { executeCanvasOp, getCanvasOpBridge, type AgentCanvasOp } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
+import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -139,6 +142,80 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   const handleTabHostRef = useCallback((el: HTMLElement | null) => {
     setTabContentHost(el);
   }, [setTabContentHost]);
+
+  // ===== Plan#51：制作计划（Plan）页签联动 =====
+  // 发送到 Agent：把主体/分镜块上下文注入 Agent 会话，让 AI 据此改 Plan
+  const handlePlanSendToAgent = useCallback((payload: { scope: 'subject' | 'shot'; refId: string; text: string }) => {
+    void sendMessage(payload.text);
+  }, [sendMessage]);
+
+  // 发送到画布：素材副本列 → 视频产物空节点 → 连线 → 聚焦，然后切回画布页签
+  const handlePlanSendToCanvas = useCallback((payload: { shotId: string; images: string[]; prompt: string; title: string }) => {
+    const { shotId, images, prompt, title } = payload;
+    const bridge = getCanvasOpBridge();
+    const store = bridge?.getStore();
+    if (!bridge || !store) return;
+
+    const vp = store.getViewport() as { x?: number; y?: number } | undefined;
+    const baseX = typeof vp?.x === 'number' ? vp.x : 0;
+    const baseY = typeof vp?.y === 'number' ? vp.y : 0;
+    const productId = `plan-${shotId}`;
+
+    const ops: AgentCanvasOp[] = [];
+    images.forEach((storageKey, i) => {
+      const srcId = `${productId}-src${i}`;
+      ops.push({
+        op: 'add_node',
+        args: {
+          id: srcId,
+          type: 'image',
+          position: { x: baseX, y: baseY + i * 170 },
+          size: { width: 200, height: 150 },
+          title: `图${i + 1}`,
+          data: {
+            content: getResourceUrl(storageKey, 'preview'),
+            storageKey,
+            title: `图${i + 1}`,
+          },
+        },
+      });
+      ops.push({
+        op: 'add_edge',
+        args: {
+          source: { nodeId: srcId, pinId: 'output' },
+          target: { nodeId: productId, pinId: 'input' },
+        },
+      });
+    });
+
+    ops.push({
+      op: 'add_node',
+      args: {
+        id: productId,
+        type: 'video',
+        position: { x: baseX + 340, y: baseY },
+        size: { width: 260, height: 170 },
+        title,
+        data: {
+          // 空 media 节点 = 生成器态（NodeGenerateDock 读取以下字段预填/展示）
+          content: '',
+          prompt,
+          status: 'idle',
+          generationMode: 'video',
+          referenceImages: images,
+          channelId: '',
+          model: '',
+          params: {},
+          title,
+        },
+      },
+    });
+
+    // executeCanvasOp 内部串行队列，逐条执行后自动 flush
+    for (const op of ops) void executeCanvasOp(op);
+    // 切回画布页签，让用户看到刚落地的链
+    activateTab(CANVAS_TAB_KEY);
+  }, [activateTab]);
 
   // 2026-08-29 修复「节点选中后切换页签会错位穿透」:
   // 画布在页签激活时仍保持挂载(Plan#50 要求,display:none 会破坏 ResizeObserver/视口),
@@ -1258,7 +1335,17 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               background: theme.canvas.background,
               borderLeft: `1px solid ${theme.toolbar.border || 'rgba(128,128,128,0.25)'}`,
             }}
-          />
+          >
+            {/* Plan#51：制作计划页签（key = plan:<assetId>） */}
+            {activeTabKey.startsWith('plan:') && (
+              <PlanWorkbench
+                planAssetId={activeTabKey.slice('plan:'.length)}
+                embedded
+                onSendToAgent={handlePlanSendToAgent}
+                onSendToCanvas={handlePlanSendToCanvas}
+              />
+            )}
+          </div>
         )}
 
         {/* 征集 #92 T26 验收修正二:画布底部「保存状态条」(CreationSyncBadge + 云端红点)已迁至顶栏标题旁(TopBar syncBadge) */}

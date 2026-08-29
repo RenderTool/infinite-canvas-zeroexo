@@ -16,8 +16,12 @@ import { create } from 'zustand';
 /** 画布底层页签的固定 key（不可关闭） */
 export const CANVAS_TAB_KEY = 'canvas';
 
-/** 资源类型：剧本（后续可扩展 storyboard / workbench） */
-export type CanvasTabKind = 'script' | 'storyboard' | 'workbench';
+/**
+ * 资源类型
+ * - script 剧本 / storyboard 分镜 / workbench 工作台
+ * - plan 制作计划（Plan#51）：幂等 key `plan:<assetId>`，内容层渲染 PlanWorkbench
+ */
+export type CanvasTabKind = 'script' | 'storyboard' | 'workbench' | 'plan';
 
 export interface CanvasTab {
   key: string;
@@ -110,6 +114,7 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
 function defaultTitle(kind: CanvasTabKind): string {
   if (kind === 'script') return '剧本';
   if (kind === 'storyboard') return '分镜';
+  if (kind === 'plan') return '制作计划';
   return '工作台';
 }
 

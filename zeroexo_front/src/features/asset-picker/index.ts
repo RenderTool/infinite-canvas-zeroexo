@@ -7,8 +7,12 @@
  * Phase D2: 扩展 audio 类型支持,接入真实数据(AssetStore)。
  */
 
-/** 资产类型；script 为剧本资产（content 存 episodes JSON，资产库按剧本分组展示） */
-export type AssetKind = 'text' | 'image' | 'video' | 'audio' | 'script';
+/**
+ * 资产类型
+ * - script 为剧本资产（content 存 episodes JSON，资产库按剧本分组展示）
+ * - plan 为制作计划资产（Plan#51，content 存 PlanDoc JSON，页签打开 PlanWorkbench）
+ */
+export type AssetKind = 'text' | 'image' | 'video' | 'audio' | 'script' | 'plan';
 
 export interface Asset {
   id: string;
@@ -28,6 +32,21 @@ export interface Asset {
   data:
     | { kind: 'text'; content: string }
     | { kind: 'script'; content: string; storageKey?: string }
+    /**
+     * Plan#51：制作计划（content 存 PlanDoc JSON）
+     * 注：下方媒体字段对 plan 无业务含义，仅为兼容既有代码对 Asset['data'] 联合类型的
+     * 统一访问（storageKey/dataUrl/…）；plan 分支这些字段恒为空。
+     */
+    | {
+        kind: 'plan';
+        content: string;
+        storageKey?: string;
+        dataUrl?: string;
+        url?: string;
+        width?: number;
+        height?: number;
+        durationMs?: number;
+      }
     | { kind: 'image'; dataUrl: string; storageKey?: string; width?: number; height?: number }
     | { kind: 'video'; url: string; storageKey?: string; width?: number; height?: number; durationMs?: number }
     | { kind: 'audio'; url: string; storageKey?: string; durationMs?: number };
