@@ -54,8 +54,17 @@ export function consumeStashSourceRect(): { x: number; y: number; width: number;
   return { x: (window.innerWidth - w) / 2, y: Math.max(60, (window.innerHeight - h) / 2), width: w, height: h };
 }
 
-/** 统一提示「已复制到我的提示词库」，并支持点击跳转到资产库提示词分组聚焦新副本 */
-export function notifyPromptCopied(antdMessage: MessageInstance, promptId?: string): void {
+/**
+ * 统一提示「已复制到我的提示词库」，并支持点击跳转到资产库提示词分组聚焦新副本
+ *
+ * @param onNavigate 点击「点击查看」时、跳转前执行的动作（2026-08-29）。
+ *   典型用途：关闭当前弹窗 —— 否则跳转后详情弹窗仍遮在资产库之上，用户会以为没跳转。
+ */
+export function notifyPromptCopied(
+  antdMessage: MessageInstance,
+  promptId?: string,
+  onNavigate?: () => void,
+): void {
   // 采集源弹窗矩形(供 ghost 收纳动画使用)
   captureModalRect();
   // 强制失效共享缓存，确保跳转后资产库列表出现新副本
@@ -72,6 +81,8 @@ export function notifyPromptCopied(antdMessage: MessageInstance, promptId?: stri
         <a
           onClick={(e) => {
             e.stopPropagation();
+            // 先关闭当前弹窗再跳转，避免跳转后弹窗仍遮挡资产库
+            onNavigate?.();
             window.location.hash = focusHash;
           }}
           onMouseEnter={(e) => {

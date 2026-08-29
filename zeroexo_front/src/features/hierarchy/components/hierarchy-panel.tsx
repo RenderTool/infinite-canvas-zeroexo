@@ -110,34 +110,40 @@ export function HierarchyPanelSidebar({
         transition: `opacity ${DRAWER_TRANSITION}`,
       }
     : {
-        flexShrink: 0, width, opacity, overflow: 'clip',
+        // 2026-08-29 修复:PC 端去掉 overflow clip——innerStyle 的 box-shadow(1px 边线)
+        // 会被父级 overflow 裁剪而不可见;innerStyle 自带 overflow hidden 已足够约束内容
+        flexShrink: 0, width, opacity,
         pointerEvents: closing || !expanded ? 'none' : undefined,
         transition: `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
       };
+  // 抽屉底色与画布主题色一致(征集 #92 拍板)→ 必须靠边缘与画布区分。
+  // 2026-08-29 用户反馈「PC 上根本看不到阴影」：抽屉推开画布后紧贴画布，
+  // box-shadow 是画在元素外部的投影，右侧投影全部落进不透明画布区域，被盖住。
+  // 故 PC 端改用 border-right（边框绘制在元素内部，永远可见）。
+  const drawerBorder = theme.mode === 'dark'
+    ? 'rgba(255,255,255,0.12)'
+    : 'rgba(0,0,0,0.16)';
   const innerStyle: CSSProperties = (modal || overlay)
     ? {
         width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
-        // 征集 #92:抽屉底色与画布主题色一致(原 toolbar.panel 与画布底色割裂)
         overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
         transition: `transform ${DRAWER_TRANSITION}, box-shadow ${DRAWER_TRANSITION}`,
-        // 征集 #96(Plan#49 T29):阴影强化并与 PC 侧同款,与画布明显区分(原 0 8px 24px -12px rgba(0,0,0,0.3) 过淡)
-        boxShadow: expanded ? '0 0 0 1px rgba(0,0,0,0.18), 8px 0 32px -6px rgba(0,0,0,0.55)' : 'none',
+        // 覆盖模式(移动端):仅柔和投影,不加边线(边线是 PC 端语义,2026-08-29 用户拍板)
+        boxShadow: expanded ? '3px 0 16px rgba(0,0,0,0.35)' : 'none',
         willChange: 'transform',
       }
     : {
         width: PANEL_WIDTH, height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
-        // 征集 #92:抽屉底色与画布主题色一致(原 toolbar.panel 与画布底色割裂)
         overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
-        transition: `transform ${DRAWER_TRANSITION}, box-shadow ${DRAWER_TRANSITION}`,
-        // 无边框：用方向性柔和投影替代生硬边线，与画布形成层次
-        // 征集 #96(Plan#49 T29):阴影强化(原 -14px/0.35 过淡)，与覆盖模式同款
-        boxShadow: expanded ? '0 0 0 1px rgba(0,0,0,0.18), 8px 0 32px -6px rgba(0,0,0,0.55)' : 'none',
+        transition: `transform ${DRAWER_TRANSITION}`,
+        // PC 端:右边框与画布区分(内部边框不受画布遮挡),暗色用亮边、亮色用暗边
+        borderRight: expanded ? `1px solid ${drawerBorder}` : 'none',
         willChange: 'transform',
       };
 

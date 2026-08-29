@@ -68,7 +68,8 @@ function getScriptTools(): ToolDefinition[] {
     {
       id: 'edit',
       label: '编辑',
-      title: '全屏编辑',
+      // Plan#50:不再全屏覆盖,改为画布顶部页签打开(幂等,重复点击只激活已有页签)
+      title: '编辑剧本（页签打开）',
       icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('script:edit', { nodeId: node.id }); },

@@ -83,18 +83,21 @@ export function useEditorDialogs({
   // ===== 设置弹窗 =====
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // ===== 协作管理弹窗 =====
-  const [collaborationOpen, setCollaborationOpen] = useState(false);
+  // ===== 版本历史 + 协作 管理抽屉(2026-08-29 协作并入版本历史抽屉,双 Tab 切换,不再独立 Modal) =====
+  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
+  // 打开时默认激活的 Tab:协作按钮→协作;版本按钮/Ctrl+S→版本历史
+  const [versionDialogTab, setVersionDialogTab] = useState<'history' | 'collab'>('history');
 
-  // 打开协作弹窗
+  // 打开协作:打开抽屉并默认落在「协作」Tab
   const onOpenCollaboration = useCallback(() => {
-    setCollaborationOpen(true);
+    setVersionDialogTab('collab');
+    setVersionDialogOpen(true);
   }, []);
 
-  // ===== 版本快照面板(2026-08-24 保存+历史合并为单页面) =====
-  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
-
-  const onOpenVersionHistory = useCallback(() => setVersionDialogOpen(true), []);
+  const onOpenVersionHistory = useCallback(() => {
+    setVersionDialogTab('history');
+    setVersionDialogOpen(true);
+  }, []);
 
   // Ctrl+S 打开版本面板(Ctrl 或 Meta,并阻止浏览器默认保存)
   useEffect(() => {
@@ -468,14 +471,13 @@ export function useEditorDialogs({
     settingsOpen,
     setSettingsOpen,
 
-    // 协作管理弹窗
-    collaborationOpen,
-    setCollaborationOpen,
+    // 协作入口(打开版本历史抽屉并切到「协作」Tab)
     onOpenCollaboration,
 
-    // 版本快照面板(保存+历史合并单页面)
+    // 版本历史 + 协作 管理抽屉(保存+历史+回退 / 协作双 Tab)
     versionDialogOpen,
     setVersionDialogOpen,
+    versionDialogTab,
     onOpenVersionHistory,
 
     // 组样式编辑

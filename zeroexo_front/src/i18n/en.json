@@ -403,6 +403,8 @@
     "delete": "Delete",
     "export": "Export",
     "add": "Add",
+    "edit": "Edit",
+    "exitEdit": "Exit editing",
     "publicPrompts": "Public Prompts",
     "publicPromptsSectionTitle": "Public Prompts",
     "viewAllPrompts": "View All",
@@ -735,6 +737,11 @@
     "zoomOut": "Zoom Out",
     "fitScreen": "Fit Screen",
     "scaleTo": "Scale To"
+  },
+  "canvasTab": {
+    "canvas": "Canvas",
+    "close": "Close tab",
+    "script": "Script"
   },
   "toolsDock": {
     "tool": "Tool",
@@ -1342,8 +1349,6 @@
     "contentPlaceholder": "Enter prompt content",
     "category": "Category",
     "generationMode": "Generation Mode",
-    "modeTxt2Img": "Text-to-Image",
-    "modeImg2Img": "Image-to-Image",
     "categoryRole": "Character",
     "categoryScene": "Scene",
     "categoryStyle": "Style",
@@ -1383,6 +1388,7 @@
     "edit": "Edit",
     "cancel": "Cancel",
     "titleLabel": "Title",
+    "tags": "Tags",
     "note": "Notes",
     "notePlaceholder": "Add notes or description",
     "imagesCount": "{{count}} images",
@@ -2039,14 +2045,14 @@
     "continueEditing": "Continue Editing"
   },
   "promptChain": {
-    "modeTxt2Img": "Text-to-Image",
-    "modeImg2Img": "Image-to-Image",
     "reference": "Reference",
     "output": "Output",
     "promptNode": "Prompt",
     "emptyPrompt": "(Prompt content is empty)",
     "noReference": "No reference images",
     "noOutput": "No output images recorded",
+    "addReference": "Add reference image",
+    "addOutput": "Add output image",
     "tapToExpand": "Click to expand",
     "addTag": "+ Tag",
     "pinAddInput": "Add input image (reference)",

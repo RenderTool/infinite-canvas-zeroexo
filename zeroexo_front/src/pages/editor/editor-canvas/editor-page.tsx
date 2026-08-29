@@ -45,7 +45,6 @@ import { ContextualShortcutsPanel } from '@/shared/hints/contextual-shortcuts-pa
 import { ContentBeacon } from '@/features/canvas-interaction/content-beacon.js';
 import { ReadOnlyProvider } from '@/shared/readonly-context.js';
 import { useHintsEnabled } from '@/shared/hints/hints-settings.js';
-import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import { CollabOverlay } from '@/features/collaboration/collab-overlay.js';
 import { AgentCursorOverlay } from '@/features/canvas-agent/ui/agent-cursor-overlay.js';
@@ -60,6 +59,7 @@ import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js
 import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-agent-prompt.js';
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
+import { CANVAS_TAB_KEY, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -126,6 +126,41 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     setRenamingGroupId,
     refs, state, actions, message, t, isMobile,
   });
+
+  // Plan#50:顶部页签——activeTabKey 决定画布显隐;setTabContentHost 注册页签内容层挂载点
+  const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
+  const setTabContentHost = useCanvasTabStore((s) => s.setContentHost);
+  const activateTab = useCanvasTabStore((s) => s.activateTab);
+  // 2026-08-29:剧本页签开着时资产抽屉必须保持挂载(否则其 portal 出的编辑器内容会消失)
+  const tabList = useCanvasTabStore((s) => s.tabs);
+  const hasScriptTabOpen = tabList.some((tab) => tab.kind === 'script');
+  // Plan#50 T13 回归修复:ref 必须稳定——内联箭头会在每次渲染触发 ref(null)+ref(el),
+  // 经 setContentHost 反写 store 造成「null→el→null→el」无限渲染循环,表现为关闭页签后再打开剧本失败
+  const handleTabHostRef = useCallback((el: HTMLElement | null) => {
+    setTabContentHost(el);
+  }, [setTabContentHost]);
+
+  // 2026-08-29 修复「节点选中后切换页签会错位穿透」:
+  // 画布在页签激活时仍保持挂载(Plan#50 要求,display:none 会破坏 ResizeObserver/视口),
+  // 选中框/浮动工具条等画布内部浮层因此依然渲染,且部分 z-index 高于页签内容层 → 浮在页签之上。
+  // 离开画布页签时主动清除选中态,从源头去掉这些浮层。
+  useEffect(() => {
+    if (activeTabKey === CANVAS_TAB_KEY) return;
+    const store = state.editor?.store;
+    if (!store) return;
+    const { selectedNodeIds, selectedEdgeIds } = store.getSelection();
+    if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) return;
+    store.clearSelection();
+  }, [activeTabKey, state.editor]);
+
+  // 2026-08-29 修复:canvas-tab-store 是全局单例,离开画布(本组件卸载)时 tabs 不会自动清空;
+  // 残留的旧页签 activeTabKey 指向已不存在的节点,重新进入画布后「页签还在但内容为空」。
+  // 卸载时清空全部页签(回退画布页签),下次进入干净重来。
+  useEffect(() => {
+    return () => {
+      useCanvasTabStore.getState().closeAllTabs();
+    };
+  }, []);
 
   // 参与者：发起者关闭协作(room_closed) → 弹出"协作已失效"提示，确认后返回主页
   useEffect(() => {
@@ -759,76 +794,6 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     <ReadOnlyProvider value={isReadOnlyViewer}>
     <Layout style={layoutStyle(theme)}>
       <div style={mainRowStyle}>
-      {/* 桌面端:画布结构(层级)侧边栏 — 全高占位,展开时同时推开顶部 NAV 与右侧内容区(沉浸式体验) */}
-      {!state.loading && !isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing) && state.editor && refs.groupPlugin ? (
-        <HierarchyPanelSidebar
-          closing={dialogs.isHierarchyClosing}
-          store={state.editor.store}
-          groupPlugin={refs.groupPlugin}
-          theme={theme}
-          onSendToCanvas={dialogs.handleAssetInsert}
-          onClose={dialogs.toggleHierarchy}
-          onFocusNode={(nodeId) => {
-            const store = state.editor?.store;
-            if (!store?.focusOnNode) return;
-            const graph = store.getGraph();
-            const selection = store.getSelection();
-            // 多选聚焦：使用所有选中节点的联合边界
-            const selectedIds = Array.from(selection.selectedNodeIds).filter((id) => {
-              const n = graph.nodes.find((nd) => nd.id === id);
-              return n && n.type !== 'group';
-            });
-            if (selectedIds.length > 1) {
-              // 计算联合边界
-              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-              for (const id of selectedIds) {
-                const node = graph.nodes.find((n) => n.id === id);
-                if (!node) continue;
-                if (node.type === 'group') {
-                  const b = getGroupBoundsWithEmptyFallback(graph.nodes, id, interactions.getNodeSize);
-                  if (b) {
-                    minX = Math.min(minX, b.x);
-                    minY = Math.min(minY, b.y);
-                    maxX = Math.max(maxX, b.x + b.width);
-                    maxY = Math.max(maxY, b.y + b.height);
-                  }
-                } else {
-                  const size = interactions.getNodeSize(node as any);
-                  minX = Math.min(minX, node.position.x);
-                  minY = Math.min(minY, node.position.y);
-                  maxX = Math.max(maxX, node.position.x + size.width);
-                  maxY = Math.max(maxY, node.position.y + size.height);
-                }
-              }
-              if (Number.isFinite(minX)) {
-                const unionW = maxX - minX;
-                const unionH = maxY - minY;
-                store.focusOnBounds(
-                  { x: minX, y: minY, width: unionW, height: unionH },
-                  state.containerSize,
-                  400,
-                  51,
-                );
-                return;
-              }
-            }
-            // 单节点聚焦
-            const targetNode = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
-            if (!targetNode) return;
-            // 组节点使用 bounds 聚焦(含空组回退,避免聚焦到组 position 0,0 世界原点)
-            if (targetNode.type === 'group') {
-              const bounds = getGroupBoundsWithEmptyFallback(graph.nodes, nodeId, interactions.getNodeSize);
-              if (bounds) {
-                store.focusOnBounds(bounds, state.containerSize, 400, 51);
-                return;
-              }
-            }
-            // 普通节点聚焦
-            const size = interactions.getNodeSize(targetNode as any);
-            store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
-          }}
-        />
-      ) : null}
       <div style={mainColStyle}>
       <div style={headerStyle}>
         <TopBar
@@ -851,8 +816,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           isMobile={isMobile}
           onMobileNavOpen={() => dialogs.setMobileNavOpen(true)}
           onOpenCollaboration={dialogs.onOpenCollaboration}
-          // R2-8: 协作聊天面板入口已并入 AgentDock 页签，Nav 按钮移除
-          onOpenVersionHistory={dialogs.onOpenVersionHistory}
+          isHierarchyOpen={dialogs.isHierarchyOpen}
+          onToggleHierarchy={dialogs.toggleHierarchy}
           canvasMenu={
             <CanvasMenu
               theme={theme}
@@ -861,6 +826,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onNewProject={() => void dialogs.handleNewProject()}
               onCopyProject={() => void dialogs.handleCopyProject()}
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
+              onOpenSettings={dialogs.onOpenSettings}
             />
           }
           syncBadge={!state.loading ? (
@@ -901,8 +867,92 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
       <Layout.Content style={contentLayoutStyle}>
         <div style={flexContainerStyle}>
-          {/* 画布区域(flex-1 自适应) */}
-          <div ref={containerRef} style={canvasAreaStyle}>
+          {/* 桌面端:资产抽屉(2026-08-29 用户拍板)放在 Content 行内(Nav 下方),展开仅推开画布内容,
+              不再整行推走 TopBar;HierarchyPanelSidebar 非 overlay 模式 flexShrink:0 占位推开右侧画布 */}
+          {!state.loading && !isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing || hasScriptTabOpen) && state.editor && refs.groupPlugin ? (
+            <HierarchyPanelSidebar
+              // 2026-08-29 修复「资产面板关闭后剧本页签内容消失」:
+              // 剧本编辑器由抽屉内 AssetLibraryPage 用 createPortal 挂到页签内容层,
+              // 抽屉一卸载 portal 内容即消失(页签还在全局 store,于是「页签在、内容空」)。
+              // 剧本页签开着时保持抽屉挂载但收起(closing=true → 宽度 0 不可见),内容得以保留。
+              closing={dialogs.isHierarchyClosing || !dialogs.isHierarchyOpen}
+              store={state.editor.store}
+              groupPlugin={refs.groupPlugin}
+              theme={theme}
+              onSendToCanvas={dialogs.handleAssetInsert}
+              onClose={dialogs.toggleHierarchy}
+              onFocusNode={(nodeId) => {
+                // Plan#50 T13:非画布页签激活时,点击层级节点先切回画布页签再聚焦(否则聚焦发生在被覆盖的画布上)
+                activateTab(CANVAS_TAB_KEY);
+                const store = state.editor?.store;
+                if (!store?.focusOnNode) return;
+                const graph = store.getGraph();
+                const selection = store.getSelection();
+                // 多选聚焦：使用所有选中节点的联合边界
+                const selectedIds = Array.from(selection.selectedNodeIds).filter((id) => {
+                  const n = graph.nodes.find((nd) => nd.id === id);
+                  return n && n.type !== 'group';
+                });
+                if (selectedIds.length > 1) {
+                  // 计算联合边界
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  for (const id of selectedIds) {
+                    const node = graph.nodes.find((n) => n.id === id);
+                    if (!node) continue;
+                    if (node.type === 'group') {
+                      const b = getGroupBoundsWithEmptyFallback(graph.nodes, id, interactions.getNodeSize);
+                      if (b) {
+                        minX = Math.min(minX, b.x);
+                        minY = Math.min(minY, b.y);
+                        maxX = Math.max(maxX, b.x + b.width);
+                        maxY = Math.max(maxY, b.y + b.height);
+                      }
+                    } else {
+                      const size = interactions.getNodeSize(node as any);
+                      minX = Math.min(minX, node.position.x);
+                      minY = Math.min(minY, node.position.y);
+                      maxX = Math.max(maxX, node.position.x + size.width);
+                      maxY = Math.max(maxY, node.position.y + size.height);
+                    }
+                  }
+                  if (Number.isFinite(minX)) {
+                    const unionW = maxX - minX;
+                    const unionH = maxY - minY;
+                    store.focusOnBounds(
+                      { x: minX, y: minY, width: unionW, height: unionH },
+                      state.containerSize,
+                      400,
+                      51,
+                    );
+                    return;
+                  }
+                }
+                // 单节点聚焦
+                const targetNode = graph.nodes.find((n: NodeRecord) => n.id === nodeId);
+                if (!targetNode) return;
+                // 组节点使用 bounds 聚焦(含空组回退,避免聚焦到组 position 0,0 世界原点)
+                if (targetNode.type === 'group') {
+                  const bounds = getGroupBoundsWithEmptyFallback(graph.nodes, nodeId, interactions.getNodeSize);
+                  if (bounds) {
+                    store.focusOnBounds(bounds, state.containerSize, 400, 51);
+                    return;
+                  }
+                }
+                // 普通节点聚焦
+                const size = interactions.getNodeSize(targetNode as any);
+                store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
+              }}
+            />
+          ) : null}
+          {/* 画布区域(flex-1 自适应)
+              Plan#50:页签激活时画布保持挂载与渲染(不可 display:none——CanvasView/ResizeObserver
+              依赖可见尺寸,隐藏会导致视口/缩放异常),由覆盖层在画布之上承载页签内容 */}
+          {/* 2026-08-29 修复穿透:页签激活时画布仍挂载(Plan#50 要求),但必须停止接收指针事件,
+              否则画布层会截获本该属于页签内容的点击/拖拽(表现为「穿透」) */}
+          <div ref={containerRef} style={{
+            ...canvasAreaStyle,
+            pointerEvents: activeTabKey === CANVAS_TAB_KEY ? 'auto' : 'none',
+          }}>
             {/* 只读保护遮罩（Plan#38 Phase 7.4）：viewer 成员拦截画布编辑交互，仅保留浏览；不影响顶栏/弹窗 */}
             {/* 2026-08-25 用户反馈：遮罩改为「编辑拦截 + 浏览转发」——鼠标拖动/触摸单指平移画布，双指缩放与滚轮平移/缩放由容器原生监听处理 */}
             {isReadOnlyViewer && !state.loading && (
@@ -1072,14 +1122,12 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         </>
         ) : null}
 
-        {!state.loading && (
+        {!state.loading && activeTabKey === CANVAS_TAB_KEY && (
         <LeftSideToolBar
           scale={state.scale}
           onScaleChange={actions.setScale}
           isMiniMapOpen={dialogs.isMiniMapOpen}
           onToggleMiniMap={() => dialogs.setIsMiniMapOpen((v: boolean) => !v)}
-          isHierarchyOpen={dialogs.isHierarchyOpen}
-          onToggleHierarchy={dialogs.toggleHierarchy}
           onClear={dialogs.handleClearCanvasClick}
           interactionMode={state.interactionMode}
           onToggleInteractionMode={actions.toggleInteractionMode}
@@ -1129,11 +1177,14 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         {/* BUG5: RightSideToolBar 已移除 — 节点创建功能并入 LeftSideToolBar 加号菜单 */}
 
         {/* 征集 #95(Plan#49 T28):移动端不再单独设计抽屉(MobileHierarchyDrawer 退役),
-            直接复用 PC 同款 HierarchyPanelSidebar,改为覆盖模式——在画布左缘之上覆盖拉开,不推开布局 */}
-        {!state.loading && isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing) && state.editor && refs.groupPlugin ? (
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 60 }}>
+            直接复用 PC 同款 HierarchyPanelSidebar,改为覆盖模式——在画布左缘之上覆盖拉开,不推开布局。
+            2026-08-29 修正:包裹层改 fixed 全视口覆盖(zIndex 300),盖住顶栏 CanvasTabBar——
+            否则资产抽屉的分类 Tab 与画布页签条同时可见,形成双重页签 */}
+        {!state.loading && isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing || hasScriptTabOpen) && state.editor && refs.groupPlugin ? (
+          <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 300 }}>
             <HierarchyPanelSidebar
-              closing={dialogs.isHierarchyClosing}
+              // 同 PC:剧本页签开着时保持挂载(覆盖模式靠 translate3d 移出视口隐藏),内容不丢
+              closing={dialogs.isHierarchyClosing || !dialogs.isHierarchyOpen}
               overlay
               store={state.editor.store}
               groupPlugin={refs.groupPlugin}
@@ -1141,6 +1192,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onSendToCanvas={dialogs.handleAssetInsert}
               onClose={dialogs.toggleHierarchy}
               onFocusNode={(nodeId) => {
+                // Plan#50 T13:非画布页签激活时,点击层级节点先切回画布页签再聚焦
+                activateTab(CANVAS_TAB_KEY);
                 const store = state.editor?.store;
                 if (!store?.focusOnNode) return;
                 const graph = store.getGraph();
@@ -1190,6 +1243,23 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             paramValues={(selectedNodeData?.paramValues as Record<string, any>) ?? {}}
           />
         ) : null}
+
+        {/* Plan#50:页签内容层挂载点——节点组件(剧本等)通过 createPortal 把子编辑器渲染到这里,
+            数据/回调仍留在节点组件内;覆盖在画布之上,画布保持挂载渲染避免视口/WebGL 异常;
+            左侧 1px 边线区分画布区域(T13)。
+            2026-08-29 修复穿透:zIndex 30 低于画布内部浮层(只读遮罩 45 / 小地图 40 等),
+            导致这些浮层盖在页签内容之上;提高到 100 确保页签内容位于最上层。 */}
+        {activeTabKey !== CANVAS_TAB_KEY && (
+          <div
+            ref={handleTabHostRef}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 100,
+              overflow: 'hidden',
+              background: theme.canvas.background,
+              borderLeft: `1px solid ${theme.toolbar.border || 'rgba(128,128,128,0.25)'}`,
+            }}
+          />
+        )}
 
         {/* 征集 #92 T26 验收修正二:画布底部「保存状态条」(CreationSyncBadge + 云端红点)已迁至顶栏标题旁(TopBar syncBadge) */}
 
@@ -1387,17 +1457,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
       {/* 批量上传队列覆盖层 */}
       <UploadQueueOverlay onRetryFailed={processFiles} />
 
-      {/* 协作管理弹窗(邀请码/成员/权限管理,由 TopBar 协作按钮触发) */}
-      {!state.loading && (
-        <CollaborationModal
-          open={dialogs.collaborationOpen}
-          canvasId={canvasId}
-          onClose={() => dialogs.setCollaborationOpen(false)}
-          theme={theme}
-        />
-      )}
-
-      {/* 版本快照面板(保存+历史+回退单页面,由 TopBar 按钮或 Ctrl+S 触发) */}
+      {/* 版本历史 + 协作 管理抽屉(双 Tab;TopBar「协作」按钮打开协作 Tab,Ctrl+S 打开版本历史 Tab) */}
       {!state.loading && (
         <VersionDialogs
           canvasId={canvasId}
@@ -1405,6 +1465,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           open={dialogs.versionDialogOpen}
           onClose={() => dialogs.setVersionDialogOpen(false)}
           theme={theme}
+          defaultTab={dialogs.versionDialogTab}
         />
       )}
 
@@ -1476,10 +1537,11 @@ function layoutStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties
   // AgentDock 脱离视口右缘,右侧露出大片空白
   return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: theme.canvas.background };
 }
-const headerStyle: CSSProperties = { height: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
+const headerStyle: CSSProperties = { minHeight: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
 const contentLayoutStyle: CSSProperties = { position: 'relative', overflow: 'hidden' };
 const flexContainerStyle: CSSProperties = { display: 'flex', width: '100%', height: '100%', overflow: 'hidden' };
-// 顶层行布局:层级侧边栏(全高) + 右列(TopBar + 内容),抽屉展开时 NAV 与内容同时被推开
+// 顶层行布局:右列(TopBar + 内容)。PC 资产抽屉已移入 Content 行内(2026-08-29),
+// 展开只推开画布内容,不再把顶部 NAV 一起推走
 const mainRowStyle: CSSProperties = { display: 'flex', flex: 1, width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' };
 const mainColStyle: CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 };
 // 画布区域: touchAction none 关键——移动端单指拖节点/平移时禁止浏览器原生滚动

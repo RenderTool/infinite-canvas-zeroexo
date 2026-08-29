@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { createPortal } from 'react-dom';
 import { ListVideo } from 'lucide-react';
 import { Button, App } from 'antd';
+import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import DOMPurify from 'dompurify';
 import ReactMarkdown from 'react-markdown';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -127,8 +128,21 @@ export function ScriptEditorSheet({
   // 全屏翻阅阅读模式（Phase 5 第二阶段）
   const [readerOpen, setReaderOpen] = useState(false);
 
-  // 全屏沉浸式编辑（节点铺满全屏）
-  const [fullscreenOpen, setFullscreenOpen] = useState(defaultFullscreen);
+  // Plan#50:全屏沉浸式编辑改为「画布顶部页签」承载——本地不再持有 fullscreenOpen,
+  // 显示与否完全由 tab store 的 activeTabKey 决定(kind:id 幂等,重复打开只激活不新建)
+  const myTabKey = buildTabKey('script', nodeId);
+  const tabActive = useCanvasTabStore((s) => s.activeTabKey === myTabKey);
+  const tabContentHost = useCanvasTabStore((s) => s.contentHost);
+  const openTab = useCanvasTabStore((s) => s.openTab);
+  const closeTab = useCanvasTabStore((s) => s.closeTab);
+  const openScriptTab = useCallback(() => {
+    openTab({ kind: 'script', id: nodeId, title });
+  }, [openTab, nodeId, title]);
+
+  // 锚点模式（defaultFullscreen）：挂载即打开对应页签（幂等，重复挂载不会新建第二份）
+  useEffect(() => {
+    if (defaultFullscreen) openScriptTab();
+  }, [defaultFullscreen, openScriptTab]);
 
   // 剧本导入流程弹窗（SourceTextListModal 源文本列表）
   const [importFlowOpen, setImportFlowOpen] = useState(false);
@@ -188,7 +202,8 @@ export function ScriptEditorSheet({
       }),
       nodeActionBus.on('script:edit', (e) => {
         if (e.nodeId !== nodeId) return;
-        setFullscreenOpen(true);
+        // Plan#50:打开顶部页签(幂等:同一剧本重复触发只激活已有页签)
+        openTab({ kind: 'script', id: nodeId, title });
       }),
       // Plan#20 T0(征集#13): 胶囊「分镜」按钮请求事件——按 isSample 分流,
       // 范文→模板分镜 / 真实剧本→选集 Modal 走 AI 链路(修复胶囊入口永远范文 bug)
@@ -374,7 +389,7 @@ export function ScriptEditorSheet({
           accent={accent}
           isDark={isDark}
           onClose={() => setReaderOpen(false)}
-          zIndex={fullscreenOpen ? Z_INDEX.FULLSCREEN_EDITOR_MENU : Z_INDEX.DROPDOWN}
+          zIndex={tabActive ? Z_INDEX.FULLSCREEN_EDITOR_MENU : Z_INDEX.DROPDOWN}
         />,
         document.body,
       )}
@@ -390,10 +405,14 @@ export function ScriptEditorSheet({
         zIndex={Z_INDEX.FULLSCREEN_MODAL}
       />
 
-      {/* 全屏沉浸式编辑覆盖层(空剧集也可进入,用于新增首集) — 使用统一全屏编辑器组件 */}
+      {/* Plan#50:剧本编辑器改为画布顶部页签内嵌呈现(不再全屏覆盖)——
+          仅在页签激活且页签内容层已挂载时,通过 createPortal 渲染到页签挂载点;
+          数据(episodes)与所有回调仍留在节点组件内,关闭统一走页签 X(closeTab) */}
+      {tabActive && tabContentHost ? createPortal(
       <ScriptFullscreenEditor
-        open={fullscreenOpen}
-        onClose={() => setFullscreenOpen(false)}
+        open
+        embedded
+        onClose={() => closeTab(myTabKey)}
         title={title}
         episodes={episodes}
         activeEpisodeId={activeEpisodeId}
@@ -408,7 +427,9 @@ export function ScriptEditorSheet({
         isSample={isSample}
         onIsSampleChange={handleSampleChange}
         onImportClick={() => setImportFlowOpen(true)}
-      />
+      />,
+      tabContentHost,
+      ) : null}
 
       {/* 主体：只读阅读态(紧凑纸张;剧集切换已移至底部工具栏) */}
       {/* 只读紧凑纸张 */}
@@ -445,7 +466,7 @@ export function ScriptEditorSheet({
       {/*
       <div style={footerToolbarStyle(cardBorder)}>
         <Tooltip title="进入全屏编辑">
-          <Button size="small" type="text" icon={<Maximize size={14} />} style={{ ...fullToolBtnStyle, color: textColor }} onClick={() => setFullscreenOpen(true)}>
+          <Button size="small" type="text" icon={<Maximize size={14} />} style={{ ...fullToolBtnStyle, color: textColor }} onClick={openScriptTab}>
             编辑
           </Button>
         </Tooltip>

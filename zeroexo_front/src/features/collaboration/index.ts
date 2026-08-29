@@ -93,9 +93,12 @@ export type { UseCollaborationResult } from './use-collaboration.js';
 export { CollaborationChat, MentionInput } from './collaboration-chat.js';
 export type { CollaborationChatProps, MentionInputProps } from './collaboration-chat.js';
 
-// 协作管理弹窗(画布内)
+// 协作管理弹窗(画布外:主页发起协作/协作详情)
 export { CollaborationModal } from './collaboration-modal.js';
 export type { CollaborationModalProps } from './collaboration-modal.js';
+// 协作管理面板(画布内:并入版本历史抽屉的「协作」Tab)
+export { CollaborationPanel } from './collaboration-modal.js';
+export type { CollaborationPanelProps } from './collaboration-modal.js';
 
 // 画布远端协作覆盖层(远端光标 + 选中高亮)
 export { CollabOverlay } from './collab-overlay.js';

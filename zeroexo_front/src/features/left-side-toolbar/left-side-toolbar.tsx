@@ -3,8 +3,8 @@
  *
  * 布局(默认 'bottom',桌面/移动端一致 —— 移动端行为即默认行为):
  * - 底部居中悬浮条,与右下角缩放组件(ZoomToolbar)同款底色(半透明黑 + 毛玻璃)
- * - 按钮顺序(征集 #92:缩放百分比回归底部条,复刻 v1.1.0 原版形态):
- *   [小地图 / 缩放%] ┃ [层级资产(#91 自顶栏迁入) / 模式切换 / 清空画布] ┃ [加号(最右,单独隔开)]
+ * - 按钮顺序(2026-08-29:资产库迁至顶栏标题旁,剩余按钮不再分割线隔开):
+ *   [小地图 / 缩放% / 模式切换 / 加号]
  * - 加号创建菜单向上弹出(对齐按钮右缘)
  * - 缩放控件已移除(由画布右下角 ZoomToolbar 承担,征集 #87 验收轮)
  *
@@ -26,7 +26,6 @@ import type { AddNodeType } from '@/shared/components/index.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import {
   Map,
-  PackageOpen,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -41,9 +40,6 @@ export interface LeftSideToolBarProps {
   onScaleChange: (scale: number) => void;
   isMiniMapOpen: boolean;
   onToggleMiniMap: () => void;
-  /** 层级/资产抽屉开关(征集 #91:自顶栏 LOGO 侧迁入底部条;缺省不渲染按钮) */
-  isHierarchyOpen?: boolean;
-  onToggleHierarchy?: () => void;
   /** 征集 #96:清空画布按钮已移除,接口保留供旧调用方透传(不再消费) */
   onClear?: () => void;
   interactionMode: 'select' | 'pan';
@@ -86,8 +82,6 @@ function LeftSideToolBarView({
   onScaleChange,
   isMiniMapOpen,
   onToggleMiniMap,
-  isHierarchyOpen,
-  onToggleHierarchy,
   interactionMode,
   onToggleInteractionMode,
   isMobile,
@@ -105,11 +99,6 @@ function LeftSideToolBarView({
   const isPan = interactionMode === 'pan';
 
   const isBottom = layout === 'bottom';
-
-  // 底部条内的竖向分隔线
-  const dividerStyle: CSSProperties = {
-    width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.15)', flexShrink: 0, margin: '0 2px',
-  };
 
   // 底部条按钮样式(32×32,与顶栏按钮组同尺寸)
   const barBtnStyle = (active = false): CSSProperties => ({
@@ -244,22 +233,6 @@ function LeftSideToolBarView({
           >
             {zoomTrigger}
           </Dropdown>
-          {/* 分割线:缩放组与右侧功能组隔开(征集 #92 用户拍板) */}
-          <div style={dividerStyle} />
-          {/* 层级/资产开关(征集 #91:自顶栏 LOGO 侧迁入;激活态 = 抽屉开,accent 高亮) */}
-          {onToggleHierarchy && (
-            <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')} theme={theme}>
-              <Button
-                type="text"
-                onClick={onToggleHierarchy}
-                aria-label={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}
-                style={barBtnStyle(!!isHierarchyOpen)}
-              >
-                {/* 征集 #96:图标改 lucide package-open(资产库语义) */}
-                <PackageOpen size={18} />
-              </Button>
-            </Tooltip>
-          )}
           {/* 模式切换(select/pan) */}
           <Tooltip title={isPan ? t('toolbar.pan') : t('toolbar.select')} theme={theme}>
             <Button
@@ -271,14 +244,8 @@ function LeftSideToolBarView({
               {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
             </Button>
           </Tooltip>
-          {/* 征集 #96(Plan#49 T29):清空画布按钮移除(底部悬浮条只留 小地图/缩放/资产库/模式/加号) */}
-          {/* 征集 #87 验收轮:加号移到最右,与清空画布单独隔开 */}
-          {plusButton && (
-            <>
-              <div style={dividerStyle} />
-              {plusButton}
-            </>
-          )}
+          {/* 征集 #96(Plan#49 T29):清空画布按钮移除;资产库按钮迁至顶栏标题旁(2026-08-29,任何时刻可打开) */}
+          {plusButton}
         </div>
       </div>
       {/* 征集 #87 验收轮三(修复"无法正确上弹"根因):菜单必须渲染在带 transform 的 wrapper 之外——

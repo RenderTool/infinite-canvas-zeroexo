@@ -35,13 +35,13 @@ const STATUS_CONFIG: Record<SaveStatus, { color: string; pulse: boolean; label: 
   unsaved: { color: '#999', pulse: false, label: i18n.t('syncBadge.unsaved'), icon: 'alert' },
 };
 
-export function CreationSyncBadge({ status, lastSavedAt, theme, compact = false }: CreationSyncBadgeProps): React.ReactElement {
+export function CreationSyncBadge({ status, lastSavedAt, theme: _theme, compact = false }: CreationSyncBadgeProps): React.ReactElement {
   const cfg = STATUS_CONFIG[status];
   const tooltipText = lastSavedAt ? i18n.t('syncBadge.lastSavedAt', { time: new Date(lastSavedAt).toLocaleTimeString() }) : undefined;
 
   if (compact) {
     return (
-      <Tooltip title={tooltipText}>
+      <Tooltip title={tooltipText ?? cfg.label}>
         <div
           style={compactContainerStyle}
         >
@@ -52,16 +52,14 @@ export function CreationSyncBadge({ status, lastSavedAt, theme, compact = false 
         ) : (
           <AlertCircle size={12} color={cfg.color} />
         )}
-        <span style={{ fontSize: 11, color: theme.toolbar.textMuted, whiteSpace: 'nowrap' }}>
-          {cfg.label}
-        </span>
+        {/* Plan#50 T13:去掉状态文本,悬停按当前状态显示 tooltip(已保存/保存中/保存失败/未保存) */}
       </div>
       </Tooltip>
     );
   }
 
   return (
-    <Tooltip title={tooltipText}>
+    <Tooltip title={tooltipText ?? cfg.label}>
       <div
         style={containerStyle}
       >
@@ -73,9 +71,7 @@ export function CreationSyncBadge({ status, lastSavedAt, theme, compact = false 
           opacity: cfg.pulse ? 1 : 0.8,
         }}
       />
-      <span style={{ color: theme.toolbar.text, fontSize: 12, opacity: 0.7, whiteSpace: 'nowrap' }}>
-        {cfg.label}
-      </span>
+      {/* Plan#50 T13:去掉状态文本,悬停按当前状态显示 tooltip */}
     </div>
     </Tooltip>
   );

@@ -14,8 +14,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Bot, Users,
-  History, SquareMousePointer,
+  Bot, Users, Package, PackageOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -23,23 +22,11 @@ import { Badge, Button as AntdButton, Tooltip } from 'antd';
 import { useCollaborationStore } from '@/features/collaboration/use-collaboration-store.js';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
-import { AppearanceDialog, LanguageSwitcher } from '@/shared/components/index.js';
 import type { GridStyle } from '@/shared/components/index.js';
+import { AppearanceDialog } from '@/shared/components/index.js';
 import { TitleEditor } from './title-editor.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
-
-/** 换肤图标(sun-moon),与主页 AppTopBar 保持同一图标,体现"同一组件变体" */
-function SunMoonIcon(): React.ReactElement {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2v2" />
-      <path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715" />
-      <path d="M16 12a4 4 0 0 0-4-4" />
-      <path d="m19 5-1.256 1.256" />
-      <path d="M20 12h2" />
-    </svg>
-  );
-}
+import { CanvasTabBar } from '@/features/canvas-tabs/canvas-tab-bar.js';
 
 export interface TopBarProps {
   title: string;
@@ -65,10 +52,11 @@ export interface TopBarProps {
   canvasMenu?: React.ReactNode;
   /** 移动端导航按钮打开 */
   onMobileNavOpen?: () => void;
-  /** 打开协作弹窗 */
+  /** 打开协作(版本历史+协作 管理抽屉,默认协作 Tab) */
   onOpenCollaboration?: () => void;
-  /** 打开版本快照面板(保存+历史合并单页面) */
-  onOpenVersionHistory?: () => void;
+  /** 层级/资产抽屉(资产任何时刻可打开,2026-08-29 迁至标题旁) */
+  isHierarchyOpen?: boolean;
+  onToggleHierarchy?: () => void;
 }
 
 export function TopBar({
@@ -82,16 +70,16 @@ export function TopBar({
   onCancelTitleEditing,
   agentOpen,
   onToggleAgent,
-  gridStyle,
-  onGridStyleChange,
-  onOpenSettings,
   isMobile,
   syncBadge,
   canvasMenu,
+  gridStyle,
+  onGridStyleChange,
   onOpenCollaboration,
-  onOpenVersionHistory,
+  isHierarchyOpen,
+  onToggleHierarchy,
 }: TopBarProps): React.ReactElement {
-  const { theme, mode } = useTheme();
+  const { theme } = useTheme();
   const { t } = useTranslation();
   const readOnly = useReadOnly();
   const isMobileAuto = useIsMobile();
@@ -101,7 +89,7 @@ export function TopBar({
   const newMemberCount = useCollaborationStore((s) => s.newMemberCount);
   const unreadMessages = useCollaborationStore((s) => s.unreadMessages);
   const agentUnread = useCanvasAgentStore((s) => s.agentUnread);
-
+  // 外观设置弹窗(高频操作,自 LOGO 下拉移回顶栏:2026-08-29 用户拍板)
   const [appearanceOpen, setAppearanceOpen] = useState(false);
 
   const barStyle: CSSProperties = {
@@ -140,11 +128,6 @@ export function TopBar({
     color: theme.toolbar.text,
   };
 
-  /** 版本快照:点按钮直接打开合并面板(保存+历史),无下拉 */
-  const handleOpenVersion = (): void => {
-    onOpenVersionHistory?.();
-  };
-
   /** 可编辑标题(compact 13px;桌面端右侧组,移动端居中容器) */
   const titleEditor = (
     <TitleEditor
@@ -162,6 +145,7 @@ export function TopBar({
   );
 
   return (
+    <>
     <div style={barStyle}>
       <div style={leftStyle}>
         {!mobile && canvasMenu}
@@ -169,71 +153,70 @@ export function TopBar({
         {!mobile && (
           <>
             {titleEditor}
+            {/* 资产(任何时刻可打开,2026-08-29 迁至标题旁) */}
+            {onToggleHierarchy && (
+              <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}>
+                <AntdButton
+                  type="text"
+                  icon={isHierarchyOpen ? <PackageOpen size={16} /> : <Package size={16} />}
+                  onClick={onToggleHierarchy}
+                  style={{
+                    ...iconBtnInHeader,
+                    color: isHierarchyOpen ? theme.toolbar.accent : theme.toolbar.text,
+                  }}
+                />
+              </Tooltip>
+            )}
             {syncBadge}
           </>
         )}
+        {/* Plan#50 修正(用户拍板):页签条放标题旁边同一行(占中间剩余空间),不是 NAV 下方独立行 */}
+        {/* 2026-08-29 修复:仅桌面端渲染——移动端下方分支已单独渲染 CanvasTabBar,此处无条件渲染会双重页签 */}
+        {!mobile && (
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <CanvasTabBar />
+          </div>
+        )}
       </div>
-      {/* 移动端:标题 + 同步徽标居中(征集 #87 验收轮十八) */}
+      {/* 移动端:标题 + 同步徽标居中(征集 #87 验收轮十八);页签条同行(标题旁,占剩余空间) */}
       {mobile && (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minWidth: 0 }}>
           {titleEditor}
+          {onToggleHierarchy && (
+            <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}>
+              <AntdButton
+                type="text"
+                icon={isHierarchyOpen ? <PackageOpen size={16} /> : <Package size={16} />}
+                onClick={onToggleHierarchy}
+                style={{
+                  ...iconBtnInHeader,
+                  color: isHierarchyOpen ? theme.toolbar.accent : theme.toolbar.text,
+                }}
+              />
+            </Tooltip>
+          )}
           {syncBadge}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <CanvasTabBar />
+          </div>
         </div>
       )}
       <div style={rightStyle}>
-        {/* 桌面端:外观设置 + 语言/配置 + 版本快照 */}
+        {/* 协作 + Agent(桌面端;账号/退出已移入左上角 CanvasMenu) */}
         {!mobile && (
           <>
-            {/* 外观设置(与主页换肤为同一组件变体,文案一致) */}
+            {/* 外观(高频操作,2026-08-29 移回顶栏协作按钮旁;图标与主页 TopNav 换肤按钮同款) */}
             <Tooltip title={t('topbar.appearance')}>
               <AntdButton
                 type="text"
-                icon={<SunMoonIcon />}
+                icon={
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></svg>
+                }
                 onClick={() => setAppearanceOpen(true)}
                 style={iconBtnInHeader}
               />
             </Tooltip>
-
-            {/* 中英文切换(与主页同款 LanguageSwitcher:Globe 图标 + 语言弹窗) */}
-            <LanguageSwitcher theme={theme} />
-
-            {/* 配置(图标 square-mouse-pointer) */}
-            <Tooltip title={t('settings.title')}>
-              <AntdButton
-                type="text"
-                icon={<SquareMousePointer size={16} />}
-                onClick={onOpenSettings}
-                style={iconBtnInHeader}
-              />
-            </Tooltip>
-
-            {/* 版本快照:点击直接打开合并面板(保存+历史单页面,2026-08-24 去下拉) */}
-            <Tooltip title={t('topbar.versionHistory')}>
-              <AntdButton
-                type="text"
-                icon={<History size={16} />}
-                onClick={handleOpenVersion}
-                style={iconBtnInHeader}
-              />
-            </Tooltip>
-          </>
-        )}
-
-        {/* 换肤居中弹窗(桌面端) */}
-        {appearanceOpen ? (
-          <AppearanceDialog
-            theme={theme}
-            currentMode={mode}
-            gridStyle={gridStyle}
-            onGridStyleChange={onGridStyleChange}
-            onClose={() => setAppearanceOpen(false)}
-          />
-        ) : null}
-
-        {/* 协作 + Agent(桌面端;账号/退出已移入左上角 CanvasMenu) */}
-        {!mobile && (
-          <>
-            {/* 协作(仅登录用户;未登录时点击引导登录)；待审申请+新成员加入红点：弹窗同步真实列表后覆盖，批准/拒绝/查看成员后自动移除 */}
+            {/* 协作(版本历史+协作 管理抽屉入口;待审申请+新成员加入红点：抽屉同步真实列表后覆盖，批准/拒绝/查看成员后自动移除) */}
             <Tooltip title={t('topbar.collaboration')}>
               <Badge count={pendingApprovals + newMemberCount} size="small" overflowCount={99} offset={[2, -2]}>
                 <AntdButton
@@ -267,5 +250,17 @@ export function TopBar({
       </div>
 
     </div>
+
+    {/* 外观设置弹窗(高频操作,2026-08-29 移回顶栏) */}
+    {appearanceOpen ? (
+      <AppearanceDialog
+        theme={theme}
+        currentMode={theme.mode}
+        gridStyle={gridStyle}
+        onGridStyleChange={onGridStyleChange}
+        onClose={() => setAppearanceOpen(false)}
+      />
+    ) : null}
+    </>
   );
 }

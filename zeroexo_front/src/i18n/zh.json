@@ -127,7 +127,7 @@
     "redo": "重做",
     "selectMode": "选择模式",
     "panMode": "平移模式",
-    "appearance": "外观设置",
+    "appearance": "外观",
     "devLog": "开发日志",
     "toggleAgent": "Agent",
     "openMenu": "打开画布菜单",
@@ -402,6 +402,8 @@
     "delete": "删除",
     "export": "导出",
     "add": "添加",
+    "edit": "编辑",
+    "exitEdit": "退出编辑",
     "publicPrompts": "公共提示词",
     "publicPromptsSectionTitle": "公共提示词",
     "viewAllPrompts": "查看更多",
@@ -738,6 +740,11 @@
     "zoomOut": "缩小",
     "fitScreen": "适合屏幕",
     "scaleTo": "缩放至"
+  },
+  "canvasTab": {
+    "canvas": "画布",
+    "close": "关闭页签",
+    "script": "剧本"
   },
   "toolsDock": {
     "tool": "工具",
@@ -1345,8 +1352,6 @@
     "contentPlaceholder": "请输入提示词内容",
     "category": "分类",
     "generationMode": "生成模式",
-    "modeTxt2Img": "文生图",
-    "modeImg2Img": "图生图",
     "categoryRole": "角色",
     "categoryScene": "场景",
     "categoryStyle": "风格",
@@ -1386,11 +1391,12 @@
     "edit": "编辑",
     "cancel": "取消",
     "titleLabel": "标题",
+    "tags": "标签",
     "note": "备注",
     "notePlaceholder": "添加备注或说明",
     "imagesCount": "{{count}} 张",
     "copying": "复制中...",
-    "generateSimilar": "收藏副本",
+    "generateSimilar": "生成副本",
     "favorited": "已收藏",
     "unsaved": "未保存的变动",
     "uploading": "上传中...",
@@ -2025,7 +2031,7 @@
     "expired": "已失效"
   },
   "promptCard": {
-    "generateSimilar": "收藏副本",
+    "generateSimilar": "生成副本",
     "pleaseLoginFirst": "请先登录",
     "favorited": "已收藏",
     "favorite": "收藏",
@@ -2042,14 +2048,14 @@
     "continueEditing": "继续编辑"
   },
   "promptChain": {
-    "modeTxt2Img": "文生图",
-    "modeImg2Img": "图生图",
     "reference": "参考图",
     "output": "生成图",
     "promptNode": "提示词",
     "emptyPrompt": "（提示词内容为空）",
     "noReference": "暂无参考图",
     "noOutput": "暂未录入生成图",
+    "addReference": "添加参考图",
+    "addOutput": "添加生成图",
     "tapToExpand": "点击展开",
     "addTag": "+ 标签",
     "pinAddInput": "添加输入图（参考图）",

@@ -116,9 +116,9 @@ production pipeline of script → storyboard → shot → finished film:
 |---|---|---|
 | ![Script editor](docs/screenshots/frontend/前端剧本编辑页.webp) | ![Script and storyboard](docs/screenshots/frontend/前端剧本和分镜.webp) | ![Storyboard editor](docs/screenshots/frontend/前端分镜编辑页.webp) |
 
-| Prompt library | Asset library | Canvas manager |
+| Prompt editor | Asset library | Canvas manager |
 |---|---|---|
-| ![Prompts](docs/screenshots/frontend/前端提示词.webp) | ![Asset library](docs/screenshots/frontend/前端素材库管理页.webp) | ![Canvas manager](docs/screenshots/frontend/前端画布管理页.webp) |
+| ![Prompt editor](docs/screenshots/frontend/前端提示词编辑页.jpg) | ![Asset library](docs/screenshots/frontend/前端素材库管理页.webp) | ![Canvas manager](docs/screenshots/frontend/前端画布管理页.webp) |
 
 ### Admin Console
 

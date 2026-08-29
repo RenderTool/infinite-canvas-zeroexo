@@ -554,13 +554,11 @@ export function HierarchyListView({
   const { t } = useTranslation();
   const dragIdRef = useRef<string | null>(null);
 
-  // 类型筛选：外部(工具栏筛选行)优先，未提供时回退内部状态
-  const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
+  // 类型筛选：由外部(资产库工具栏筛选行)受控驱动；未提供时回退内部默认值
+  // （征集 #96：筛选下拉已并入工具栏，本组件不再自行切换筛选，故无需 setter）
+  const [localTypeFilter] = useState<'all' | string>('all');
   const typeFilter = externalTypeFilter ?? localTypeFilter;
-  const setTypeFilter = useCallback((value: string) => {
-    if (onTypeFilterChange) onTypeFilterChange(value);
-    else setLocalTypeFilter(value);
-  }, [onTypeFilterChange]);
+  void onTypeFilterChange;
 
   // 选择模式(征集 #87 验收轮十三:优先外部驱动,与资产库工具栏多选按钮联动;未提供时回退内部)
   const [internalSelectMode, setInternalSelectMode] = useState(false);

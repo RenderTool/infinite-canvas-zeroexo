@@ -7,5 +7,5 @@
 
 export { AssetLibraryPage } from './asset-library-page.js';
 export { AssetLibraryModal } from './asset-library-modal.js';
-export { PromptCreatePage, type PublicPromptInitialData } from './prompt-create-page.js';
+export { PromptCreatePage, type PublicPromptInitialData, type PromptCreatePageHandle } from './prompt-create-page.js';
 export { PublicPromptsPage, getLocalizedTitle, type PublicPromptItem } from './public-prompts-page.js';

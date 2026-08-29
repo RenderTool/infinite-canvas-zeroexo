@@ -13,7 +13,7 @@ import { Button, Progress, Tag, Spin, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import { fullscreenOverlayStyle } from './components/StoryboardToolbar';
+import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { WorkbenchNodeData, WorkbenchShot } from './workbench-types';
 import { generateFrame } from './workbench-frame-api';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
@@ -34,7 +34,15 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
 
-  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  // Plan#50:工作台全屏改为顶部页签承载——本地不再持有 fullscreenOpen,显示与否由 tab store 决定
+  const myTabKey = buildTabKey('workbench', nodeId);
+  const tabActive = useCanvasTabStore((s) => s.activeTabKey === myTabKey);
+  const tabHost = useCanvasTabStore((s) => s.contentHost);
+  const openTab = useCanvasTabStore((s) => s.openTab);
+  const closeTab = useCanvasTabStore((s) => s.closeTab);
+  const openWorkbenchTab = useCallback(() => {
+    openTab({ kind: 'workbench', id: nodeId, title: t('canvasNodes.stage.workbench') });
+  }, [openTab, nodeId, t]);
   const [timeScale, setTimeScale] = useState(80);
 
   // 主题色
@@ -54,15 +62,15 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   // 事件订阅
   useEffect(() => {
     const unsub = nodeActionBus.on('workbench:fullscreen', (e: { nodeId: string }) => {
-      if (e.nodeId === nodeId) setFullscreenOpen(true);
+      if (e.nodeId === nodeId) openWorkbenchTab();
     });
     return () => unsub?.();
-  }, [nodeId]);
+  }, [nodeId, openWorkbenchTab]);
 
-  // 打开全屏编辑器
+  // 打开工作台页签(幂等)
   const openFullscreen = useCallback(() => {
-    setFullscreenOpen(true);
-  }, []);
+    openWorkbenchTab();
+  }, [openWorkbenchTab]);
 
   // ===== 首帧/尾帧生成 =====
 
@@ -221,9 +229,10 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
         />
       )}
 
-      {/* 全屏覆盖层 */}
-      {fullscreenOpen && createPortal(
-        <div style={fullscreenOverlayStyle(bgPage)}>
+      {/* Plan#50:工作台全屏改为画布顶部页签承载(幂等 key = workbench:<nodeId>)——embedded 用
+          absolute 填满页签内容层(覆盖画布),数据(data.shots)与回调仍留在节点组件内 */}
+      {tabActive && tabHost ? createPortal(
+        <div style={tabEmbeddedStyle(bgPage)}>
           {/* 全屏顶部栏 */}
           <div style={{
             display: 'flex',
@@ -270,7 +279,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                   {t('canvasNodes.workbenchLastFrame')}
                 </Button>
               </Tooltip>
-              <Button size="small" onClick={() => setFullscreenOpen(false)}>
+              {/* Plan#50:关闭统一走页签 X */}
+              <Button size="small" onClick={() => closeTab(myTabKey)}>
                 {t('common.close')}
               </Button>
             </div>
@@ -385,8 +395,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
             />
           </div>
         </div>,
-        document.body,
-      )}
+        tabHost,
+        ) : null}
     </div>
   );
 });
@@ -710,3 +720,12 @@ const centerStyle: CSSProperties = {
   width: '100%',
   height: '100%',
 };
+
+/** Plan#50:页签内嵌容器(absolute 填满页签内容层,替代原 fixed 全屏 overlay) */
+const tabEmbeddedStyle = (background: string): CSSProperties => ({
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  background,
+});

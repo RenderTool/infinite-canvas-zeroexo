@@ -6,10 +6,10 @@
  * 可接收 asset 对象或 node 记录，统一展示。
  * 沉浸模式：全出血 + 深色剧场背景 + 悬浮工具栏。
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Download, X,
+  Download, X, Check, Copy,
   Music as MusicIcon, FileText, Trash2, Pencil, ImagePlus,
 } from 'lucide-react';
 import { Modal, Tag } from 'antd';
@@ -26,7 +26,8 @@ import { ImageViewerStage, ZoomToolbar, useImagePanZoom } from '@/shared/compone
 export interface AssetDetailData {
   id: string;
   title: string;
-  kind: 'text' | 'image' | 'video' | 'audio' | 'script';
+  /** prompt：提示词资产（用提示词链路画布展示，与图片/文档同属一套查看器框架的变体） */
+  kind: 'text' | 'image' | 'video' | 'audio' | 'script' | 'prompt';
   bytes: number;
   mimeType?: string;
   tags?: string[];
@@ -52,6 +53,26 @@ export interface AssetDetailViewerProps {
   onRename?: (title: string) => void;
   /** 发送到画布(征集 #87 验收轮:层级面板资产模式点击资源后由此发送;不传则不显示按钮) */
   onSendToCanvas?: () => void;
+  /**
+   * 提示词资产的舞台内容（kind='prompt' 时渲染）。
+   * 由调用方注入而非本文件 import —— shared 组件不能反向依赖 features/asset-library
+   * （asset-library-modals 会从 shared/components 取组件，直接 import 会成环）。
+   */
+  renderPromptStage?: (ctx: { editing: boolean }) => React.ReactNode;
+  /** 是否可编辑（文本/提示词）：显示底部出血栏的「编辑」按钮 */
+  editable?: boolean;
+  /** 编辑态（受控；不传则内部自管） */
+  editing?: boolean;
+  /** 编辑态变更（点击编辑/取消时回调） */
+  onEditingChange?: (editing: boolean) => void;
+  /** 编辑态下的保存（底部出血栏「保存」按钮） */
+  onSave?: () => void | Promise<void>;
+  /** 保存中（禁用保存按钮） */
+  saving?: boolean;
+  /** 副本（提示词：创建副本；不传则不显示按钮） */
+  onDuplicate?: () => void;
+  /** 文本内容编辑回调（文本类型在编辑态下可直编） */
+  onContentChange?: (content: string) => void;
   /** 弹窗层级——默认不传!项目全局 zIndexPopupBase=20000 且 antd 嵌套弹窗自动升层,
    *  手动传小值(如 1000/2000)会被外层 Modal 压住(征集 #80 实测教训);仅特殊场景显式传大值 */
   zIndex?: number;
@@ -124,11 +145,36 @@ export function AssetDetailViewer({
   onDelete,
   onRename,
   onSendToCanvas,
+  renderPromptStage,
+  editable,
+  editing,
+  onEditingChange,
+  onSave,
+  saving,
+  onDuplicate,
+  onContentChange,
   zIndex,
 }: AssetDetailViewerProps): React.ReactElement | null {
   const asset: AssetDetailData | null = assetProp ?? (node ? nodeToAssetDetail(node) : null);
   if (!asset) return null;
-  return <AssetDetailViewerInner asset={asset} onClose={onClose} onDelete={onDelete} onRename={onRename} onSendToCanvas={onSendToCanvas} zIndex={zIndex} />;
+  return (
+    <AssetDetailViewerInner
+      asset={asset}
+      onClose={onClose}
+      onDelete={onDelete}
+      onRename={onRename}
+      onSendToCanvas={onSendToCanvas}
+      renderPromptStage={renderPromptStage}
+      editable={editable}
+      editing={editing}
+      onEditingChange={onEditingChange}
+      onSave={onSave}
+      saving={saving}
+      onDuplicate={onDuplicate}
+      onContentChange={onContentChange}
+      zIndex={zIndex}
+    />
+  );
 }
 
 // ===== 内部实现 =====
@@ -139,10 +185,33 @@ interface InnerProps {
   onDelete?: () => void;
   onRename?: (title: string) => void;
   onSendToCanvas?: () => void;
+  renderPromptStage?: (ctx: { editing: boolean }) => React.ReactNode;
+  editable?: boolean;
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
+  onSave?: () => void | Promise<void>;
+  saving?: boolean;
+  onDuplicate?: () => void;
+  onContentChange?: (content: string) => void;
   zIndex?: number;
 }
 
-function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCanvas, zIndex }: InnerProps): React.ReactElement {
+function AssetDetailViewerInner({
+  asset,
+  onClose,
+  onDelete,
+  onRename,
+  onSendToCanvas,
+  renderPromptStage,
+  editable,
+  editing: editingProp,
+  onEditingChange,
+  onSave,
+  saving,
+  onDuplicate,
+  onContentChange,
+  zIndex,
+}: InnerProps): React.ReactElement {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const data = asset.data;
@@ -150,6 +219,7 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
   const isVideo = data.kind === 'video';
   const isAudio = data.kind === 'audio';
   const isText = data.kind === 'text' || data.kind === 'script';
+  const isPrompt = data.kind === 'prompt';
 
   // ===== 状态 =====
   const [textMode, setTextMode] = useState<TextRenderMode>(() => detectTextMode(data.content ?? '', asset.mimeType));
@@ -165,6 +235,16 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
   const [titleDraft, setTitleDraft] = useState('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [hovering, setHovering] = useState(false); // 沉浸：控制 overlay 显隐
+
+  // ===== 编辑态（文本/提示词）：外部受控优先，否则内部自管 =====
+  const [editingSelf, setEditingSelf] = useState(false);
+  const isEditing = editingProp ?? editingSelf;
+  const setEditing = useCallback((v: boolean) => {
+    if (editingProp === undefined) setEditingSelf(v);
+    onEditingChange?.(v);
+  }, [editingProp, onEditingChange]);
+  /** 可编辑的类型：文本（含剧本）与提示词 */
+  const canEdit = editable === true;
 
   const cover = isImage ? data.dataUrl : isVideo ? data.url : undefined;
   const storageKeyForHydrate = data.kind === 'text' ? undefined : data.storageKey;
@@ -248,13 +328,18 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor
+              // 编辑态切换时重挂载：退出编辑需丢弃未保存改动（Monaco 是非受控的，
+              // value 不变时不会回退到 data.content，必须靠 key 强制重建）
+              key={isEditing ? 'edit' : 'view'}
               height="100%"
               language={monacoLanguage}
               value={data.content ?? ''}
               theme="vs-dark"
+              // 编辑态下把正文变更回传调用方保存（与提示词画布同一套「编辑→保存」语义）
+              onChange={(value) => { if (isEditing) onContentChange?.(value ?? ''); }}
               onMount={(editor) => requestAnimationFrame(() => editor.layout())}
               options={{
-                readOnly: true,
+                readOnly: !isEditing,
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 fontSize: 13,
@@ -263,8 +348,9 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
                 padding: { top: 8, bottom: 16 },
                 scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
                 overviewRulerLanes: 0,
-                renderLineHighlight: 'none',
-                contextmenu: false,
+                renderLineHighlight: isEditing ? 'all' : 'none',
+                // 编辑态放开右键菜单（复制/粘贴），查看态保持精简
+                contextmenu: isEditing,
                 folding: false,
                 glyphMargin: false,
                 lineDecorationsWidth: 0,
@@ -306,7 +392,9 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
 
   const stageContainerStyle: React.CSSProperties = {
     width: '100%',
-    height: '75vh',
+    // 2026-08-29：与提示词页面统一尺寸 —— Modal body 高 calc(100vh - 140px)，
+    // 舞台撑满 body，图片/文档/提示词三种资产打开后尺寸完全一致。
+    height: '100%',
     display: 'flex',
     alignItems: 'stretch',      // ✅ 修复高度塌陷
     justifyContent: 'flex-start',
@@ -338,26 +426,71 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
     e.currentTarget.style.opacity = '0';
   };
 
-  // 右侧操作按钮浮层(图片/非图片分支共用)
+  // 底部出血栏按钮统一样式（图片/文档/提示词共用一套，保证视觉同框架）
+  const actionBtn = (color: string, enabled = true): React.CSSProperties => ({
+    width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
+    color, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.4,
+  });
+
+  // 右侧操作按钮浮层(图片/文档/提示词分支共用)
+  // 编辑态常显（保存/取消必须随时可点），查看态沿用沉浸 hover 显隐。
   const actionsOverlay = (
     <div style={{
       position: 'absolute', bottom: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4,
-      opacity: overlayOpacity, transition: 'opacity 0.2s',
+      opacity: isEditing ? 1 : overlayOpacity, transition: 'opacity 0.2s',
     }}>
-      {onSendToCanvas && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', color: theme.toolbar.accent, cursor: 'pointer' }} title={t('assetLibrary.sendToCanvas')}>
-          <ImagePlus size={13} />
-        </button>
-      )}
-      {onDelete && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', color: '#ff6b6b', cursor: 'pointer' }} title={t('common.delete')}>
-          <Trash2 size={13} />
-        </button>
-      )}
-      {(isImage || isVideo || isAudio || isText) && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); handleDownload(); }} disabled={!isText && !hydrated && !cover} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', color: 'rgba(255,255,255,0.9)', cursor: (isText || hydrated || cover) ? 'pointer' : 'not-allowed', opacity: (isText || hydrated || cover) ? 1 : 0.4 }} title={t('common.download') || '下载'}>
-          <Download size={13} />
-        </button>
+      {isEditing ? (
+        <>
+          {/* 编辑按钮作为切换开关：编辑态高亮常驻，再点一次即退出编辑（放弃未保存改动） */}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setEditing(false); }}
+            style={{ ...actionBtn(theme.toolbar.accent), background: 'rgba(0,0,0,0.72)' }}
+            title={t('common.exitEdit') || '退出编辑'}
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); void onSave?.(); }}
+            disabled={saving}
+            style={actionBtn(theme.toolbar.accent, !saving)}
+            title={t('common.save') || '保存'}
+          >
+            <Check size={13} />
+          </button>
+        </>
+      ) : (
+        <>
+          {/* 编辑：文本（含剧本）与提示词 —— 与提示词画布同一套编辑语义 */}
+          {canEdit && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); setEditing(true); }} style={actionBtn('rgba(255,255,255,0.9)')} title={t('common.edit') || '编辑'}>
+              <Pencil size={13} />
+            </button>
+          )}
+          {/* 副本：提示词资产创建副本 */}
+          {onDuplicate && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onDuplicate(); }} style={actionBtn('rgba(255,255,255,0.9)')} title={t('promptCreate.generateSimilar') || '副本'}>
+              <Copy size={13} />
+            </button>
+          )}
+          {onSendToCanvas && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }} style={actionBtn(theme.toolbar.accent)} title={t('assetLibrary.sendToCanvas')}>
+              <ImagePlus size={13} />
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }} style={actionBtn('#ff6b6b')} title={t('common.delete')}>
+              <Trash2 size={13} />
+            </button>
+          )}
+          {(isImage || isVideo || isAudio || isText) && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); handleDownload(); }} disabled={!isText && !hydrated && !cover} style={actionBtn('rgba(255,255,255,0.9)', isText || !!hydrated || !!cover)} title={t('common.download') || '下载'}>
+              <Download size={13} />
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -394,7 +527,7 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
         onCancel={onClose}
         footer={null}
         width="calc(100vw - 32px)"
-        style={{ maxWidth: 1600 }}
+        style={{ maxWidth: 1300 }}
         centered
         destroyOnHidden
         {...(zIndex !== undefined ? { zIndex } : {})}
@@ -434,7 +567,8 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
         styles={{
           mask: { background: 'transparent' },
           header: { marginBottom: 0, paddingBottom: 0, borderBottom: 'none' },
-          body: { padding: 0 }, // ✅ 全出血
+          // ✅ 全出血；高度与提示词页面一致（calc(100vh - 140px)），两种资产打开后尺寸相同
+          body: { padding: 0, height: 'calc(100vh - 140px)', overflow: 'hidden' },
           container: { borderRadius: 12, overflow: 'hidden' },
         }}
       >
@@ -462,6 +596,23 @@ function AssetDetailViewerInner({ asset, onClose, onDelete, onRename, onSendToCa
             {actionsOverlay}
             {metaOverlay}
           </ImageViewerStage>
+        ) : isPrompt ? (
+          /* ===== 提示词资产：同一套查看器框架，只是展示区换成提示词链路画布 ===== */
+          <div
+            onMouseEnter={() => setHovering(true)}
+            onMouseLeave={() => setHovering(false)}
+            style={{ ...stageContainerStyle, touchAction: 'auto' }}
+          >
+            {renderPromptStage?.({ editing: isEditing }) ?? (
+              <div style={{ margin: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.5 }}>
+                <FileText size={40} />
+                <span style={{ fontSize: 13 }}>{t('resourceViewer.noContent')}</span>
+              </div>
+            )}
+            {actionsOverlay}
+            {/* 提示词不渲染底部渐变元信息栏：链路画布已承载全部信息，
+                渐变层会盖住画布内的编辑浮层（标题/分类/备注） */}
+          </div>
         ) : (
           <div
             onMouseEnter={() => setHovering(true)}

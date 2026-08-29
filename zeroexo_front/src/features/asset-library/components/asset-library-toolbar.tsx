@@ -335,6 +335,8 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
             onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = theme.toolbar.text; }}
             onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = theme.toolbar.textMuted; }}
           >
+            {/* 分类 Tab 图标(2026-08-29 修复:此前只渲染 label 漏掉了 icon) */}
+            {cat.icon}
             {cat.label}
             {!isMobile && cat.count !== undefined && cat.count > 0 && (
               <span style={{
@@ -421,8 +423,9 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
               onSelect={(key) => onChildClick(key)}
             />
           )}
-          {/* 征集 #96:层级类型筛选下拉与子分类同款,与搜索/统计/多选同一行 */}
-          {hierarchyFilter && (
+          {/* 征集 #96:层级类型筛选下拉与子分类同款,与搜索/统计/多选同一行;
+              Plan#50 回归修复:必须限定 activeGroup==='hierarchy',否则会串到素材/提示词/剧本 Tab */}
+          {hierarchyFilter && activeGroup === 'hierarchy' && (
             <FilterDropdown
               activeLabel={hierarchyFilter.options.find((o) => o.value === hierarchyFilter.value)?.label ?? hierarchyFilter.options[0]?.label ?? ''}
               options={hierarchyFilter.options.map((o) => ({
@@ -440,8 +443,17 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
             placeholder={t('assetLibrary.searchPlaceholder')}
             theme={theme}
           />
-          {/* 征集 #96:节点统计徽标并入筛选行(原层级面板底部) */}
-          {hierarchyFilter && (
+          {/* 多选按钮紧跟搜索(2026-08-29 用户拍板:层级多选移到搜索旁边) */}
+          <Tooltip title={multiSelectEnabled ? '退出多选' : '多选'}>
+            <Button
+              icon={multiSelectEnabled ? <CheckSquare size={14} /> : <Square size={14} />}
+              size="small"
+              onClick={onMultiSelectToggle}
+            />
+          </Tooltip>
+          {/* 征集 #96:节点统计徽标并入筛选行(原层级面板底部);
+              Plan#50 回归修复:同样限定仅层级分组显示 */}
+          {hierarchyFilter && activeGroup === 'hierarchy' && (
             <Tooltip title={t('hierarchy.nodeCount', { count: hierarchyNodeCount })}>
               <span style={{
                 marginLeft: 'auto', fontSize: 10, padding: '1px 7px', borderRadius: 999,
@@ -452,13 +464,6 @@ export const AssetLibraryToolbar = memo(function AssetLibraryToolbar({
               </span>
             </Tooltip>
           )}
-          <Tooltip title={multiSelectEnabled ? '退出多选' : '多选'}>
-            <Button
-              icon={multiSelectEnabled ? <CheckSquare size={14} /> : <Square size={14} />}
-              size="small"
-              onClick={onMultiSelectToggle}
-            />
-          </Tooltip>
         </div>
         {/* 各自 Tab 的「新增格子」：水平虚线加号，占满宽度，高度对齐层级节点 */}
         {addTile && (

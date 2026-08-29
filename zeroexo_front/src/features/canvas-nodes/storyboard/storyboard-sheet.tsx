@@ -5,7 +5,9 @@
  * 数据处理逻辑已抽离至 storyboard-utils。
  */
 import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import { Link2, ListVideo, Aperture, Table } from 'lucide-react';
+import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { Button, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -147,7 +149,15 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const paginatedShots = shots.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // UI 状态
-  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  // Plan#50:分镜全屏编辑改为顶部页签承载——本地不再持有 fullscreenOpen,显示与否由 tab store 决定
+  const myTabKey = buildTabKey('storyboard', nodeId);
+  const tabActive = useCanvasTabStore((s) => s.activeTabKey === myTabKey);
+  const tabHost = useCanvasTabStore((s) => s.contentHost);
+  const openTab = useCanvasTabStore((s) => s.openTab);
+  const closeTab = useCanvasTabStore((s) => s.closeTab);
+  const openStoryboardTab = useCallback(() => {
+    openTab({ kind: 'storyboard', id: nodeId, title: '分镜' });
+  }, [openTab, nodeId]);
   const [deleteConfirm, setDeleteConfirm] = useState<null | { type: 'single'; shotId: string } | { type: 'batch' }>(null);
   const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(new Set());
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
@@ -259,7 +269,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   useEffect(() => {
     const unsubs = [
       nodeActionBus.on('storyboard:addShot', (e) => { if (e.nodeId === nodeId) handleAddShotRef.current(); }),
-      nodeActionBus.on('storyboard:fullscreen', (e) => { if (e.nodeId === nodeId) setFullscreenOpen(true); }),
+      nodeActionBus.on('storyboard:fullscreen', (e) => { if (e.nodeId === nodeId) openStoryboardTab(); }),
       // 2026-08-21 BUG 修复: capsule 菜单"重新生成"有分镜内容时弹出确认弹窗
       nodeActionBus.on('storyboard:requestRegenerate', (e: { nodeId: string; episodeId?: string }) => {
         if (e.nodeId !== nodeId) return;
@@ -355,11 +365,13 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
       />
       */}
 
-      {/* 全屏编辑（Req5b：表格为基础壳 + 步骤视图承载图册/提示词/镜头信息） */}
-      {fullscreenOpen && (
+      {/* Plan#50:分镜编辑器改为画布顶部页签内嵌呈现(不再全屏覆盖)——幂等 key = storyboard:<nodeId>;
+          数据(shots)与回调仍留在节点组件内,关闭统一走页签 X(closeTab) */}
+      {tabActive && tabHost ? createPortal(
         <StoryboardFullscreenEditor
-          open={fullscreenOpen}
-          onClose={() => setFullscreenOpen(false)}
+          open
+          embedded
+          onClose={() => closeTab(myTabKey)}
           shots={shots}
           onUpdateShot={updateShot}
           onAddShot={handleAddShot}
@@ -380,8 +392,9 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           scriptNodes={scriptNodes}
           scriptOptionLabel={scriptOptionLabel}
           onAssociateScript={openAssociateModal}
-        />
-      )}
+        />,
+        tabHost,
+        ) : null}
 
       {/* 弹窗 */}
       <ShotSizePickerModal open={pickerOpen} currentValue={pickerShotId ? shots.find((s) => s.id === pickerShotId)?.shotType ?? '中景' : '中景'} onClose={() => { setPickerOpen(false); setPickerShotId(null); }} onConfirm={(value) => { if (pickerShotId) updateShot(pickerShotId, { shotType: value as any }); setPickerOpen(false); setPickerShotId(null); }} />

@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { App, Modal, Button, Select, Tabs, Switch, Radio } from 'antd';
+import { App, Modal, Button, Select, Switch, Radio } from 'antd';
 import { Copy, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -41,6 +41,14 @@ import { useCollaborationStore } from './use-collaboration-store';
 import { useAuth } from '@/features/auth/auth-store';
 import { ApiError } from '@/services/api-client';
 
+export interface CollaborationPanelProps {
+  canvasId: string;
+  onClose: () => void;
+  theme: ThemeConfig;
+  /** 面板是否激活(打开)；false 时挂起数据加载与 SSE 监听，默认 true */
+  active?: boolean;
+}
+
 export interface CollaborationModalProps {
   open: boolean;
   canvasId: string;
@@ -56,12 +64,12 @@ const EXPIRY_OPTIONS = [
   { label: '30天', value: 720 },
 ];
 
-export function CollaborationModal({
-  open,
+export function CollaborationPanel({
+  active = true,
   canvasId,
   onClose,
   theme,
-}: CollaborationModalProps): React.ReactElement {
+}: CollaborationPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { message, modal } = App.useApp();
@@ -78,7 +86,6 @@ export function CollaborationModal({
   // Phase 8：加入方式（无需审核/需要审核）+ 待审申请列表（房主侧）
   const [requiresApproval, setRequiresApproval] = useState(false);
   const [applications, setApplications] = useState<JoinApplication[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('manage');
   // 批准/拒绝处理中的用户 ID（防连点：并发批准会让 approve 多次成功 → 重复广播 + 重复 toast，2026-08-25）
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
 
@@ -96,25 +103,16 @@ export function CollaborationModal({
   // 房间不存在(未开启)时能打开协作弹窗者必为画布所有者（非所有者需通过邀请码进入，此时房间必然存在）
   const isOwner = roomState ? roomState.ownerId === String(user?.id) : true;
 
-  // 初始化 tab: 房主默认"发起协作"(含未开启面板)，参与者默认"退出本次协作"
-  // （Phase 9：加入入口已收敛到邀请落地页，弹窗不再提供输码加入）
-  useEffect(() => {
-    if (open) {
-      setActiveTab(isOwner ? 'manage' : 'exit');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   // SSE member_joined/member_left 实时刷新的是全局 store,弹窗本地 state 需跟随,
   // 否则他人加入/离开时成员列表不更新,必须重开弹窗才刷新;
   // canvasId 守卫:全局 store 跨画布单例,避免残留其他画布的成员数据闪入
   const globalMembers = useCollaborationStore((s) => s.members);
   const globalCanvasId = useCollaborationStore((s) => s.canvasId);
   useEffect(() => {
-    if (open && globalCanvasId === canvasId) {
+    if (active && globalCanvasId === canvasId) {
       setMembers(globalMembers);
     }
-  }, [globalMembers, globalCanvasId, open, canvasId]);
+  }, [globalMembers, globalCanvasId, active, canvasId]);
 
   // 重置本地表单状态（弹窗关闭后重新打开时触发）
   const resetState = useCallback(() => {
@@ -190,12 +188,12 @@ export function CollaborationModal({
   }, [canvasId, message, t, loadApplications, user?.id]);
 
   useEffect(() => {
-    if (open) {
+    if (active) {
       // 先重置本地表单，再加载新鲜数据（避免旧状态残留）
       resetState();
       void loadRoom();
     }
-  }, [open, resetState, loadRoom]);
+  }, [active, resetState, loadRoom]);
 
   // 开启协作（仅画布所有者）
   const handleStartCollaboration = async () => {
@@ -429,7 +427,7 @@ export function CollaborationModal({
 
   // SSE 新申请到达（房主端）：刷新待审列表 + 轻提示（仅弹窗打开时）
   useEffect(() => {
-    if (!open || !isOwner) return;
+    if (!active || !isOwner) return;
     const handler = (e: Event): void => {
       const detail = (e as CustomEvent<{ canvasId?: string } | undefined>).detail;
       if (!detail || detail.canvasId !== canvasId) return;
@@ -438,7 +436,7 @@ export function CollaborationModal({
     };
     window.addEventListener('zeroexo:collab-join-application', handler);
     return () => window.removeEventListener('zeroexo:collab-join-application', handler);
-  }, [open, isOwner, canvasId, loadApplications, message, t]);
+  }, [active, isOwner, canvasId, loadApplications, message, t]);
 
   const cardStyle: CSSProperties = {
     marginBottom: 16,
@@ -792,26 +790,38 @@ export function CollaborationModal({
     </div>
   );
 
-  // 参与者视角（房间存在且非房主）：失效 → 失效视图；协作中 → 仅退出 Tab
-  // （Phase 9：加入入口全部收敛到邀请落地页，弹窗不再提供输码加入）
+  // 参与者视角（房间存在且非房主）：失效 → 失效视图；协作中 → 仅退出入口
+  // （Phase 9：加入入口全部收敛到邀请落地页，面板不再提供输码加入）
+  // 2026-08-29：移除面板内部 Tabs——原「发起协作/加入协作」双 Tab 收敛后仅剩单标签，
+  // 且画布内本面板已嵌入版本历史抽屉的「协作」Tab，再包一层 Tabs 会形成两层 Tab 条
   const isGuestExpired = status === 'expired' && !isOwner;
 
-  const tabs = isOwner
-    ? [
-        {
-          key: 'manage',
-          label: t('collab.createRoom'),
-          children: status === 'active' ? renderManagePanel() : renderStartPanel(),
-        },
-      ]
-    : [
-        {
-          key: 'exit',
-          label: t('collab.exitCollaboration'),
-          children: renderExitCard(),
-        },
-      ];
+  return (
+    <>
+      {isGuestExpired
+        ? renderExpiredView()
+        : isOwner
+          ? status === 'active'
+            ? renderManagePanel()
+            : renderStartPanel()
+          : renderExitCard()}
+    </>
+  );
+}
 
+/**
+ * CollaborationModal - 协作管理弹窗（统一组件，Modal 外壳）
+ *
+ * 画布外（主页「发起协作 / 协作详情」）使用；画布内已并入版本历史抽屉的
+ * 「协作」Tab（CollaborationPanel），不再单独弹出 Modal。
+ */
+export function CollaborationModal({
+  open,
+  canvasId,
+  onClose,
+  theme,
+}: CollaborationModalProps): React.ReactElement {
+  const { t } = useTranslation();
   return (
     <Modal
       open={open}
@@ -834,19 +844,7 @@ export function CollaborationModal({
         },
       }}
     >
-      {isGuestExpired ? (
-        renderExpiredView()
-      ) : isOwner ? (
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          style={{ marginBottom: 0 }}
-          items={tabs}
-        />
-      ) : (
-        // 参与者仅一个退出入口,不再用 Tabs 包裹(少一步 tab 点击)
-        renderExitCard()
-      )}
+      <CollaborationPanel canvasId={canvasId} onClose={onClose} theme={theme} />
     </Modal>
   );
 }

@@ -403,6 +403,8 @@
     "delete": "削除",
     "export": "エクスポート",
     "add": "追加",
+    "edit": "編集",
+    "exitEdit": "編集を終了",
     "publicPrompts": "公開プロンプト",
     "publicPromptsSectionTitle": "公開プロンプト",
     "viewAllPrompts": "すべて見る",
@@ -721,6 +723,11 @@
     "zoomOut": "縮小",
     "fitScreen": "画面に合わせる",
     "scaleTo": "スケール"
+  },
+  "canvasTab": {
+    "canvas": "キャンバス",
+    "close": "タブを閉じる",
+    "script": "脚本"
   },
   "toolsDock": {
     "tool": "ツール",
@@ -1323,8 +1330,6 @@
     "contentPlaceholder": "プロンプト内容を入力",
     "category": "カテゴリ",
     "generationMode": "生成モード",
-    "modeTxt2Img": "テキストから画像",
-    "modeImg2Img": "画像から画像",
     "categoryRole": "キャラクター",
     "categoryScene": "シーン",
     "categoryStyle": "スタイル",
@@ -1364,6 +1369,7 @@
     "edit": "編集",
     "cancel": "キャンセル",
     "titleLabel": "タイトル",
+    "tags": "タグ",
     "note": "メモ",
     "notePlaceholder": "メモや説明を追加",
     "imagesCount": "{{count}} 枚",
@@ -2017,14 +2023,14 @@
     "continueEditing": "編集を続ける"
   },
   "promptChain": {
-    "modeTxt2Img": "テキストから画像",
-    "modeImg2Img": "画像から画像",
     "reference": "参照画像",
     "output": "生成画像",
     "promptNode": "プロンプト",
     "emptyPrompt": "（プロンプト内容が空です）",
     "noReference": "参照画像なし",
     "noOutput": "生成画像が未登録",
+    "addReference": "参照画像を追加",
+    "addOutput": "生成画像を追加",
     "tapToExpand": "クリックで展開",
     "addTag": "+ タグ",
     "pinAddInput": "入力画像を追加（参照画像）",

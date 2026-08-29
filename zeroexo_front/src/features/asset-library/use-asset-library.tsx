@@ -12,7 +12,7 @@ import { Package, FileText, BookOpen, Layers } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { useAssets } from '@/features/asset-picker/use-assets.js';
-import { addAssets as storeAddAssets, upsertAsset } from '@/features/asset-picker/asset-store.js';
+import { addAssets as storeAddAssets, upsertAsset, type UpdateAssetInput } from '@/features/asset-picker/asset-store.js';
 import { onAssetCreated } from '@/services/sync/sync-service.js';
 import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
@@ -145,6 +145,8 @@ export interface UseAssetLibraryReturn {
   setScanningMessage: (msg: string) => void;
   setPromptViewId: (id: string | null) => void;
   setAssetDetail: (detail: any) => void;
+  /** 更新资产（文本类资产编辑正文后保存） */
+  updateAsset: (id: string, patch: UpdateAssetInput) => Promise<void>;
   setPromptCreateOpen: (open: boolean) => void;
   setPromptCreateId: (id: string | undefined) => void;
 }
@@ -943,6 +945,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     setScanningMessage,
     setPromptViewId,
     setAssetDetail,
+    updateAsset,
     setPromptCreateOpen,
     setPromptCreateId,
   };

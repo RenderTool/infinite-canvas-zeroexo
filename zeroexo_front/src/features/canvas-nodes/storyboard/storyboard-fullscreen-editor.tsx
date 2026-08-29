@@ -43,6 +43,8 @@ export interface PmRefItem {
 export interface StoryboardFullscreenEditorProps {
   open: boolean;
   onClose: () => void;
+  /** Plan#50:内嵌模式(画布顶部页签内显示)——容器 absolute 填满父级、不 createPortal;关闭按钮隐藏 */
+  embedded?: boolean;
   /** 当前集分镜列表 */
   shots: Shot[];
   onUpdateShot: (shotId: string, patch: Partial<Shot>) => void;
@@ -80,6 +82,7 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
   open, onClose, shots, onUpdateShot, onAddShot, onDeleteShot, episodes, activeEpisodeId, onEpisodeChange, pmItems,
   entities, aiSubjects, subjectStatesByEntity, pmItemsByEntity, status, progress, nodeId, linkedScript, activeEpisode,
   scriptNodes = [], scriptOptionLabel, onAssociateScript,
+  embedded = false,
 }: StoryboardFullscreenEditorProps): ReactElement | null {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -329,11 +332,13 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
 
   if (!open) return null;
 
-  return createPortal(
-    // 真全屏覆盖层:自制 fixed overlay(Z_INDEX.FULLSCREEN=30000),antd 弹层(Dropdown/Tooltip/Modal)
+  // Plan#50:embedded(页签内嵌)——不 createPortal、容器 absolute 填满父级(页签内容层),
+  // 由调用方(分镜节点)自行 portal 到页签挂载点;非 embedded 保持原全屏覆盖形态。
+  const overlay = (
+    // 真全屏覆盖层:自制 overlay(Z_INDEX.FULLSCREEN=30000),antd 弹层(Dropdown/Tooltip/Modal)
     // 由 ConfigProvider 提升到 40000,保证景别取景器等弹层显示在全屏之上
     <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
-    <div style={overlayStyle(pageBg)}>
+    <div style={overlayStyle(pageBg, embedded)}>
       {/* 事件阻断：全屏挂载于 body，不阻断则事件冒泡至画布平移/缩放 */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
@@ -410,11 +415,14 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
             <Trash2 size={13} />
             {t('storyboardFullscreenEditor.deleteShot')}
           </button>
-          <Tooltip title={t('common.close')}>
-            <button type="button" {...ghostHoverHandlers(theme)} onClick={onClose} style={modalIconBtnStyle(theme, false)}>
-              <X size={15} />
-            </button>
-          </Tooltip>
+          {/* Plan#50:embedded(页签)模式隐藏自带关闭按钮——统一由页签 X 关闭 */}
+          {!embedded && (
+            <Tooltip title={t('common.close')}>
+              <button type="button" {...ghostHoverHandlers(theme)} onClick={onClose} style={modalIconBtnStyle(theme, false)}>
+                <X size={15} />
+              </button>
+            </Tooltip>
+          )}
         </div>
 
         {viewMode === 'table' ? (
@@ -761,16 +769,19 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
         onConfirm={(value) => { if (pickerShotId) onUpdateShot(pickerShotId, { shotType: value as any }); setPickerOpen(false); setPickerShotId(null); }}
       />
     </div>
-    </ConfigProvider>,
-    document.body,
+    </ConfigProvider>
   );
+
+  if (embedded) return overlay;
+  return createPortal(overlay, document.body);
 });
 
 /** 全屏覆盖层样式:铺满视口 + 顶部层级 */
-const overlayStyle = (background: string): React.CSSProperties => ({
-  position: 'fixed',
+const overlayStyle = (background: string, embedded = false): React.CSSProperties => ({
+  // Plan#50:embedded(页签内嵌)用 absolute 填满父容器;否则原全屏 fixed 覆盖
+  position: embedded ? 'absolute' : 'fixed',
   inset: 0,
-  zIndex: Z_INDEX.FULLSCREEN,
+  zIndex: embedded ? undefined : Z_INDEX.FULLSCREEN,
   display: 'flex',
   flexDirection: 'column',
   background,

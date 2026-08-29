@@ -62,6 +62,11 @@ export interface ScriptFullscreenEditorProps {
   onIsSampleChange?: (next: boolean) => void;
   /** 自定义导入点击回调（外部提供时使用外部导入流程，否则使用内置文件输入） */
   onImportClick?: () => void;
+  /**
+   * Plan#50:内嵌模式（画布顶部页签内显示）——容器改 absolute 填满父级、不做 createPortal。
+   * 关闭按钮在 embedded 下隐藏（由页签的 X 关闭），避免双关闭入口。
+   */
+  embedded?: boolean;
 }
 
 const SAMPLE_HTML = serializeScriptLines(buildSampleLines());
@@ -89,6 +94,7 @@ export function ScriptFullscreenEditor({
   isSample = false,
   onIsSampleChange,
   onImportClick,
+  embedded = false,
 }: ScriptFullscreenEditorProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -400,11 +406,13 @@ export function ScriptFullscreenEditor({
 
   if (!open) return null;
 
-  return createPortal(
+  // Plan#50:embedded 模式(页签内嵌)——不 createPortal、容器 absolute 填满父级(页签内容层),
+  // 由调用方(剧本节点)自行 portal 到页签挂载点;非 embedded 保持原全屏覆盖形态。
+  const overlay = (
     // 局部提升 antd 弹层基准:自制 overlay(Z_INDEX.FULLSCREEN=30000)之上的 antd 弹层
     // (Dropdown/Tooltip/Modal)由 token 自动分配 40000,替代手动 zIndex/overlayStyle
     <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
-    <div style={overlayStyle(theme)}>
+    <div style={overlayStyle(theme, embedded)}>
       {/* ===== 顶部 header ===== */}
       <div style={headerStyle(cardBorder, theme)}>
         {/* 左侧：工具按钮 */}
@@ -505,13 +513,16 @@ export function ScriptFullscreenEditor({
               />
             </span>
           </Tooltip>
-          <Button
-            type="text"
-            size="small"
-            icon={<X size={15} />}
-            onClick={onClose}
-            style={{ ...toolBtnStyle, color: textColor }}
-          />
+          {/* Plan#50:embedded(页签)模式隐藏自带关闭按钮——关闭统一走页签 X */}
+          {!embedded && (
+            <Button
+              type="text"
+              size="small"
+              icon={<X size={15} />}
+              onClick={onClose}
+              style={{ ...toolBtnStyle, color: textColor }}
+            />
+          )}
         </div>
       </div>
 
@@ -619,9 +630,11 @@ export function ScriptFullscreenEditor({
         />
       </Modal>
     </div>
-    </ConfigProvider>,
-    document.body,
+    </ConfigProvider>
   );
+
+  if (embedded) return overlay;
+  return createPortal(overlay, document.body);
 }
 
 // ===== Styles =====
@@ -630,8 +643,14 @@ const toolBtnStyle: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12,
 };
 
-const overlayStyle = (theme: ReturnType<typeof useTheme>['theme']): React.CSSProperties => ({
-  position: 'fixed', inset: 0, zIndex: Z_INDEX.FULLSCREEN,
+const overlayStyle = (
+  theme: ReturnType<typeof useTheme>['theme'],
+  embedded = false,
+): React.CSSProperties => ({
+  // Plan#50:embedded(页签内嵌)用 absolute 填满父容器;否则原全屏 fixed 覆盖
+  position: embedded ? 'absolute' : 'fixed',
+  inset: 0,
+  zIndex: embedded ? undefined : Z_INDEX.FULLSCREEN,
   display: 'flex', flexDirection: 'column',
   background: theme.toolbar.editorPaper,
 });

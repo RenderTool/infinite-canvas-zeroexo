@@ -13,7 +13,7 @@
 
 import { useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { Home, Plus, Copy, Trash2, LogOut, User, BookOpen, Keyboard } from 'lucide-react';
+import { Home, Plus, Copy, Trash2, LogOut, User, BookOpen, Keyboard, Languages, SquareMousePointer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
@@ -32,6 +32,8 @@ export interface CanvasMenuProps {
   onDeleteProject: () => void;
   /** 快捷键注册表(征集 #87 验收轮三:快捷键入口收入本下拉后透传给弹窗) */
   keyboardShortcuts?: readonly ShortcutEntry[];
+  /** 打开设置弹窗(Plan#50 T13:配置入口自顶栏收入 LOGO 下拉) */
+  onOpenSettings?: () => void;
 }
 
 export function CanvasMenu({
@@ -41,8 +43,9 @@ export function CanvasMenu({
   onCopyProject,
   onDeleteProject,
   keyboardShortcuts,
+  onOpenSettings,
 }: CanvasMenuProps): React.ReactElement {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user, isAuthenticated, logout } = useAuth();
   const readOnly = useReadOnly();
   const [open, setOpen] = useState(false);
@@ -57,7 +60,11 @@ export function CanvasMenu({
     await logout();
   }, [logout]);
 
+  // 分组分隔线(Plan#50 T13:虚线分组)
+  const dashedDivider: NonNullable<MenuProps['items']>[number] = { type: 'divider' as const };
+
   const items: MenuProps['items'] = [
+    // ── 项目组 ──
     { key: 'home', label: t('menu.backHome'), icon: <Home size={14} />, onClick: handleHome },
     { key: 'new', label: t('menu.newProject'), icon: <Plus size={14} />, onClick: handleNew },
     // 只读隐藏拷贝/删除（2026-08-25 系统性只读防护）：拷贝项目=创建副本、删除=销毁画布，均属项目级写操作
@@ -67,13 +74,28 @@ export function CanvasMenu({
           { key: 'delete', label: t('menu.deleteCanvas'), icon: <Trash2 size={14} />, danger: true, onClick: handleDelete },
         ]
       : []),
+    dashedDivider,
+    // ── 视图组(Plan#50 T13:外观已移回顶栏高频入口,语言/配置自顶栏收入本下拉) ──
+    {
+      key: 'language',
+      label: t('language.label'),
+      icon: <Languages size={14} />,
+      children: [
+        { key: 'lang-zh', label: '中文', onClick: () => { setOpen(false); void i18n.changeLanguage('zh-CN'); } },
+        { key: 'lang-en', label: 'English', onClick: () => { setOpen(false); void i18n.changeLanguage('en'); } },
+        { key: 'lang-ja', label: '日本語', onClick: () => { setOpen(false); void i18n.changeLanguage('ja'); } },
+      ],
+    },
+    { key: 'settings', label: t('settings.title'), icon: <SquareMousePointer size={14} />, onClick: () => { setOpen(false); onOpenSettings?.(); } },
+    dashedDivider,
+    // ── 帮助组 ──
     // 征集 #87 验收轮三:文档/快捷键自顶栏独立按钮收入本下拉(浏览类入口,只读也可见)
     { key: 'docs', label: t('topbar.docsComingSoon'), icon: <BookOpen size={14} />, onClick: () => { setOpen(false); } },
     { key: 'shortcuts', label: t('menu.shortcuts'), icon: <Keyboard size={14} />, onClick: () => { setOpen(false); setShortcutsOpen(true); } },
-    // 底部区域: 登录态显示账号信息与退出登录
+    // ── 账号组(登录态) ──
     ...(isAuthenticated && user
       ? [
-          { type: 'divider' as const },
+          dashedDivider,
           { key: 'user', label: user.username, icon: <User size={14} />, disabled: true },
           { key: 'logout', label: t('auth.logout'), icon: <LogOut size={14} />, danger: true, onClick: handleLogout },
         ]
@@ -82,10 +104,17 @@ export function CanvasMenu({
 
   return (
     <>
+      {/* 虚线分组(Plan#50 T13):覆盖 antd divider 为虚线 */}
+      <style>{`
+        .canvas-menu-dropdown .ant-dropdown-menu-item-divider {
+          border-top: 1px dashed ${theme.mode === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'} !important;
+          margin: 4px 8px;
+        }
+      `}</style>
       <Dropdown
         open={open}
         onOpenChange={setOpen}
-        menu={{ items }}
+        menu={{ items, className: 'canvas-menu-dropdown' }}
       >
         <button
           type="button"

@@ -115,9 +115,9 @@ ZeroExo 是一个**全栈项目**。前端 React 画布是核心产品，后端 
 |---|---|---|
 | ![剧本编辑页](docs/screenshots/frontend/前端剧本编辑页.webp) | ![剧本和分镜](docs/screenshots/frontend/前端剧本和分镜.webp) | ![分镜编辑页](docs/screenshots/frontend/前端分镜编辑页.webp) |
 
-| 提示词库 | 素材库 | 画布管理 |
+| 提示词编辑页 | 素材库 | 画布管理 |
 |---|---|---|
-| ![提示词](docs/screenshots/frontend/前端提示词.webp) | ![素材库管理页](docs/screenshots/frontend/前端素材库管理页.webp) | ![画布管理页](docs/screenshots/frontend/前端画布管理页.webp) |
+| ![提示词编辑页](docs/screenshots/frontend/前端提示词编辑页.jpg) | ![素材库管理页](docs/screenshots/frontend/前端素材库管理页.webp) | ![画布管理页](docs/screenshots/frontend/前端画布管理页.webp) |
 
 ### 管理后台
 

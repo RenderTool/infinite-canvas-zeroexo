@@ -30,10 +30,10 @@
  *   role 变更后调用方数据驱动，节点自动移列）
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image as ImageIcon, Sparkles, ImagePlus, Star, Copy, ChevronDown, ChevronUp, X, ArrowLeft, ArrowRight } from 'lucide-react';
+import { FileText, Image as ImageIcon, ImagePlus, Star, Copy, ChevronDown, ChevronUp, X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { useImagePanZoom, ZoomToolbar } from '@/shared/components/image-viewer.js';
@@ -61,6 +61,8 @@ const FOCUS_PADDING = 0.82;
 export interface PromptChainImage {
   storageKey: string;
   role: string;
+  /** 封面标记(独立布尔,2026-08-29:不改角色,仅星标填充) */
+  isCover?: boolean;
   title?: string;
 }
 
@@ -75,12 +77,6 @@ export interface PromptChainCanvasProps {
   localPreviews?: Record<string, string>;
   /** 标签列表（征集 #87：从侧边表单迁入画布左上角展示/编辑） */
   tags?: string[];
-  /** 只读态：标签仅展示不可增删（编辑态可增删） */
-  readOnly?: boolean;
-  /** 编辑态新增标签（由调用方做去重/上限校验） */
-  onAddTag?: (tag: string) => void;
-  /** 编辑态移除标签 */
-  onRemoveTag?: (tag: string) => void;
   /** 复制提示词正文（征集 #87：提示词节点复制按钮，仅正文） */
   onCopyPrompt?: () => void;
   /** 编辑态：提示词节点展开后正文可直接编辑（征集 #89：右侧详情面板移除，内容编辑迁入画布） */
@@ -97,6 +93,12 @@ export interface PromptChainCanvasProps {
   onToggleImageRole?: (storageKey: string) => void;
   /** 编辑态：移除图片 */
   onRemoveImage?: (storageKey: string) => void;
+  /**
+   * 编辑态控件（标题/分类/备注）以浮层形式嵌入画布底部（2026-08-29）。
+   * 不占布局高度 —— 浏览器高度变化时画布独占全部空间并自适应缩放，
+   * 编辑条不再挤压画布、也不会被容器裁剪。事件已隔离，不会触发画布平移。
+   */
+  editOverlay?: ReactNode;
   style?: CSSProperties;
 }
 
@@ -163,23 +165,25 @@ function ChainImageCard({ storageKey, label, isDark, x, y, localPreview, isCover
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{label}</span>
         {isCover && <Star size={11} fill="currentColor" style={{ flexShrink: 0 }} />}
       </div>
-      {/* 右上角操作钮组（征集 #90：编辑态固定常显；事件全隔离防触发画布平移/节点聚焦） */}
+      {/* 右上角操作钮组（征集 #90：编辑态固定常显；事件全隔离防触发画布平移/节点聚焦）
+          2026-08-29 修正:封面节点按钮与其他节点一致(设封面/切角色/删除都显示),
+          封面仅是星标填充(isCover),不隐藏任何按钮 */}
       {editable && (
         <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 3, zIndex: 2 }}>
-          {!isCover && onSetCover && (
+          {onSetCover && (
             <button
               type="button"
-              title={t('promptCreate.setCover', '设为封面')}
+              title={isCover ? t('promptCreate.setCover', '设为封面') : t('promptCreate.setCover', '设为封面')}
               onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onSetCover(); }}
-              style={actionBtnStyle}
+              style={{ ...actionBtnStyle, color: isCover ? '#ffd166' : '#ffffff' }}
             >
-              <Star size={10} />
+              <Star size={10} fill={isCover ? 'currentColor' : 'none'} />
             </button>
           )}
-          {!isCover && onToggleRole && (
+          {onToggleRole && (
             <button
               type="button"
               title={columnRole === 'reference' ? t('promptCreate.markOutput', '标记为输出（生成图）') : t('promptCreate.markInput', '标记为输入（参考图）')}
@@ -211,54 +215,54 @@ function ChainImageCard({ storageKey, label, isDark, x, y, localPreview, isCover
   );
 }
 
+// 2026-08-29：链路 Pin（ChainPin）已移除 —— 加图入口改为列末尾显式的「添加xx图」卡片，
+// Pin 太隐蔽，用户普遍不知道可以点击加图。
+
 /**
- * 链路 Pin（征集 #90）：视觉对齐主画布 pin-view 契约（14px 圆环 + 2px 边框 + 内嵌十字 + 外发光 + 主题色），
- * 挂在提示词节点左右边缘中点；点击触发调用方加图（本画布无连线目标端，不做拖拽连线）。
+ * 占位 / 添加节点（2026-08-29 改造）
+ * - 查看态：虚线灰卡，文案「暂无参考图 / 暂未录入生成图」，不可交互（忠实呈现链路缺口）
+ * - 编辑态：可点击的「添加参考图 / 添加生成图」，点击即录入素材并追加到列末尾，
+ *   占位格随之后移，用户可连续点击继续追加 —— 很多用户不知道旧版 Pin 能加图，
+ *   改为显式的「添加」卡片后入口不再隐藏。
  */
-function ChainPin({ color, title, onClick, style }: { color: string; title: string; onClick: () => void; style: CSSProperties }): React.ReactElement {
+function PlaceholderCard({ label, isDark, x, y, clickable, onClick }: {
+  label: string; isDark: boolean; x: number; y: number;
+  clickable?: boolean; onClick?: () => void;
+}): React.ReactElement {
+  const [hovered, setHovered] = useState(false);
+  const active = clickable && hovered;
   return (
-    <button
-      type="button"
-      title={title}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+    <div
+      onMouseEnter={() => { if (clickable) setHovered(true); }}
+      onMouseLeave={() => { if (clickable) setHovered(false); }}
+      onClick={(e) => { if (!clickable) return; e.stopPropagation(); onClick?.(); }}
       style={{
-        position: 'absolute', width: 16, height: 16, borderRadius: '50%', padding: 0,
-        border: `2px solid ${color}`, background: 'transparent',
-        boxShadow: `0 0 3px ${color}44`, cursor: 'crosshair',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 3, pointerEvents: 'auto',
-        ...style,
+        position: 'absolute', left: x, top: y, width: CARD_W, height: IMG_NODE_H,
+        borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+        border: `1.5px dashed ${active
+          ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(28,25,23,0.55)')
+          : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)')}`,
+        background: active ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : 'transparent',
+        color: active
+          ? (isDark ? 'rgba(255,255,255,0.85)' : 'rgba(28,25,23,0.8)')
+          : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(28,25,23,0.35)'),
+        fontSize: 11,
+        pointerEvents: clickable ? 'auto' : 'none',
+        cursor: clickable ? 'pointer' : 'default',
+        transition: 'all 0.15s',
       }}
     >
-      <svg width="8" height="8" viewBox="0 0 8 8">
-        <line x1="4" y1="1" x2="4" y2="7" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
-        <line x1="1" y1="4" x2="7" y2="4" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
-      </svg>
-    </button>
-  );
-}
-
-/** 虚线占位节点（无参考图/无生成图时提示链路缺口） */
-function PlaceholderCard({ label, isDark, x, y }: { label: string; isDark: boolean; x: number; y: number }): React.ReactElement {
-  return (
-    <div style={{
-      position: 'absolute', left: x, top: y, width: CARD_W, height: IMG_NODE_H,
-      borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
-      border: `1.5px dashed ${isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}`,
-      color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(28,25,23,0.35)',
-      fontSize: 11, pointerEvents: 'none',
-    }}>
       <ImagePlus size={20} strokeWidth={1.5} />
       <span>{label}</span>
     </div>
   );
 }
 
-/** 左上角标签徽章（征集 #87：标签迁入画布，紧邻文生图徽章；只读态仅展示，编辑态可增删） */
-function TagsOverlay({ tags, readOnly, isDark, onAddTag, onRemoveTag }: {
+/**
+ * 标签徽章组件（征集 #87 / 2026-08-29 改造）
+ * 对外导出：编辑浮层用它做标签编辑，画布左上角用它做纯展示（readOnly）。
+ */
+export function TagsOverlay({ tags, readOnly, isDark, onAddTag, onRemoveTag }: {
   tags: string[]; readOnly: boolean; isDark: boolean;
   onAddTag?: (tag: string) => void; onRemoveTag?: (tag: string) => void;
 }): React.ReactElement | null {
@@ -306,7 +310,8 @@ function TagsOverlay({ tags, readOnly, isDark, onAddTag, onRemoveTag }: {
           placeholder={t('promptChain.addTag', '+ 标签')}
           style={{
             ...chipStyle, pointerEvents: 'auto', border: 'none', outline: 'none',
-            width: 72, color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(28,25,23,0.72)',
+            // 标签区占比提升后，输入框同步加宽，便于输入较长标签
+            width: 88, color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(28,25,23,0.72)',
           }}
         />
       )}
@@ -314,71 +319,104 @@ function TagsOverlay({ tags, readOnly, isDark, onAddTag, onRemoveTag }: {
   );
 }
 
-export function PromptChainCanvas({ content, mode, images, localPreviews, tags, readOnly = true, onAddTag, onRemoveTag, onCopyPrompt, editable = false, onContentChange, contentMaxLength, onAddImage, onSetCover, onToggleImageRole, onRemoveImage, style }: PromptChainCanvasProps): React.ReactElement {
+// 2026-08-29：标签编辑入口下沉到画布底部编辑浮层（editOverlay），
+// 画布左上角标签改为纯展示，故 readOnly / onAddTag / onRemoveTag 不再需要。
+export function PromptChainCanvas({ content, images, localPreviews, tags, onCopyPrompt, editable = false, onContentChange, contentMaxLength, onAddImage, onSetCover, onToggleImageRole, onRemoveImage, editOverlay, style }: PromptChainCanvasProps): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
-  // 征集 #90：Pin 主题色（对齐主画布注入层 theme.node.pinDefaultColor：暗 #a8a29e / 亮 #78716c）
-  const pinColor = isDark ? '#a8a29e' : '#78716c';
   // 征集 #78 验收拍板:无论缩小还是放大,视口都支持拖拽平移(节点本身锁定不可动)
   const panZoom = useImagePanZoom({ panAlways: true });
   const containerElRef = useRef<HTMLDivElement | null>(null);
+  const editOverlayRef = useRef<HTMLDivElement | null>(null);
 
   // 布局恒按图生图式展示(征集 #78 验收拍板):参考图列始终在位,无图时占位提示;
   // mode 字段仅影响徽章文案(存量/公共提示词默认文生图)
+  // 2026-08-29 模型修正:封面是独立 isCover 标记,不改变角色——参考/生成列只按 role 过滤,
+  // 封面图留在原列带星标(不再因设封面而跳到输出列)
   const references = useMemo(() => images.filter((i) => i.role === 'reference'), [images]);
-  // 输出列 = output + 封面(封面本质是选中的生成图,归入输出列带星标 —— 修复"第一张封面图不上画布"验收 bug)
-  const outputs = useMemo(() => images.filter((i) => i.role === 'output' || i.role === 'cover'), [images]);
+  const outputs = useMemo(() => images.filter((i) => i.role === 'output'), [images]);
 
-  // 列排布：有数据按数据；无数据放一个占位格（忠实呈现链路缺口）
-  const refCount = Math.max(references.length, 1);
-  const outCount = Math.max(outputs.length, 1);
+  // 列排布（2026-08-29 改造）：
+  // - 查看态：空列放一个占位格（忠实呈现链路缺口）
+  // - 编辑态：列末尾恒留一个「添加」格（可点击连续追加素材），有图时也保留
+  const refCount = editable ? references.length + 1 : Math.max(references.length, 1);
+  const outCount = editable ? outputs.length + 1 : Math.max(outputs.length, 1);
   const refYs = columnYs(refCount, IMG_NODE_H);
   const outYs = columnYs(outCount, IMG_NODE_H);
   // 提示词节点默认收起(用户验收反馈:展开的大文本块碍眼),点击卡片展开/点标题栏收起;
   // 连线锚点恒为 CENTER_Y,收起/展开不改变链路几何(仅卡片自身垂直居中)
   const [promptExpanded, setPromptExpanded] = useState(false);
-  // 征集 #90：编辑态 hover 提示词节点 → 左右 Pin 显现（与主画布「hover 才显示 Pin」契约一致）
-  const [promptHovered, setPromptHovered] = useState(false);
   const promptH = promptExpanded ? PROMPT_H : PROMPT_COLLAPSED_H;
   const promptY = CENTER_Y - promptH / 2;
   const promptText = content.trim();
 
   // 连线（纯几何计算，节点位置恒定）
+  // 2026-08-29 修复「无参考图时链路断开」：原实现按 references 实际条数遍历，
+  // 空列时一条线都不画 → 占位节点与提示词节点之间没有连线。
+  // 改为按列槽位（含占位/添加格）遍历，保证占位节点同样接入链路。
   const edges = useMemo(() => {
     const list: Array<{ d: string; key: string }> = [];
-    references.forEach((_, i) => {
+    for (let i = 0; i < refCount; i++) {
       const y = refYs[i];
-      if (y === undefined) return;
+      if (y === undefined) continue;
       list.push({ key: `ref-${i}`, d: edgePath(REFS_X + CARD_W, y + IMG_NODE_H / 2, PROMPT_X, CENTER_Y) });
-    });
-    outYs.forEach((y) => {
-      list.push({ key: `out-${y}`, d: edgePath(PROMPT_X + PROMPT_W, CENTER_Y, OUTS_X, y + IMG_NODE_H / 2) });
-    });
+    }
+    for (let i = 0; i < outCount; i++) {
+      const y = outYs[i];
+      if (y === undefined) continue;
+      list.push({ key: `out-${i}`, d: edgePath(PROMPT_X + PROMPT_W, CENTER_Y, OUTS_X, y + IMG_NODE_H / 2) });
+    }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [references.length, outCount]);
+  }, [refCount, outCount]);
 
-  // 初始适配：内容超容器时按 0.25 步进缩到放得下（复用工具条同款缩放通道）
-  useEffect(() => {
+  const hasEditOverlay = !!editOverlay;
+
+  // 适配容器：内容超容器时按 0.25 步进缩到放得下（复用工具条同款缩放通道）
+  // 2026-08-29 修复「改变高度后编辑模式内容看不到」：原实现仅在挂载时执行一次，
+  // 容器尺寸变化(窗口 resize/modal 高度调整)后缩放与偏移不再匹配新视口，内容被挤出画布。
+  // 改为通过 ResizeObserver 监听容器尺寸，变化即先复位再重新适配居中。
+  // 编辑态额外为底部浮层预留高度，避免链路节点被浮层遮挡。
+  const fitToContainer = useCallback(() => {
     const el = containerElRef.current;
     if (!el) return;
     const cw = el.clientWidth;
     const ch = el.clientHeight;
     if (cw <= 0 || ch <= 0) return;
-    const needed = Math.min((cw - 48) / WORLD_W, (ch - 48) / WORLD_H);
+    panZoom.reset();
+    const bottomInset = hasEditOverlay ? 56 : 0;
+    const needed = Math.min((cw - 48) / WORLD_W, (ch - 48 - bottomInset) / WORLD_H);
     if (needed >= 1) return;
     const target = Math.max(needed, 0.25);
     const steps = Math.min(Math.ceil((1 - target) / 0.25), 4);
     for (let i = 0; i < steps; i++) panZoom.zoomOut();
+    // 缩放后重新居中：世界层在容器 flex 居中，缩放原点为中心，无需额外偏移
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasEditOverlay]);
 
-  // 模式徽章文案(仅展示用:布局恒为图生图式,存量/公共默认文生图)
-  const modeLabel = mode === 'img2img'
-    ? t('promptChain.modeImg2Img', '图生图')
-    : t('promptChain.modeTxt2Img', '文生图');
+  useEffect(() => {
+    const el = containerElRef.current;
+    if (!el) return;
+    fitToContainer();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => fitToContainer());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitToContainer]);
 
+  // 编辑浮层内的滚轮必须拦在原生阶段：画布的 wheel 监听是容器上的原生监听，
+  // React 合成事件 stopPropagation 拦不住它，会导致在备注/标题上滚动时误缩放画布。
+  useEffect(() => {
+    if (!hasEditOverlay) return;
+    const el = editOverlayRef.current;
+    if (!el) return;
+    const stopWheel = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener('wheel', stopWheel);
+    return () => el.removeEventListener('wheel', stopWheel);
+  }, [hasEditOverlay]);
+
+  // 2026-08-29:模式徽章(文生图/图生图)已移除,仅保留标签
   return (
     <div
       ref={(el) => {
@@ -407,26 +445,39 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, tags, 
           ))}
         </svg>
 
-        {/* 参考图列（恒显示；无图时占位提示） */}
-        {references.length === 0
-          ? <PlaceholderCard label={t('promptChain.noReference', '暂无参考图')} isDark={isDark} x={REFS_X} y={refYs[0] ?? CENTER_Y - IMG_NODE_H / 2} />
-          : references.map((img, i) => (
-            <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
-              label={`${t('promptChain.reference', '参考图')} ${i + 1}`}
-              isDark={isDark} x={REFS_X} y={refYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
-              columnRole="reference"
-              editable={editable}
-              onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
-              onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
-              onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
-              onFocus={() => panZoom.focusOnWorldRect({ x: REFS_X, y: refYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
-          ))}
+        {/* 参考图列：真实图在前，末尾追加「添加参考图」格（编辑态可点击连续追加） */}
+        {references.map((img, i) => (
+          <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
+            label={`${t('promptChain.reference', '参考图')} ${i + 1}`}
+            isDark={isDark} x={REFS_X} y={refYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
+            isCover={!!img.isCover}
+            columnRole="reference"
+            editable={editable}
+            onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
+            onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
+            onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
+            onFocus={() => panZoom.focusOnWorldRect({ x: REFS_X, y: refYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
+        ))}
+        {Array.from({ length: refCount - references.length }, (_, k) => {
+          const idx = references.length + k;
+          const y = refYs[idx];
+          if (y === undefined) return null;
+          return (
+            <PlaceholderCard
+              key={`ref-add-${idx}`}
+              label={editable ? t('promptChain.addReference', '添加参考图') : t('promptChain.noReference', '暂无参考图')}
+              isDark={isDark}
+              x={REFS_X}
+              y={y}
+              clickable={editable && !!onAddImage}
+              onClick={editable && onAddImage ? () => onAddImage('reference') : undefined}
+            />
+          );
+        })}
 
         {/* 提示词节点（仿文本节点卡；保留边框；默认收起小卡,点击展开；新增复制按钮 + 双击聚焦） */}
-        {/* hover 包装层（征集 #90）：卡片与左右 Pin 同组——指针移到 Pin 上仍算 hover，Pin 不闪失 */}
+        {/* 2026-08-29：原 hover 包装层是为「Pin 同组防闪失」服务的，Pin 移除后不再需要 hover 状态 */}
         <div
-          onMouseEnter={() => setPromptHovered(true)}
-          onMouseLeave={() => setPromptHovered(false)}
           style={{ position: 'absolute', left: PROMPT_X, top: promptY, width: PROMPT_W, height: promptH, pointerEvents: 'none' }}
         >
         <div
@@ -526,62 +577,71 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, tags, 
             </div>
           )}
         </div>
-        {/* 左右 Pin（征集 #90）：编辑态 hover 显现——左=追加输入图（参考图列）/ 右=追加输出图（输出列） */}
-        {editable && onAddImage && promptHovered && (
-          <>
-            <ChainPin
-              color={pinColor}
-              title={t('promptChain.pinAddInput', '添加输入图（参考图）')}
-              onClick={() => onAddImage('reference')}
-              style={{ left: -8, top: '50%', transform: 'translateY(-50%)' }}
-            />
-            <ChainPin
-              color={pinColor}
-              title={t('promptChain.pinAddOutput', '添加输出图（生成图）')}
-              onClick={() => onAddImage('output')}
-              style={{ right: -8, top: '50%', transform: 'translateY(-50%)' }}
-            />
-          </>
-        )}
+        {/* 2026-08-29：提示词节点旁的左右 Pin 已移除 —— 加图入口改为列末尾显式的
+            「添加参考图 / 添加生成图」卡片（Pin 太隐蔽，用户不知道能点） */}
         </div>
 
-        {/* 生成图列（无图时占位提示） */}
-        {outputs.length === 0
-          ? <PlaceholderCard label={t('promptChain.noOutput', '暂未录入生成图')} isDark={isDark} x={OUTS_X} y={outYs[0] ?? CENTER_Y - IMG_NODE_H / 2} />
-          : outputs.map((img, i) => (
-            <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
-              label={`${t('promptChain.output', '生成图')} ${i + 1}`}
-              isDark={isDark} x={OUTS_X} y={outYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
-              isCover={img.role === 'cover'}
-              columnRole="output"
-              editable={editable}
-              onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
-              onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
-              onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
-              onFocus={() => panZoom.focusOnWorldRect({ x: OUTS_X, y: outYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
-          ))}
+        {/* 生成图列：真实图在前，末尾追加「添加生成图」格（编辑态可点击连续追加） */}
+        {outputs.map((img, i) => (
+          <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
+            label={`${t('promptChain.output', '生成图')} ${i + 1}`}
+            isDark={isDark} x={OUTS_X} y={outYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
+            isCover={!!img.isCover}
+            columnRole="output"
+            editable={editable}
+            onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
+            onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
+            onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
+            onFocus={() => panZoom.focusOnWorldRect({ x: OUTS_X, y: outYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
+        ))}
+        {Array.from({ length: outCount - outputs.length }, (_, k) => {
+          const idx = outputs.length + k;
+          const y = outYs[idx];
+          if (y === undefined) return null;
+          return (
+            <PlaceholderCard
+              key={`out-add-${idx}`}
+              label={editable ? t('promptChain.addOutput', '添加生成图') : t('promptChain.noOutput', '暂未录入生成图')}
+              isDark={isDark}
+              x={OUTS_X}
+              y={y}
+              clickable={editable && !!onAddImage}
+              onClick={editable && onAddImage ? () => onAddImage('output') : undefined}
+            />
+          );
+        })}
       </div>
 
-      {/* ===== 左上角：模式徽章 + 标签（征集 #87：标签迁入画布，紧邻文生图徽章） ===== */}
+      {/* ===== 左上角：标签（2026-08-29：改为纯展示 —— 标签编辑下沉到底部编辑浮层，
+           避免画布上的浮层又展示又编辑、与底部编辑条职责重叠） ===== */}
       <div style={{
         position: 'absolute', top: 10, left: 10, right: 60,
         display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, pointerEvents: 'none', zIndex: 2,
       }}>
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          padding: '3px 10px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
-          background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-          color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(28,25,23,0.7)',
-          backdropFilter: 'blur(6px)', pointerEvents: 'none',
-        }}>
-          <Sparkles size={11} />
-          {modeLabel}
-        </div>
-        <TagsOverlay tags={tags ?? []} readOnly={readOnly} isDark={isDark} onAddTag={onAddTag} onRemoveTag={onRemoveTag} />
+        <TagsOverlay tags={tags ?? []} readOnly isDark={isDark} />
       </div>
 
-      {/* ===== 竖排缩放工具条（沿用图片查看器右下角同款） ===== */}
-      <ZoomToolbar panZoom={panZoom} orientation="vertical" style={{ position: 'absolute', bottom: 10, right: 10 }} />
+      {/* ===== 竖排缩放工具条（2026-08-29：从右下角移至右上角，让出底部给编辑浮层） ===== */}
+      <ZoomToolbar panZoom={panZoom} orientation="vertical" style={{ position: 'absolute', top: 10, right: 10, zIndex: 3 }} />
+
+      {/* ===== 编辑态浮层（征集 #90 后续：编辑控件嵌入画布，不占布局高度） =====
+          绝对定位于画布底部，随画布尺寸自适应，不参与外层 flex 计算，
+          因此改变浏览器高度时既不会挤压画布、也不会被容器裁剪。 */}
+      {editOverlay && (
+        <div
+          ref={editOverlayRef}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            // right 留出右下角操作按钮（资产浏览器底部出血栏：取消/保存或编辑/副本/删除）的空间，
+            // 避免编辑条压在按钮上。编辑态按钮最多 2 个（约 74px），留 96px 安全。
+            position: 'absolute', left: 10, right: 96, bottom: 10, zIndex: 3,
+            pointerEvents: 'auto',
+          }}
+        >
+          {editOverlay}
+        </div>
+      )}
     </div>
   );
 }

@@ -409,8 +409,10 @@ model PromptImage {
   prompt     Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
   /// 关联的 Asset.storageKey
   storageKey String
-  /// reference(参考图) | result(结果图) | preview(预览)
+  /// reference(参考图/输入) | output(生成图/输出) —— 封面不再用 role 表达,见 isCover
   role       String   @default("reference")
+  /// 封面标记(2026-08-29 独立字段):封面不改变 reference/output 角色,仅星标填充
+  isCover    Boolean  @default(false)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
 

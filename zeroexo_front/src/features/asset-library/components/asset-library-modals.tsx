@@ -4,14 +4,17 @@
  * 从 asset-library-page.tsx 抽出所有 Modal/弹窗。
  */
 
-import { memo, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Input, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ContextMenu, AssetDetailViewer } from '@/shared/components/index.js';
+import type { AssetDetailData } from '@/shared/components/asset-detail-viewer.js';
 import { PromptViewer } from '@/shared/components/index.js';
-import { PromptCreatePage } from '../index.js';
+import { PromptCreatePage, type PromptCreatePageHandle } from '../index.js';
 import { ScriptFullscreenEditor } from '@/features/canvas-nodes/storyboard/script-fullscreen-editor.js';
 import { ScriptImportFlow } from '@/features/canvas-nodes/storyboard/components/script-import-flow.js';
 import { UploadQueueOverlay } from '@/features/upload-queue/index.js';
@@ -44,6 +47,8 @@ export interface AssetLibraryModalsProps {
   // 资源详情
   assetDetail: any;
   onAssetDetailClose: () => void;
+  /** 文本类资产保存正文（编辑模式启用后由底部出血栏「保存」触发） */
+  onAssetDetailSave?: (content: string) => Promise<void>;
 
   // 剧本编辑器
   scriptEditorOpen: boolean;
@@ -56,6 +61,10 @@ export interface AssetLibraryModalsProps {
   onScriptEditorEpisodesAndActiveChange: (eps: Episode[], activeId?: string) => void;
   onScriptEditorAddEpisode: () => void;
   onScriptEditorImportClick: () => void;
+  /** 剧本资产 id（Plan#50:页签幂等 key 用，画布抽屉内嵌模式必需） */
+  scriptAssetId?: string | null;
+  /** 画布抽屉内嵌（Plan#50:抽屉内剧本编辑器改为顶部页签呈现，而非全屏 Modal） */
+  embeddedInCanvas?: boolean;
 
   // 剧本导入
   scriptImportOpen: boolean;
@@ -87,8 +96,93 @@ export interface AssetLibraryModalsProps {
 export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetLibraryModalsProps): React.ReactElement {
   const { t } = useTranslation();
   const theme = props.theme;
-  const isDark = theme.mode === 'dark';
   const [promptTitle, setPromptTitle] = useState('');
+
+  // ===== 提示词新建/编辑：统一走资产浏览器框架（与图片/文档同 UI，尺寸一致）=====
+  const promptPageRef = useRef<PromptCreatePageHandle | null>(null);
+  const [promptEditing, setPromptEditing] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  // 打开时重置编辑态：新建直接进编辑，已有提示词先进查看
+  useEffect(() => {
+    if (props.promptCreateOpen) setPromptEditing(!props.promptCreateId);
+  }, [props.promptCreateOpen, props.promptCreateId]);
+
+  // 编辑态变更：进入编辑要交给页面内部记录快照（脏检查 / 取消回退依赖它）。
+  // 用 ref 守卫，避免内部 setViewMode 回调 → 再次触发本函数的死循环。
+  const promptEditingRef = useRef(false);
+  useEffect(() => { promptEditingRef.current = promptEditing; }, [promptEditing]);
+  const handlePromptEditingChange = useCallback((v: boolean) => {
+    if (promptEditingRef.current === v) return;
+    promptEditingRef.current = v;
+    if (v) promptPageRef.current?.enterEdit();
+    else promptPageRef.current?.cancelEdit();
+    setPromptEditing(v);
+  }, []);
+
+  const handlePromptSave = useCallback(async () => {
+    setPromptSaving(true);
+    try {
+      await promptPageRef.current?.save();
+      setPromptEditing(false);
+    } finally {
+      setPromptSaving(false);
+    }
+  }, []);
+
+  const handlePromptDuplicate = useCallback(async () => {
+    setPromptSaving(true);
+    try {
+      await promptPageRef.current?.duplicate();
+    } finally {
+      setPromptSaving(false);
+    }
+  }, []);
+
+  // ===== 文本类资产（text）：与提示词同款的「编辑 → 保存」语义 =====
+  const isTextAsset = props.assetDetail?.data?.kind === 'text';
+  const [textEditing, setTextEditing] = useState(false);
+  const [textSaving, setTextSaving] = useState(false);
+  const [textDraft, setTextDraft] = useState<string | null>(null);
+  // 打开/切换资产时重置编辑态与草稿
+  useEffect(() => {
+    setTextEditing(false);
+    setTextDraft(null);
+  }, [props.assetDetail?.id]);
+
+  const handleTextEditingChange = useCallback((v: boolean) => {
+    setTextEditing(v);
+    // 进入编辑时以当前正文作为草稿起点；退出时丢弃草稿
+    if (v) setTextDraft(props.assetDetail?.data?.content ?? '');
+    else setTextDraft(null);
+  }, [props.assetDetail]);
+
+  const handleTextSave = useCallback(async () => {
+    if (textDraft === null) { setTextEditing(false); return; }
+    setTextSaving(true);
+    try {
+      await props.onAssetDetailSave?.(textDraft);
+      setTextEditing(false);
+      setTextDraft(null);
+    } finally {
+      setTextSaving(false);
+    }
+  }, [textDraft, props.onAssetDetailSave]);
+
+  // Plan#50:画布抽屉内嵌时,剧本编辑器改为顶部页签呈现(幂等 key = script:<assetId>)
+  const scriptTabKey = props.embeddedInCanvas && props.scriptAssetId
+    ? buildTabKey('script', props.scriptAssetId)
+    : null;
+  const scriptTabActive = useCanvasTabStore((s) => (scriptTabKey ? s.activeTabKey === scriptTabKey : false));
+  const scriptTabHost = useCanvasTabStore((s) => s.contentHost);
+  const closeScriptTab = useCanvasTabStore((s) => s.closeTab);
+  useEffect(() => {
+    if (!props.embeddedInCanvas || !props.scriptEditorOpen || !props.scriptAssetId) return;
+    useCanvasTabStore.getState().openTab({
+      kind: 'script',
+      id: props.scriptAssetId,
+      title: props.scriptEditorTitle,
+    });
+  }, [props.embeddedInCanvas, props.scriptEditorOpen, props.scriptAssetId, props.scriptEditorTitle]);
 
   return (
     <>
@@ -169,22 +263,51 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
         <AssetDetailViewer
           asset={props.assetDetail}
           onClose={props.onAssetDetailClose}
+          // 文本类资产可编辑：与提示词同一套「编辑 → 保存」交互（图片/视频/音频仍只读）
+          editable={isTextAsset}
+          editing={textEditing}
+          onEditingChange={handleTextEditingChange}
+          onSave={handleTextSave}
+          saving={textSaving}
+          onContentChange={setTextDraft}
         />
       )}
 
-      {/* 剧本编辑器 */}
-      <ScriptFullscreenEditor
-        open={props.scriptEditorOpen}
-        onClose={props.onScriptEditorClose}
-        title={props.scriptEditorTitle}
-        episodes={props.scriptEditorEpisodes}
-        activeEpisodeId={props.scriptEditorActiveId}
-        onEpisodesChange={props.onScriptEditorEpisodesChange}
-        onActiveEpisodeChange={props.onScriptEditorActiveChange}
-        onEpisodesAndActiveChange={props.onScriptEditorEpisodesAndActiveChange}
-        onAddEpisode={props.onScriptEditorAddEpisode}
-        onImportClick={props.onScriptEditorImportClick}
-      />
+      {/* 剧本编辑器(Plan#50:画布抽屉内嵌 → 顶部页签呈现;主页/独立页 → 保持全屏 Modal) */}
+      {props.embeddedInCanvas && scriptTabKey ? (
+        scriptTabActive && scriptTabHost ? createPortal(
+          <ScriptFullscreenEditor
+            open
+            embedded
+            onClose={() => {
+              closeScriptTab(scriptTabKey);
+              props.onScriptEditorClose();
+            }}
+            title={props.scriptEditorTitle}
+            episodes={props.scriptEditorEpisodes}
+            activeEpisodeId={props.scriptEditorActiveId}
+            onEpisodesChange={props.onScriptEditorEpisodesChange}
+            onActiveEpisodeChange={props.onScriptEditorActiveChange}
+            onEpisodesAndActiveChange={props.onScriptEditorEpisodesAndActiveChange}
+            onAddEpisode={props.onScriptEditorAddEpisode}
+            onImportClick={props.onScriptEditorImportClick}
+          />,
+          scriptTabHost,
+        ) : null
+      ) : (
+        <ScriptFullscreenEditor
+          open={props.scriptEditorOpen}
+          onClose={props.onScriptEditorClose}
+          title={props.scriptEditorTitle}
+          episodes={props.scriptEditorEpisodes}
+          activeEpisodeId={props.scriptEditorActiveId}
+          onEpisodesChange={props.onScriptEditorEpisodesChange}
+          onActiveEpisodeChange={props.onScriptEditorActiveChange}
+          onEpisodesAndActiveChange={props.onScriptEditorEpisodesAndActiveChange}
+          onAddEpisode={props.onScriptEditorAddEpisode}
+          onImportClick={props.onScriptEditorImportClick}
+        />
+      )}
 
       {/* 剧本导入弹窗 */}
       <ScriptImportFlow
@@ -211,73 +334,39 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
 
       {/* Plan#29 V3: 主体编辑入口已移除(主体升维为画布统筹节点,资产库不再存主体) */}
 
-      {/* 提示词创建/编辑弹窗 */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-            <span style={{
-              fontSize: 10,
-              padding: '1px 6px',
-              borderRadius: 9999,
-              background: `${theme.toolbar.accent}20`,
-              color: theme.toolbar.accent,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}>
-              {t('asset.kindPrompt', 'Prompt')}
-            </span>
-            <span style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: theme.toolbar.text,
-              opacity: 0.92,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              flex: 1,
-              minWidth: 0,
-            }}>
-              {promptTitle || '提示词'}
-            </span>
-          </div>
-        }
-        open={props.promptCreateOpen}
-        onCancel={props.onPromptCreateClose}
-        footer={null}
-        centered
-        width="calc(100vw - 32px)"
-        style={{ maxWidth: 1300 }}
-        destroyOnHidden
-        styles={{
-          header: {
-            marginBottom: 0,
-            paddingBottom: 10,
-            borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`,
-          },
-          body: {
-            padding: 0,
-            background: theme.toolbar.background,
-            height: 'calc(100vh - 140px)',
-            overflow: 'hidden',
-          },
-          container: {
-            borderRadius: 14,
-            overflow: 'hidden',
-            boxShadow: isDark
-              ? '0 24px 80px rgba(0,0,0,0.5)'
-              : '0 24px 64px rgba(28,25,23,0.18)',
-          },
-        } as React.ComponentProps<typeof Modal>['styles']}
-      >
-        <PromptCreatePage
-          modal
-          hideTitle
-          promptId={props.promptCreateId}
-          onBack={props.onPromptCreateClose}
-          onSaved={props.onPromptCreateSaved}
-          onTitleChange={setPromptTitle}
+      {/* 提示词创建/编辑：与图片/文档共用同一套资产浏览器框架（同尺寸、同底部出血栏、同视觉），
+          展示区换成提示词链路画布；删除统一由资产库列表负责，页内不再自带删除按钮 */}
+      {props.promptCreateOpen && (
+        <AssetDetailViewer
+          asset={{
+            id: props.promptCreateId ?? 'new',
+            title: promptTitle || t('asset.kindPrompt', 'Prompt'),
+            kind: 'prompt',
+            bytes: 0,
+            data: { kind: 'prompt' },
+          } as AssetDetailData}
+          onClose={props.onPromptCreateClose}
+          renderPromptStage={({ editing }) => (
+            <PromptCreatePage
+              ref={promptPageRef}
+              embedded
+              hideTitle
+              promptId={props.promptCreateId}
+              viewMode={editing ? 'edit' : 'view'}
+              onSaved={props.onPromptCreateSaved}
+              onTitleChange={setPromptTitle}
+              // 「副本 → 点击跳转」时先关掉本弹窗，否则跳转后仍遮挡资产库
+              onRequestClose={props.onPromptCreateClose}
+            />
+          )}
+          editable
+          editing={promptEditing}
+          onEditingChange={handlePromptEditingChange}
+          onSave={handlePromptSave}
+          saving={promptSaving}
+          onDuplicate={handlePromptDuplicate}
         />
-      </Modal>
+      )}
     </>
   );
 });

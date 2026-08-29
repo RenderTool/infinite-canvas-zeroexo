@@ -196,6 +196,18 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.handleDownloadItem({ type: item.type as any, data: item.data });
   }, [ctx.handleDownloadItem]);
 
+  // 文本类资产：资产浏览器内编辑正文后保存（与提示词同一套「编辑 → 保存」语义）
+  const handleAssetDetailSave = useCallback(async (content: string) => {
+    const cur = ctx.assetDetail;
+    if (!cur?.id) return;
+    const nextData = { ...cur.data, content };
+    await ctx.updateAsset(cur.id, { data: nextData });
+    // 乐观更新详情视图，避免等待刷新期间的视差。
+    // 注意：云端 PATCH 只同步 text，不同步 size，故此处不改 bytes
+    // —— 否则下次 pull 会用云端旧 size 覆盖回来，造成字节数跳变。
+    ctx.setAssetDetail({ ...cur, data: nextData });
+  }, [ctx.assetDetail, ctx.updateAsset, ctx.setAssetDetail]);
+
   // 征集 #87 验收轮十三:卡片发送到画布(画布内嵌入时提供;剧本类型按 data.kind 还原)
   const handleSendItemToCanvas = useCallback((item: PageItem) => {
     if (!props.onSendToCanvas) return;
@@ -385,10 +397,13 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
         onScriptNameCancel={() => ctx.setScriptNamePromptOpen(false)}
         assetDetail={ctx.assetDetail}
         onAssetDetailClose={() => ctx.setAssetDetail(null)}
+        onAssetDetailSave={handleAssetDetailSave}
         scriptEditorOpen={ctx.scriptEditorOpen}
         scriptEditorTitle={ctx.scriptEditorTitle}
         scriptEditorEpisodes={ctx.scriptEditorEpisodes}
         scriptEditorActiveId={ctx.scriptEditorActiveId}
+        scriptAssetId={ctx.scriptEditorAssetId}
+        embeddedInCanvas={props.embeddedInCanvas}
         onScriptEditorClose={ctx.handleCloseScriptEditor}
         onScriptEditorEpisodesChange={ctx.setScriptEditorEpisodes}
         onScriptEditorActiveChange={ctx.setScriptEditorActiveId}

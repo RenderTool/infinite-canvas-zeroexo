@@ -40,6 +40,7 @@ export class PromptImagesService {
         promptId,
         storageKey: dto.storageKey,
         role: dto.role ?? 'reference',
+        isCover: dto.isCover ?? false,
         sortOrder: dto.sortOrder ?? 0,
       },
     });
@@ -47,7 +48,7 @@ export class PromptImagesService {
     await this.syncImageKeysSnapshot(promptId);
     this.logsService.log('system', `添加提示词图片`, {
       userId: ownerId,
-      meta: { promptId, storageKey: dto.storageKey, role: dto.role ?? 'reference' },
+      meta: { promptId, storageKey: dto.storageKey, role: dto.role ?? 'reference', isCover: dto.isCover },
     });
     return img;
   }
@@ -79,6 +80,7 @@ export class PromptImagesService {
             promptId,
             storageKey: img.storageKey,
             role: img.role ?? 'reference',
+            isCover: img.isCover ?? false,
             sortOrder: img.sortOrder ?? idx,
           })),
         });
