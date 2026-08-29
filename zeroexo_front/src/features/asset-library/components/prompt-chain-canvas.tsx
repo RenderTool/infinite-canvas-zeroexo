@@ -1,5 +1,5 @@
 /**
- * PromptChainCanvas - 提示词录入专用只读画布（Plan#47 T3，征集 #79）
+ * PromptChainCanvas - 提示词录入专用只读画布（Plan#47 T3，征集 #79 / #87 优化）
  *
  * 把提示词的「输入 → 输出」忠实还原为仿主画布节点链：
  *   参考图列（仅图生图）→ 提示词节点 → 生成图列
@@ -10,21 +10,37 @@
  * - 右下角竖排 ZoomToolbar 沿用图片查看器同款
  * - 图片走三档契约（征集 #77）：usePreviewImage 自适应档，不拉原图
  * - 只读可视化：数据录入仍走 PromptCreatePage 既有上传区
+ *
+ * 征集 #87 优化（本轮）：
+ * - 不再支持详情查看（节点可放大）→ 图片节点去掉详情按钮，改双击聚焦
+ * - 双击节点聚焦：复用 useImagePanZoom.focusOnWorldRect，缩放基准对齐主画布（占视口约 82%）
+ * - 图片节点去边框，标题改为图片顶部渐变条标签（提示词文本节点仍保留边框）
+ * - 提示词节点新增复制按钮（仅复制正文）
+ * - 标签从侧边表单迁入画布左上角（紧邻文生图徽章），编辑态可增删
+ *
+ * 征集 #89 优化：
+ * - 调用方 Modal 右侧详情面板整体移除，画布占满全宽
+ * - 提示词节点编辑态正文 textarea 直编（editable/onContentChange，事件隔离防画布平移）
+ *
+ * 征集 #90 优化（本轮）：
+ * - 图片录入画布化：编辑态 hover 提示词节点，左右显现 Pin（对齐主画布 pin-view 契约：
+ *   14px 圆环 + 2px 边框 + 内嵌十字 + 外发光 + 主题色）；左 Pin=添加输入图 / 右 Pin=添加输出图，
+ *   点击触发文件选择（上传由调用方接管；本画布无连线目标端，拖拽连线语义不成立）
+ * - 图片节点右上角编辑态常显按钮组：设封面 / 输入输出切换 / 删除（封面节点隐藏前两者；
+ *   role 变更后调用方数据驱动，节点自动移列）
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image as ImageIcon, Sparkles, ImagePlus, Star, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileText, Image as ImageIcon, Sparkles, ImagePlus, Star, Copy, ChevronDown, ChevronUp, X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { useImagePanZoom, ZoomToolbar } from '@/shared/components/image-viewer.js';
 
 // ===== 世界布局常量（节点不可移动 → 布局完全确定，连线纯计算） =====
 const CARD_W = 240;
-const TITLE_H = 30;
-const IMG_H = 170;
-const IMG_NODE_H = TITLE_H + IMG_H;
+const IMG_NODE_H = 200;
 const PROMPT_W = 280;
 const PROMPT_H = 200;
 /** 收起态高度(标题栏 + 单行摘要):默认收起不挡视线,点击展开(用户验收反馈) */
@@ -39,6 +55,8 @@ const OUTS_X = PROMPT_X + PROMPT_W + COL_GAP;
 const WORLD_W = OUTS_X + CARD_W;
 /** 世界高度按最大列估算（占位节点也占一格） */
 const WORLD_H = CENTER_Y * 2;
+/** 双击聚焦缩放基准：对齐主画布 computeFocusTarget 默认 paddingRatio（节点占视口约 82%） */
+const FOCUS_PADDING = 0.82;
 
 export interface PromptChainImage {
   storageKey: string;
@@ -55,8 +73,30 @@ export interface PromptChainCanvasProps {
   images: PromptChainImage[];
   /** 本地预览 URL（上传后即时显示优先） */
   localPreviews?: Record<string, string>;
-  /** 点击节点右上角详情按钮（调起统一资源浏览器，征集 #78 验收） */
-  onOpenDetail?: (storageKey: string) => void;
+  /** 标签列表（征集 #87：从侧边表单迁入画布左上角展示/编辑） */
+  tags?: string[];
+  /** 只读态：标签仅展示不可增删（编辑态可增删） */
+  readOnly?: boolean;
+  /** 编辑态新增标签（由调用方做去重/上限校验） */
+  onAddTag?: (tag: string) => void;
+  /** 编辑态移除标签 */
+  onRemoveTag?: (tag: string) => void;
+  /** 复制提示词正文（征集 #87：提示词节点复制按钮，仅正文） */
+  onCopyPrompt?: () => void;
+  /** 编辑态：提示词节点展开后正文可直接编辑（征集 #89：右侧详情面板移除，内容编辑迁入画布） */
+  editable?: boolean;
+  /** 编辑回调：正文变更（调用方按当前语言路由到 zh/en/ja 字段） */
+  onContentChange?: (value: string) => void;
+  /** 正文最大长度（与录入表单 MAX_CONTENT_LENGTH 同源） */
+  contentMaxLength?: number;
+  /** 编辑态：点击左右 Pin 追加图片（征集 #90；left=输入图 / right=输出图，调用方触发文件选择） */
+  onAddImage?: (role: 'reference' | 'output') => void;
+  /** 编辑态：设为封面（封面自动归入输出列带星标） */
+  onSetCover?: (storageKey: string) => void;
+  /** 编辑态：输入 ↔ 输出 互换（节点自动移列） */
+  onToggleImageRole?: (storageKey: string) => void;
+  /** 编辑态：移除图片 */
+  onRemoveImage?: (storageKey: string) => void;
   style?: CSSProperties;
 }
 
@@ -74,56 +114,130 @@ function edgePath(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
-/** 图片节点卡（三档契约自适应档；右上角详情按钮调起资源浏览器） */
-function ChainImageCard({ storageKey, label, isDark, x, y, localPreview, isCover, onOpenDetail }: {
+/**
+ * 图片节点卡（征集 #87 / #90）：
+ * - 去边框，图片占满整个节点；标题改为顶部渐变条标签（白色文字，跨主题可读）
+ * - 三档契约自适应档；双击聚焦（不再提供详情按钮，节点可放大查看）
+ * - 编辑态右上角常显操作钮组：设封面 / 输入输出切换 / 删除（封面节点隐藏前两者，与原胶片条逻辑一致）
+ */
+function ChainImageCard({ storageKey, label, isDark, x, y, localPreview, isCover, columnRole, editable, onSetCover, onToggleRole, onRemove, onFocus }: {
   storageKey: string; label: string; isDark: boolean; x: number; y: number; localPreview?: string;
-  isCover?: boolean; onOpenDetail?: (storageKey: string) => void;
+  isCover?: boolean; columnRole: 'reference' | 'output'; editable?: boolean;
+  onSetCover?: () => void; onToggleRole?: () => void; onRemove?: () => void; onFocus?: () => void;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const src = usePreviewImage(storageKey, localPreview ?? '');
+  const actionBtnStyle: CSSProperties = {
+    width: 18, height: 18, borderRadius: 5, border: 'none', cursor: 'pointer', padding: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.66)', color: '#ffffff', backdropFilter: 'blur(4px)',
+  };
   return (
-    <div style={{
-      position: 'absolute', left: x, top: y, width: CARD_W, height: IMG_NODE_H,
-      borderRadius: 10, overflow: 'hidden',
-      background: isDark ? '#161616' : '#ffffff',
-      border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
-      boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 20px rgba(28,25,23,0.12)',
-      display: 'flex', flexDirection: 'column', pointerEvents: 'none',
-    }}>
-      <div style={{
-        height: TITLE_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px',
-        fontSize: 11, fontWeight: 600, flexShrink: 0,
-        color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(28,25,23,0.75)',
-        borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-      }}>
-        <ImageIcon size={12} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{label}</span>
-        {isCover && <Star size={11} fill="currentColor" style={{ flexShrink: 0 }} />}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)' }}>
+    <div
+      onDoubleClick={(e) => { e.stopPropagation(); onFocus?.(); }}
+      title={label}
+      style={{
+        position: 'absolute', left: x, top: y, width: CARD_W, height: IMG_NODE_H,
+        borderRadius: 10, overflow: 'hidden', cursor: 'zoom-in',
+        background: isDark ? '#161616' : '#ffffff',
+        boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 20px rgba(28,25,23,0.12)',
+        pointerEvents: 'auto',
+      }}
+    >
+      {/* 图片铺满节点（三档契约自适应档） */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)' }}>
         {src ? (
           <img src={src} alt={label} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         ) : (
           <ImageIcon size={22} color={isDark ? 'rgba(255,255,255,0.25)' : 'rgba(15,23,42,0.25)'} />
         )}
       </div>
-      {/* 右上角详情按钮：调起统一资源浏览器(征集 #78 验收) */}
-      {onOpenDetail && (
-        <button
-          type="button"
-          title="查看详情"
-          onClick={(e) => { e.stopPropagation(); onOpenDetail(storageKey); }}
-          style={{
-            position: 'absolute', top: 5, right: 5, width: 20, height: 20,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            borderRadius: 6, border: 'none', cursor: 'pointer', pointerEvents: 'auto',
-            background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
-            color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(28,25,23,0.7)',
-          }}
-        >
-          <Info size={12} />
-        </button>
+      {/* 顶部渐变条标签（征集 #87：标题内置到画布节点，替代原独立标题栏） */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px',
+        background: 'linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.28) 62%, rgba(0,0,0,0) 100%)',
+        color: '#ffffff', fontSize: 11, fontWeight: 600, pointerEvents: 'none',
+      }}>
+        <ImageIcon size={12} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{label}</span>
+        {isCover && <Star size={11} fill="currentColor" style={{ flexShrink: 0 }} />}
+      </div>
+      {/* 右上角操作钮组（征集 #90：编辑态固定常显；事件全隔离防触发画布平移/节点聚焦） */}
+      {editable && (
+        <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 3, zIndex: 2 }}>
+          {!isCover && onSetCover && (
+            <button
+              type="button"
+              title={t('promptCreate.setCover', '设为封面')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onSetCover(); }}
+              style={actionBtnStyle}
+            >
+              <Star size={10} />
+            </button>
+          )}
+          {!isCover && onToggleRole && (
+            <button
+              type="button"
+              title={columnRole === 'reference' ? t('promptCreate.markOutput', '标记为输出（生成图）') : t('promptCreate.markInput', '标记为输入（参考图）')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onToggleRole(); }}
+              style={actionBtnStyle}
+            >
+              {columnRole === 'reference' ? <ArrowRight size={10} /> : <ArrowLeft size={10} />}
+            </button>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              title={t('promptCreate.remove', '移除')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+              style={{ ...actionBtnStyle, color: '#ff7b7b' }}
+            >
+              <X size={10} />
+            </button>
+          )}
+        </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 链路 Pin（征集 #90）：视觉对齐主画布 pin-view 契约（14px 圆环 + 2px 边框 + 内嵌十字 + 外发光 + 主题色），
+ * 挂在提示词节点左右边缘中点；点击触发调用方加图（本画布无连线目标端，不做拖拽连线）。
+ */
+function ChainPin({ color, title, onClick, style }: { color: string; title: string; onClick: () => void; style: CSSProperties }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      title={title}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{
+        position: 'absolute', width: 16, height: 16, borderRadius: '50%', padding: 0,
+        border: `2px solid ${color}`, background: 'transparent',
+        boxShadow: `0 0 3px ${color}44`, cursor: 'crosshair',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 3, pointerEvents: 'auto',
+        ...style,
+      }}
+    >
+      <svg width="8" height="8" viewBox="0 0 8 8">
+        <line x1="4" y1="1" x2="4" y2="7" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+        <line x1="1" y1="4" x2="7" y2="4" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+      </svg>
+    </button>
   );
 }
 
@@ -143,10 +257,69 @@ function PlaceholderCard({ label, isDark, x, y }: { label: string; isDark: boole
   );
 }
 
-export function PromptChainCanvas({ content, mode, images, localPreviews, onOpenDetail, style }: PromptChainCanvasProps): React.ReactElement {
+/** 左上角标签徽章（征集 #87：标签迁入画布，紧邻文生图徽章；只读态仅展示，编辑态可增删） */
+function TagsOverlay({ tags, readOnly, isDark, onAddTag, onRemoveTag }: {
+  tags: string[]; readOnly: boolean; isDark: boolean;
+  onAddTag?: (tag: string) => void; onRemoveTag?: (tag: string) => void;
+}): React.ReactElement | null {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState('');
+  if (readOnly && tags.length === 0) return null;
+  const chipStyle: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 3,
+    padding: '2px 8px', borderRadius: 9999, fontSize: 10.5, fontWeight: 500,
+    background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+    color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(28,25,23,0.72)',
+    backdropFilter: 'blur(6px)',
+  };
+  const commit = () => {
+    const v = draft.trim();
+    if (v && onAddTag) onAddTag(v);
+    setDraft('');
+  };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, pointerEvents: 'none' }}>
+      {tags.map((tag) => (
+        <span key={tag} style={{ ...chipStyle, pointerEvents: 'auto' }}>
+          {tag}
+          {!readOnly && onRemoveTag && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onRemoveTag(tag); }}
+              style={{ display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}
+              title={t('promptCreate.remove')}
+            >
+              <X size={9} />
+            </button>
+          )}
+        </span>
+      ))}
+      {!readOnly && (
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); } }}
+          onBlur={commit}
+          placeholder={t('promptChain.addTag', '+ 标签')}
+          style={{
+            ...chipStyle, pointerEvents: 'auto', border: 'none', outline: 'none',
+            width: 72, color: isDark ? 'rgba(255,255,255,0.78)' : 'rgba(28,25,23,0.72)',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+export function PromptChainCanvas({ content, mode, images, localPreviews, tags, readOnly = true, onAddTag, onRemoveTag, onCopyPrompt, editable = false, onContentChange, contentMaxLength, onAddImage, onSetCover, onToggleImageRole, onRemoveImage, style }: PromptChainCanvasProps): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
+  // 征集 #90：Pin 主题色（对齐主画布注入层 theme.node.pinDefaultColor：暗 #a8a29e / 亮 #78716c）
+  const pinColor = isDark ? '#a8a29e' : '#78716c';
   // 征集 #78 验收拍板:无论缩小还是放大,视口都支持拖拽平移(节点本身锁定不可动)
   const panZoom = useImagePanZoom({ panAlways: true });
   const containerElRef = useRef<HTMLDivElement | null>(null);
@@ -165,6 +338,8 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, onOpen
   // 提示词节点默认收起(用户验收反馈:展开的大文本块碍眼),点击卡片展开/点标题栏收起;
   // 连线锚点恒为 CENTER_Y,收起/展开不改变链路几何(仅卡片自身垂直居中)
   const [promptExpanded, setPromptExpanded] = useState(false);
+  // 征集 #90：编辑态 hover 提示词节点 → 左右 Pin 显现（与主画布「hover 才显示 Pin」契约一致）
+  const [promptHovered, setPromptHovered] = useState(false);
   const promptH = promptExpanded ? PROMPT_H : PROMPT_COLLAPSED_H;
   const promptY = CENTER_Y - promptH / 2;
   const promptText = content.trim();
@@ -238,25 +413,41 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, onOpen
           : references.map((img, i) => (
             <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
               label={`${t('promptChain.reference', '参考图')} ${i + 1}`}
-              isDark={isDark} x={REFS_X} y={refYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]} onOpenDetail={onOpenDetail} />
+              isDark={isDark} x={REFS_X} y={refYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
+              columnRole="reference"
+              editable={editable}
+              onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
+              onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
+              onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
+              onFocus={() => panZoom.focusOnWorldRect({ x: REFS_X, y: refYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
           ))}
 
-        {/* 提示词节点（仿文本节点卡；默认收起小卡,点击展开 —— 用户验收反馈） */}
-        <div style={{
-          position: 'absolute', left: PROMPT_X, top: promptY, width: PROMPT_W, height: promptH,
-          borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          background: isDark ? '#161616' : '#ffffff',
-          border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
-          boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 20px rgba(28,25,23,0.12)',
-          cursor: promptExpanded ? 'default' : 'pointer',
-          pointerEvents: promptExpanded ? 'none' : 'auto',
-          transition: 'height 0.18s ease-out',
-        }} onClick={() => { if (!promptExpanded) setPromptExpanded(true); }}>
-          {/* 标题栏:展开态点击收起;收起态随整卡点击展开 */}
+        {/* 提示词节点（仿文本节点卡；保留边框；默认收起小卡,点击展开；新增复制按钮 + 双击聚焦） */}
+        {/* hover 包装层（征集 #90）：卡片与左右 Pin 同组——指针移到 Pin 上仍算 hover，Pin 不闪失 */}
+        <div
+          onMouseEnter={() => setPromptHovered(true)}
+          onMouseLeave={() => setPromptHovered(false)}
+          style={{ position: 'absolute', left: PROMPT_X, top: promptY, width: PROMPT_W, height: promptH, pointerEvents: 'none' }}
+        >
+        <div
+          onDoubleClick={(e) => { e.stopPropagation(); setPromptExpanded(true); panZoom.focusOnWorldRect({ x: PROMPT_X, y: promptY, width: PROMPT_W, height: promptH }, FOCUS_PADDING); }}
+          style={{
+            position: 'absolute', inset: 0,
+            borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            background: isDark ? '#161616' : '#ffffff',
+            border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+            boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 20px rgba(28,25,23,0.12)',
+            cursor: promptExpanded ? 'default' : 'zoom-in',
+            pointerEvents: promptExpanded ? 'none' : 'auto',
+            transition: 'height 0.18s ease-out',
+          }}
+          onClick={() => { if (!promptExpanded) setPromptExpanded(true); }}
+        >
+          {/* 标题栏:展开态点击收起;收起态随整卡点击展开；右侧复制按钮 */}
           <div
             onClick={(e) => { if (promptExpanded) { e.stopPropagation(); setPromptExpanded(false); } }}
             style={{
-              height: TITLE_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0,
+              height: 30, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0,
               fontSize: 11, fontWeight: 600,
               color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(28,25,23,0.75)',
               borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
@@ -266,18 +457,61 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, onOpen
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {t('promptChain.promptNode', '提示词')}{promptText ? ` · ${promptText.length} 字` : ''}
             </span>
+            {/* 复制提示词正文（征集 #87） */}
+            {onCopyPrompt && (
+              <button
+                type="button"
+                title={t('subjectCreate.copyPrompt', '复制提示词')}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onCopyPrompt(); }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 20, height: 20, borderRadius: 6, border: 'none', cursor: 'pointer', pointerEvents: 'auto',
+                  background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+                  color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(28,25,23,0.7)',
+                }}
+              >
+                <Copy size={12} />
+              </button>
+            )}
             {promptExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </div>
           {promptExpanded ? (
-            <div style={{
-              flex: 1, minHeight: 0, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.6,
-              color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(28,25,23,0.68)',
-              // 征集 #78 验收:长提示词支持滚动查看(去掉行数截断);滚轮优先滚动文本不干扰画布缩放
-              overflowY: 'auto', pointerEvents: 'auto', overscrollBehavior: 'contain',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            }}>
-              {promptText || t('promptChain.emptyPrompt', '（提示词内容为空）')}
-            </div>
+            editable && onContentChange ? (
+              /* 编辑态（征集 #89）：正文 textarea 直编；pointer/wheel 全隔离防触发画布平移/缩放（参照 node-editable-drag-intercept 契约） */
+              <textarea
+                value={promptText}
+                onChange={(e) => onContentChange(e.target.value)}
+                maxLength={contentMaxLength}
+                placeholder={t('promptCreate.contentPlaceholder', '请输入提示词内容')}
+                spellCheck={false}
+                autoFocus
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                style={{
+                  flex: 1, minHeight: 0, margin: 0, padding: '10px 12px',
+                  background: 'transparent', border: 'none', outline: 'none', resize: 'none',
+                  fontFamily: 'inherit', fontSize: 11.5, lineHeight: 1.6,
+                  color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(28,25,23,0.68)',
+                  overflowY: 'auto', overscrollBehavior: 'contain',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  pointerEvents: 'auto',
+                }}
+              />
+            ) : (
+              <div style={{
+                flex: 1, minHeight: 0, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.6,
+                color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(28,25,23,0.68)',
+                // 征集 #78 验收:长提示词支持滚动查看(去掉行数截断);滚轮优先滚动文本不干扰画布缩放
+                overflowY: 'auto', pointerEvents: 'auto', overscrollBehavior: 'contain',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {promptText || t('promptChain.emptyPrompt', '（提示词内容为空）')}
+              </div>
+            )
           ) : (
             /* 收起态:单行摘要 + 展开提示 */
             <div style={{
@@ -292,6 +526,24 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, onOpen
             </div>
           )}
         </div>
+        {/* 左右 Pin（征集 #90）：编辑态 hover 显现——左=追加输入图（参考图列）/ 右=追加输出图（输出列） */}
+        {editable && onAddImage && promptHovered && (
+          <>
+            <ChainPin
+              color={pinColor}
+              title={t('promptChain.pinAddInput', '添加输入图（参考图）')}
+              onClick={() => onAddImage('reference')}
+              style={{ left: -8, top: '50%', transform: 'translateY(-50%)' }}
+            />
+            <ChainPin
+              color={pinColor}
+              title={t('promptChain.pinAddOutput', '添加输出图（生成图）')}
+              onClick={() => onAddImage('output')}
+              style={{ right: -8, top: '50%', transform: 'translateY(-50%)' }}
+            />
+          </>
+        )}
+        </div>
 
         {/* 生成图列（无图时占位提示） */}
         {outputs.length === 0
@@ -300,20 +552,32 @@ export function PromptChainCanvas({ content, mode, images, localPreviews, onOpen
             <ChainImageCard key={img.storageKey + i} storageKey={img.storageKey}
               label={`${t('promptChain.output', '生成图')} ${i + 1}`}
               isDark={isDark} x={OUTS_X} y={outYs[i] ?? 0} localPreview={localPreviews?.[img.storageKey]}
-              isCover={img.role === 'cover'} onOpenDetail={onOpenDetail} />
+              isCover={img.role === 'cover'}
+              columnRole="output"
+              editable={editable}
+              onSetCover={onSetCover ? () => onSetCover(img.storageKey) : undefined}
+              onToggleRole={onToggleImageRole ? () => onToggleImageRole(img.storageKey) : undefined}
+              onRemove={onRemoveImage ? () => onRemoveImage(img.storageKey) : undefined}
+              onFocus={() => panZoom.focusOnWorldRect({ x: OUTS_X, y: outYs[i] ?? 0, width: CARD_W, height: IMG_NODE_H }, FOCUS_PADDING)} />
           ))}
       </div>
 
-      {/* ===== 模式徽章（左上角浮层） ===== */}
+      {/* ===== 左上角：模式徽章 + 标签（征集 #87：标签迁入画布，紧邻文生图徽章） ===== */}
       <div style={{
-        position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: '3px 10px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
-        background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-        color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(28,25,23,0.7)',
-        backdropFilter: 'blur(6px)', pointerEvents: 'none',
+        position: 'absolute', top: 10, left: 10, right: 60,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, pointerEvents: 'none', zIndex: 2,
       }}>
-        <Sparkles size={11} />
-        {modeLabel}
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          padding: '3px 10px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
+          background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+          color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(28,25,23,0.7)',
+          backdropFilter: 'blur(6px)', pointerEvents: 'none',
+        }}>
+          <Sparkles size={11} />
+          {modeLabel}
+        </div>
+        <TagsOverlay tags={tags ?? []} readOnly={readOnly} isDark={isDark} onAddTag={onAddTag} onRemoveTag={onRemoveTag} />
       </div>
 
       {/* ===== 竖排缩放工具条（沿用图片查看器右下角同款） ===== */}

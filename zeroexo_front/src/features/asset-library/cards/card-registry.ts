@@ -22,8 +22,6 @@ export interface GridCardRendererProps<T> {
   onDelete: () => void;
   onDownload?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
-  onFavorite?: () => void;
-  onUnfavorite?: () => void;
   /** 发送到画布(征集 #87 验收轮十三:仅画布内嵌入时提供,卡片右上角飞机图标) */
   onSendToCanvas?: () => void;
   theme: ThemeConfig;

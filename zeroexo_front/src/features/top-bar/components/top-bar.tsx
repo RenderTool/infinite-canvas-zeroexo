@@ -1,7 +1,7 @@
 /**
  * TopBar - 顶部工具栏容器(画布编辑器专用)
  *
- * 左侧:LOGO 下拉 + 层级/资产按钮(征集 #87:回归 LOGO 侧,激活态 accent 高亮);
+ * 左侧:LOGO 下拉(征集 #91:层级/资产按钮迁至底部工具栏小地图旁,LOGO 旁分割线删除);
  * 右侧:可编辑标题(compact 13px 右对齐)+ 外观设置 + 语言/配置 + 版本快照 + 协作 + Agent。
  * 账号信息与退出登录已移入左上角 CanvasMenu。
  * 主题由 useTheme() 注入;外观浮层开关内部管理;设置弹窗由父组件控制(通过 onOpenSettings)。
@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Bot, Layers, Users,
+  Bot, Users,
   History, SquareMousePointer,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -61,9 +61,6 @@ export interface TopBarProps {
   isMobile?: boolean;
   /** 云同步状态徽章(渲染在标题右侧,垂直居中对齐) */
   syncBadge?: React.ReactNode;
-  /** 层级/资产抽屉开关(征集 #87:按钮回归 LOGO 侧,激活态 accent 高亮) */
-  isHierarchyOpen: boolean;
-  onToggleHierarchy: () => void;
   /** LOGO下拉菜单(画布编辑器左上角,桌面端显示) */
   canvasMenu?: React.ReactNode;
   /** 移动端导航按钮打开 */
@@ -90,8 +87,6 @@ export function TopBar({
   onOpenSettings,
   isMobile,
   syncBadge,
-  isHierarchyOpen,
-  onToggleHierarchy,
   canvasMenu,
   onOpenCollaboration,
   onOpenVersionHistory,
@@ -145,13 +140,6 @@ export function TopBar({
     color: theme.toolbar.text,
   };
 
-  /** 层级/资产按钮(征集 #87:激活态 = 抽屉开,accent 高亮) */
-  const hierarchyBtnStyle = (open: boolean): CSSProperties => ({
-    ...iconBtnInHeader,
-    color: open ? theme.toolbar.accent : theme.toolbar.text,
-    background: open ? `${theme.toolbar.accent}14` : 'transparent',
-  });
-
   /** 版本快照:点按钮直接打开合并面板(保存+历史),无下拉 */
   const handleOpenVersion = (): void => {
     onOpenVersionHistory?.();
@@ -177,19 +165,13 @@ export function TopBar({
     <div style={barStyle}>
       <div style={leftStyle}>
         {!mobile && canvasMenu}
-        {/* LOGO 与层级按钮竖向分割线(桌面端;征集 #87 验收轮十八) */}
+        {/* 征集 #92 T26 验收修正二(用户拍板):标题放 LOGO 旁(左侧),保存状态条(syncBadge,含「已保存」)放标题旁边 */}
         {!mobile && (
-          <div style={{ width: 1, height: 20, background: theme.toolbar.border || 'rgba(128,128,128,0.2)' }} />
+          <>
+            {titleEditor}
+            {syncBadge}
+          </>
         )}
-        {/* 层级/资产按钮(征集 #87:回归 LOGO 侧;激活态 = 抽屉开,accent 高亮) */}
-        <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}>
-          <AntdButton
-            type="text"
-            icon={<Layers size={16} />}
-            onClick={onToggleHierarchy}
-            style={hierarchyBtnStyle(isHierarchyOpen)}
-          />
-        </Tooltip>
       </div>
       {/* 移动端:标题 + 同步徽标居中(征集 #87 验收轮十八) */}
       {mobile && (
@@ -199,13 +181,6 @@ export function TopBar({
         </div>
       )}
       <div style={rightStyle}>
-        {/* 桌面端:可编辑标题(compact 13px 右对齐) + 保存状态指示器(移动端标题居中见中间容器) */}
-        {!mobile && (
-          <>
-            {titleEditor}
-            {syncBadge}
-          </>
-        )}
         {/* 桌面端:外观设置 + 语言/配置 + 版本快照 */}
         {!mobile && (
           <>

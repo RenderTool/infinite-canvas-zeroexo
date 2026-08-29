@@ -333,7 +333,7 @@
     "collabExpired": "已失效",
     "startCollaboration": "发起协作",
     "exitCollaborationMode": "退出协作",
-    "collabModeHint": "发起协作模式：点击画布卡片管理协作，再次点击按钮可退出",
+    "collabModeHint": "点击卡片管理协作，再点退出",
     "collabFilterAll": "全部",
     "collabFilterMine": "我发起的",
     "collabFilterJoined": "我参与的",
@@ -2050,7 +2050,10 @@
     "emptyPrompt": "（提示词内容为空）",
     "noReference": "暂无参考图",
     "noOutput": "暂未录入生成图",
-    "tapToExpand": "点击展开"
+    "tapToExpand": "点击展开",
+    "addTag": "+ 标签",
+    "pinAddInput": "添加输入图（参考图）",
+    "pinAddOutput": "添加输出图（生成图）"
   },
   "policyEditor": {
     "insertImage": "插入图片",

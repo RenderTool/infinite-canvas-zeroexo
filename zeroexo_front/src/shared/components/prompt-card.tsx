@@ -10,7 +10,7 @@
  */
 
 import { useState, type CSSProperties } from 'react';
-import { Star, Globe, Trash2, Copy } from 'lucide-react';
+import { Globe, Trash2, Copy } from 'lucide-react';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/features/auth/auth-store.js';
@@ -39,15 +39,11 @@ export interface PromptCardProps {
   disableHoverScale?: boolean;
   mode: 'public' | 'asset';
 
-  /** 资产库模式收藏状态 */
-  isFavorited?: boolean;
   /** 公共模式许可证信息 */
   license?: string;
   /** 公共模式来源链接 */
   sourceUrl?: string;
 
-  onFavorite?: () => void;
-  onUnfavorite?: () => void;
   onClone?: () => void;
   onDelete?: () => void;
   onClick?: () => void;
@@ -196,14 +192,6 @@ function actionBtnStyle(): CSSProperties {
   };
 }
 
-function favBtnStyle(isFavorited: boolean): CSSProperties {
-  const baseStyle = actionBtnStyle();
-  return {
-    ...baseStyle,
-    background: isFavorited ? 'rgba(233,69,96,0.85)' : 'rgba(0,0,0,0.45)',
-  };
-}
-
 function licenseSectionStyle(): CSSProperties {
   return {
     display: 'flex',
@@ -250,7 +238,6 @@ export function PromptCard({
   categoryLabel,
   tags,
   imageKeys,
-  isFavorited = false,
   animationDelay = 0,
   borderRadius = 14,
   thumbnailAspectRatio,
@@ -258,8 +245,6 @@ export function PromptCard({
   mode,
   license,
   sourceUrl,
-  onFavorite,
-  onUnfavorite,
   onClone,
   onDelete,
   onClick,
@@ -276,16 +261,6 @@ export function PromptCard({
     : undefined;
 
   const animationDelayValue = Math.min(animationDelay * ANIMATION_BASE_DELAY, ANIMATION_MAX_DELAY);
-
-  const handleFavClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isAuthenticated) return;
-    if (isFavorited) {
-      onUnfavorite?.();
-    } else {
-      onFavorite?.();
-    }
-  };
 
   const handleCloneClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -375,44 +350,8 @@ export function PromptCard({
               </button>
             )
           ) : (
-            /* 资产库模式：显示收藏星标 + 删除按钮 */
+            /* 资产库模式：显示删除按钮 */
             <>
-              {(isFavorited || hovered) && (
-                <Tooltip
-                  title={
-                    !isAuthenticated
-                      ? t('promptCard.pleaseLoginFirst')
-                      : isFavorited
-                        ? t('promptCard.favorited')
-                        : t('promptCard.favorite')
-                  }
-                >
-                  <button
-                    type="button"
-                    style={{
-                      ...favBtnStyle(isFavorited),
-                      opacity: !isAuthenticated ? 0.4 : 1,
-                      cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
-                    }}
-                    onClick={handleFavClick}
-                    onMouseEnter={(e) => {
-                      if (!isFavorited && isAuthenticated) {
-                        e.currentTarget.style.background = 'rgba(0,0,0,0.65)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isFavorited && isAuthenticated) {
-                        e.currentTarget.style.background = 'rgba(0,0,0,0.45)';
-                      }
-                    }}
-                  >
-                    <Star
-                      size={13}
-                      fill={isFavorited ? 'currentColor' : 'none'}
-                    />
-                  </button>
-                </Tooltip>
-              )}
               {hovered && onDelete && (
                 <Tooltip title={t('promptCard.delete')}>
                   <button

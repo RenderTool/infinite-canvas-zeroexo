@@ -230,24 +230,6 @@ export function HomePage({ onOpenProject, onNavigate }: HomePageProps): React.Re
                     variant="create"
                     onClick={handleCreateBlank}
                   />
-                  {/* V2 引擎调研画布入口（Plan#26：Three.js 画布引擎 demo） */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => { window.location.hash = '#/canvas-v2'; }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') window.location.hash = '#/canvas-v2'; }}
-                    style={{
-                      height: 120, borderRadius: 12, cursor: 'pointer',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      border: '1px dashed rgba(88,166,255,0.5)',
-                      background: 'rgba(88,166,255,0.06)',
-                      color: '#9ecbff', fontSize: 14, fontWeight: 600,
-                    }}
-                  >
-                    <span style={{ fontSize: 24 }}>🧪</span>
-                    V2 引擎调研画布
-                    <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>Three.js · Plan#26 demo</span>
-                  </div>
                   {recentProjects.map((project) => {
                     const updatedAt = new Date(project.updatedAt);
                     const dateStr = formatRelativeDate(updatedAt);

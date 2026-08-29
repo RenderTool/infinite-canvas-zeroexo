@@ -333,7 +333,7 @@
     "collabExpired": "無効",
     "startCollaboration": "コラボを開始",
     "exitCollaborationMode": "コラボを終了",
-    "collabModeHint": "コラボ開始モード：キャンバスカードをクリックしてコラボを管理、ボタンを再度クリックで終了",
+    "collabModeHint": "カードをクリックで管理、再クリックで終了",
     "collabFilterAll": "すべて",
     "collabFilterMine": "自分が開始",
     "collabFilterJoined": "自分が参加",
@@ -2025,7 +2025,10 @@
     "emptyPrompt": "（プロンプト内容が空です）",
     "noReference": "参照画像なし",
     "noOutput": "生成画像が未登録",
-    "tapToExpand": "クリックで展開"
+    "tapToExpand": "クリックで展開",
+    "addTag": "+ タグ",
+    "pinAddInput": "入力画像を追加（参照画像）",
+    "pinAddOutput": "出力画像を追加（生成画像）"
   },
   "policyEditor": {
     "insertImage": "画像を挿入",

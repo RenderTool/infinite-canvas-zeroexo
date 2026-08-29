@@ -66,7 +66,8 @@ export function TitleEditor({
       fontSize: titleFontSize,
       fontWeight: 600,
       color: theme.toolbar.text,
-      textAlign: compact ? 'right' : undefined,
+      // 征集 #92 T26 验收修正四:编辑态左对齐(用户拍板,反转 compact 右对齐——标题在 LOGO 旁自洽)
+      textAlign: compact ? 'left' : undefined,
     };
     return (
       <div ref={containerRef} style={wrapperStyle}>
@@ -97,7 +98,8 @@ export function TitleEditor({
     fontSize: titleFontSize,
     fontWeight: 600,
     color: theme.toolbar.text,
-    textAlign: compact ? 'right' : undefined,
+    // 征集 #92 T26 验收修正四:显示态左对齐,与编辑态一致
+    textAlign: compact ? 'left' : undefined,
     cursor: editable ? 'pointer' : 'default',
     transition: 'border-color 0.15s',
   };

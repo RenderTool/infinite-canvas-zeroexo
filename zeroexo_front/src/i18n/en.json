@@ -334,7 +334,7 @@
     "collabExpired": "Expired",
     "startCollaboration": "Start Collaboration",
     "exitCollaborationMode": "Exit Collaboration",
-    "collabModeHint": "Collaboration mode: click a canvas card to manage collaboration; click the button again to exit",
+    "collabModeHint": "Click a card to manage; click again to exit",
     "collabFilterAll": "All",
     "collabFilterMine": "Started by Me",
     "collabFilterJoined": "Joined by Me",
@@ -2047,7 +2047,10 @@
     "emptyPrompt": "(Prompt content is empty)",
     "noReference": "No reference images",
     "noOutput": "No output images recorded",
-    "tapToExpand": "Click to expand"
+    "tapToExpand": "Click to expand",
+    "addTag": "+ Tag",
+    "pinAddInput": "Add input image (reference)",
+    "pinAddOutput": "Add output image (generated)"
   },
   "policyEditor": {
     "insertImage": "Insert Image",

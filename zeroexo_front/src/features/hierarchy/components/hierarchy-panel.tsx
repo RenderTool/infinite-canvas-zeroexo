@@ -1,7 +1,7 @@
 /**
  * HierarchyPanelSidebar - 画布结构/资产库合一抽屉（征集 #87 验收轮九重设计）
  *
- * 布局：宽 450px，内容 = 主页资产库同款页面（forceMobile 移动端同款单列卡片布局）。
+ * 布局：宽 450px，内容 = 主页资产库同款页面（forceMobile 移动端同款卡片布局 + 固定 2 格网格）。
  * 视图由分组决定（征集 #87 验收轮十用户拍板）：
  * - 层级分组 = 原树形列表（HierarchyListView，层级专属；虚拟滚动/键盘导航/批量选择/ZIP 全保留）
  * - 素材/提示词/剧本分组 = 网格卡片（主页同款，上传/删除/重命名/收藏/右键发送到画布）
@@ -28,6 +28,8 @@ export interface HierarchyPanelSidebarProps {
   theme: ThemeConfig;
   /** 移动端弹窗模式:禁用宽度动画,宽度 100%,无右边框 */
   modal?: boolean;
+  /** 覆盖模式(征集 #95):绝对定位于画布左缘之上覆盖拉开(不推开布局),移动端复用 PC 同款抽屉 */
+  overlay?: boolean;
   /** 关闭按钮回调 */
   onClose?: () => void;
   /** 点击节点时聚焦(层级分组卡片点击回调) */
@@ -42,7 +44,7 @@ const PANEL_WIDTH = 450;
 const DRAWER_TRANSITION = '0.35s cubic-bezier(0.22, 1, 0.36, 1)';
 
 export function HierarchyPanelSidebar({
-  closing, store, groupPlugin, theme, modal, onClose, onFocusNode,
+  closing, store, groupPlugin, theme, modal, overlay, onClose, onFocusNode,
   onSendToCanvas,
 }: HierarchyPanelSidebarProps): React.ReactElement {
   const props = useHierarchyPanelProps(store, groupPlugin.getController());
@@ -91,7 +93,16 @@ export function HierarchyPanelSidebar({
 
   // 抽屉式动画:展开收起统一节奏。
   // 外层不加 will-change:width 非合成属性,无效提示反而诱发多余分层(征集 #85/Plan#48-T6 教训)。
-  const outerStyle: CSSProperties = modal
+  const outerStyle: CSSProperties = overlay
+    ? {
+        // 征集 #95:覆盖模式——绝对定位于画布左缘之上(不占布局、不推开内容),移动端与 PC 同款组件
+        position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 60,
+        width: PANEL_WIDTH, maxWidth: '92vw',
+        opacity: closing ? 0 : (expanded ? 1 : 0),
+        pointerEvents: closing || !expanded ? 'none' : 'auto',
+        transition: `opacity ${DRAWER_TRANSITION}`,
+      }
+    : modal
     ? {
         width: '100%', height: '100%',
         opacity: closing ? 0 : (expanded ? 1 : 0),
@@ -103,34 +114,38 @@ export function HierarchyPanelSidebar({
         pointerEvents: closing || !expanded ? 'none' : undefined,
         transition: `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
       };
-  const innerStyle: CSSProperties = modal
+  const innerStyle: CSSProperties = (modal || overlay)
     ? {
         width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
-        overflow: 'hidden', backgroundColor: theme.toolbar.panel,
+        // 征集 #92:抽屉底色与画布主题色一致(原 toolbar.panel 与画布底色割裂)
+        overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
         transition: `transform ${DRAWER_TRANSITION}, box-shadow ${DRAWER_TRANSITION}`,
-        boxShadow: expanded ? '0 8px 24px -12px rgba(0,0,0,0.3)' : 'none',
+        // 征集 #96(Plan#49 T29):阴影强化并与 PC 侧同款,与画布明显区分(原 0 8px 24px -12px rgba(0,0,0,0.3) 过淡)
+        boxShadow: expanded ? '0 0 0 1px rgba(0,0,0,0.18), 8px 0 32px -6px rgba(0,0,0,0.55)' : 'none',
         willChange: 'transform',
       }
     : {
         width: PANEL_WIDTH, height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
-        overflow: 'hidden', backgroundColor: theme.toolbar.panel,
+        // 征集 #92:抽屉底色与画布主题色一致(原 toolbar.panel 与画布底色割裂)
+        overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
         transition: `transform ${DRAWER_TRANSITION}, box-shadow ${DRAWER_TRANSITION}`,
         // 无边框：用方向性柔和投影替代生硬边线，与画布形成层次
-        boxShadow: expanded ? '8px 0 24px -14px rgba(0,0,0,0.35)' : 'none',
+        // 征集 #96(Plan#49 T29):阴影强化(原 -14px/0.35 过淡)，与覆盖模式同款
+        boxShadow: expanded ? '0 0 0 1px rgba(0,0,0,0.18), 8px 0 32px -6px rgba(0,0,0,0.55)' : 'none',
         willChange: 'transform',
       };
 
   return (
     <div style={outerStyle}>
       <div style={innerStyle}>
-        {/* 关闭按钮(桌面端悬浮右上角;移动端由 MobileHierarchyDrawer 自带头部关闭) */}
-        {!modal && onClose && (
+        {/* 关闭按钮(桌面端/覆盖模式悬浮右上角;modal 模式由外部外壳提供关闭入口) */}
+        {(!modal || overlay) && onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -152,6 +167,8 @@ export function HierarchyPanelSidebar({
         {contentReady ? (
           <AssetLibraryPage
             forceMobile
+            gridColumns={2}
+            embeddedInCanvas
             defaultGroup="hierarchy"
             hierarchyItems={hierarchyItems}
             hierarchyListView={{

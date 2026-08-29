@@ -25,7 +25,7 @@ import { AssetLibraryGridView } from './components/asset-library-grid-view.js';
 import { AssetLibraryModals } from './components/asset-library-modals.js';
 import type { PageItem } from './types.js';
 import type { ContextMenuItem } from '@/shared/components/index.js';
-import { HierarchyListView } from '@/features/hierarchy/components/hierarchy-list-view.js';
+import { HierarchyListView, useFilterOptions } from '@/features/hierarchy/components/hierarchy-list-view.js';
 import type { HierarchyListDataProps } from '@/features/hierarchy/components/hierarchy-list-view.js';
 import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 
@@ -41,8 +41,10 @@ export interface AssetLibraryPageProps {
   defaultChild?: string;
   /** 需要聚焦高亮的卡片 id（复制提示词后跳转定位） */
   focusId?: string;
-  /** 强制移动端布局(征集 #87 验收轮七:画布内抽屉嵌入时使用主页移动端同款单列卡片布局) */
+  /** 强制移动端布局(征集 #87 验收轮七:画布内抽屉嵌入时使用主页移动端同款卡片布局) */
   forceMobile?: boolean;
+  /** 卡片网格固定列数(画布内抽屉固定 2 格);缺省按 forceMobile/视口自适应 */
+  gridColumns?: number;
   /** 层级分组数据(征集 #87 验收轮九:画布节点注册进资产面板) */
   hierarchyItems?: { id: string; title: string; nodeType: string }[];
   /** 层级分组专属视图(征集 #87 验收轮十:层级按原树形列表渲染,列表视图层级专属) */
@@ -51,6 +53,8 @@ export interface AssetLibraryPageProps {
     data: HierarchyListDataProps;
     onFocusNode?: (nodeId: string) => void;
   };
+  /** 画布抽屉内嵌(征集 #94/Plan#49 T27):启用抽屉专属排版(无标题/无分割线/筛选下拉/虚线加号格子),主页资产库不传 */
+  embeddedInCanvas?: boolean;
 }
 
 export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactElement {
@@ -74,6 +78,11 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
 
   // 上传文件选择器 ref（Toolbar 上传按钮与右键菜单「上传素材」共用同一入口）
   const materialFileInputRef = useRef<HTMLInputElement>(null);
+
+  // 征集 #96(Plan#49 T29):层级类型筛选状态上提——筛选下拉与统计徽标并入工具栏「筛选+搜索+多选」行,
+  // 由本页受控后透传给 HierarchyListView(仅抽屉内嵌模式启用)
+  const [hierarchyTypeFilter, setHierarchyTypeFilter] = useState<string>('all');
+  const hierarchyFilterOptions = useFilterOptions();
 
   // ── 副本定位聚焦：临时高亮 id + 分页跳转 ──
   const [highlightId, setHighlightId] = useState<string | null>(props.focusId ?? null);
@@ -194,14 +203,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     props.onSendToCanvas({ type: type as 'asset' | 'prompt' | 'script', id: item.data.id, data: item.data });
   }, [props.onSendToCanvas]);
 
-  const handleFavoriteItem = useCallback((item: PageItem) => {
-    ctx.handleToggleFavorite({ type: item.type as any, id: item.data.id, data: { ...item.data, favorite: false } });
-  }, [ctx.handleToggleFavorite]);
-
-  const handleUnfavoriteItem = useCallback((item: PageItem) => {
-    ctx.handleToggleFavorite({ type: item.type as any, id: item.data.id, data: { ...item.data, favorite: true } });
-  }, [ctx.handleToggleFavorite]);
-
   const handleGridCtxMenu = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('[data-item-type]')) return;
@@ -226,6 +227,13 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       scanningMessage={ctx.scanningMessage}
       isMobile={isMobile}
       theme={theme}
+      embeddedInCanvas={props.embeddedInCanvas}
+      hierarchyFilter={props.embeddedInCanvas ? {
+        value: hierarchyTypeFilter,
+        options: hierarchyFilterOptions,
+        onChange: setHierarchyTypeFilter,
+      } : null}
+      hierarchyNodeCount={props.hierarchyItems?.length ?? 0}
       onGroupClick={handleGroupClick}
       onChildClick={handleChildClick}
       onSearchChange={ctx.setSearch}
@@ -239,7 +247,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
     ctx.categories, ctx.activeGroup, ctx.activeChild,
     ctx.search, ctx.multiSelectEnabled,
     ctx.scanningProgress, ctx.scanningMessage,
-    isMobile, theme,
+    isMobile, theme, props.embeddedInCanvas,
+    hierarchyTypeFilter, hierarchyFilterOptions, props.hierarchyItems,
     handleGroupClick, handleChildClick,
     ctx.setSearch,
     handleMultiSelectToggle, handleUploadMaterial,
@@ -263,6 +272,8 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
             search={ctx.search}
             multiSelectEnabled={ctx.multiSelectEnabled}
             onMultiSelectToggle={() => ctx.setMultiSelectEnabled(!ctx.multiSelectEnabled)}
+            typeFilter={hierarchyTypeFilter}
+            onTypeFilterChange={setHierarchyTypeFilter}
           />
         ) : (
           <AssetLibraryGridView
@@ -272,6 +283,7 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
             selectedIds={ctx.selectedIds}
             highlightId={highlightId}
             isMobile={isMobile}
+            gridColumns={props.gridColumns}
             theme={theme}
             dragOver={ctx.dragOver}
             dragCounterRef={ctx.dragCounterRef}
@@ -280,8 +292,6 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
             onRenameItem={handleRenameItem}
             onDeleteItem={handleDeleteItem}
             onDownloadItem={handleDownloadItem}
-            onFavoriteItem={handleFavoriteItem}
-            onUnfavoriteItem={handleUnfavoriteItem}
             onContextMenu={handleItemContextMenu}
             onSendToCanvas={props.onSendToCanvas ? handleSendItemToCanvas : undefined}
             onDragEnter={ctx.handleDragEnter}
@@ -339,12 +349,12 @@ export function AssetLibraryPage(props: AssetLibraryPageProps): React.ReactEleme
       </div>
     </div>
   ), [
-    isMobile, toolbar, ctx.activeGroup, props.hierarchyListView, props.onSendToCanvas, handleSendItemToCanvas, ctx.pageItems,
+    isMobile, props.gridColumns, toolbar, ctx.activeGroup, props.hierarchyListView, props.onSendToCanvas, handleSendItemToCanvas, ctx.pageItems,
     ctx.loadingPrompts, ctx.loadingAssets,
     ctx.multiSelectEnabled, ctx.selectedIds, highlightId, theme,
     ctx.dragOver, ctx.dragCounterRef, ctx.handleToggleSelect,
     ctx.handleOpenItem, handleRenameItem, handleDeleteItem,
-    handleDownloadItem, handleFavoriteItem, handleUnfavoriteItem,
+    handleDownloadItem,
     handleItemContextMenu, ctx.handleDragEnter, ctx.handleDragLeave,
     ctx.handleDragOver, ctx.handleDrop, handleGridCtxMenu,
     ctx.allItems, ctx.PAGE_SIZE, ctx.page, ctx.setPage,

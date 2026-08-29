@@ -3,7 +3,8 @@
  *
  * 布局(默认 'bottom',桌面/移动端一致 —— 移动端行为即默认行为):
  * - 底部居中悬浮条,与右下角缩放组件(ZoomToolbar)同款底色(半透明黑 + 毛玻璃)
- * - 按钮顺序:[小地图 / 模式切换 / 清空画布] ┃ [加号(最右,单独隔开)]
+ * - 按钮顺序(征集 #92:缩放百分比回归底部条,复刻 v1.1.0 原版形态):
+ *   [小地图 / 缩放%] ┃ [层级资产(#91 自顶栏迁入) / 模式切换 / 清空画布] ┃ [加号(最右,单独隔开)]
  * - 加号创建菜单向上弹出(对齐按钮右缘)
  * - 缩放控件已移除(由画布右下角 ZoomToolbar 承担,征集 #87 验收轮)
  *
@@ -18,13 +19,17 @@ import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { Button } from 'antd';
+import { Button, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import { Tooltip, NodeCreateMenu } from '@/shared/components/index.js';
 import type { AddNodeType } from '@/shared/components/index.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import {
   Map,
-  Eraser,
+  PackageOpen,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
   Hand,
   MousePointer2,
   Plus,
@@ -36,7 +41,11 @@ export interface LeftSideToolBarProps {
   onScaleChange: (scale: number) => void;
   isMiniMapOpen: boolean;
   onToggleMiniMap: () => void;
-  onClear: () => void;
+  /** 层级/资产抽屉开关(征集 #91:自顶栏 LOGO 侧迁入底部条;缺省不渲染按钮) */
+  isHierarchyOpen?: boolean;
+  onToggleHierarchy?: () => void;
+  /** 征集 #96:清空画布按钮已移除,接口保留供旧调用方透传(不再消费) */
+  onClear?: () => void;
   interactionMode: 'select' | 'pan';
   onToggleInteractionMode: () => void;
   isMobile?: boolean;
@@ -49,6 +58,10 @@ export interface LeftSideToolBarProps {
 interface LeftSideToolBarViewProps extends LeftSideToolBarProps {
   theme: ThemeConfig;
 }
+
+/** 缩放边界(v1.1.0 原版契约) */
+const MAX_SCALE = 5;
+const MIN_SCALE = 0.05;
 
 /** 底部悬浮条按钮文字色(与 ZoomToolbar 同款) */
 const BAR_TEXT = 'rgba(255,255,255,0.85)';
@@ -69,9 +82,12 @@ const bottomBarStyle: CSSProperties = {
 };
 
 function LeftSideToolBarView({
+  scale,
+  onScaleChange,
   isMiniMapOpen,
   onToggleMiniMap,
-  onClear,
+  isHierarchyOpen,
+  onToggleHierarchy,
   interactionMode,
   onToggleInteractionMode,
   isMobile,
@@ -81,9 +97,11 @@ function LeftSideToolBarView({
 }: LeftSideToolBarViewProps): React.ReactElement {
   const { t } = useTranslation();
   const readOnly = useReadOnly();
+  const [zoomOpen, setZoomOpen] = useState(false);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodePos, setAddNodePos] = useState<{ x: number; y: number }>({ x: 56, y: 72 });
   const plusButtonRef = useRef<HTMLElement>(null);
+  const percent = Math.round(scale * 100);
   const isPan = interactionMode === 'pan';
 
   const isBottom = layout === 'bottom';
@@ -101,6 +119,58 @@ function LeftSideToolBarView({
     background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
     borderRadius: 8,
   });
+
+  // ===== 缩放百分比下拉(v1.1.0 原版形态复刻,征集 #92) =====
+  const zoomItems: MenuProps['items'] = [
+    {
+      key: 'zoomIn',
+      label: t('canvasControls.zoomIn'),
+      icon: <ZoomIn size={14} />,
+      onClick: () => onScaleChange(Math.min(scale * 1.25, MAX_SCALE)),
+    },
+    {
+      key: 'zoomOut',
+      label: t('canvasControls.zoomOut'),
+      icon: <ZoomOut size={14} />,
+      onClick: () => onScaleChange(Math.max(scale / 1.25, MIN_SCALE)),
+    },
+    { type: 'divider' },
+    { key: '50', label: '50%', onClick: () => onScaleChange(0.5) },
+    { key: '100', label: '100%', onClick: () => onScaleChange(1) },
+    { key: '500', label: '500%', onClick: () => onScaleChange(5) },
+    { type: 'divider' },
+    {
+      key: 'fit',
+      label: t('canvasControls.fitScreen'),
+      icon: <Maximize2 size={14} />,
+      onClick: () => onScaleChange(1),
+    },
+  ];
+
+  // 缩放下拉触发器(无下拉箭头,点击弹出菜单;黑底白字体系用 BAR_TEXT)
+  const zoomTrigger = (
+    <div
+      className="zx-toolbar-btn"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 48,
+        height: 32,
+        padding: '0 6px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        fontSize: 12,
+        fontWeight: 500,
+        color: BAR_TEXT,
+        background: 'transparent',
+        border: 'none',
+        userSelect: 'none',
+      }}
+    >
+      <span>{percent}%</span>
+    </div>
+  );
 
   // 加号按钮(只读隐藏:创建节点是核心编辑入口)
   // 菜单位置:底部布局统一向上弹出,右缘对齐按钮(加号在条最右,防菜单溢出屏幕)
@@ -147,6 +217,11 @@ function LeftSideToolBarView({
   // ===== 底部布局(默认):双端一致的悬浮条 =====
   if (isBottom) {
     return (<>
+      {/* zx-toolbar-btn hover 缩放动效(v1.1.0 原版同款,缩放触发器使用) */}
+      <style>{`
+        .zx-toolbar-btn { transition: transform 0.15s ease; }
+        .zx-toolbar-btn:hover { transform: scale(1.1); }
+      `}</style>
       <div style={bottomWrapperStyle}>
         <div style={bottomBarStyle} onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
           {/* 小地图开关 */}
@@ -160,6 +235,31 @@ function LeftSideToolBarView({
               <Map size={18} />
             </Button>
           </Tooltip>
+          {/* 缩放百分比下拉(征集 #92:v1.1.0 原版形态回归,紧邻小地图) */}
+          <Dropdown
+            open={zoomOpen}
+            onOpenChange={setZoomOpen}
+            menu={{ items: zoomItems }}
+            placement="top"
+          >
+            {zoomTrigger}
+          </Dropdown>
+          {/* 分割线:缩放组与右侧功能组隔开(征集 #92 用户拍板) */}
+          <div style={dividerStyle} />
+          {/* 层级/资产开关(征集 #91:自顶栏 LOGO 侧迁入;激活态 = 抽屉开,accent 高亮) */}
+          {onToggleHierarchy && (
+            <Tooltip title={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')} theme={theme}>
+              <Button
+                type="text"
+                onClick={onToggleHierarchy}
+                aria-label={t(isHierarchyOpen ? 'canvasControls.hierarchyOpen' : 'canvasControls.hierarchyClosed')}
+                style={barBtnStyle(!!isHierarchyOpen)}
+              >
+                {/* 征集 #96:图标改 lucide package-open(资产库语义) */}
+                <PackageOpen size={18} />
+              </Button>
+            </Tooltip>
+          )}
           {/* 模式切换(select/pan) */}
           <Tooltip title={isPan ? t('toolbar.pan') : t('toolbar.select')} theme={theme}>
             <Button
@@ -171,14 +271,7 @@ function LeftSideToolBarView({
               {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
             </Button>
           </Tooltip>
-          {/* 清空画布(只读隐藏:2026-08-25 系统性只读防护) */}
-          {!readOnly && (
-            <Tooltip title={t('toolbar.clear')} theme={theme}>
-              <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} style={barBtnStyle()}>
-                <Eraser size={18} />
-              </Button>
-            </Tooltip>
-          )}
+          {/* 征集 #96(Plan#49 T29):清空画布按钮移除(底部悬浮条只留 小地图/缩放/资产库/模式/加号) */}
           {/* 征集 #87 验收轮:加号移到最右,与清空画布单独隔开 */}
           {plusButton && (
             <>
@@ -242,13 +335,7 @@ function LeftSideToolBarView({
                 {isPan ? <Hand size={18} /> : <MousePointer2 size={18} />}
               </Button>
             </Tooltip>
-            {!readOnly && (
-              <Tooltip title={t('toolbar.clear')} theme={theme}>
-                <Button type="text" onClick={onClear} aria-label={t('toolbar.clear')} style={{ width: 32, height: 32, padding: 0 }}>
-                  <Eraser size={18} />
-                </Button>
-              </Tooltip>
-            )}
+            {/* 征集 #96:清空画布按钮移除(双端一致;legacy 布局同步清理) */}
           </div>
         </div>
       </div>

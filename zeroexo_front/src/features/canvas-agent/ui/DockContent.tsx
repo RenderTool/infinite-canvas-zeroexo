@@ -436,6 +436,18 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
 
   const [convs, setConvs] = useState<ConversationSummary[]>([]);
   const [convOpen, setConvOpen] = useState(false);
+  /** 头部容器 ref（会话切换按钮 + 历史会话下拉面板都在其中，用于点击外部收起判定） */
+  const headerRef = useRef<HTMLDivElement>(null);
+  // 征集 #96:历史会话下拉——点击头部以外区域自动收起(捕获阶段监听,避免被内部点击冒泡干扰)
+  useEffect(() => {
+    if (!convOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (headerRef.current?.contains(e.target as Node)) return;
+      setConvOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [convOpen]);
   /** 历史会话搜索关键词（标题/最后消息预览模糊匹配） */
   const [convQuery, setConvQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -678,19 +690,21 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     >
       {/* ===== 头部：会话 + Tab ===== */}
       <div
+        ref={headerRef}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           padding: '8px 14px',
-          borderBottom: '1px solid var(--agent-border)',
+          // 征集 #96:分割线与剧本编辑器同款(原 --agent-border 过重)
+          borderBottom: '1px solid var(--agent-divider)',
           background: 'var(--agent-panel)',
           position: 'relative',
           flexShrink: 0,
           zIndex: 20,
         }}
       >
-        {/* 会话切换 */}
+        {/* 会话切换（征集 #96：与下方渠道下拉同款——无边框、透明底、hover 灰底） */}
         <button
           type="button"
           onClick={() => setConvOpen((v) => !v)}
@@ -698,17 +712,22 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            padding: '5px 10px',
-            borderRadius: 8,
-            border: '1.5px solid var(--agent-border)',
-            background: 'var(--agent-surface-2)',
+            height: 26,
+            padding: '0 6px',
+            borderRadius: 4,
+            border: 'none',
+            background: 'transparent',
             color: 'var(--agent-text)',
             fontSize: 12,
             fontWeight: 600,
             cursor: 'pointer',
             fontFamily: 'inherit',
             maxWidth: 170,
+            flexShrink: 0,
+            transition: 'background 0.12s',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--agent-surface-2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           title="切换会话"
         >
           <MessageSquare size={12} style={{ flexShrink: 0 }} />
@@ -740,17 +759,27 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 26,
-            height: 26,
-            borderRadius: 7,
-            border: '1.5px solid var(--agent-border)',
-            background: 'var(--agent-surface-2)',
+            // 征集 #96:改圆形按钮并缩小(原 26×26 方角带边框)
+            width: 22,
+            height: 22,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
             color: 'var(--agent-muted)',
             cursor: 'pointer',
             flexShrink: 0,
+            transition: 'background 0.12s, color 0.12s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--agent-surface-2)';
+            e.currentTarget.style.color = 'var(--agent-text)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = 'var(--agent-muted)';
           }}
         >
-          <Plus size={13} />
+          <Plus size={12} />
         </button>
 
         {/* Tab 切换 */}

@@ -64,6 +64,9 @@ export interface HierarchyListViewProps {
   /** 征集 #87 验收轮十三:选择模式由外部驱动(资产库工具栏多选按钮);未提供时回退内部状态 */
   multiSelectEnabled?: boolean;
   onMultiSelectToggle?: () => void;
+  /** 征集 #96(Plan#49 T29):类型筛选由外部驱动(筛选下拉已并入资产库工具栏搜索行);未提供时回退内部状态 */
+  typeFilter?: string;
+  onTypeFilterChange?: (value: string) => void;
 }
 
 // ===== 类型 → 图标映射（与节点左上角图标一致） =====
@@ -525,7 +528,8 @@ const HierarchyRow = memo(function HierarchyRow({
 
 // ===== 类型筛选选项 =====
 
-function useFilterOptions(): Array<{ value: string; label: string }> {
+/** 层级类型筛选项（征集 #96：筛选下拉移入资产库工具栏后由页面层调用，故导出） */
+export function useFilterOptions(): Array<{ value: string; label: string }> {
   const { t } = useTranslation();
   // 征集 #87 验收轮十二:移除「组」筛选项(用户拍板)
   return [
@@ -545,13 +549,18 @@ function useFilterOptions(): Array<{ value: string; label: string }> {
 export function HierarchyListView({
   theme, store, data, onFocusNode, search,
   multiSelectEnabled: externalMultiSelect, onMultiSelectToggle,
+  typeFilter: externalTypeFilter, onTypeFilterChange,
 }: HierarchyListViewProps): React.ReactElement {
   const { t } = useTranslation();
   const dragIdRef = useRef<string | null>(null);
 
-  // 本地类型筛选
+  // 类型筛选：外部(工具栏筛选行)优先，未提供时回退内部状态
   const [localTypeFilter, setLocalTypeFilter] = useState<'all' | string>('all');
-  const filterOptions = useFilterOptions();
+  const typeFilter = externalTypeFilter ?? localTypeFilter;
+  const setTypeFilter = useCallback((value: string) => {
+    if (onTypeFilterChange) onTypeFilterChange(value);
+    else setLocalTypeFilter(value);
+  }, [onTypeFilterChange]);
 
   // 选择模式(征集 #87 验收轮十三:优先外部驱动,与资产库工具栏多选按钮联动;未提供时回退内部)
   const [internalSelectMode, setInternalSelectMode] = useState(false);
@@ -597,8 +606,8 @@ export function HierarchyListView({
   // 过滤：类型筛选 + 搜索词（来自资产库工具栏）
   const filteredTree = useMemo(() => {
     let list = data.tree;
-    if (localTypeFilter !== 'all') {
-      list = list.filter((item) => item.node.type === localTypeFilter);
+    if (typeFilter !== 'all') {
+      list = list.filter((item) => item.node.type === typeFilter);
     }
     const kw = search.trim().toLowerCase();
     if (kw) {
@@ -609,7 +618,7 @@ export function HierarchyListView({
       });
     }
     return list;
-  }, [data.tree, localTypeFilter, search]);
+  }, [data.tree, typeFilter, search]);
 
   useEffect(() => {
     setFocusIndex((prev) => (filteredTree.length === 0 ? -1 : Math.min(prev, filteredTree.length - 1)));
@@ -756,35 +765,8 @@ export function HierarchyListView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* 征集 #87 验收轮十一/十三:筛选改资产库同款 pill 组;多选按钮已移至资产库工具栏(不再独占一行) */}
-      {/* 验收轮二十:行顶部 padding 归零 → 到下划线距离与素材分组一致(分割线 12px);按钮尺寸同素材(24 高/11 字号/0 8px) */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', alignItems: 'center',
-        gap: 4, padding: '0 12px 4px', flexShrink: 0,
-      }}>
-        {filterOptions.map((o) => {
-          const isActive = localTypeFilter === o.value;
-          return (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => setLocalTypeFilter(o.value)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                height: 24, padding: '0 8px',
-                fontSize: 11, fontWeight: isActive ? 600 : 400,
-                borderRadius: 6, cursor: 'pointer',
-                border: isActive ? `1px solid ${theme.toolbar.accent}` : '1px solid transparent',
-                background: isActive ? theme.toolbar.accent : 'transparent',
-                color: isActive ? '#fff' : theme.toolbar.textMuted,
-                transition: 'all 0.15s', whiteSpace: 'nowrap',
-              }}
-            >
-              {o.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* 征集 #96(Plan#49 T29):层级筛选下拉与节点统计徽标已并入资产库工具栏的「筛选+搜索+多选」行
+          (状态由 AssetLibraryPage 受控传入 typeFilter/onTypeFilterChange),此处不再渲染独立筛选行 */}
 
       {/* 树形列表（Virtuoso 虚拟滚动） */}
       <div
@@ -849,20 +831,7 @@ export function HierarchyListView({
             </Tooltip>
           </div>
         </div>
-      ) : (
-        <div style={{
-          height: 28, flexShrink: 0, display: 'flex', alignItems: 'center',
-          justifyContent: 'flex-end', padding: '0 12px',
-          fontSize: 10, color: theme.toolbar.textMuted,
-        }}>
-          <span style={{
-            fontSize: 10, padding: '1px 7px', borderRadius: 999,
-            background: theme.toolbar.border + '55', fontVariantNumeric: 'tabular-nums',
-          }}>
-            {data.tree.length}
-          </span>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

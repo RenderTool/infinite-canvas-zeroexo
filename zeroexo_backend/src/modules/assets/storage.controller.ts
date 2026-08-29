@@ -34,6 +34,7 @@ const PUBLIC_READ_PREFIXES = ['resources/public/'];
  * 图片变体(sharp 管道):
  *   PUT 接收图片时自动生成 __sm(160px)、__thumb(48px) 和 __preview(768px) 三个变体,
  *   GET 通过 ?size= 参数返回对应尺寸,实现前端 LOD 渐进式加载。
+ *   旧图缺失变体时按需懒生成(首次请求付生成成本后持久化),杜绝展示层回退拉原图。
  *
  * 客户端调用流程(与 MinIO 预签名直传完全一致):
  *   1. POST /api/assets/presign 拿到 uploadUrl 与 storageKey
@@ -158,16 +159,40 @@ export class StorageController {
     }
 
     // 支持 size 参数: sm / thumb / preview / full(或空)
-    const resolvedKey =
-      size !== 'full' && this.imageProcessor.isImageExt(decodedKey)
-        ? this.imageProcessor.variantKey(decodedKey, size as 'sm' | 'thumb' | 'preview')
-        : decodedKey;
+    const isVariantRequest =
+      size !== 'full' && this.imageProcessor.isImageExt(decodedKey);
+    const resolvedKey = isVariantRequest
+      ? this.imageProcessor.variantKey(decodedKey, size as 'sm' | 'thumb' | 'preview')
+      : decodedKey;
 
-    const buffer = await this.minio.readFile(resolvedKey);
+    let buffer = await this.minio.readFile(resolvedKey);
+    let original: Buffer | null = null;
+    // 旧图无尺寸变体:按需懒生成并持久化(首次请求付生成成本,后续复用)。
+    // 历史行为是直接回退原图 —— 卡片封面等展示层因此实际拉取原图,违反三档图片契约。
+    if (!buffer && isVariantRequest) {
+      original = await this.minio.readFile(decodedKey);
+      if (original) {
+        try {
+          buffer = await this.imageProcessor.generateVariant(
+            original,
+            size as 'sm' | 'thumb' | 'preview',
+          );
+          await this.minio.putBuffer(resolvedKey, buffer, 'image/jpeg');
+          this.logger.log(
+            `懒生成变体: ${resolvedKey} (${buffer.length} bytes)`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `变体懒生成失败(回退原图): ${resolvedKey}`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+    }
     if (!buffer) {
-      // 如果请求的变体不存在,回退到原始文件
+      // 懒生成失败或原图缺失时兜底:返回原始文件(旧数据兼容唯一出口)
       if (resolvedKey !== decodedKey) {
-        const fallback = await this.minio.readFile(decodedKey);
+        const fallback = original ?? await this.minio.readFile(decodedKey);
         if (!fallback) {
           throw notFound(ErrorCode.STORAGE_FILE_NOT_FOUND, 'File not found');
         }

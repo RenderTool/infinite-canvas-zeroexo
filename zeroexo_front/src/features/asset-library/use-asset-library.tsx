@@ -18,7 +18,8 @@ import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useAssetUploadQueue } from '@/features/upload-queue/use-upload-queue.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { deletePrompt, updatePrompt, createPrompt, type Prompt } from './prompts-api.js';
-import { useSharedPrompts, updatePromptFavoriteLocal } from './shared-data-store.js';
+import { setPromptImages } from './prompt-images-api.js';
+import { useSharedPrompts } from './shared-data-store.js';
 import { notifyPromptCopied } from './prompt-copy-feedback.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { apiPost, getToken } from '@/services/api-client.js';
@@ -115,7 +116,6 @@ export interface UseAssetLibraryReturn {
   handleConfirmDelete: () => Promise<void>;
   handleToggleSelect: (id: string) => void;
   handleToggleSelectAll: () => void;
-  handleToggleFavorite: (item: { type: 'prompt' | 'asset'; id: string; data: any }) => Promise<void>;
   handleClonePrompt: (prompt: Prompt) => Promise<void>;
   handleBatchDelete: () => void;
   handleSendToCanvas: (item: SendToCanvasItem) => void;
@@ -279,7 +279,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       color: '#f59e0b',
       count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity').length,
       children: [
-        { key: 'favorite', label: t('assetLibrary.filterFavorite'), count: assets.filter((a) => a.favorite && (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity').length },
         { key: 'all', label: t('assetLibrary.filterAll'), count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity').length },
         { key: 'image', label: t('assetLibrary.filterImage'), count: assets.filter((a) => a.kind === 'image').length },
         { key: 'video', label: t('assetLibrary.filterVideo'), count: assets.filter((a) => a.kind === 'video').length },
@@ -295,7 +294,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       color: '#8b5cf6',
       count: prompts.length,
       children: [
-        { key: 'favorite', label: t('assetLibrary.filterFavorite'), count: prompts.filter((p) => p.favorite).length },
         { key: 'all', label: t('assetLibrary.filterAll'), count: prompts.length },
         { key: 'role', label: t('assetLibrary.filterRole'), count: prompts.filter((p) => p.category === 'role').length },
         { key: 'scene', label: t('assetLibrary.filterScene'), count: prompts.filter((p) => p.category === 'scene').length },
@@ -326,7 +324,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       case 'prompt':
         return { contentType: 'prompt' as ContentType, assetKind: 'all' as AssetKindFilter };
       case 'material': {
-        const validKinds: AssetKindFilter[] = ['all', 'favorite', 'image', 'video', 'audio', 'text'];
+        const validKinds: AssetKindFilter[] = ['all', 'image', 'video', 'audio', 'text'];
         const child = validKinds.includes(activeChild as AssetKindFilter) ? (activeChild as AssetKindFilter) : 'all';
         return { contentType: 'asset' as ContentType, assetKind: child };
       }
@@ -354,9 +352,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const filteredPrompts = useMemo(() => {
     let result = safePrompts;
     if (activeChild && activeChild !== 'all') {
-      if (activeChild === 'favorite') {
-        result = result.filter((p) => p.favorite);
-      } else if (['role', 'scene', 'style', 'shot', 'other'].includes(activeChild)) {
+      if (['role', 'scene', 'style', 'shot', 'other'].includes(activeChild)) {
         result = result.filter((p) => p.category === activeChild);
       }
     }
@@ -377,9 +373,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     if (activeGroup === 'material') {
       result = result.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity');
     }
-    if (assetKindFilter === 'favorite') {
-      result = result.filter((a) => a.favorite);
-    } else if (assetKindFilter !== 'all') {
+    if (assetKindFilter !== 'all') {
       result = result.filter((a) => (a.kind as string) === assetKindFilter);
     }
     if (search.trim()) {
@@ -708,30 +702,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     });
   }, [allItems]);
 
-  // ── 收藏 ──
-  const handleToggleFavorite = useCallback(async (item: { type: 'prompt' | 'asset'; id: string; data: any }) => {
-    if (!isAuthenticated) {
-      antdMessage.warning(t('assetLibrary.loginRequired'));
-      if (typeof window !== 'undefined') window.location.hash = '#/auth';
-      return;
-    }
-    try {
-      const currentFavorite = item.data.favorite ?? false;
-      const newFavState = !currentFavorite;
-      if (item.type === 'prompt') {
-        // 乐观更新本地数据，避免刷新后列表重新排列
-        updatePromptFavoriteLocal(item.id, newFavState);
-        await updatePrompt(item.id, { favorite: newFavState });
-      } else if (item.type === 'asset') {
-        // 素材暂不支持乐观更新，走原有刷新逻辑
-        await updateAsset(item.id, { favorite: newFavState });
-        await refreshAssets();
-      }
-    } catch (err) {
-      console.error('Toggle favorite failed', err);
-    }
-  }, [refreshAssets]);
-
   // ── 克隆提示词 ──
   const handleClonePrompt = useCallback(async (prompt: Prompt) => {
     if (cloningPromptIds.current.has(prompt.id)) return;
@@ -744,6 +714,16 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
         tags: prompt.tags ?? [],
         imageKeys: prompt.imageKeys ?? [],
       });
+      // 征集 #93(Plan#47 T9):后端 create 不再重建 PromptImage,克隆副本显式写附图(默认参考图语义,
+      // 与旧 create 重建行为一致);若需保留源 role 可改为先 listPromptImages 再透传
+      await setPromptImages(
+        clone.id,
+        (prompt.imageKeys ?? []).map((key, idx) => ({
+          storageKey: key,
+          role: 'reference' as const,
+          sortOrder: idx,
+        })),
+      ).catch(() => {});
       notifyPromptCopied(antdMessage, clone.id);
     } catch {
       antdMessage.error(t('assetLibrary.copyFailed'));
@@ -936,7 +916,6 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     handleConfirmDelete,
     handleToggleSelect,
     handleToggleSelectAll,
-    handleToggleFavorite,
     handleClonePrompt,
     handleBatchDelete,
     handleSendToCanvas,

@@ -6,8 +6,9 @@
  */
 
 import { useState, useMemo } from 'react';
-import { BookOpen, Download, Pencil, Trash2, Send } from 'lucide-react';
-import { Tooltip } from 'antd';
+import { BookOpen, Download, Pencil, Trash2, Send, MoreHorizontal } from 'lucide-react';
+import { Tooltip, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
 
 // ===== 辅助 =====
@@ -32,6 +33,7 @@ function ScriptCardGrid({
   onOpen,
   onRename,
   onDelete,
+  onDownload,
   onContextMenu,
   onSendToCanvas,
   theme,
@@ -40,6 +42,33 @@ function ScriptCardGrid({
   const [hovered, setHovered] = useState(false);
   const episodeCount = useMemo(() => parseEpisodeCount(asset), [asset]);
   const isDark = theme.mode === 'dark';
+
+  // 更多下拉菜单：下载 / 重命名 / 删除（画布项目卡片同款）
+  const moreMenuItems = useMemo<MenuProps['items']>(() => {
+    const items: MenuProps['items'] = [];
+    if (onDownload) {
+      items.push({
+        key: 'download',
+        icon: <Download size={14} />,
+        label: t('common.download'),
+        onClick: (e) => { e.domEvent.stopPropagation(); onDownload(); },
+      });
+    }
+    items.push({
+      key: 'rename',
+      icon: <Pencil size={14} />,
+      label: t('assetLibrary.rename'),
+      onClick: (e) => { e.domEvent.stopPropagation(); onRename(); },
+    });
+    items.push({
+      key: 'delete',
+      icon: <Trash2 size={14} />,
+      label: t('assetLibrary.delete'),
+      danger: true,
+      onClick: (e) => { e.domEvent.stopPropagation(); onDelete(); },
+    });
+    return items;
+  }, [onDownload, onRename, onDelete, t]);
 
   return (
     <div
@@ -98,6 +127,23 @@ function ScriptCardGrid({
             {episodeCount} 集
           </span>
         )}
+
+        {/* 发送到画布快捷按钮(常驻,仅画布内嵌时提供) */}
+        {onSendToCanvas && (
+          <Tooltip title={t('assetLibrary.sendToCanvas')}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }}
+              // 征集 #95(Plan#49 T28):hover 后显示,与卡片其它操作按钮显隐一致
+              style={{
+                ...cardActionBtnStyle, position: 'absolute', top: 8, right: 8, zIndex: 10,
+                opacity: hovered ? 1 : 0, transition: 'opacity 0.2s, background 0.15s',
+              }}
+            >
+              <Send size={13} />
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       {/* 底部信息 */}
@@ -128,6 +174,7 @@ function ScriptCardGrid({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 8,
         }}>
           <span style={{
             fontSize: 11,
@@ -136,44 +183,41 @@ function ScriptCardGrid({
           }}>
             {t('asset.kindScript')}
           </span>
+          {/* 画布项目卡片同款「更多」按钮(下载/重命名/删除) */}
+          <Dropdown
+            menu={{ items: moreMenuItems }}
+            trigger={['click']}
+            placement="bottomRight"
+          >
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                flexShrink: 0,
+                width: 24,
+                height: 24,
+                padding: 0,
+                border: 'none',
+                borderRadius: 6,
+                background: 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: theme.toolbar.textMuted,
+                opacity: hovered ? 1 : 0,
+                transition: 'opacity 0.2s, background 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <Tooltip title={t('projectCard.moreActions')}>
+                <MoreHorizontal size={14} />
+              </Tooltip>
+            </button>
+          </Dropdown>
         </div>
       </div>
-
-      {/* Hover 操作按钮(征集 #87 验收轮十三:提示词卡同款竖排风格;画布内额外飞机图标发送到画布) */}
-      {hovered && (
-        <div style={{
-          position: 'absolute',
-          top: 8,
-          right: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          zIndex: 10,
-        }} onClick={(e) => e.stopPropagation()}>
-          {onSendToCanvas && (
-            <Tooltip title={t('assetLibrary.sendToCanvas')}>
-              <button type="button" onClick={onSendToCanvas} style={cardActionBtnStyle}>
-                <Send size={13} />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip title={t('common.download')}>
-            <button type="button" style={cardActionBtnStyle}>
-              <Download size={13} />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('assetLibrary.rename')}>
-            <button type="button" onClick={onRename} style={cardActionBtnStyle}>
-              <Pencil size={13} />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('assetLibrary.delete')}>
-            <button type="button" onClick={onDelete} style={cardActionBtnStyle}>
-              <Trash2 size={13} />
-            </button>
-          </Tooltip>
-        </div>
-      )}
     </div>
   );
 }

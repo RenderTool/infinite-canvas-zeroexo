@@ -34,6 +34,9 @@ export interface ImagePanZoom {
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
+  /** 平滑聚焦到世界坐标内的某矩形区域(节点双击聚焦):中心对齐视口中心 + 按比例缩放,
+   *  公式与主画布 focus-geometry computeFocusTarget 一致(占视口约 paddingRatio,上限 2.0) */
+  focusOnWorldRect: (rect: { x: number; y: number; width: number; height: number }, paddingRatio?: number) => void;
   /** 绑定到舞台容器(回调 ref,挂载时自动绑定原生 wheel 监听) */
   containerRef: (el: HTMLDivElement | null) => void;
   /** 绑定到图片元素:高频拖拽/缩放直接写 DOM transform,绕开 React 重渲染 */
@@ -88,7 +91,10 @@ export function useImagePanZoom(options?: { panAlways?: boolean }): ImagePanZoom
     lastX: number; lastY: number;
   }>({ mode: 'none', distance: 0, centerX: 0, centerY: 0, startScale: 1, startScaleX: 0, startScaleY: 0, lastX: 0, lastY: 0 });
 
-  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); if (focusAnimRef.current) cancelAnimationFrame(focusAnimRef.current); }, []);
+
+  // 双击聚焦动画帧句柄(独立于拖拽 RAF,避免相互覆盖)
+  const focusAnimRef = useRef(0);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!panAlways && scale <= 1) return;
@@ -214,6 +220,38 @@ export function useImagePanZoom(options?: { panAlways?: boolean }): ImagePanZoom
     applyTransform(1, 0, 0);
   }, [applyTransform]);
 
+  // 聚焦到世界坐标矩形(节点双击聚焦):中心对齐视口中心 + 按比例缩放 + 400ms 缓动。
+  // 变换模型 transform=scale(s)translate(x/s,y/s)、origin 为元素中心且元素 flex 居中于容器,
+  // 故世界点 P 映射到视口(以容器中心为原点)为 s·(P−C)+(x,y);令节点中心 N 归零得 (x,y)=k·(C−N)。
+  const focusOnWorldRect = useCallback((rect: { x: number; y: number; width: number; height: number }, paddingRatio = 0.82) => {
+    const el = imgRef.current;
+    const container = containerRef.current;
+    if (!el || !container) return;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    if (cw <= 0 || ch <= 0 || rect.width <= 0 || rect.height <= 0) return;
+    const Cx = el.offsetWidth / 2, Cy = el.offsetHeight / 2;
+    // 与主画布 computeFocusTarget 同基准:占视口约 paddingRatio(默认 0.82),上限 2.0 防小节点过度放大
+    const k = Math.min((cw / rect.width) * paddingRatio, (ch / rect.height) * paddingRatio, 2.0);
+    const targetX = k * (Cx - (rect.x + rect.width / 2));
+    const targetY = k * (Cy - (rect.y + rect.height / 2));
+    const startS = scaleRef.current, startX = positionRef.current.x, startY = positionRef.current.y;
+    if (focusAnimRef.current) cancelAnimationFrame(focusAnimRef.current);
+    const DUR = 400, t0 = performance.now();
+    const ease = (p: number) => 1 - Math.pow(1 - p, 3);
+    const step = (now: number) => {
+      const p = Math.min((now - t0) / DUR, 1);
+      const e = ease(p);
+      const s = startS + (k - startS) * e;
+      const x = startX + (targetX - startX) * e;
+      const y = startY + (targetY - startY) * e;
+      scaleRef.current = s; positionRef.current = { x, y };
+      applyTransform(s, x, y);
+      if (p < 1) focusAnimRef.current = requestAnimationFrame(step);
+      else { focusAnimRef.current = 0; setScale(k); setPosition({ x: targetX, y: targetY }); }
+    };
+    focusAnimRef.current = requestAnimationFrame(step);
+  }, [applyTransform]);
+
   const imgTransformStyle: CSSProperties = {
     transform: `scale(${scaleRef.current}) translate(${positionRef.current.x / scaleRef.current}px, ${positionRef.current.y / scaleRef.current}px)`,
     // 拖拽平移期间关闭过渡,避免 transform 缓动造成的拖尾呆滞;缩放/重置时保留缓动
@@ -227,6 +265,7 @@ export function useImagePanZoom(options?: { panAlways?: boolean }): ImagePanZoom
     zoomIn,
     zoomOut,
     reset,
+    focusOnWorldRect,
     containerRef: setContainerRef,
     imgRef: (el: HTMLImageElement | null) => { imgRef.current = el; },
     containerHandlers: {

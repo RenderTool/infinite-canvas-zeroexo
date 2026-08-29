@@ -36,8 +36,6 @@ interface GridContextValue {
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
   onDownloadItem?: (item: PageItem) => void;
-  onFavoriteItem?: (item: PageItem) => void;
-  onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   /** 发送到画布(征集 #87 验收轮十三:仅画布内嵌入时提供) */
   onSendToCanvas?: (item: PageItem) => void;
@@ -62,8 +60,6 @@ const CardItem = memo(function CardItem({ index }: { index: number }) {
     onRenameItem: ctxOnRenameItem,
     onDeleteItem: ctxOnDeleteItem,
     onDownloadItem: ctxOnDownloadItem,
-    onFavoriteItem: ctxOnFavoriteItem,
-    onUnfavoriteItem: ctxOnUnfavoriteItem,
     onContextMenu: ctxOnContextMenu,
     onSendToCanvas: ctxOnSendToCanvas,
   } = ctx;
@@ -95,8 +91,6 @@ const CardItem = memo(function CardItem({ index }: { index: number }) {
         onRename={() => ctxOnRenameItem(item)}
         onDelete={() => ctxOnDeleteItem(item)}
         onDownload={ctxOnDownloadItem ? () => ctxOnDownloadItem(item) : undefined}
-        onFavorite={ctxOnFavoriteItem ? () => ctxOnFavoriteItem(item) : undefined}
-        onUnfavorite={ctxOnUnfavoriteItem ? () => ctxOnUnfavoriteItem(item) : undefined}
         onContextMenu={(e) => ctxOnContextMenu(e, item)}
         onSendToCanvas={ctxOnSendToCanvas ? () => ctxOnSendToCanvas(item) : undefined}
         theme={ctxTheme}
@@ -114,6 +108,8 @@ interface VirtuosoGridInnerProps {
   selectedIds: Set<string>;
   highlightId: string | null;
   isMobile: boolean;
+  /** 固定列数(画布内嵌抽屉固定 2 格);缺省按 isMobile/自适应列 */
+  gridColumns?: number;
   theme: ThemeConfig;
   t: ReturnType<typeof useTranslation>['t'];
   onToggleSelect: (id: string) => void;
@@ -121,8 +117,6 @@ interface VirtuosoGridInnerProps {
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
   onDownloadItem?: (item: PageItem) => void;
-  onFavoriteItem?: (item: PageItem) => void;
-  onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   onSendToCanvas?: (item: PageItem) => void;
 }
@@ -133,6 +127,7 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
   selectedIds,
   highlightId,
   isMobile,
+  gridColumns,
   theme,
   t,
   onToggleSelect,
@@ -140,8 +135,6 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
   onRenameItem,
   onDeleteItem,
   onDownloadItem,
-  onFavoriteItem,
-  onUnfavoriteItem,
   onContextMenu,
   onSendToCanvas,
 }: VirtuosoGridInnerProps): React.ReactElement {
@@ -149,7 +142,7 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
   const components = useMemo(() => ({
     List: forwardRef<HTMLDivElement, React.HTMLProps<HTMLDivElement>>(
       ({ style, children, ...props }, ref) => (
-        <div ref={ref} {...props} style={{ ...style, ...gridStyle(isMobile) }}>
+        <div ref={ref} {...props} style={{ ...style, ...gridStyle(isMobile, gridColumns) }}>
           {children}
         </div>
       ),
@@ -159,7 +152,7 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
         <div ref={ref} {...props} style={{ ...style, overflow: 'visible' }} />
       ),
     ),
-  }), [isMobile]);
+  }), [isMobile, gridColumns]);
 
   // 稳定 itemContent：useCallback 空依赖，永远不重新创建函数引用
   // CardItem 通过 context 读取最新数据，不依赖 itemContent 重渲染
@@ -180,8 +173,6 @@ const VirtuosoGridInner = memo(function VirtuosoGridInner({
     onRenameItem,
     onDeleteItem,
     onDownloadItem,
-    onFavoriteItem,
-    onUnfavoriteItem,
     onContextMenu,
     onSendToCanvas,
   };
@@ -209,6 +200,8 @@ interface AssetLibraryGridViewProps {
   /** 需要聚焦高亮的卡片 id（复制副本后跳转定位,配收纳动画 + 脉冲） */
   highlightId?: string | null;
   isMobile: boolean;
+  /** 固定列数(画布内嵌抽屉固定 2 格);缺省按 isMobile/自适应列 */
+  gridColumns?: number;
   theme: ThemeConfig;
   dragOver: boolean;
   dragCounterRef: React.MutableRefObject<number>;
@@ -218,8 +211,6 @@ interface AssetLibraryGridViewProps {
   onRenameItem: (item: PageItem) => void;
   onDeleteItem: (item: PageItem) => void;
   onDownloadItem?: (item: PageItem) => void;
-  onFavoriteItem?: (item: PageItem) => void;
-  onUnfavoriteItem?: (item: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, item: PageItem) => void;
   onSendToCanvas?: (item: PageItem) => void;
   onDragEnter: (e: React.DragEvent) => void;
@@ -236,6 +227,7 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
   selectedIds,
   highlightId,
   isMobile,
+  gridColumns,
   theme,
   dragOver,
   onToggleSelect,
@@ -243,8 +235,6 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
   onRenameItem,
   onDeleteItem,
   onDownloadItem,
-  onFavoriteItem,
-  onUnfavoriteItem,
   onContextMenu,
   onSendToCanvas,
   onDragEnter,
@@ -289,6 +279,7 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
             selectedIds={selectedIds}
             highlightId={highlightId ?? null}
             isMobile={isMobile}
+            gridColumns={gridColumns}
             theme={theme}
             t={t}
             onToggleSelect={onToggleSelect}
@@ -296,8 +287,6 @@ export const AssetLibraryGridView = memo(function AssetLibraryGridView({
             onRenameItem={onRenameItem}
             onDeleteItem={onDeleteItem}
             onDownloadItem={onDownloadItem}
-            onFavoriteItem={onFavoriteItem}
-            onUnfavoriteItem={onUnfavoriteItem}
             onContextMenu={onContextMenu}
             onSendToCanvas={onSendToCanvas}
           />

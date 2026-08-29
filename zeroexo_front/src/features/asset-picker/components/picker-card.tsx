@@ -99,7 +99,8 @@ export function PickerCard({ asset, theme, onClick, onDragStart, selectMode = fa
   const cover = ((): string | undefined => {
     if (hydratedCover && !hydratedCover.startsWith('resources/')) return hydratedCover;
     const key = coverStorageKey ?? rawCover;
-    return key ? getResourceUrl(key, 'full') : undefined;
+    // 封面走三档图片契约(征集 #77):图片预览档,视频/音频无尺寸变体维持 full 解析
+    return key ? getResourceUrl(key, data.kind === 'image' ? 'preview' : 'full') : undefined;
   })();
   const duration = data.kind === 'video' || data.kind === 'audio' ? formatDuration(data.durationMs) : '';
   const kindLabel = t(`asset.kind${asset.kind.charAt(0).toUpperCase()}${asset.kind.slice(1)}`);

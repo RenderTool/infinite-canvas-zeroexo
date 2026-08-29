@@ -1,9 +1,9 @@
 ﻿/** * CanvasPage - 画布项目列表页 * * 从原 HomePage 提取的画布项目列表功能。 * 展示用户创建的所有画布项目，支持新建、删除、重命名、搜索、选择模式、导入/导出。 */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Trash2, CheckSquare, Square, Download, Upload, Users, LogOut } from 'lucide-react';
+import { Plus, Trash2, CheckSquare, Square, Download, Users, LogOut } from 'lucide-react';
 import { App, Button, Input, Modal, Typography, Space, Form, Skeleton, Tooltip } from 'antd';
 import { SearchButton } from '@/shared/components/search-button.js';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -13,9 +13,8 @@ import { useCoverUpload } from '@/shared/hooks/use-cover-upload.js';
 import { useProjects } from './use-projects.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import { exportProjects } from './services/export-projects.js';
-import { importProjectsFromZip } from './services/import-projects.js';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
-import { fullSync, pushProjectMeta } from '@/services/sync/sync-service.js';
+import { pushProjectMeta } from '@/services/sync/sync-service.js';
 import { CollaborationModal } from '@/features/collaboration/collaboration-modal.js';
 import { listMyCanvases, listParticipating, removeSelfFromRoom } from '@/features/collaboration/collaboration-api.js';
 import type { MyCanvasItem, ParticipatingCanvasItem } from '@/features/collaboration/collaboration-types.js';
@@ -120,7 +119,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
   const { coverState, openCoverUpload, closeCoverUpload, confirmCoverUpload } = useCoverUpload();
   const [busy, setBusy] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [form] = Form.useForm();
 
   const allProjects = useMemo(() => projects, [projects]);
@@ -348,31 +346,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
     }
   }, [selectedIds, busy, t, message]);
 
-  const handleImportClick = useCallback(() => {
-    if (busy) return;
-    fileInputRef.current?.click();
-  }, [busy]);
-
-  const handleImportFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setBusy(true);
-    try {
-      const imported = await importProjectsFromZip(file);
-      if (imported.length > 0) {
-        await refresh();
-        void fullSync();
-      } else {
-        message.error(t('home.importFailed'));
-      }
-    } catch (err) {
-      message.error(t('home.importFailed'));
-    } finally {
-      setBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [refresh, t, message]);
-
   const hasSelection = selectedIds.size > 0;
   const deleteTargetCount = pendingDeleteId ? 1 : selectedIds.size;
 
@@ -499,12 +472,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
                 </Tooltip>
               )}
 
-              {!collabMode && (
-                <Tooltip title={t('home.importZip')}>
-                  <Button icon={<Upload size={14} />} size="small" onClick={handleImportClick} disabled={busy} />
-                </Tooltip>
-              )}
-
               {/* 多选按钮（末位） */}
               {allProjects.length > 0 && (
                 <Tooltip title={selectMode ? t('home.exitSelect') : t('home.selectMode')}>
@@ -518,14 +485,6 @@ export function CanvasPage({ onOpen }: CanvasPageProps): React.ReactElement {
             </div>
           </div>
         </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/zip,.zip"
-          style={{ display: 'none' }}
-          onChange={(e) => void handleImportFile(e)}
-        />
 
         <div style={contentScrollStyle}>
           {isEmpty ? (

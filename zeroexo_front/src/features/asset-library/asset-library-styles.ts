@@ -68,12 +68,14 @@ export function gridContainerStyle(isMobile: boolean): CSSProperties {
   };
 }
 
-export function gridStyle(isMobile: boolean): CSSProperties {
+export function gridStyle(isMobile: boolean, columns?: number): CSSProperties {
   return {
     display: 'grid',
-    gridTemplateColumns: isMobile
-      ? '1fr'
-      : 'repeat(auto-fill, minmax(280px, 1fr))',
+    gridTemplateColumns: columns && columns > 0
+      ? `repeat(${columns}, minmax(0, 1fr))`
+      : isMobile
+        ? '1fr'
+        : 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: isMobile ? 10 : 20,
     alignContent: 'start',
   };

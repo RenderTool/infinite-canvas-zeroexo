@@ -47,7 +47,6 @@ export function CanvasV2Page({ onBack }: CanvasV2PageProps): React.ReactElement 
   const [titleDraft, setTitleDraft] = useState('V2 引擎调研画布');
   const [titleEditing, setTitleEditing] = useState(false);
   const [miniMapOpen, setMiniMapOpen] = useState(false);
-  const [hierarchyOpen, setHierarchyOpen] = useState(false);
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>('select');
 
   // 引擎初始化
@@ -247,8 +246,6 @@ export function CanvasV2Page({ onBack }: CanvasV2PageProps): React.ReactElement 
               gridStyle="dots"
               onGridStyleChange={() => undefined}
               onOpenSettings={() => undefined}
-              isHierarchyOpen={hierarchyOpen}
-              onToggleHierarchy={() => setHierarchyOpen((v) => !v)}
             />
           </div>
           <Layout.Content style={contentLayoutStyle}>

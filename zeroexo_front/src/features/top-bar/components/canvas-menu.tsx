@@ -15,7 +15,7 @@ import { useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { Home, Plus, Copy, Trash2, LogOut, User, BookOpen, Keyboard } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Dropdown, Tooltip } from 'antd';
+import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useAuth } from '../../auth/auth-store.js';
@@ -87,15 +87,13 @@ export function CanvasMenu({
         onOpenChange={setOpen}
         menu={{ items }}
       >
-        <Tooltip title={t('topbar.home')}>
-          <button
-            type="button"
-            aria-label={t('topbar.home')}
-            style={logoBtnStyle(theme)}
-          >
-            <LogoIcon size={30} />
-          </button>
-        </Tooltip>
+        <button
+          type="button"
+          aria-label={t('topbar.home')}
+          style={logoBtnStyle(theme)}
+        >
+          <LogoIcon size={30} />
+        </button>
       </Dropdown>
       {/* 快捷键弹窗(征集 #87 验收轮三:入口自顶栏收入 LOGO 下拉) */}
       {shortcutsOpen ? (

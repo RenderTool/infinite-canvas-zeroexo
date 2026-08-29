@@ -28,10 +28,8 @@ import {
   Pencil,
   ExternalLink,
   Image as ImageIcon,
-  ArrowLeft as ArrowLeftIcon,
-  ArrowRight as ArrowRightIcon,
 } from 'lucide-react';
-import { Button, Input, Select, App as AntdApp, Spin, Tag, Progress, Tooltip } from 'antd';
+import { Button, Input, Select, App as AntdApp, Spin, Progress, Tooltip } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useIsMobile } from '@/shared/hooks/use-media-query.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
@@ -45,7 +43,6 @@ import {
   type PromptGenerationMode,
 } from './prompts-api.js';
 import { PromptChainCanvas } from './components/prompt-chain-canvas.js';
-import { AssetDetailViewer, type AssetDetailData } from '@/shared/components/asset-detail-viewer.js';
 import { updatePrompt as storeUpdatePrompt, upsertPrompt as storeUpsertPrompt, removePrompt as storeRemovePrompt } from '@/features/prompt-library/prompt-store.js';
 import {
   listPromptImages,
@@ -141,7 +138,6 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   // 生成模式(征集 #79/Plan#47):文生图/图生图,存量默认文生图(右侧链路画布据此还原输入/输出)
   const [generationMode, setGenerationMode] = useState<PromptGenerationMode>('txt2img');
   const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState('');
   const [favorite, setFavorite] = useState(false);
   const [images, setImages] = useState<PromptImage[]>([]);
   // 当前主预览图索引(胶片条选中态;主预览已由链路画布接管,征集 #79)
@@ -160,6 +156,9 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     return m;
   }, [images, localPreviews]);
   const uploadIdCounter = useRef(0);
+  // 征集 #90:画布 Pin 加图——隐藏 file input + 待入列角色（Pin 点击时记录,选完文件按角色追加）
+  const canvasFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingImageRoleRef = useRef<'reference' | 'output'>('reference');
 
   // 查看/编辑模式（只读模式始终为 view）
   const [viewMode, setViewMode] = useState<'view' | 'edit'>(isReadOnly || isEdit ? 'view' : 'edit');
@@ -300,6 +299,16 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         createdAt: created.createdAt,
         updatedAt: created.updatedAt,
       }).catch(() => {});
+      // 征集 #93(Plan#47 T9):后端 create 不再按 imageKeys 重建 PromptImage(role 由 images/set 唯一维护),
+      // 收藏副本必须显式写附图 role,否则刷新后图片丢失
+      await setPromptImages(
+        created.id,
+        images.map((img, i) => ({
+          storageKey: img.storageKey,
+          role: img.role,
+          sortOrder: i,
+        })),
+      );
       notifyPromptCopied(antdMessage, created.id);
       props.onSaved();
       // 如果有关闭回调，导航到资产页
@@ -338,12 +347,13 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         imageKeys: sortedImages.map((i) => i.storageKey),
       };
       let promptId = props.promptId;
-      if (isEdit && promptId && !isPublicImport) {
+      // 有 promptId = 编辑用户自己的资产（含公共导入副本）：直接更新本体；
+      // 无 promptId = 新建 / 公共提示词收藏副本：创建新提示词（副本 source 标记来源，避免与公共原版混淆）
+      if (isEdit && promptId) {
         await updatePrompt(promptId, payload);
         // 同步更新本地 store（前端刷新时从本地 store 加载）
         await storeUpdatePrompt(promptId, payload).catch(() => {});
       } else {
-        // 如果是从公共提示词导入的副本，始终创建新提示词而非修改原提示词
         const created = await createPrompt({
           ...payload,
           ...(isPublicImport ? { source: 'public-import' as const } : {}),
@@ -387,7 +397,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     } finally {
       setSaving(false);
     }
-  }, [title, content, contentEn, contentJa, category, tags, favorite, images, isEdit, props, antdMessage, t]);
+  }, [title, content, contentEn, contentJa, note, category, generationMode, tags, favorite, images, isEdit, isPublicImport, props, antdMessage, t]);
 
   const handleDelete = useCallback(async () => {
     if (!props.promptId) return;
@@ -495,23 +505,31 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   const MAX_CONTENT_LENGTH = 7000;
   const MAX_NOTE_LENGTH = 500;
 
-  const handleAddTag = useCallback(() => {
-    const v = tagInput.trim();
+  // 征集 #87:画布左上角标签区(迁入)的新增/移除回调,与表单标签同一套限额/去重规则。
+  // 画布 TagsOverlay 内部自持输入草稿,提交时传入完整标签字符串。
+  const handleAddTagFromCanvas = useCallback((raw: string) => {
+    const v = raw.trim();
     if (!v) return;
-    if (tags.length >= MAX_TAGS) return;
-    if (v.length > MAX_TAG_LENGTH) {
-      antdMessage.warning(t('promptCreate.tagTooLong', { max: MAX_TAG_LENGTH, length: v.length }));
-      setTags([...tags, v.slice(0, MAX_TAG_LENGTH)]);
-      setTagInput('');
+    if (tags.length >= MAX_TAGS) {
+      antdMessage.warning(t('promptCreate.tagLimitHint', { maxLength: MAX_TAG_LENGTH, maxCount: MAX_TAGS, count: tags.length }));
       return;
     }
-    if (tags.includes(v)) {
-      setTagInput('');
-      return;
-    }
-    setTags([...tags, v]);
-    setTagInput('');
-  }, [tagInput, tags, antdMessage, t]);
+    const final = v.length > MAX_TAG_LENGTH ? v.slice(0, MAX_TAG_LENGTH) : v;
+    if (tags.includes(final)) return;
+    setTags([...tags, final]);
+  }, [tags, antdMessage, t]);
+
+  const handleRemoveTag = useCallback((tag: string) => {
+    setTags((prev) => prev.filter((x) => x !== tag));
+  }, []);
+
+  // 征集 #89:右侧详情面板移除,提示词正文编辑迁入画布提示词节点;
+  // 画布展示当前语言版本,编辑时按 contentLang 路由回对应字段(与脏检查字段一致)
+  const handleCanvasContentChange = useCallback((v: string) => {
+    if (contentLang === 'en') setContentEn(v);
+    else if (contentLang === 'ja') setContentJa(v);
+    else setContent(v);
+  }, [contentLang]);
 
   // 设为封面(同一时间仅一张 cover,同时重排图片使封面排第一)
   const handleSetCover = useCallback((imgId: string) => {
@@ -536,27 +554,13 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
     setPreviewIdx(idx);
   }, []);
 
-  // 节点详情查看器(征集 #78 验收):画布节点右上角按钮 → 调起统一资源浏览器(只读,无删除/重命名)
-  const [viewerImage, setViewerImage] = useState<PromptImage | null>(null);
-  const handleOpenImageDetail = useCallback((storageKey: string) => {
-    const img = images.find((i) => i.storageKey === storageKey);
-    if (img) setViewerImage(img);
-  }, [images]);
-  const viewerAsset: AssetDetailData | null = viewerImage ? {
-    id: viewerImage.id,
-    title: title || '提示词图片',
-    kind: 'image',
-    bytes: 0,
-    data: {
-      kind: 'image',
-      storageKey: viewerImage.storageKey,
-      dataUrl: localPreviews[viewerImage.id],
-    },
-  } : null;
+  // 征集 #87:移除节点详情查看器(原征集 #78)——图片节点可双击放大查看,不再调起资源浏览器,
+  // 故去掉 viewerImage 状态 / handleOpenImageDetail / viewerAsset 及 AssetDetailViewer 渲染。
 
   // 添加参考图(先上传到后端 storage,再关联到提示词)
+  // 征集 #90:画布路径显式传 forcedRole（Pin 指定输入/输出,不再自动首图 cover,封面由节点按钮指派）
   const handleAddImage = useCallback(
-    async (file: File) => {
+    async (file: File, forcedRole?: 'reference' | 'output') => {
       const uploadId = `upload_${++uploadIdCounter.current}`;
       // 先添加一个占位图,显示上传中
       setUploadingProgress((prev) => ({ ...prev, [uploadId]: 0 }));
@@ -580,7 +584,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
           id: `local_${Date.now()}_${images.length}`,
           promptId: props.promptId ?? 'pending',
           storageKey,
-          role: images.length === 0 ? 'cover' as PromptImageRole : 'reference' as PromptImageRole,
+          role: forcedRole ?? (images.length === 0 ? 'cover' as PromptImageRole : 'reference' as PromptImageRole),
           sortOrder: images.length,
           createdAt: new Date().toISOString(),
         };
@@ -621,6 +625,33 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
   const handleChangeImageRole = useCallback((img: PromptImage, role: PromptImageRole) => {
     setImages((prev) => prev.map((i) => (i.id === img.id ? { ...i, role } : i)));
   }, []);
+
+  // ===== 画布节点操作回调（征集 #90：胶片条退役，加图/设封面/切换角色/删除全部画布内完成） =====
+
+  // Pin 加图（左 Pin=输入 / 右 Pin=输出）：记录待入列角色后触发隐藏文件选择
+  const handleCanvasAddImage = useCallback((role: 'reference' | 'output') => {
+    pendingImageRoleRef.current = role;
+    canvasFileInputRef.current?.click();
+  }, []);
+
+  // 设为封面：按 storageKey 定位后复用既有 handler（原 cover 自动回落 reference，数据驱动自动移列）
+  const handleCanvasSetCover = useCallback((storageKey: string) => {
+    const img = images.find((i) => i.storageKey === storageKey);
+    if (img) handleSetCover(img.id);
+  }, [images, handleSetCover]);
+
+  // 输入 ↔ 输出互换：role 变更后画布按数据重排列（封面节点不参与切换）
+  const handleCanvasToggleRole = useCallback((storageKey: string) => {
+    const img = images.find((i) => i.storageKey === storageKey);
+    if (!img || img.role === 'cover') return;
+    handleChangeImageRole(img, img.role === 'reference' ? 'output' : 'reference');
+  }, [images, handleChangeImageRole]);
+
+  // 移除图片：复用既有 handler（本地 draft 删除，保存时整体替换）
+  const handleCanvasRemoveImage = useCallback((storageKey: string) => {
+    const img = images.find((i) => i.storageKey === storageKey);
+    if (img) handleRemoveImage(img);
+  }, [images, handleRemoveImage]);
 
   if (loading) {
     return (
@@ -671,289 +702,83 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
       {props.modal ? (
         <>
         <div style={modalBodyStyle(isMobile)} className="zx-thin-scroll">
-          <div style={modalBodyGridStyle(isMobile)}>
-            {/* 左侧：图片预览区 - 自适应各种比例(1:1 / 3:2 / 2:3 / 16:9 等) */}
+            {/* 画布区占满全宽（征集 #89：右侧详情面板移除；征集 #90：图片录入画布化，胶片条退役） */}
             <div style={previewPanelStyle(isMobile)}>
-              {/* 提示词链路只读画布(征集 #79/Plan#47):参考图→提示词→生成图忠实还原;
-                  节点不可移动、仅视口缩放+平移;选图/角色指派仍走下方胶片条 */}
+              {/* 提示词链路画布(征集 #79/Plan#47):参考图→提示词→生成图忠实还原;
+                  节点不可移动、仅视口缩放+平移;
+                  编辑态正文在提示词节点内直编(征集 #89);图片录入/角色/封面/删除全在画布节点内完成(征集 #90) */}
               <div style={{ flex: 1, minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
                 <PromptChainCanvas
                   content={contentLang === 'en' ? contentEn : contentLang === 'ja' ? contentJa : content}
                   mode={generationMode}
                   images={images}
                   localPreviews={localPreviewByStorageKey}
-                  onOpenDetail={handleOpenImageDetail}
-                />
-              </div>
-              {/* 缩略图胶片条 */}
-              <div style={filmstripStyle()}>
-                {images.map((img, idx) => {
-                  const thumbSrc = localPreviews[img.id] || getResourceUrl(img.storageKey, 'preview') || '';
-                  const isActive = idx === previewIdx;
-                  const isCover = img.role === 'cover';
-                  return (
-                    <div
-                      key={img.id}
-                      style={thumbItemStyle(theme, isActive, isCover)}
-                      onClick={() => handleSelectPreview(idx)}
-                    >
-                      <AuthorizedImage
-                        src={thumbSrc}
-                        alt=""
-                        style={thumbImageStyle}
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                      {isCover && (
-                        <div style={thumbCoverBadgeStyle}>
-                          <Star size={8} fill="currentColor" />
-                        </div>
-                      )}
-                      {viewMode === 'edit' && (
-                        <div
-                          style={thumbHoverOverlayStyle}
-                          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; }}
-                        >
-                          {/* 输入/输出标记切换(征集 #78 验收):参考图=输入 ↔ 输出;封面由右侧星标按钮单独指派 */}
-                          {!isCover && (
-                            <button
-                              type="button"
-                              style={thumbActionBtnStyle}
-                              onClick={(e) => { e.stopPropagation(); handleChangeImageRole(img, img.role === 'reference' ? 'output' : 'reference'); }}
-                              title={img.role === 'reference' ? t('promptCreate.markOutput') : t('promptCreate.markInput')}
-                            >
-                              {img.role === 'reference' ? <ArrowRightIcon size={11} /> : <ArrowLeftIcon size={11} />}
-                            </button>
-                          )}
-                          {!isCover && (
-                            <button
-                              type="button"
-                              style={thumbActionBtnStyle}
-                              onClick={(e) => { e.stopPropagation(); handleSetCover(img.id); }}
-                              title={t('promptCreate.setCover')}
-                            >
-                              <ImageIcon size={11} />
-                            </button>
-                          )}
-                          <Tooltip title={t('promptCreate.remove')}>
-                            <button
-                              type="button"
-                              style={thumbActionBtnStyle}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveImage(img);
-                                if (previewIdx >= images.length - 1) setPreviewIdx(Math.max(0, images.length - 2));
-                              }}
-                            >
-                              <X size={11} />
-                            </button>
-                          </Tooltip>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {viewMode === 'edit' && (
-                  /* 上传按钮 */
-                  <label style={uploadTileStyle(theme)}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        if (e.target.files) {
-                          Array.from(e.target.files).forEach(handleAddImage);
-                        }
-                        e.target.value = '';
-                      }}
-                    />
-                    <Plus size={22} />
-                  </label>
-                )}
-              </div>
-            </div>
-
-            {/* 右侧：表单区(备注 + 提示词内容 + 标签) */}
-            <div style={formPanelStyle(isMobile)} className="zx-thin-scroll">
-              {/* hideTitle 时标题移入表单面板 */}
-              {props.hideTitle && (
-                <div style={formSectionStyle()}>
-                  <label style={formLabelStyle(theme)}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                    {t('promptCreate.titleLabel')}
-                  </label>
-                  <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={isEdit ? t('promptCreate.editTitle') : t('promptCreate.namePlaceholder')}
-                    maxLength={100}
-                    readOnly={viewMode === 'view'}
-                    style={{ ...modalTitleInputStyle(theme), ...(viewMode === 'view' ? { cursor: 'default' } : {}) }}
-                  />
-                </div>
-              )}
-              {/* 分类 */}
-              <div style={formSectionStyle()}>
-                <label style={formLabelStyle(theme)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M4 6h16M4 12h16M4 18h7"/></svg>
-                  {t('promptCreate.category')}
-                </label>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={category}
-                    onChange={(v) => setCategory(v)}
-                    options={CATEGORIES.map((c) => ({
-                      value: c.value,
-                      label: t(`promptCreate.${c.i18nKey}`),
-                    }))}
-                    disabled={viewMode === 'view'}
-                    size="small"
-                  />
-                </div>
-              </div>
-              {/* 生成模式(征集 #79/Plan#47):征集 #78 验收拍板移除切换控件 —— 布局恒按图生图式展示,
-                  模式字段仅落库留档(存量/公共默认文生图),此处只读展示 */}
-              <div style={formSectionStyle()}>
-                <label style={formLabelStyle(theme)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M12 3l1.9 5.7 5.7 1.9-5.7 1.9L12 18.2l-1.9-5.7-5.7-1.9 5.7-1.9z"/></svg>
-                  {t('promptCreate.generationMode')}
-                </label>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
-                  color: theme.toolbar.text, opacity: 0.8, padding: '4px 0',
-                }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 9999,
-                    background: `${theme.toolbar.accent}1a`, color: theme.toolbar.accent,
-                  }}>
-                    {generationMode === 'img2img' ? t('promptCreate.modeImg2Img') : t('promptCreate.modeTxt2Img')}
-                  </span>
-                </div>
-              </div>
-              {/* 备注 */}
-              <div style={formSectionStyle()}>
-                <label style={formLabelStyle(theme)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                  {t('promptCreate.note')}
-                </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder={t('promptCreate.notePlaceholder')}
-                  maxLength={MAX_NOTE_LENGTH}
+                  tags={tags}
                   readOnly={viewMode === 'view'}
-                  style={{ ...noteInputStyle(theme), ...(viewMode === 'view' ? { cursor: 'default' } : {}) }}
-                  rows={2}
+                  editable={viewMode === 'edit'}
+                  onContentChange={handleCanvasContentChange}
+                  contentMaxLength={MAX_CONTENT_LENGTH}
+                  onAddImage={handleCanvasAddImage}
+                  onSetCover={handleCanvasSetCover}
+                  onToggleImageRole={handleCanvasToggleRole}
+                  onRemoveImage={handleCanvasRemoveImage}
+                  onAddTag={handleAddTagFromCanvas}
+                  onRemoveTag={handleRemoveTag}
+                  onCopyPrompt={handleCopyContent}
                 />
               </div>
-
-              {/* 提示词内容 - 表单核心 */}
-              <div style={formSectionStyle()}>
-                <div style={formLabelRowStyle()}>
-                  <label style={formLabelStyle(theme)}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                    {t('promptCreate.content')}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleCopyContent}
-                    style={copyBtnStyle(theme)}
-                    title={t('subjectCreate.copyPrompt')}
-                  >
-                    <Copy size={12} />
-                    {t('subjectCreate.copyPrompt')}
-                  </button>
-                </div>
-                <div style={promptBlockStyle(theme)}>
-                  <textarea
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    placeholder={t('promptCreate.contentPlaceholder')}
-                    readOnly={viewMode === 'view'}
-                    maxLength={MAX_CONTENT_LENGTH}
-                    style={{ ...promptTextareaStyle(theme), ...(viewMode === 'view' ? { cursor: 'default' } : {}) }}
-                  />
-                </div>
-              </div>
-
-              {/* 标签 */}
-              <div style={formSectionStyle()}>
-                <label style={formLabelStyle(theme)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                  {t('promptCreate.tags')}
-                </label>
-                {tags.length > 0 && (
-                  <div style={tagsRowStyle()}>
-                    {tags.map((tag) => (
-                      <span key={tag} style={tagChipStyle(theme)}>
-                        {tag}
-                        {viewMode === 'edit' && (
-                          <button
-                            type="button"
-                            onClick={() => setTags(tags.filter((x) => x !== tag))}
-                            style={tagRemoveBtnStyle}
-                          >
-                            <X size={10} />
-                          </button>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {viewMode === 'edit' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        value={tagInput}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v.includes(',')) {
-                            const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
-                            let truncated = false;
-                            const newTags = [...tags];
-                            for (const p of parts) {
-                              if (newTags.length >= MAX_TAGS) break;
-                              if (p.length > MAX_TAG_LENGTH) {
-                                newTags.push(p.slice(0, MAX_TAG_LENGTH));
-                                truncated = true;
-                              } else if (p && !newTags.includes(p)) {
-                                newTags.push(p);
-                              }
-                            }
-                            if (truncated) antdMessage.warning(`${t('promptCreate.tagsTruncated', { max: MAX_TAG_LENGTH })}`);
-                            setTags(newTags);
-                            setTagInput('');
-                          } else {
-                            if (v.length <= MAX_TAG_LENGTH) {
-                              setTagInput(v);
-                            }
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddTag();
-                          }
-                        }}
-                        placeholder={t('promptCreate.tagsPlaceholder')}
-                        style={tagInputStyle(theme)}
-                      />
-                      <span style={{ fontSize: 11, color: 'var(--color-text-tertiary, #bfbfbf)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                        {tagInput.length}/{MAX_TAG_LENGTH}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary, #bfbfbf)' }}>
-                      {t('promptCreate.tagLimitHint', { maxLength: MAX_TAG_LENGTH, maxCount: MAX_TAGS, count: tags.length })}
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
-          </div>
+
+          {/* 编辑态紧凑条（征集 #89：右栏详情面板移除后，hideTitle 标题 + 分类 + 备注下沉至此；
+              提示词正文在画布提示词节点内直编，生成模式由画布左上角徽章展示） */}
+          {viewMode === 'edit' && (
+            <div style={editBarStyle(theme, isMobile)}>
+              {props.hideTitle && (
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={isEdit ? t('promptCreate.editTitle') : t('promptCreate.namePlaceholder')}
+                  maxLength={100}
+                  style={editBarInputStyle(theme)}
+                />
+              )}
+              <Select
+                size="small"
+                style={{ width: 132, flexShrink: 0 }}
+                value={category}
+                onChange={(v) => setCategory(v)}
+                options={CATEGORIES.map((c) => ({
+                  value: c.value,
+                  label: t(`promptCreate.${c.i18nKey}`),
+                }))}
+              />
+              <Input
+                size="small"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={t('promptCreate.notePlaceholder')}
+                maxLength={MAX_NOTE_LENGTH}
+                allowClear
+                style={{ flex: 1, minWidth: 140 }}
+              />
+            </div>
+          )}
+
+          {/* 画布加图入口（征集 #90）：Pin 点击 → 记录待入列角色 → 触发文件选择 → 按角色追加 */}
+          <input
+            ref={canvasFileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const role = pendingImageRoleRef.current;
+              if (e.target.files) {
+                Array.from(e.target.files).forEach((f) => handleAddImage(f, role));
+              }
+              e.target.value = '';
+            }}
+          />
         </div>
 
           {/* 底部操作栏 */}
@@ -1112,7 +937,11 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                 mode={generationMode}
                 images={images}
                 localPreviews={localPreviewByStorageKey}
-                onOpenDetail={handleOpenImageDetail}
+                tags={tags}
+                readOnly={viewMode === 'view'}
+                onAddTag={handleAddTagFromCanvas}
+                onRemoveTag={handleRemoveTag}
+                onCopyPrompt={handleCopyContent}
               />
             </div>
             <div style={filmstripStyle()}>
@@ -1182,7 +1011,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                     style={{ display: 'none' }}
                     onChange={(e) => {
                       if (e.target.files) {
-                        Array.from(e.target.files).forEach(handleAddImage);
+                        Array.from(e.target.files).forEach((f) => handleAddImage(f));
                       }
                       e.target.value = '';
                     }}
@@ -1223,33 +1052,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                   disabled={viewMode === 'view'}
                 />
               </div>
-              <div>
-                <div style={fieldLabelStyle(theme)}>{t('promptCreate.tags')}</div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {tags.map((tag) => (
-                    <Tag key={tag} closable={viewMode === 'edit'}
-                      onClose={viewMode === 'edit' ? () => setTags(tags.filter((x) => x !== tag)) : undefined}
-                    >{tag}</Tag>
-                  ))}
-                </div>
-                {viewMode === 'edit' && (
-                  <Input
-                    value={tagInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v.includes(',')) {
-                        const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
-                        const newTags = [...tags];
-                        for (const p of parts) { if (!newTags.includes(p)) newTags.push(p); }
-                        setTags(newTags); setTagInput('');
-                      } else { setTagInput(v); }
-                    }}
-                    onPressEnter={handleAddTag}
-                    placeholder={t('promptCreate.tagsPlaceholder')}
-                    size="small"
-                  />
-                )}
-              </div>
+              {/* 征集 #87:标签已迁入链路画布左上角,移动端表单不再重复展示/编辑 */}
             </div>
           </div>
           <div style={cardStyle(theme)}>
@@ -1322,28 +1125,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
                   options={CATEGORIES.map((c) => ({ value: c.value, label: t(`promptCreate.${c.i18nKey}`) }))}
                   disabled={viewMode === 'view'} />
               </div>
-              <div>
-                <div style={fieldLabelStyle(theme)}>{t('promptCreate.tags')}</div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {tags.map((tag) => (
-                    <Tag key={tag} closable={viewMode === 'edit'}
-                      onClose={viewMode === 'edit' ? () => setTags(tags.filter((x) => x !== tag)) : undefined}
-                    >{tag}</Tag>
-                  ))}
-                </div>
-                {viewMode === 'edit' && (
-                  <Input value={tagInput} onChange={(e) => {
-                    const v = e.target.value;
-                    if (v.includes(',')) {
-                      const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
-                      const newTags = [...tags];
-                      for (const p of parts) { if (!newTags.includes(p)) newTags.push(p); }
-                      setTags(newTags); setTagInput('');
-                    } else { setTagInput(v); }
-                  }} onPressEnter={handleAddTag}
-                    placeholder={t('promptCreate.tagsPlaceholder')} size="small" />
-                )}
-              </div>
+              {/* 征集 #87:标签已迁入链路画布左上角,移动端表单不再重复展示/编辑 */}
             </div>
           </div>
           {/* 桌面端: 提示词内容 */}
@@ -1398,7 +1180,7 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
               {viewMode === 'edit' && (
                 <label style={imageAddStyle(theme)}>
                   <input type="file" accept="image/*" multiple style={{ display: 'none' }}
-                    onChange={(e) => { if (e.target.files) { Array.from(e.target.files).forEach(handleAddImage); } e.target.value = ''; }} />
+                    onChange={(e) => { if (e.target.files) { Array.from(e.target.files).forEach((f) => handleAddImage(f)); } e.target.value = ''; }} />
                   <Plus size={22} color={theme.toolbar.textMuted} />
                 </label>
               )}
@@ -1443,10 +1225,6 @@ export function PromptCreatePage(props: PromptCreatePageProps): React.ReactEleme
         </div>
       )}
 
-      {/* 节点详情查看器(征集 #78 验收):画布节点右上角按钮 → 调起统一资源浏览器(只读,无删除/重命名)。
-          层级约定(征集 #80 三次补修定稿):项目全局 zIndexPopupBase=20000(antd-theme-provider),
-          antd 嵌套弹窗自动升层 —— 禁止手动传 zIndex(传小值如 2000 会被压到外层 Modal 之下,实测遮挡根因) */}
-      {viewerAsset && <AssetDetailViewer asset={viewerAsset} onClose={() => setViewerImage(null)} />}
     </div>
   );
 }
@@ -1780,16 +1558,6 @@ function modalBodyStyle(isMobile?: boolean): CSSProperties {
   };
 }
 
-function modalBodyGridStyle(isMobile?: boolean): CSSProperties {
-  return {
-    display: 'flex',
-    flexDirection: isMobile ? 'column' : 'row',
-    gap: 20,
-    minHeight: 0,
-    flex: 1,
-  };
-}
-
 // ===== 左侧：图片预览区 =====
 
 function previewPanelStyle(isMobile?: boolean): CSSProperties {
@@ -1912,170 +1680,39 @@ function uploadTileStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProper
   };
 }
 
-// ===== 右侧：表单区 =====
+// ===== 编辑态紧凑条（征集 #89：右栏详情面板移除后，hideTitle 标题 + 分类 + 备注下沉至画布下方） =====
 
-function formPanelStyle(isMobile?: boolean): CSSProperties {
+function editBarStyle(theme: ReturnType<typeof useTheme>['theme'], isMobile?: boolean): CSSProperties {
+  const isDark = theme.mode === 'dark';
   return {
-    width: isMobile ? '100%' : 380,
-    minHeight: isMobile ? 0 : 340,
     flexShrink: 0,
     display: 'flex',
-    flexDirection: 'column',
-    gap: 18,
-    overflowY: 'auto',
-  };
-}
-
-function formSectionStyle(): CSSProperties {
-  return {
-    display: 'flex',
-    flexDirection: 'column',
-  };
-}
-
-function formLabelStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 5,
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    color: isDark ? '#a8a29e' : '#78716c',
-    marginBottom: 8,
-  };
-}
-
-function formLabelRowStyle(): CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    marginBottom: 8,
-  };
-}
-
-function copyBtnStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    marginLeft: 'auto',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    background: 'transparent',
-    border: 'none',
-    color: isDark ? '#a8a29e' : '#78716c',
-    cursor: 'pointer',
-    fontSize: 11,
-    padding: 0,
-    transition: 'color 0.15s',
-  };
-}
-
-function noteInputStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    width: '100%',
-    minHeight: 56,
-    maxHeight: 100,
-    background: isDark ? '#211d1a' : '#f5f5f4',
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-    borderRadius: 8,
-    outline: 'none',
-    padding: '8px 12px',
-    fontFamily: 'inherit',
-    fontSize: 13,
-    lineHeight: 1.5,
-    color: isDark ? '#d6d3d1' : '#44403c',
-    resize: 'none',
-    transition: 'border-color 0.15s',
-  };
-}
-
-function promptBlockStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    background: isDark ? '#161412' : '#fafaf9',
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-    borderRadius: 10,
-    padding: '12px 14px',
-    flex: 1,
-    minHeight: 160,
-    overflow: 'auto',
-    resize: 'none',
-  };
-}
-
-function promptTextareaStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    width: '100%',
-    minHeight: 136,
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
-    fontSize: 12,
-    lineHeight: 1.65,
-    // 随主题区分文字颜色，保证浅色主题下可读性
-    color: isDark ? '#d6d3d1' : '#44403c',
-    // 允许拖动右下角调整高度（修复"复制提示词"下方输入框无法改高度的问题）
-    resize: 'vertical',
-    padding: 0,
-  };
-}
-
-function tagsRowStyle(): CSSProperties {
-  return {
-    display: 'flex',
-    gap: 5,
     flexWrap: 'wrap',
-    marginBottom: 8,
-  };
-}
-
-function tagChipStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
-  const isDark = theme.mode === 'dark';
-  return {
-    display: 'inline-flex',
     alignItems: 'center',
-    gap: 4,
-    padding: '3px 9px',
-    borderRadius: 9999,
-    fontSize: 11,
-    fontWeight: 500,
-    background: isDark ? 'rgba(139,92,246,0.1)' : 'rgba(139,92,246,0.08)',
-    color: '#8b5cf6',
-    border: 'none',
+    gap: 8,
+    padding: '8px 10px',
+    borderRadius: 10,
+    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
+    background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+    marginTop: isMobile ? 12 : 0,
   };
 }
 
-const tagRemoveBtnStyle: CSSProperties = {
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  cursor: 'pointer',
-  color: '#a78bfa',
-  display: 'inline-flex',
-  alignItems: 'center',
-  lineHeight: 1,
-};
-
-function tagInputStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
+function editBarInputStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties {
   const isDark = theme.mode === 'dark';
   return {
-    width: '100%',
-    height: 34,
-    background: isDark ? '#211d1a' : '#f5f5f4',
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-    borderRadius: 8,
+    flex: 2,
+    minWidth: 160,
+    height: 28,
+    background: 'transparent',
+    border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+    borderRadius: 6,
     outline: 'none',
-    padding: '0 12px',
+    padding: '0 10px',
     fontFamily: 'inherit',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: 600,
     color: isDark ? '#f5f5f4' : '#1c1917',
-    transition: 'border-color 0.15s',
   };
 }
 

@@ -18,8 +18,6 @@ function PromptCardGrid({
   onOpen,
   onDelete,
   onContextMenu,
-  onFavorite,
-  onUnfavorite,
   theme,
   t,
 }: GridCardRendererProps<Prompt>): React.ReactElement {
@@ -44,13 +42,10 @@ function PromptCardGrid({
         categoryLabel={categoryLabel}
         tags={prompt.tags}
         imageKeys={prompt.imageKeys}
-        isFavorited={prompt.favorite}
         mode="asset"
         borderRadius={12}
         thumbnailAspectRatio="239.2/135.4"
         disableHoverScale
-        onFavorite={onFavorite}
-        onUnfavorite={onUnfavorite}
         onDelete={onDelete}
         onClick={multiSelectEnabled ? () => onToggleSelect(prompt.id) : onOpen}
         theme={theme}

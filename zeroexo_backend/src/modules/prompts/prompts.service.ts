@@ -136,7 +136,10 @@ export class PromptsService {
 
   /**
    * 创建提示词(同步场景可携带 id)。
-   * 若提供 imageKeys,会同步创建 PromptImage 记录。
+   * imageKeys 仅写入 Prompt.imageKeys 冗余快照,不再创建 PromptImage 记录——
+   * 征集 #93(Plan#47 T9):旧实现按 imageKeys 重建 PromptImage 且 role 硬编码 'reference',
+   * 云同步 upsert 推送会覆盖用户设置的 输入/输出/封面 role。PromptImage 唯一由前端
+   * POST /prompts/:id/images/set 维护(前端所有创建/克隆/编辑路径均已补 setPromptImages)。
    */
   async create(ownerId: string, dto: CreatePromptDto) {
     const imageKeys = dto.imageKeys ?? [];
@@ -181,18 +184,6 @@ export class PromptsService {
           lastSyncedAt: new Date(),
         },
       });
-      // 参考图采用整体替换，保证与传入的 imageKeys 一致
-      if (imageKeys.length > 0) {
-        await tx.promptImage.deleteMany({ where: { promptId: created.id } });
-        await tx.promptImage.createMany({
-          data: imageKeys.map((key, idx) => ({
-            promptId: created.id,
-            storageKey: key,
-            role: 'reference' as const,
-            sortOrder: idx,
-          })),
-        });
-      }
       return created;
     });
     this.logsService.log('system', `创建提示词: ${dto.title}`, {
@@ -216,7 +207,10 @@ export class PromptsService {
 
   /**
    * 更新提示词(每次更新自增 version,刷新 lastSyncedAt)。
-   * 若提供 imageKeys,会整体替换 PromptImage 记录。
+   * imageKeys 仅更新 Prompt.imageKeys 冗余快照字段,不再重建 PromptImage 记录——
+   * 征集 #93(Plan#47 T9):旧实现按 imageKeys 整体重建且 role 硬编码 'reference',
+   * 保存后云同步推送(imageKeys)再次触发 update 会把用户设置的 输入/输出/封面 role 全部重置为参考图,
+   * 表现为「切换生成图/参考图保存刷新不生效」。role 唯一由 POST /prompts/:id/images/set 维护。
    */
   async update(ownerId: string, id: string, dto: UpdatePromptDto) {
     await this.findOne(ownerId, id);
@@ -242,19 +236,6 @@ export class PromptsService {
           lastSyncedAt: new Date(),
         },
       });
-      if (imageKeys !== undefined) {
-        await tx.promptImage.deleteMany({ where: { promptId: id } });
-        if (imageKeys.length > 0) {
-          await tx.promptImage.createMany({
-            data: imageKeys.map((key, idx) => ({
-              promptId: id,
-              storageKey: key,
-              role: 'reference' as const,
-              sortOrder: idx,
-            })),
-          });
-        }
-      }
       return updated;
     });
     this.logsService.log('sync', `提示词同步: ${prompt.title}`, {

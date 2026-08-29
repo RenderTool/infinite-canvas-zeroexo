@@ -254,7 +254,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 12px 10px;
-  border-top: 1px solid var(--agent-border);
+  /* 征集 #96:分割线与剧本编辑器同款 */
+  border-top: 1px solid var(--agent-divider);
   background: var(--agent-panel);
   flex-shrink: 0;
 }

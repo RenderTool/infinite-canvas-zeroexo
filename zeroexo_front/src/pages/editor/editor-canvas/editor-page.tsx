@@ -18,7 +18,7 @@
  * 弹窗状态和交互回调已提取到 use-editor-dialogs 和 use-editor-interactions 两个 Hook。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -60,8 +60,6 @@ import { sendMessage } from '@/features/canvas-agent/ui/session/agent-session.js
 import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-agent-prompt.js';
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
-import { ZoomToolbar } from '@/shared/components/image-viewer.js';
-import type { ImagePanZoom } from '@/shared/components/image-viewer.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -80,7 +78,6 @@ import { CreationSyncBadge } from '@/components/creation/CreationSyncBadge.js';
 import { useAiConfigStore } from '@/features/ai-config/use-ai-config-store.js';
 import { useEditorDialogs } from './use-editor-dialogs.js';
 import { useEditorInteractions } from './use-editor-interactions.js';
-import { MobileHierarchyDrawer } from './editor-mobile-drawer.js';
 import { DevPerformancePanel } from '@/features/dev-performance/dev-performance-panel.js';
 
 // 堆叠收纳提示合并窗口(征集#25 拍板 A+B):批量场景(压力注入器/JSON 加载)一次触发大量 stackCollected,
@@ -376,33 +373,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     );
   }, [state.editor, state.containerSize, interactions]);
 
-  // 征集 #87:右下角缩放组件适配器——把主画布 viewport 缩放桥接成 ZoomToolbar 的 ImagePanZoom 语义。
-  // ZoomToolbar 只消费 scale/zoomIn/zoomOut/reset 四字段,其余手势字段给 no-op 占位(主画布手势由 interaction 插件接管)。
-  const canvasZoomAdapter = useMemo<ImagePanZoom>(() => {
-    const noopContainerRef = (): void => undefined;
-    const noopImgRef = (): void => undefined;
-    const noopHandler = (() => undefined) as unknown as ImagePanZoom['containerHandlers']['onMouseDown'];
-    const noopTouchHandler = (() => undefined) as unknown as ImagePanZoom['containerHandlers']['onTouchStart'];
-    return {
-      scale: state.scale,
-      position: { x: 0, y: 0 },
-      zoomIn: () => actions.setScale(Math.min(state.scale + 0.25, 5)),
-      zoomOut: () => actions.setScale(Math.max(state.scale - 0.25, 0.05)),
-      reset: handleResetView,
-      containerRef: noopContainerRef,
-      imgRef: noopImgRef,
-      containerHandlers: {
-        onMouseDown: noopHandler,
-        onMouseMove: noopHandler,
-        onMouseUp: noopHandler,
-        onMouseLeave: noopHandler,
-        onTouchStart: noopTouchHandler,
-        onTouchMove: noopTouchHandler,
-        onTouchEnd: noopTouchHandler,
-      },
-      imgTransformStyle: {},
-    };
-  }, [state.scale, actions, handleResetView]);
+  // 征集 #92:右下角 ZoomToolbar 及其适配器已移除——缩放回归底部工具条(v1.1.0 原版形态)
 
   // 从 persistence 加载画布标题
   useEffect(() => {
@@ -892,8 +863,39 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
               onDeleteProject={() => void dialogs.handleMenuDeleteProject()}
             />
           }
-          isHierarchyOpen={dialogs.isHierarchyOpen}
-          onToggleHierarchy={dialogs.toggleHierarchy}
+          syncBadge={!state.loading ? (
+            <>
+              <CreationSyncBadge
+                status={status === 'syncing' ? 'saving' : status === 'error' ? 'error' : status === 'inactive' ? 'unsaved' : 'idle'}
+                lastSavedAt={null}
+                theme={theme}
+                compact
+              />
+              {cloudUpdateAvailable && (
+                <Tooltip title={t('editor.cloudUpdateTooltip')}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          await fullSync();
+                          clearCloudUpdateAvailable();
+                        } catch (err) {
+                          console.error('[EditorPage] sync failed:', err);
+                        }
+                      })();
+                    }}
+                    style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      backgroundColor: '#ef4444', border: 'none',
+                      cursor: 'pointer', flexShrink: 0, padding: 0,
+                    }}
+                    aria-label={t('editor.cloudUpdateAvailable')}
+                  />
+                </Tooltip>
+              )}
+            </>
+          ) : undefined}
         />
       </div>
 
@@ -1076,6 +1078,8 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           onScaleChange={actions.setScale}
           isMiniMapOpen={dialogs.isMiniMapOpen}
           onToggleMiniMap={() => dialogs.setIsMiniMapOpen((v: boolean) => !v)}
+          isHierarchyOpen={dialogs.isHierarchyOpen}
+          onToggleHierarchy={dialogs.toggleHierarchy}
           onClear={dialogs.handleClearCanvasClick}
           interactionMode={state.interactionMode}
           onToggleInteractionMode={actions.toggleInteractionMode}
@@ -1124,25 +1128,30 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
         {/* BUG5: RightSideToolBar 已移除 — 节点创建功能并入 LeftSideToolBar 加号菜单 */}
 
-        {/* 移动端:画布结构抽屉(从右侧滑入) */}
-        {!state.loading && isMobile && state.editor && refs.groupPlugin ? (
-          <MobileHierarchyDrawer
-            open={dialogs.isHierarchyOpen}
-            store={state.editor.store}
-            groupPlugin={refs.groupPlugin}
-            theme={theme}
-            onClose={dialogs.toggleHierarchy}
-            onFocusNode={(nodeId) => {
-              const store = state.editor?.store;
-              if (!store?.focusOnNode) return;
-              const graph = store.getGraph();
-              const targetNode = graph.nodes.find((n) => n.id === nodeId);
-              if (!targetNode) return;
-              const w = targetNode.size?.width ?? 200;
-              const h = targetNode.size?.height ?? 200;
-              store.focusOnNode(nodeId, state.containerSize, w, h, 400, 51);
-            }}
-          />
+        {/* 征集 #95(Plan#49 T28):移动端不再单独设计抽屉(MobileHierarchyDrawer 退役),
+            直接复用 PC 同款 HierarchyPanelSidebar,改为覆盖模式——在画布左缘之上覆盖拉开,不推开布局 */}
+        {!state.loading && isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing) && state.editor && refs.groupPlugin ? (
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 60 }}>
+            <HierarchyPanelSidebar
+              closing={dialogs.isHierarchyClosing}
+              overlay
+              store={state.editor.store}
+              groupPlugin={refs.groupPlugin}
+              theme={theme}
+              onSendToCanvas={dialogs.handleAssetInsert}
+              onClose={dialogs.toggleHierarchy}
+              onFocusNode={(nodeId) => {
+                const store = state.editor?.store;
+                if (!store?.focusOnNode) return;
+                const graph = store.getGraph();
+                const targetNode = graph.nodes.find((n) => n.id === nodeId);
+                if (!targetNode) return;
+                const w = targetNode.size?.width ?? 200;
+                const h = targetNode.size?.height ?? 200;
+                store.focusOnNode(nodeId, state.containerSize, w, h, 400, 51);
+              }}
+            />
+          </div>
         ) : null}
 
         {/* 小地图(桌面端右下角 / 移动端左下角上移,isMiniMapOpen 时显示) */}
@@ -1182,55 +1191,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           />
         ) : null}
 
-        {/* 征集 #87 验收轮三:保存状态徽章贴画布最底部(原 bottom:64 上移要求改贴底) */}
-        {!state.loading && (
-          <div style={{
-            position: 'absolute', left: 12, bottom: 'max(12px, env(safe-area-inset-bottom))', zIndex: 30,
-            display: 'inline-flex', alignItems: 'center', gap: 6, pointerEvents: 'auto',
-          }}>
-            <CreationSyncBadge
-              status={status === 'syncing' ? 'saving' : status === 'error' ? 'error' : status === 'inactive' ? 'unsaved' : 'idle'}
-              lastSavedAt={null}
-              theme={theme}
-              compact
-            />
-            {/* 云端更新红点徽章 */}
-            {cloudUpdateAvailable && (
-              <Tooltip title={t('editor.cloudUpdateTooltip')}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        await fullSync();
-                        clearCloudUpdateAvailable();
-                      } catch (err) {
-                        console.error('[EditorPage] sync failed:', err);
-                      }
-                    })();
-                  }}
-                  style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    backgroundColor: '#ef4444', border: 'none',
-                    cursor: 'pointer', flexShrink: 0, padding: 0,
-                  }}
-                  aria-label={t('editor.cloudUpdateAvailable')}
-                />
-              </Tooltip>
-            )}
-          </div>
-        )}
+        {/* 征集 #92 T26 验收修正二:画布底部「保存状态条」(CreationSyncBadge + 云端红点)已迁至顶栏标题旁(TopBar syncBadge) */}
 
-        {/* 征集 #87:右下角缩放组件(提示词链路画布同款 ZoomToolbar,适配主画布 viewport) */}
-        {!state.loading && state.editor ? (
-          <ZoomToolbar
-            panZoom={canvasZoomAdapter}
-            orientation="vertical"
-            style={isMobile
-              ? { position: 'absolute', right: 12, bottom: 20, zIndex: 40 }
-              : { position: 'absolute', right: 20, bottom: dialogs.isMiniMapOpen ? 196 : 20, zIndex: 40 }}
-          />
-        ) : null}
+        {/* 征集 #92:右下角独立 ZoomToolbar 移除——缩放百分比回归底部工具条(v1.1.0 原版形态) */}
 
         <AssetDetailViewer
           node={dialogs.detailNode}

@@ -19,8 +19,8 @@ export interface HierarchyLibraryItem {
   content?: string;
 }
 
-/** 资产类型筛选（favorite 表示仅看收藏） */
-export type AssetKindFilter = 'all' | 'favorite' | 'image' | 'video' | 'audio' | 'text' | 'zeroexo-text';
+/** 资产类型筛选 */
+export type AssetKindFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'zeroexo-text';
 
 /** 页面列表项（统一分页用） */
 export type PageItem =

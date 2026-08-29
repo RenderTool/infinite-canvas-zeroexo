@@ -6,7 +6,7 @@
  * 末尾调用 registerCard 注册到卡片注册表。
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Image as ImageIcon,
   Video as VideoIcon,
@@ -18,11 +18,13 @@ import {
   Pencil,
   Trash2,
   Send,
+  MoreHorizontal,
 } from 'lucide-react';
-import { Tooltip } from 'antd';
+import { Tooltip, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { TFunction } from 'i18next';
-import { useHydratedContent } from '@zeroexo/plugin-nodes';
+import { usePreviewImage } from '@zeroexo/plugin-nodes';
 import { registerCard, type GridCardRendererProps, type ListCardRendererProps } from './card-registry.js';
 
 // ===== 辅助 =====
@@ -64,7 +66,9 @@ function AssetCardGrid({
   const isImage = data.kind === 'image';
   const isVideo = data.kind === 'video';
   const cover = isImage ? data.dataUrl : isVideo ? data.url : undefined;
-  const hydrated = useHydratedContent(
+  // 封面走三档图片契约(征集 #77):展示层自适应预览档,永不直连原图;
+  // 视频无尺寸变体概念,usePreviewImage 内部自动回退 hydrate 行为(悬停播放不受影响)
+  const hydrated = usePreviewImage(
     isImage || isVideo ? data.storageKey : undefined,
     cover ?? '',
   );
@@ -88,6 +92,33 @@ function AssetCardGrid({
   const isDark = theme.mode === 'dark';
   const coverBg = isDark ? 'rgba(255,255,255,0.02)' : '#ffffff';
   const coverBorder = isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid #e5e7eb';
+
+  // 更多下拉菜单：下载 / 重命名 / 删除（画布项目卡片同款）
+  const moreMenuItems = useMemo<MenuProps['items']>(() => {
+    const items: MenuProps['items'] = [];
+    if (onDownload) {
+      items.push({
+        key: 'download',
+        icon: <Download size={14} />,
+        label: t('common.download'),
+        onClick: (e) => { e.domEvent.stopPropagation(); onDownload(); },
+      });
+    }
+    items.push({
+      key: 'rename',
+      icon: <Pencil size={14} />,
+      label: t('assetLibrary.rename'),
+      onClick: (e) => { e.domEvent.stopPropagation(); onRename(); },
+    });
+    items.push({
+      key: 'delete',
+      icon: <Trash2 size={14} />,
+      label: t('assetLibrary.delete'),
+      danger: true,
+      onClick: (e) => { e.domEvent.stopPropagation(); onDelete(); },
+    });
+    return items;
+  }, [onDownload, onRename, onDelete, t]);
 
   return (
     <div
@@ -189,6 +220,23 @@ function AssetCardGrid({
           transition: 'opacity 0.3s',
           pointerEvents: 'none',
         }} />
+
+        {/* 发送到画布快捷按钮(常驻,仅画布内嵌时提供) */}
+        {onSendToCanvas && (
+          <Tooltip title={t('assetLibrary.sendToCanvas')}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSendToCanvas(); }}
+              // 征集 #95(Plan#49 T28):hover 后显示,与卡片其它操作按钮(更多/重命名/删除)显隐一致
+              style={{
+                ...cardActionBtnStyle, position: 'absolute', top: 8, right: 8, zIndex: 10,
+                opacity: hovered ? 1 : 0, transition: 'opacity 0.2s, background 0.15s',
+              }}
+            >
+              <Send size={13} />
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       {/* 底部信息 */}
@@ -219,6 +267,7 @@ function AssetCardGrid({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 8,
         }}>
           <span style={{
             fontSize: 11,
@@ -227,44 +276,41 @@ function AssetCardGrid({
           }}>
             {getKindLabel(asset.kind, t)}
           </span>
+          {/* 画布项目卡片同款「更多」按钮(下载/重命名/删除) */}
+          <Dropdown
+            menu={{ items: moreMenuItems }}
+            trigger={['click']}
+            placement="bottomRight"
+          >
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                flexShrink: 0,
+                width: 24,
+                height: 24,
+                padding: 0,
+                border: 'none',
+                borderRadius: 6,
+                background: 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: theme.toolbar.textMuted,
+                opacity: hovered ? 1 : 0,
+                transition: 'opacity 0.2s, background 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <Tooltip title={t('projectCard.moreActions')}>
+                <MoreHorizontal size={14} />
+              </Tooltip>
+            </button>
+          </Dropdown>
         </div>
       </div>
-
-      {/* Hover 操作按钮(征集 #87 验收轮十三:改提示词卡同款竖排风格;画布内额外飞机图标发送到画布) */}
-      {hovered && (
-        <div style={{
-          position: 'absolute',
-          top: 8,
-          right: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          zIndex: 10,
-        }} onClick={(e) => e.stopPropagation()}>
-          {onSendToCanvas && (
-            <Tooltip title={t('assetLibrary.sendToCanvas')}>
-              <button type="button" onClick={onSendToCanvas} style={cardActionBtnStyle}>
-                <Send size={13} />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip title={t('common.download')}>
-            <button type="button" onClick={() => onDownload?.()} style={cardActionBtnStyle}>
-              <Download size={13} />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('assetLibrary.rename')}>
-            <button type="button" onClick={onRename} style={cardActionBtnStyle}>
-              <Pencil size={13} />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('assetLibrary.delete')}>
-            <button type="button" onClick={onDelete} style={cardActionBtnStyle}>
-              <Trash2 size={13} />
-            </button>
-          </Tooltip>
-        </div>
-      )}
     </div>
   );
 }

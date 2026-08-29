@@ -36,6 +36,9 @@ export function getAgentThemeVars(t: ReturnType<typeof useAgentTheme>): CSSPrope
     '--agent-surface': t.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
     '--agent-surface-2': t.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
     '--agent-border': t.border,
+    // 征集 #96:分割线专用色——与剧本编辑器同款(暗 rgba(255,255,255,0.06) / 亮 rgba(0,0,0,0.06)),
+    // 比 --agent-border(#44403c) 更淡,避免面板内分割线过重
+    '--agent-divider': t.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
     '--agent-text': t.text,
     '--agent-muted': t.textMuted,
     '--agent-accent': t.accent,
