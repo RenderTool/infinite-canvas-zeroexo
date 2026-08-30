@@ -8,6 +8,8 @@ import { CSSProperties, ReactElement } from 'react';import { Modal, Progress } f
 import { useTranslation } from 'react-i18next';
 import { StopCircle, RefreshCw } from 'lucide-react';
 import type { EpisodeInfo, EpisodeShotResult } from '@/pages/editor/editor-canvas/interactions/ai-generation-utils.js';
+// 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 ✓/✗ 等字符图标（2026-08-31）
+import { CANVAS_NODE_ICONS } from '../../icons.js';
 
 // ===== 类型 =====
 
@@ -91,13 +93,13 @@ export function StoryboardEpisodeProgress({
       case 'completed':
         return (
           <span style={{ ...iconStyle, background: `${successColor}20`, color: successColor }}>
-          ✓
+          <CANVAS_NODE_ICONS.check size={12} />
         </span>
         );
       case 'failed':
         return (
           <span style={{ ...iconStyle, background: `${errorColor}20`, color: errorColor }}>
-          ✗
+          <CANVAS_NODE_ICONS.close size={12} />
         </span>
         );
     }

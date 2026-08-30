@@ -132,7 +132,8 @@ export function MentionInput({
     for (const m of members) {
       // 提及仅限可对话的活跃成员：被封禁(banned)成员不应出现在建议列表
       if (!m.nickname) continue;
-      if (m.sessions.some((s) => s.status === 'banned')) continue;
+      // ⚠️ sessions 可能缺省（后端契约漂移），必须可选链兜底
+      if (m.sessions?.some((s) => s.status === 'banned') ?? false) continue;
       if (!q || m.nickname.toLowerCase().includes(q)) {
         list.push({ key: m.userId, label: m.nickname, type: 'member' });
       }
@@ -318,9 +319,10 @@ export function CollaborationChat({ theme, height }: CollaborationChatProps): Re
     // 自己被禁言:本地成员状态直接拦截,给出明确原因而非等到后端 403
     // 禁言持久化在 permissions(移除 chat):退出重进后 session 可能恢复 online,需同时查权限
     const self = members.find((m) => m.isSelf) ?? null;
+    // ⚠️ sessions 可能缺省（后端契约漂移），必须可选链兜底
     const selfMuted =
       !!self &&
-      (self.sessions.some((s) => s.status === 'muted') || (canChat && !self.permissions.includes('chat')));
+      ((self.sessions?.some((s) => s.status === 'muted') ?? false) || (canChat && !self.permissions.includes('chat')));
     if (selfMuted) {
       message.warning(t('collab.chatMuted'));
       return;

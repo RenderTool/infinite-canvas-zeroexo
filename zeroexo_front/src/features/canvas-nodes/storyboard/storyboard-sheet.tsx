@@ -14,13 +14,18 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useReactGraphStore, useGraph } from '@zeroexo/plugin-render-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
-import type { StoryboardNodeData, Shot, StoryboardEntity } from './storyboard-types';
-import { createNewShot, normalizeUpdate, SAMPLE_SUBJECTS } from './storyboard-utils';
+import type { StoryboardNodeData, Shot, EntityRef } from './storyboard-types';
+import type { ProductionItem, ProductionItemKind } from '../production-manager/production-manager-types';
+import { createProductionItem } from '../production-manager/production-manager-types';
+import {
+  createNewShot, normalizeUpdate, SAMPLE_SUBJECTS, entityDisplayName,
+  collectSubjectSources, extractExplicitMentions, type SubjectMatchSource,
+} from './storyboard-utils';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import { StoryboardAssociateModal } from './storyboard-associate-modal';
 import { FullscreenDropdown, fullToolBtnStyle } from './components/FullscreenDropdown';
 import { StoryboardTable } from './components/StoryboardTable';
-import { StoryboardShotView } from './storyboard-shot-view';
+import { StoryboardSubjectManager } from './StoryboardSubjectManager';
 import { StoryboardFullscreenEditor } from './storyboard-fullscreen-editor';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
 import {
@@ -52,13 +57,10 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   }, [graph, nodeId, data]);
   const scriptNodes = useMemo(() => graph.nodes.filter((n) => n.type === 'script'), [graph]);
 
-  // 2026-08-21: 分镜→剧管主体映射——关联剧管条目按实体名/别名索引(剧管=分镜后置工序, 主体列点击实体可映射)
+  // 2026-08-30 剧管并入分镜：主体映射从本节点 productionItems 索引（原从独立剧管节点收集）
   const pmItemsByEntity = useMemo(() => {
     const map: Record<string, Array<{ id: string; name: string; kind: string }>> = {};
-    const pmId = (data as StoryboardNodeData).productionManagerId;
-    if (!pmId) return map;
-    const pmNode = graph.nodes.find((n) => n.id === pmId && n.type === 'production-manager');
-    const items = (pmNode?.data as { items?: Array<{ id: string; name: string; kind: string; aliases?: string[] }> } | undefined)?.items ?? [];
+    const items = (data.productionItems ?? []) as Array<{ id: string; name: string; kind: string; aliases?: string[] }>;
     for (const it of items) {
       const keys = new Set([it.name, ...(it.aliases ?? [])].filter((k): k is string => !!k));
       for (const k of keys) {
@@ -67,7 +69,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
       }
     }
     return map;
-  }, [graph, data]);
+  }, [data.productionItems]);
   const scriptOptionLabel = useCallback((n: { id?: string; title?: string }) => {
     const scriptDefault = t('storyboard.script');
     const title = n.title || scriptDefault;
@@ -97,11 +99,9 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const status = data.statusByEpisode?.[activeEpisodeId] ?? (hasByEpisode ? 'idle' : (data.status ?? 'idle'));
   const progress = data.progressByEpisode?.[activeEpisodeId] ?? data.progress ?? 0;
   const entities = data.entities ?? [];
-  // Plan#29 T4: 主体字典并集 = 本节点 AI 字典 ∪ 画布统筹条目(手动登记的条目也能命中 mention/kind 徽章);范文节点无字典时用 SAMPLE_SUBJECTS 兑底
+  // 2026-08-30 剧管并入分镜：主体字典并集 = 本节点 AI 字典 ∪ 本节点主体库条目；范文节点无字典时用 SAMPLE_SUBJECTS 兑底
   const aiSubjects = useMemo(() => {
-    const pmItems = graph.nodes
-      .filter((n: any) => n.type === 'production-manager')
-      .flatMap((n: any) => (Array.isArray(n.data?.items) ? n.data.items : []) as Array<{ name?: string; kind?: string; aliases?: string[]; consistency?: string }>)
+    const pmItems = (data.productionItems ?? [])
       .map((it: { name?: string; kind?: string; aliases?: string[]; consistency?: string }) => ({
         name: it.name ?? '',
         kind: (it.kind ?? 'character') as 'character' | 'scene' | 'prop',
@@ -112,7 +112,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     const base = data.aiSubjects?.length ? data.aiSubjects : (data.isSample ? SAMPLE_SUBJECTS : undefined);
     if (!base || base.length === 0) return pmItems.length > 0 ? pmItems : undefined;
     return [...base, ...pmItems];
-  }, [graph.nodes, data.aiSubjects, data.isSample]);
+  }, [data.productionItems, data.aiSubjects, data.isSample]);
   // Plan#29: 「状态」概念废弃(改为剧照集 + 自由标签),stateId 选择选项停用
   const subjectStatesByEntity = useMemo(() => ({} as Record<string, Array<{ id: string; name: string }>>), []);
   const activeEpisode = scriptEpisodes.find((e) => e.id === activeEpisodeId) ?? scriptEpisodes[0];
@@ -150,8 +150,8 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   const [regenStep, setRegenStep] = useState(0);
   const [regenOption, setRegenOption] = useState<'overwrite' | 'compare'>('overwrite');
 
-  // 视图(修正 tA9 误删):剧管风格 Step 卡(默认,代替旧单镜卡) ↔ 表格 两态
-  const [viewMode, setViewMode] = useState<'shot' | 'table'>('shot');
+  // 2026-08-30 征集 #110: 视图两态 = 主体库(剧管, Aperture) ↔ 表格; 原步骤视图语义改为主体库
+  const [viewMode, setViewMode] = useState<'subject' | 'table'>('subject');
 
   const associateScript = useMemo(() => scriptNodes.find((n) => n.id === associateScriptId) ?? null, [scriptNodes, associateScriptId]);
   const associateEpisodes = useMemo(() => {
@@ -167,8 +167,10 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
   // 数据变更
   const updateData = useCallback((updater: (prev: StoryboardNodeData) => StoryboardNodeData) => {
     const next = normalizeUpdate(data, activeEpisodeId, updater);
-    store.updateNodeData(nodeId, { ...next });
-    onDataChange(next);
+    // 用户真实编辑(增删主体/分镜等)后清除范文标记,与剧本节点行为一致
+    const realized = data.isSample ? { ...next, isSample: false } : next;
+    store.updateNodeData(nodeId, { ...realized });
+    onDataChange(realized);
   }, [data, activeEpisodeId, nodeId, store, onDataChange]);
 
   // 导航
@@ -228,14 +230,69 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     updateData((prev) => ({ ...prev, shots: prev.shots.map((s) => (s.id === shotId ? { ...s, ...patch } : s)) }));
   }, [updateData]);
 
-  // @ 提及
-  const handleMentionSelect = useCallback((entity: StoryboardEntity) => {
+  // @ 提及（2026-08-30 征集 #110：选择主体 → 写入 shot.entities 关联 + 描述追加 @主体）
+  const handleMentionSelect = useCallback((source: SubjectMatchSource) => {
     if (!mentionShotId) return;
-    const desc = shots.find((s) => s.id === mentionShotId)?.description ?? '';
-    updateShot(mentionShotId, { description: `${desc}@${entity.name}` });
+    const shot = shots.find((s) => s.id === mentionShotId);
+    const desc = shot?.description ?? '';
+    // 追加 @主体 到描述末尾（未引用时）
+    const nextDesc = extractExplicitMentions(desc).has(source.name) ? desc : `${desc}@${source.name}`;
+    updateShot(mentionShotId, { description: nextDesc });
     setMentionOpen(false); setMentionShotId(null); setMentionSearch('');
   }, [shots, updateShot, mentionShotId]);
   const handleMentionOpen = useCallback((shotId: string) => { setMentionShotId(shotId); setMentionOpen(true); setMentionSearch(''); }, []);
+
+  // ===== 2026-08-30 主体库条目 CRUD（与节点主体库 StoryboardSubjectManager 同一数据源 productionItems） =====
+  const handleAddProductionItem = useCallback((kind: ProductionItemKind) => {
+    const item = createProductionItem(kind);
+    const sameKindCount = (data.productionItems ?? []).filter((i) => i.kind === kind).length;
+    const kindLabel = kind === 'character' ? t('entity.character') : kind === 'scene' ? t('entity.scene') : t('entity.prop');
+    item.name = `${kindLabel} ${sameKindCount + 1}`;
+    updateData((prev) => ({ ...prev, productionItems: [...(prev.productionItems ?? []), item] }));
+  }, [data.productionItems, updateData, t]);
+
+  const handleUpdateProductionItem = useCallback((itemId: string, patch: Partial<ProductionItem>) => {
+    updateData((prev) => ({
+      ...prev,
+      productionItems: (prev.productionItems ?? []).map((it) => (it.id === itemId ? { ...it, ...patch } : it)),
+    }));
+  }, [updateData]);
+
+  const handleDeleteProductionItem = useCallback((itemId: string) => {
+    updateData((prev) => ({
+      ...prev,
+      productionItems: (prev.productionItems ?? []).filter((it) => it.id !== itemId),
+    }));
+  }, [updateData]);
+
+  // 2026-08-30 征集 #110：描述文本回车/失焦自动匹配（整段扫描裸词，跳过已 @ 词；命中写 shot.entities 关联）
+  const handleAutoMatchMentions = useCallback((shotId: string, text: string) => {
+    const target = shots.find((s) => s.id === shotId);
+    if (!target) return;
+    const sources = collectSubjectSources(entities, aiSubjects, data.productionItems);
+    const explicit = extractExplicitMentions(text);
+    // 扫描裸词：按主体名长度降序匹配（长名优先避免短名吞长名），已 @ 词跳过
+    const sorted = [...sources].sort((a, b) => b.name.length - a.name.length);
+    const matchedNames = new Set<string>();
+    let rest = text.replace(/@[\w\u4e00-\u9fa5]+/g, ' ');
+    for (const src of sorted) {
+      if (explicit.has(src.name)) continue;
+      if (rest.includes(src.name)) { matchedNames.add(src.name); rest = rest.split(src.name).join(' '); }
+    }
+    if (matchedNames.size === 0) return;
+    const current = Array.isArray(target.entities) ? target.entities : [];
+    const existing = new Set(current.map((e) => entityDisplayName(e)));
+    const toAdd: EntityRef[] = [];
+    for (const name of matchedNames) {
+      if (existing.has(name)) continue;
+      const src = sources.find((s) => s.name === name);
+      toAdd.push({ entityId: src?.id ?? name, mention: name, cardId: src?.id });
+      existing.add(name);
+    }
+    if (toAdd.length === 0) return;
+    updateShot(shotId, { entities: [...current, ...toAdd] });
+    message.success(t('storyboard.autoMatchedSubjects', { count: toAdd.length }));
+  }, [shots, entities, aiSubjects, data.productionItems, updateShot, message, t]);
 
   // 事件订阅(使用 ref 稳定回调引用,避免因 data 变化导致 useEffect 反复重订阅)
   const handleAddShotRef = useRef(handleAddShot);
@@ -291,14 +348,14 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
         )}
         <div style={{ flex: 1 }} />
         {data.isSample && <span style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 1, color: isDark ? '#fbbf24' : '#b45309', background: isDark ? 'rgba(251,191,36,0.14)' : 'rgba(180,83,9,0.12)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.35)' : 'rgba(180,83,9,0.3)'}`, userSelect: 'none', pointerEvents: 'none' }}>{t('storyboard.sampleBadge')}</span>}
-        {/* 切换视图按钮: Step卡(剧管风格) ↔ 表格 两态 */}
-        <Tooltip title={viewMode === 'table' ? t('storyboard.switchToStepView') : t('storyboard.switchToTableView')}>
+        {/* 2026-08-30 征集 #110: 视图切换 = 主体库(剧管) ↔ 表格；图标保留 Aperture */}
+        <Tooltip title={viewMode === 'table' ? t('storyboard.switchToSubjectView', '主体库') : t('storyboard.switchToTableView')}>
           <Button
             size="small"
             type="text"
-            icon={viewMode === 'table' ? <Table size={14} /> : <Aperture size={14} />}
+            icon={viewMode === 'table' ? <Aperture size={14} /> : <Table size={14} />}
             style={{ color: textColor, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}
-            onClick={() => { setViewMode(viewMode === 'table' ? 'shot' : 'table'); }}
+            onClick={() => { setViewMode(viewMode === 'table' ? 'subject' : 'table'); }}
           />
         </Tooltip>
         <span style={{ fontSize: 11, color: mutedColor }}>{t('storyboard.shotCountSummary', { count: shots.length })}</span>
@@ -306,17 +363,17 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
 
       {/* 内容区域 */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {viewMode === 'shot' ? (
+        {viewMode === 'subject' ? (
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-            <StoryboardShotView
-              shots={shots}
-              status={status}
-              progress={progress}
-              readOnly
+            <StoryboardSubjectManager
+              items={data.productionItems ?? []}
+              onChange={(items) => updateData((prev) => ({ ...prev, productionItems: items }))}
+              store={store}
+              nodeId={nodeId}
             />
           </div>
         ) : (
-          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} pmItemsByEntity={pmItemsByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
+          <StoryboardTable readOnly shots={shots} paginatedShots={paginatedShots} selectedRowId={selectedRowId} onRowSelect={setSelectedRowId} selectedShotIds={selectedShotIds} onToggleSelect={handleToggleSelect} onDeleteShot={handleDeleteShot} onUpdateShot={updateShot} cameraOpenId={cameraOpenId} cameraRect={cameraRect} onCameraOpen={(id, r) => { setCameraOpenId(id); setCameraRect(r); }} onCameraClose={() => { setCameraOpenId(null); setCameraRect(null); }} entities={entities} aiSubjects={aiSubjects} subjectStatesByEntity={subjectStatesByEntity} pmItemsByEntity={pmItemsByEntity} mentionOpen={mentionOpen} mentionShotId={mentionShotId} onMentionSelect={handleMentionSelect} onMentionOpen={handleMentionOpen} onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }} subjectSources={collectSubjectSources(entities, aiSubjects, data.productionItems)} onAutoMatchMentions={handleAutoMatchMentions} status={status} progress={progress} nodeId={nodeId} linkedScript={linkedScript} activeEpisode={activeEpisode} activeEpisodeId={activeEpisodeId} />
         )}
       </div>
 
@@ -360,6 +417,11 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           aiSubjects={aiSubjects}
           subjectStatesByEntity={subjectStatesByEntity}
           pmItemsByEntity={pmItemsByEntity}
+          productionItems={data.productionItems ?? []}
+          onAutoMatchMentions={handleAutoMatchMentions}
+          onAddItem={handleAddProductionItem}
+          onUpdateItem={handleUpdateProductionItem}
+          onDeleteItem={handleDeleteProductionItem}
           status={status}
           progress={progress}
           nodeId={nodeId}

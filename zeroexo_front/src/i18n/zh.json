@@ -380,6 +380,7 @@
     "close": "关闭",
     "confirm": "确认",
     "cancel": "取消",
+    "ok": "知道了",
     "copy": "复制",
     "save": "保存",
     "copySuccess": "已复制",
@@ -400,6 +401,7 @@
     "next": "下一个",
     "expand": "展开",
     "delete": "删除",
+    "confirmDelete": "确定删除",
     "export": "导出",
     "add": "添加",
     "edit": "编辑",
@@ -963,6 +965,7 @@
   },
   "hierarchy": {
     "title": "画布结构",
+    "collapse": "收起",
     "empty": "画布为空",
     "nodeCount": "共 {{count}} 个节点",
     "noSearchResults": "无匹配结果",
@@ -1348,6 +1351,7 @@
     "savedToast": "已保存",
     "deletedToast": "已删除",
     "nameRequired": "请输入名称",
+    "loginRequired": "请先登录后再操作",
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
     "imagesTitle": "参考图",
@@ -1761,6 +1765,30 @@
     "switchToTableView": "切换到表格视图",
     "switchToStepView": "切换到步骤视图",
     "switchToShotView": "切换到单镜视图",
+    "switchToSubjectView": "切换到主体库",
+    "subjectDock": "生成真实图片",
+    "subjectDockGenerate": "生成",
+    "subjectDockPlaceholder": "AI 已自动映射当前主体的提示词，可在此修改…",
+    "subjectDockPhase2": "真实图片生成链路将在 Phase 2 接入；当前提示词已就绪。",
+    "subjectAdded": "已新建主体，可在主体库/全屏中补充名称与提示词",
+    "autoMatchedSubjects": "已自动关联 {{count}} 个主体",
+    "addSubject": "添加主体",
+    "confirmDeleteSubject": "确定删除主体「{{name}}」？",
+    "confirmDeleteProductionItem": "确定删除主体「{{name}}」？",
+    "subjectName": "主体名称",
+    "wizard": {
+      "title": "分镜生产台",
+      "subtitle": "本镜头尚未有内容。三步快速开始：",
+      "promptTitle": "补全提示词",
+      "promptHint": "请在底部提示词区填写 Image/Video Prompt，或点击「从圣经组装」。",
+      "promptDesc": "从圣经组装或 AI 补全本镜提示词",
+      "generateTitle": "生成视频",
+      "generateHint": "填写提示词并通过质量门后，点击「生成视频」。",
+      "generateDesc": "质量门通过后一键生成主视频",
+      "voiceTitle": "配音预览",
+      "voiceHint": "配音录制与音频上传将在 Phase 2 接入；当前可直接在镜头上填写音频地址（audioPreview.storageKey）后试听。",
+      "voiceDesc": "自己配音上传，试听本镜音频"
+    },
     "generatingEpisode": "正在生成分镜",
     "addShot": "添加镜头",
     "deselectAll": "取消全选",
@@ -1787,6 +1815,9 @@
     "createSubjectStack": "同步创建主体堆叠",
     "createSubjectStackDesc": "自动识别剧本中的角色/场景/道具，在分镜下游创建主体节点",
     "subjectStackCreated": "已创建 {{count}} 个占位主体",
+    "subjectAll": "全部",
+    "subjectEmpty": "暂无主体，可让 Agent 生成主体占位提示词卡片",
+    "subjectPromptEmpty": "（该主体暂无提示词，可让 Agent 补全）",
     "previousStep": "上一步",
     "nextStep": "下一步",
     "startOverwrite": "开始覆盖",
@@ -2128,6 +2159,10 @@
     "licenseFallback": "开放",
     "source": "来源",
     "resourceExpired": "资源已失效"
+  },
+  "promptSource": {
+    "mine": "我的",
+    "public": "公共"
   },
   "promptViewer": {
     "discardUnsavedTitle": "丢弃未保存的修改？",
@@ -2599,6 +2634,17 @@
     "retryFailed": "重试失败集",
     "viewResults": "查看结果",
     "close": "关闭"
+  },
+  "subjectMention": {
+    "searchPlaceholder": "搜索主体…",
+    "notFound": "未找到主体，可在「主体库」中新建"
+  },
+  "nodeDock": {
+    "expand": "展开生成面板",
+    "collapse": "收起",
+    "generate": "生成",
+    "removeRef": "移除参考素材",
+    "placeholder": "输入提示词... 连入的素材会自动作为输入源(堆叠节点需 @ 内部资源)"
   },
   "entity": {
     "character": "角色",

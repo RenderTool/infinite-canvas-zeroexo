@@ -17,8 +17,8 @@ import { Type, Image as ImageIcon, FileText, Aperture, Film } from 'lucide-react
 import { CREATE_MENU_ICONS } from './icons.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 
-/** 节点类型 */
-export type AddNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager';
+/** 节点类型（2026-08-30：production-manager 剧管已合并进分镜节点，创建菜单移除） */
+export type AddNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench';
 
 export interface NodeCreateMenuProps {
   /** 菜单位置(固定定位) */
@@ -66,7 +66,6 @@ function createNodeTypeDefs(_t: (key: string) => string): NodeTypeDef[] {
     { type: 'script', icon: <FileText size={14} />, labelKey: 'canvasNodes.stage.script', category: 'creation' },
     { type: 'storyboard', icon: <Aperture size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
     { type: 'workbench', icon: <Film size={14} />, labelKey: 'canvasNodes.stage.workbench', category: 'creation' },
-    { type: 'production-manager', icon: <CREATE_MENU_ICONS.productionManager size={14} />, labelKey: 'canvasNodes.stage.productionManager', category: 'creation' },
   ];
 }
 

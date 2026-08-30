@@ -197,6 +197,8 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const { prompts, loading: loadingPrompts, refreshPrompts } = useSharedPrompts();
   const [prevDefaultAssetKind, setPrevDefaultAssetKind] = useState<AssetKindFilter | undefined>(props.defaultAssetKind);
 
+
+
   const [search, setSearch] = useState('');
 
   // ── 弹窗状态 ──
@@ -294,15 +296,14 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       label: t('assetLibrary.filterPrompt'),
       icon: <FileText size={16} />,
       color: '#8b5cf6',
+      // 2026-08-30 用户拍板:分类收敛为 角色/场景/道具/其他,style、shot 并入 other
       count: prompts.length,
       children: [
         { key: 'all', label: t('assetLibrary.filterAll'), count: prompts.length },
         { key: 'role', label: t('assetLibrary.filterRole'), count: prompts.filter((p) => p.category === 'role').length },
         { key: 'scene', label: t('assetLibrary.filterScene'), count: prompts.filter((p) => p.category === 'scene').length },
         { key: 'prop', label: t('assetLibrary.filterProp'), count: prompts.filter((p) => p.category === 'prop').length },
-        { key: 'style', label: t('assetLibrary.filterStyle'), count: prompts.filter((p) => p.category === 'style').length },
-        { key: 'shot', label: t('assetLibrary.filterShot'), count: prompts.filter((p) => p.category === 'shot').length },
-        { key: 'other', label: t('assetLibrary.filterOther'), count: prompts.filter((p) => p.category === 'other').length },
+        { key: 'other', label: t('assetLibrary.filterOther'), count: prompts.filter((p) => p.category === 'other' || p.category === 'style' || p.category === 'shot').length },
       ],
     },
     {
@@ -355,8 +356,9 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const filteredPrompts = useMemo(() => {
     let result = safePrompts;
     if (activeChild && activeChild !== 'all') {
-      if (['role', 'scene', 'style', 'shot', 'other'].includes(activeChild)) {
-        result = result.filter((p) => p.category === activeChild);
+      // 2026-08-30 用户拍板:分类收敛,「其他」合并 style/shot
+      if (['role', 'scene', 'prop', 'other'].includes(activeChild)) {
+        result = result.filter((p) => (activeChild === 'other' ? (p.category === 'other' || p.category === 'style' || p.category === 'shot') : p.category === activeChild));
       }
     }
     if (search.trim()) {

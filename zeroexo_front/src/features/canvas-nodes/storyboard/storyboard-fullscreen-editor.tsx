@@ -7,16 +7,18 @@
  * - 步骤视图：图册/网格模块 + 提示词（SelectedImageDetail）+ 右侧镜头信息（行表单化），配色沿用无边线分层
  * 步骤视图 = 升级版单镜视图（节点与全屏均不再出现单镜），header 分镜切换器驱动当前镜头
  */
-import { memo, useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { memo, useCallback, useEffect, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Tooltip, App as AntdApp, ConfigProvider, Select, Button } from 'antd';
-import { Plus, Trash2, X, ListVideo, Table, FileText, CheckSquare, Link2, RotateCcw } from 'lucide-react';
-import { StoryboardMergedTab } from './storyboard-merged-tab';
+import { Plus, Trash2, X, ListVideo, Table, CheckSquare, Link2, RotateCcw, Users } from 'lucide-react';
+import { StoryboardSubjectTab } from './StoryboardSubjectTab';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { FullscreenDropdown } from './components/FullscreenDropdown';
 import type { Shot, StoryboardEntity, EntityKind, AiSubject, EpisodeStatus } from './storyboard-types';
+import type { ProductionItem, ProductionItemKind } from '../production-manager/production-manager-types';
+import { collectSubjectSources, extractExplicitMentions, type SubjectMatchSource } from './storyboard-utils';
 import { StoryboardTable } from './components/StoryboardTable';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import {
@@ -53,6 +55,14 @@ export interface StoryboardFullscreenEditorProps {
   aiSubjects?: AiSubject[];
   subjectStatesByEntity?: Record<string, Array<{ id: string; name: string }>>;
   pmItemsByEntity?: Record<string, Array<{ id: string; name: string; kind: string }>>;
+  /** 2026-08-30 征集 #110: 主体库数据（剧管合并进分镜节点） */
+  productionItems?: ProductionItem[];
+  /** 2026-08-30 征集 #110: 描述文本回车/失焦自动匹配回调 */
+  onAutoMatchMentions?: (shotId: string, text: string) => void;
+  /** 2026-08-30 征集 #110: 主体 tab 可编辑新建（全屏=查看为主+可编辑/新建主体；写主体库 productionItems） */
+  onAddItem?: (kind: ProductionItemKind) => void;
+  onUpdateItem?: (itemId: string, patch: Partial<ProductionItem>) => void;
+  onDeleteItem?: (itemId: string) => void;
   status: EpisodeStatus;
   progress?: number;
   nodeId: string;
@@ -72,7 +82,8 @@ const PAGE_SIZE = 10;
 
 export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEditor({
   open, onClose, shots, onUpdateShot, onAddShot, onDeleteShot, episodes, activeEpisodeId, onEpisodeChange,
-  entities, aiSubjects, subjectStatesByEntity, pmItemsByEntity, status, progress, nodeId, linkedScript, activeEpisode,
+  entities, aiSubjects, subjectStatesByEntity, pmItemsByEntity, productionItems, onAutoMatchMentions,
+  onAddItem, onUpdateItem, onDeleteItem, status, progress, nodeId, linkedScript, activeEpisode,
   scriptNodes = [], scriptOptionLabel, onAssociateScript, onRequestRegenerate,
   embedded = false,
 }: StoryboardFullscreenEditorProps): ReactElement | null {
@@ -88,7 +99,8 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
   const cardBorder = theme.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
 
   // ===== 2026-08-30 收敛:两页签(表格 / 提示词与主体清单);步骤视图已移除 =====
-  const [tabKey, setTabKey] = useState<'table' | 'merged'>('table');
+  // 2026-08-30 追加「主体」页签：表格后插入，展示 AI 生成的主体占位提示词卡片（主页提示词同款）
+  const [tabKey, setTabKey] = useState<'table' | 'subject'>('table');
 
   // ===== 当前分镜（纯视图态 activeIndex，不落 node.data；header 切换器驱动） =====
   const [activeIndex, setActiveIndex] = useState(0);
@@ -114,37 +126,7 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
   useEffect(() => { setCurrentPage(1); }, [activeEpisodeId]);
 
-  // ===== Plan#53 T10: merged 视图本地状态（时间轴排序/缩放/播放头；业务写入走 onUpdateShot） =====
-  const [timelineOrder, setTimelineOrder] = useState<string[] | null>(null);
-  const [pps, setPps] = useState(60);
-  const [playhead, setPlayhead] = useState(0);
-  useEffect(() => { setTimelineOrder(null); }, [activeEpisodeId]);
-  const orderedShots = useMemo(() => {
-    if (!timelineOrder || timelineOrder.length === 0) return shots;
-    const idx = new Map(shots.map((s, i) => [s.id, i]));
-    return [...timelineOrder].map((id) => shots[idx.get(id) ?? -1]).filter((s): s is Shot => s != null);
-  }, [shots, timelineOrder]);
-  const currentShot = orderedShots[activeIndex];
-  const activeVideoIndex = currentShot?.activeVideoIndex ?? 0;
-  const activeVideo = currentShot?.videos?.[activeVideoIndex];
-  const timelineData = useMemo(() => orderedShots.map((s) => ({
-    id: s.id,
-    number: s.number,
-    duration: s.duration,
-    status: (s.generated ? 'done' : (s.videos?.some((v) => v.status === 'generating') ? 'generating' : (s.videos?.some((v) => v.status === 'failed') ? 'failed' : 'idle'))) as any,
-    label: s.description || s.promptText || `#${s.number}`,
-    hasAudio: !!s.audioPreview?.storageKey,
-  })), [orderedShots]);
-  const bibleRefs = currentShot?.bibleRefs;
-  const currentEntities = useMemo(() => {
-    const ids = new Set([
-      ...(bibleRefs?.characters ?? []),
-      ...(bibleRefs?.scenes ?? []),
-      ...(bibleRefs?.props ?? []),
-    ]);
-    if (ids.size === 0) return entities;
-    return entities.filter((e) => ids.has(e.id) || ids.has(e.name));
-  }, [entities, bibleRefs]);
+  // Plan#53: merged 视图（分镜生产台）已迁移至出片节点 workbench-sheet.tsx，此处不再保留
 
   const handleToggleSelect = useCallback((shotId: string) => {
     setSelectedShotIds((prev) => { const n = new Set(prev); n.has(shotId) ? n.delete(shotId) : n.add(shotId); return n; });
@@ -182,10 +164,22 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
       },
     });
   }, [selectedShotIds, antdModal, t, onDeleteShot]);
-  const handleTableMentionSelect = useCallback((entity: StoryboardEntity) => {
+  const handleTableMentionSelect = useCallback((source: SubjectMatchSource) => {
     if (!mentionShotId) return;
-    const desc = shots.find((s) => s.id === mentionShotId)?.description ?? '';
-    onUpdateShot(mentionShotId, { description: `${desc}@${entity.name}` });
+    const shot = shots.find((s) => s.id === mentionShotId);
+    const desc = shot?.description ?? '';
+    const nextDesc = extractExplicitMentions(desc).has(source.name) ? desc : `${desc}@${source.name}`;
+    // 写入 shot.entities 关联（2026-08-30 征集 #110：@ 用来关联主体，不只追加文本）
+    const current = Array.isArray(shot?.entities) ? shot.entities : [];
+    const existing = new Set((current as any[]).map((e) => (typeof e === 'string' ? e : (e?.mention ?? ''))));
+    if (!existing.has(source.name)) {
+      onUpdateShot(mentionShotId, {
+        description: nextDesc,
+        entities: [...current, { entityId: source.id, mention: source.name, cardId: source.id }],
+      });
+    } else {
+      onUpdateShot(mentionShotId, { description: nextDesc });
+    }
     setMentionOpen(false); setMentionShotId(null);
   }, [shots, onUpdateShot, mentionShotId]);
 
@@ -258,11 +252,11 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
               {linkedScript ? (scriptOptionLabel ? scriptOptionLabel(linkedScript) : (linkedScript.title ?? '')) : t('storyboard.associateScript')}
             </Button>
           </FullscreenDropdown>
-          {/* 页签切换：表格 / 提示词与主体清单（2026-08-30 合并） */}
+          {/* 页签切换：表格 / 主体 / 提示词与主体（2026-08-30 合并；主体为表格后新增页签） */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: surfaceBg, borderRadius: 8, padding: 2, flexShrink: 0 }}>
             {([
               { key: 'table' as const, label: t('storyboard.tabTable', '表格'), Icon: Table },
-              { key: 'merged' as const, label: t('storyboard.tabMerged', '提示词与主体'), Icon: FileText },
+              { key: 'subject' as const, label: t('storyboard.tabSubject', '主体'), Icon: Users },
             ]).map(({ key, label, Icon }) => (
               <Tooltip key={key} title={label}>
                 <button
@@ -313,6 +307,8 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
                 onMentionSelect={handleTableMentionSelect}
                 onMentionOpen={(id) => { setMentionShotId(id); setMentionOpen(true); }}
                 onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }}
+                subjectSources={collectSubjectSources(entities, aiSubjects, productionItems)}
+                onAutoMatchMentions={onAutoMatchMentions}
                 status={status}
                 progress={progress}
                 nodeId={nodeId}
@@ -377,107 +373,18 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
               )}
             </div>
           </div>
-        ) : (
-          /* ===== Plan#53 T10: 分镜生产台（五区容器） ===== */
-          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-            <StoryboardMergedTab
+        ) : tabKey === 'subject' ? (
+          /* ===== 主体页签：AI 生成的主体占位提示词卡片（主页提示词同款，点击打开链路画布，2026-08-30 新增） ===== */
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', color: textPrimary }}>
+            <StoryboardSubjectTab
+              productionItems={productionItems ?? []}
               theme={theme}
-              isDark={theme.mode === 'dark'}
-              entities={currentEntities}
-              shot={currentShot}
-              assetPanelProps={{ entities: currentEntities }}
-              videoStageProps={{
-                videoStorageKey: activeVideo?.status === 'done' ? activeVideo?.storageKey : undefined,
-                videoStatus: currentShot?.generated ? 'done' : (activeVideo?.status ?? 'idle'),
-                videoProgress: activeVideo?.progress ?? 0,
-                videoError: activeVideo?.error,
-                audioStorageKey: currentShot?.audioPreview?.storageKey,
-                audioDuration: currentShot?.audioPreview?.duration,
-                audioName: currentShot?.audioPreview?.name,
-                onRemoveAudio: () => currentShot && onUpdateShot(currentShot.id, { audioPreview: undefined }),
-                onRecordAudio: () => {
-                  antdModal.info({
-                    centered: true,
-                    zIndex: Z_INDEX.FULLSCREEN_MODAL,
-                    title: t('storyboard.recordVoice', '配音/上传'),
-                    content: t('storyboard.recordVoiceHint', '配音录制与音频上传将在 Phase 2 接入；当前可直接在镜头上填写音频地址（audioPreview.storageKey）后试听。'),
-                    okText: t('common.ok', '知道了'),
-                  });
-                },
-                emptyLabel: t('storyboard.videoEmpty', '本镜尚无视频，点击底部「生成视频」'),
-              }}
-              alternativeVideosProps={{
-                videos: currentShot?.videos ?? [],
-                activeVideoIndex,
-                onActivate: (idx) => currentShot && onUpdateShot(currentShot.id, { activeVideoIndex: idx }),
-                onRetry: (idx) => {
-                  const list = [...(currentShot?.videos ?? [])];
-                  if (list[idx]) { list[idx] = { ...list[idx], status: 'pending', error: undefined, diagnosis: undefined }; currentShot && onUpdateShot(currentShot.id, { videos: list }); }
-                },
-                onRemove: (idx) => {
-                  const list = [...(currentShot?.videos ?? [])];
-                  list.splice(idx, 1);
-                  currentShot && onUpdateShot(currentShot.id, { videos: list, activeVideoIndex: Math.max(0, (currentShot.activeVideoIndex ?? 0) - (idx < (currentShot.activeVideoIndex ?? 0) ? 1 : 0)) });
-                },
-              }}
-              timelineProps={{
-                shots: timelineData,
-                activeShotId: currentShot?.id,
-                pixelsPerSecond: pps,
-                onPixelsPerSecondChange: setPps,
-                onSelectShot: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
-                onReorder: (orderedIds) => setTimelineOrder(orderedIds),
-                onTrim: (shotId, newDuration) => onUpdateShot(shotId, { duration: newDuration }),
-                playheadTime: playhead,
-                onPlayheadTimeChange: setPlayhead,
-                onClipDoubleClick: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
-              }}
-              promptEditorProps={{
-                imagePrompt: currentShot?.imagePrompt ?? currentShot?.prompt ?? '',
-                videoPrompt: currentShot?.videoPrompt ?? '',
-                negativePrompt: currentShot?.negativePrompt ?? '',
-                quality: currentShot?.quality,
-                model: activeVideo?.model,
-                duration: currentShot?.duration,
-                aspectRatio: currentShot?.promptAssembly?.aspectRatio,
-                onImagePromptChange: (v) => currentShot && onUpdateShot(currentShot.id, { imagePrompt: v }),
-                onVideoPromptChange: (v) => currentShot && onUpdateShot(currentShot.id, { videoPrompt: v }),
-                onNegativePromptChange: (v) => currentShot && onUpdateShot(currentShot.id, { negativePrompt: v }),
-                onModelChange: (v) => { const list = [...(currentShot?.videos ?? [])]; if (list[activeVideoIndex]) { list[activeVideoIndex] = { ...list[activeVideoIndex], model: v }; currentShot && onUpdateShot(currentShot.id, { videos: list }); } },
-                onDurationChange: (v) => currentShot && onUpdateShot(currentShot.id, { duration: v }),
-                onAspectRatioChange: (v) => currentShot && onUpdateShot(currentShot.id, { promptAssembly: { ...(currentShot?.promptAssembly ?? { form: 'S1', anchorSentences: [], motionBudget: { subject: 40, camera: 30, environment: 30 }, aspectRatio: '16:9', assembledAt: '' }), aspectRatio: v } }),
-                onGenerate: () => {
-                  if (!currentShot) return;
-                  if ((currentShot.quality?.score ?? 10) < 7) {
-                    antdModal.warning({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.qualityBelowGate', '质量门未通过，禁止生成'), content: t('storyboard.qualityGateHint', '请先修复提示词质量问题或调低质量门阈值后再生成。'), okText: t('common.ok', '知道了') });
-                    return;
-                  }
-                  const list = [...(currentShot.videos ?? [])];
-                  list.push({ storageKey: '', status: 'pending', model: activeVideo?.model });
-                  onUpdateShot(currentShot.id, { videos: list, generated: true, manualEdit: false });
-                  antdModal.info({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.generateQueued', '已排队生成'), content: t('storyboard.generateQueuedHint', '生成任务已入队；真实视频生成链路将在 Phase 2 接入（当前为占位状态）。'), okText: t('common.ok', '知道了') });
-                },
-                onAssembleFromBible: () => {
-                  if (!currentShot) return;
-                  const anchors = currentEntities.filter((e) => e.anchorSentence).map((e) => `${e.name}:${e.anchorSentence}`).join('；');
-                  onUpdateShot(currentShot.id, { imagePrompt: anchors ? `${currentShot.imagePrompt ?? ''}\n[圣经] ${anchors}` : (currentShot.imagePrompt ?? ''), promptAssembly: { ...(currentShot.promptAssembly ?? { form: 'S1', anchorSentences: [], motionBudget: { subject: 40, camera: 30, environment: 30 }, aspectRatio: '16:9', assembledAt: '' }), anchorSentences: currentEntities.filter((e) => e.anchorSentence).map((e) => e.anchorSentence!), assembledAt: new Date().toISOString() }, manualEdit: false });
-                  antdModal.success({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.assembledFromBible', '已从圣经组装'), content: t('storyboard.assembledFromBibleHint', '已将本镜引用主体的锚点句组装进 Image Prompt。'), okText: t('common.ok', '知道了') });
-                },
-                generating: activeVideo?.status === 'generating',
-                disabled: !currentShot,
-              }}
-              onWizardAction={(action) => {
-                if (action === 'prompt') {
-                  antdModal.info({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.wizard.promptTitle', '补全提示词'), content: t('storyboard.wizard.promptHint', '请在底部提示词区填写 Image/Video Prompt，或点击「从圣经组装」。'), okText: t('common.ok', '知道了') });
-                } else if (action === 'generate') {
-                  antdModal.info({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.wizard.generateTitle', '生成视频'), content: t('storyboard.wizard.generateHint', '填写提示词并通过质量门后，点击「生成视频」。'), okText: t('common.ok', '知道了') });
-                } else if (action === 'voice') {
-                  antdModal.info({ centered: true, zIndex: Z_INDEX.FULLSCREEN_MODAL, title: t('storyboard.wizard.voiceTitle', '配音预览'), content: t('storyboard.recordVoiceHint', '配音录制与音频上传将在 Phase 2 接入；当前可直接在镜头上填写音频地址（audioPreview.storageKey）后试听。'), okText: t('common.ok', '知道了') });
-                }
-              }}
+              onAddItem={onAddItem}
+              onUpdateItem={onUpdateItem}
+              onDeleteItem={onDeleteItem}
             />
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* 景别取景器（表格编辑态：点击景别列弹出） */}

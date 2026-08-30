@@ -1,0 +1,73 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]:
+        - generic [ref=e18]:
+          - button [ref=e19] [cursor=pointer]
+          - button [ref=e23] [cursor=pointer]
+          - button [ref=e27] [cursor=pointer]
+          - button [ref=e31] [cursor=pointer]
+        - button [ref=e36] [cursor=pointer]
+      - main [ref=e40]
+    - banner [ref=e169]:
+      - generic [ref=e171]:
+        - button [ref=e172] [cursor=pointer]
+        - link [ref=e177] [cursor=pointer]:
+          - /url: https://github.com/RenderTool/zeroexo-platform-infinite-canvas
+        - button [ref=e182] [cursor=pointer]
+        - button [ref=e188] [cursor=pointer]
+        - button [ref=e194] [cursor=pointer]
+  - generic [ref=e200]:
+    - generic [ref=e201]:
+      - generic [ref=e202]:
+        - button "导入" [ref=e203] [cursor=pointer]
+        - button "阅读" [ref=e210] [cursor=pointer]
+        - button "场景号" [ref=e215] [cursor=pointer]
+        - button "隐藏标签" [ref=e221] [cursor=pointer]
+        - generic [ref=e228]: 第一集 测试
+      - generic [ref=e229]:
+        - generic [ref=e230]: 字数 19
+        - generic [ref=e232]: 总页数 2
+        - generic [ref=e234]: "总时长 {{seconds}}s ≈2 分钟"
+        - button "跳转" [ref=e236] [cursor=pointer]
+      - generic [ref=e242]:
+        - button "切换明暗主题" [ref=e244] [cursor=pointer]
+        - button "关闭" [ref=e249] [cursor=pointer]
+    - generic [ref=e254]:
+      - generic [ref=e256]:
+        - generic [ref=e257]:
+          - generic [ref=e258]:
+            - generic [ref=e259]: 动作
+            - textbox "动作描述" [ref=e266]: 这是一个测试段落。
+            - generic [ref=e267]:
+              - button "下方插入段落" [ref=e268] [cursor=pointer]
+              - button "删除段落" [ref=e270] [cursor=pointer]
+          - generic [ref=e274]:
+            - generic [ref=e275]: 动作
+            - textbox "动作描述" [ref=e282]: 另一行测试。
+            - generic [ref=e283]:
+              - button "下方插入段落" [ref=e284] [cursor=pointer]
+              - button "删除段落" [ref=e286] [cursor=pointer]
+          - generic [ref=e290]:
+            - generic [ref=e291]: 动作
+            - textbox "动作描述" [ref=e298]: 第三行。
+            - generic [ref=e299]:
+              - button "下方插入段落" [ref=e300] [cursor=pointer]
+              - button "删除段落" [ref=e302] [cursor=pointer]
+          - generic [ref=e306]: 19 字
+        - button "新段落" [ref=e308] [cursor=pointer]
+      - generic "拖拽调整剧集列表宽度" [ref=e312]
+      - generic [ref=e314]:
+        - generic [ref=e315]:
+          - generic [ref=e320]: 剧集
+          - generic [ref=e321]: 2 集
+        - generic [ref=e322]:
+          - generic [ref=e323] [cursor=pointer]:
+            - generic "第 1 集 · 第一集 测试" [ref=e332]: 第一集 测试
+            - generic [ref=e333]: 1页
+            - button [ref=e335]
+          - generic [ref=e340] [cursor=pointer]:
+            - generic "第 2 集 · 第二集" [ref=e349]: 第二集
+            - generic [ref=e350]: 1页
+            - button [ref=e352]
+        - button "新剧集" [ref=e358] [cursor=pointer]

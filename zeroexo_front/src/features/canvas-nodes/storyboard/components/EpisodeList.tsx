@@ -297,7 +297,9 @@ const wrapStyle = (border: string, theme: ReturnType<typeof useTheme>['theme']):
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  padding: '12px 10px',
+  // 底部 padding 40 与左侧 ScriptStructuredEditor 的 paperStyle(paddingBottom 40)对齐:
+  // 两侧「新增」按钮底边在同一水平线(2026-08-30 实测:12 vs 40 → 按钮底差 27px)
+  padding: '12px 10px 40px',
   background: theme.toolbar.editorSurface,
   border: `1px solid ${border}`,
   borderRadius: 0,

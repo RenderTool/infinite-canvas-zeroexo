@@ -617,7 +617,7 @@ function layoutStyle(bg: string): CSSProperties {
   // 同 editor-page R3: AppLayout Content(flex) 内必须显式撑满,否则收缩导致内容不贴右缘
   return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: bg };
 }
-const headerStyle: CSSProperties = { height: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
+const headerStyle: CSSProperties = { height: 45, background: 'transparent', padding: 0, lineHeight: '45px', position: 'relative', zIndex: 100 };
 const contentLayoutStyle: CSSProperties = { position: 'relative', overflow: 'hidden' };
 const flexContainerStyle: CSSProperties = { display: 'flex', width: '100%', height: '100%', overflow: 'hidden' };
 const mainRowStyle: CSSProperties = { display: 'flex', flex: 1, width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' };

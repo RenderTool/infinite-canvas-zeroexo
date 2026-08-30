@@ -18,18 +18,25 @@ export interface CreationNodeData {
   content?: string;
 }
 
+/**
+ * 出片节点固定尺寸(2026-08-31 契约变更)
+ * 与音频气泡节点同款:resizable=false + specialAppearance=true
+ * → 无 resize 手柄、不参与全局外观配置与尺寸计算(基准尺寸恢复/统一尺寸)
+ */
+export const WORKBENCH_FIXED_SIZE = { width: 280, height: 240 };
+
 /** 各剧创节点默认尺寸 */
 export const CREATION_DEFAULT_SIZE: Record<CreationNodeType, { width: number; height: number }> = {
   script: { width: 720, height: 520 },
   storyboard: { width: 720, height: 520 },
-  workbench: { width: 720, height: 520 },
+  workbench: { ...WORKBENCH_FIXED_SIZE },
 };
 
-/** 各剧创节点最小尺寸(不可继续缩小) */
+/** 各剧创节点最小尺寸(不可继续缩小;出片节点不可 resize,此处与固定尺寸对齐仅为类型完整性) */
 export const CREATION_MIN_SIZE: Record<CreationNodeType, { width: number; height: number }> = {
   script: { width: 480, height: 360 },
   storyboard: { width: 640, height: 400 },
-  workbench: { width: 640, height: 400 },
+  workbench: { ...WORKBENCH_FIXED_SIZE },
 };
 
 /** 分镜节点生成中的紧凑占位尺寸(生成完成后展开到 defaultSize) */

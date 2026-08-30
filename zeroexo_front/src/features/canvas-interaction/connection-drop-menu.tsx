@@ -8,7 +8,6 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Type, Image as ImageIcon, FileText, Aperture, Film } from 'lucide-react';
-import { CREATE_MENU_ICONS } from '@/shared/components/icons.js';
 import type { CommandQueue, NodeRecord } from '@zeroexo/core';
 import { AddNodeCommand, AddEdgeCommand } from '@zeroexo/core';
 import type { ThemeConfig } from '@zeroexo/shared';
@@ -51,7 +50,6 @@ function createNodeTypeDefs(): NodeTypeDef[] {
     { type: 'script', icon: <FileText size={14} />, labelKey: 'canvasNodes.stage.script', category: 'creation' },
     { type: 'storyboard', icon: <Aperture size={14} />, labelKey: 'canvasNodes.stage.storyboard', category: 'creation' },
     { type: 'workbench', icon: <Film size={14} />, labelKey: 'canvasNodes.stage.workbench', category: 'creation' },
-    { type: 'production-manager', icon: <CREATE_MENU_ICONS.productionManager size={14} />, labelKey: 'canvasNodes.stage.productionManager', category: 'creation' },
   ];
 }
 

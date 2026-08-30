@@ -13,9 +13,9 @@
 
 import type { AddNodeType } from './components/node-create-menu.js';
 
-/** 所有节点类型 */
+/** 所有节点类型（2026-08-30：production-manager 剧管已合并进分镜节点，移除） */
 const ALL_NODE_TYPES: AddNodeType[] = [
-  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench', 'production-manager',
+  'text', 'image', 'video', 'audio', 'generator', 'stacked-media', 'script', 'storyboard', 'workbench',
 ];
 
 /**
@@ -27,7 +27,7 @@ const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
   // 生成语义由「空 media 节点三态」承担(NodeGenerateDock)。以下规则仅保留旧项目数据中
   // 已存在的 generator 节点连线兼容,新建生成器入口已移除。
   // 生成:可输出到所有节点(含自身,支持链式生成)
-  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench', 'production-manager'],
+  generator: ['text', 'image', 'video', 'audio', 'stacked-media', 'generator', 'script', 'storyboard', 'workbench'],
   // 文本:文生文/文生图/文生视频/文生音频/文生剧本/生成/堆叠
   text: ['text', 'image', 'video', 'audio', 'stacked-media', 'script', 'generator'],
   // 图片:图生图/图生视频/图生音频/生成/堆叠
@@ -38,12 +38,10 @@ const COMPATIBILITY_MATRIX: Record<string, AddNodeType[]> = {
   audio: ['video', 'stacked-media', 'generator'],
   // 剧本:可连分镜(2026-08-22 架构修正: 剧管=分镜后置工序, 数据链为 剧本→分镜→剧管, 剧本禁止直连剧管——历史遗留 script→production-manager 已移除)
   script: ['storyboard'],
-  // 分镜:可连工作台 + 统筹(资产关联)
-  storyboard: ['workbench', 'production-manager'],
+  // 分镜:可连工作台（2026-08-30：剧管已并入分镜，不再作为独立连线目标）
+  storyboard: ['workbench'],
   // 工作台:终端节点,不接下游
   workbench: [],
-  // 统筹节点:剧级资产管理器,可连入工作台(Plan#29)
-  'production-manager': ['workbench'],
   // 堆叠是当前 item 的切换器：可进入生成链路，也可连入另一个 StackNode 触发合并。
   'stacked-media': ['image', 'video', 'audio', 'generator', 'stacked-media'],
 };

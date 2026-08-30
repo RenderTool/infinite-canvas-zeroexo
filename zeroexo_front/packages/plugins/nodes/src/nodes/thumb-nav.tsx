@@ -46,6 +46,12 @@ export interface ThumbNavItem {
   onDelete?: () => void;
 }
 
+export interface ThumbNavCreateItem {
+  thumb: React.ReactNode;
+  title?: string;
+  onClick: () => void;
+}
+
 export interface ThumbNavProps {
   orientation: 'horizontal' | 'vertical';
   items: ThumbNavItem[];
@@ -55,6 +61,8 @@ export interface ThumbNavProps {
   onPrev: () => void;
   onNext: () => void;
   onJump: (index: number) => void;
+  /** 末尾固定创建项（不参与导航/计数，始终显示在可见圆形列表末端） */
+  createItem?: ThumbNavCreateItem;
 }
 
 /** 通用缩略图导航(水平/垂直同机制):箭头 + 圆形缩略图窗口(上限5,滑动) + 1/N 页码 */
@@ -66,6 +74,7 @@ export function ThumbNav({
   onPrev,
   onNext,
   onJump,
+  createItem,
 }: ThumbNavProps): React.ReactElement {
   const { theme } = useTheme();
   const dark = theme.mode === 'dark';
@@ -85,8 +94,10 @@ export function ThumbNav({
     return () => ro.disconnect();
   }, [orientation]);
   const thumbCount = useThumbTier(navLength);
-  const half = Math.floor(thumbCount / 2);
-  const start = Math.max(0, Math.min(activeIndex - half, Math.max(0, total - thumbCount)));
+  // 若提供创建项，为其预留一个固定圆形槽位
+  const slotCount = createItem ? Math.max(1, thumbCount - 1) : thumbCount;
+  const half = Math.floor(slotCount / 2);
+  const start = Math.max(0, Math.min(activeIndex - half, Math.max(0, total - slotCount)));
   // 导航底色对齐剧本节点「黑色标题栏」:暗色 #1b1b1b / 亮色 #fafaf7
   const navBg = dark ? '#1b1b1b' : '#fafaf7';
   const borderSubtle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
@@ -149,42 +160,64 @@ export function ThumbNav({
         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = muted; }}
         style={arrowStyle(activeIndex <= 0)}
       ><PrevIcon size={17} /></button>
-      <div style={windowStyle}>{Array.from({ length: thumbCount }, (_, offset) => {
-        const index = start + offset;
-        const item = items[index];
-        return item ? (
-          <div key={item.id} style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
-            <button
-              type="button"
-              title={item.title}
-              aria-label={`切换到 ${item.title ?? ''}`}
-              onClick={() => onJump(index)}
-              onPointerDown={(event) => event.stopPropagation()}
-              style={{
-                ...thumbBtnBase,
-                outline: index === activeIndex ? `2px solid var(--color-primary, #e94560)` : 'none',
-                outlineOffset: 2,
-                boxShadow: index === activeIndex ? `0 0 0 2px ${navBg}, 0 0 0 3.5px var(--color-primary, #e94560)` : 'none',
-              }}
-            >{item.thumb}</button>
-            {item.onDelete && (
+      <div style={windowStyle}>
+        {total === 0 && createItem ? null : Array.from({ length: slotCount }, (_, offset) => {
+          const index = start + offset;
+          const item = items[index];
+          return item ? (
+            <div key={item.id} style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
               <button
                 type="button"
-                title="删除"
-                aria-label="删除"
-                onClick={(e) => { e.stopPropagation(); item.onDelete?.(); }}
-                onPointerDown={(e) => e.stopPropagation()}
+                title={item.title}
+                aria-label={`切换到 ${item.title ?? ''}`}
+                onClick={() => onJump(index)}
+                onPointerDown={(event) => event.stopPropagation()}
                 style={{
-                  position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: '50%',
-                  background: '#dc2626', border: '2px solid ' + navBg, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: 0, color: '#fff',
+                  ...thumbBtnBase,
+                  outline: index === activeIndex ? `2px solid var(--color-primary, #e94560)` : 'none',
+                  outlineOffset: 2,
+                  boxShadow: index === activeIndex ? `0 0 0 2px ${navBg}, 0 0 0 3.5px var(--color-primary, #e94560)` : 'none',
                 }}
-              ><X size={9} strokeWidth={3} /></button>
-            )}
-          </div>
-        ) : <div key={`empty-${offset}`} style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 999, border: `1px dashed ${borderSubtle}`, background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)' }} />;
-      })}</div>
+              >{item.thumb}</button>
+              {item.onDelete && (
+                <button
+                  type="button"
+                  title="删除"
+                  aria-label="删除"
+                  onClick={(e) => { e.stopPropagation(); item.onDelete?.(); }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: '50%',
+                    background: '#dc2626', border: '2px solid ' + navBg, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: 0, color: '#fff',
+                  }}
+                ><X size={9} strokeWidth={3} /></button>
+              )}
+            </div>
+          ) : <div key={`empty-${offset}`} style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 999, border: `1px dashed ${borderSubtle}`, background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)' }} />;
+        })}
+        {createItem && (
+          <button
+            type="button"
+            title={createItem.title}
+            aria-label={createItem.title}
+            onClick={createItem.onClick}
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{
+              ...thumbBtnBase,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: `1px dashed ${borderSubtle}`,
+              background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
+              color: muted,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.09)'; e.currentTarget.style.borderColor = dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.18)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'; e.currentTarget.style.borderColor = borderSubtle; }}
+          >{createItem.thumb}</button>
+        )}
+      </div>
       <button
         type="button"
         title={vertical ? '下一个状态' : '下一张'}

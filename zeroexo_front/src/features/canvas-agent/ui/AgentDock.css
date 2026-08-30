@@ -5,13 +5,14 @@
    磨砂玻璃已移除，改用分层背景色（Req2）
    ============================================ */
 
-/* === 变量兜底默认（暗色；实际值由 AgentDock.tsx 注入覆盖） === */
+/* === 变量兜底默认（暗色；实际值由 AgentDock.tsx 注入覆盖） ===
+   2026-08-31：底色统一画布背景 #11110f，无棕 */
 .agent-chat-panel {
-  --agent-bg: #161412;
-  --agent-panel: rgba(22, 20, 18, 0.97);
+  --agent-bg: #11110f;
+  --agent-panel: rgba(17, 17, 15, 0.97);
   --agent-surface: rgba(255, 255, 255, 0.04);
   --agent-surface-2: rgba(255, 255, 255, 0.07);
-  --agent-border: #44403c;
+  --agent-border: #404040;
   --agent-text: #f5f5f4;
   --agent-muted: #a8a29e;
   --agent-accent: #e94560;

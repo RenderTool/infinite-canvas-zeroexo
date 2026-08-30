@@ -5,8 +5,8 @@
  * 所有 TopBar、Toolbar、Sidebar 应引用此处的常量，避免硬编码。
  */
 export const LAYOUT = {
-  /** 所有 TopBar 统一高度（TopNav / CreationTopBar / TopBar） */
-  NAV_HEIGHT: 54,
+  /** 所有 TopBar 统一高度（TopNav / CreationTopBar / TopBar，2026-08-31 用户拍板 45px） */
+  NAV_HEIGHT: 45,
   /** 阶段内 toolbar 高度（StageToolbar） */
   STAGE_TOOLBAR_HEIGHT: 42,
   /** 侧栏展开宽度 */

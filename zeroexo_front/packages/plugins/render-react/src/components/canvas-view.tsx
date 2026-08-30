@@ -115,6 +115,8 @@ export interface CanvasViewProps {
   welcomeHint?: string;
   /** 双击节点回调:缩放画布以聚焦该节点,传递实际尺寸(含 ext.defaultSize 回退) */
   onNodeDoubleClick?: (nodeId: string, width: number, height: number) => void;
+  /** culling 豁免白名单(透传 NodeLayer):承载页签内容的节点永不因视口外被裁剪 */
+  pinnedNodeIds?: ReadonlySet<string>;
   /** 渲染层开关:dom=原 DOM 渲染(默认,行为完全不变);three=Three.js 引擎(配合 threeHost) */
   renderer?: 'dom' | 'three';
   /** Three.js 渲染宿主(renderer='three' 时使用;由外部组装注入,保持包边界解耦,默认 DOM 渲染不受影响) */
@@ -165,6 +167,7 @@ export function CanvasView({
   onRenameFinish,
   welcomeHint,
   onNodeDoubleClick,
+  pinnedNodeIds,
   renderer = 'dom',
   threeHost,
 }: CanvasViewProps): React.ReactElement {
@@ -220,7 +223,7 @@ export function CanvasView({
         onResizeHandlePointerDown, onUpdateNode, commandQueue, children, belowNodesLayer,
         mode, forceShowPins, connectionHoverNodeId, hoveredNodeId,
         externalRenaming, onRenameFinish, welcomeHint, onNodeDoubleClick,
-        renderer, threeHost,
+        pinnedNodeIds, renderer, threeHost,
       }}>
         <ReactGraphStoreContext.Provider value={store}>
           {threeHost ?? <div style={{ position: 'absolute', inset: 0 }} />}
@@ -288,6 +291,7 @@ export function CanvasView({
         onRenameFinish={onRenameFinish}
         mode={mode}
         onNodeDoubleClick={onNodeDoubleClick}
+        pinnedNodeIds={pinnedNodeIds}
       />
       {/* P0-2: 拖动瞬态直写(节点 transform 不重建 graph;连线由 EdgeItem 内订阅处理) */}
       <DragOffsetWriter store={store} extensions={extensions} />

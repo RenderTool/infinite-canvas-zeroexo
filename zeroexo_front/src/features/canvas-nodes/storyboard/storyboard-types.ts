@@ -6,7 +6,10 @@
  * - 无剧集容器（单镜头列表，单个节点负责一个分镜单元）
  * - 主体简化（无衍生图、无形象管理、无音色）
  * - 数据直接写入 node.data，随画布 Yjs 同步
+ *
+ * 2026-08-30 征集 #110：剧管合并进分镜节点，productionItems 复用剧管 ProductionItem 契约
  */
+import type { ProductionItem } from '../production-manager/production-manager-types';
 
 // ===== 枚举 =====
 
@@ -249,6 +252,11 @@ export interface StoryboardNodeData {
   aiSubjects?: AiSubject[];
   /** 2026-08-21: 关联剧管节点 id(剧管=分镜后置工序, 分镜主体列映射到剧管条目) */
   productionManagerId?: string;
+
+  // ===== 2026-08-30 征集 #110: 剧管合并进分镜节点 =====
+
+  /** 主体库（剧管）数据：ProductionItem[] 并入分镜节点，不再依赖独立 production-manager 节点 */
+  productionItems?: ProductionItem[];
 }
 
 // ===== Plan#20 T5: 主体节点数据类型 =====

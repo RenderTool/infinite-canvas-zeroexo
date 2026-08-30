@@ -96,7 +96,7 @@ export function TopBar({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 54,
+    height: 45,
     padding: mobile ? '0 12px' : '0 16px',
     background: 'transparent',
     borderBottom: 'none',

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import i18next from 'i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { Button } from 'antd';
 import {
   MapPin, Activity, UserRound, MessageSquare, Quote, ArrowRightToLine,
   SeparatorHorizontal, X, Plus,
@@ -447,19 +448,21 @@ export function ScriptStructuredEditor({
         </div>
       </div>
 
-      {/* 底部固定按钮（不参与滚动） */}
-      <div style={{ flexShrink: 0 }}>
-        <button
-          type="button"
+      {/* 底部固定按钮（不参与滚动）——样式与 EpisodeList 新剧集按钮完全对齐 */}
+      <div style={{ flexShrink: 0, paddingTop: 8 }}>
+        <Button
+          type="dashed"
+          size="small"
+          icon={<Plus size={13} />}
+          style={{ width: '100%', height: 32, padding: '0 11px', lineHeight: '30px', color: text, fontSize: 12, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={() => {
             const nl = createScriptLine('action');
             commit([...lines, nl]);
             focusLine(nl.id);
           }}
-          style={addLineBtnStyle(border, text)}
         >
-          + 新段落
-        </button>
+          {i18next.t('scriptEditor.newParagraph')}
+        </Button>
       </div>
     </div>
   );
@@ -552,12 +555,4 @@ const inputStyle = (
   return base;
 };
 
-const addLineBtnStyle = (border: string, text: string): CSSProperties => ({
-  display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
-  marginTop: 8, marginBottom: 0, height: 32,
-  // 与右侧 antd Button 统一为 border-box，避免 1px border 导致实际高度变成 34
-  boxSizing: 'border-box',
-  border: `1px dashed ${border}`, borderRadius: 6,
-  background: 'transparent', color: text, fontSize: 12, cursor: 'pointer',
-  transition: 'background 0.12s',
-});
+// 新段落按钮已统一为 Antd Button（与 EpisodeList 新剧集按钮样式一致），此处不再需要 addLineBtnStyle

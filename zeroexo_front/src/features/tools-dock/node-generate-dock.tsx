@@ -46,6 +46,7 @@ import { getModelInputTypes } from '@/features/ai-config/utils/model-utils.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import { DynamicParamForm, type ChannelConstraints } from '@/features/generator-settings/dynamic-param-form.js';
 import { useReadOnly } from '@/shared/readonly-context.js';
+import type { WorkbenchShotReference } from '@/features/canvas-nodes/storyboard/workbench-types.js';
 
 /** 生成模式(宿主节点类型映射;text 模式走文本能力) */
 export type GenerationMode = 'text' | 'image' | 'video' | 'audio';
@@ -73,6 +74,32 @@ export interface NodeGenerateDockProps {
   node?: NodeRecord | Record<string, unknown> | null;
   /** 移动端:保留底部固定定位(避免吸附面板溢出屏幕) */
   isMobile?: boolean;
+  /** 内联模式(不 portal 到画布,作为普通流内卡片渲染在宿主面板内容下方,避免依赖画布浮层定位) */
+  inline?: boolean;
+  /**
+   * 卡片圆角(默认 DOCK_CARD_RADIUS=24,画布节点吸附面板保持原样)
+   * 2026-08-31 用户拍板:分镜生产台底部提示词栏复用本 dock 时传 0(不要圆角)
+   */
+  radius?: number;
+  /** 初始是否收起(默认 true = 画布节点吸附面板同款「细条」;内嵌常驻面板传 false 直接展开) */
+  defaultCollapsed?: boolean;
+  /** 容器样式(仅 inline 内嵌模式生效,供宿主按固定高度/最小高度直接布局,无需再包一层 div) */
+  style?: CSSProperties;
+  /**
+   * 适配固定高度容器(内嵌常驻面板,如出片工作台底部提示词区):
+   * 参考素材区与底栏(模型/参数/生成)固定可见,仅文本输入区弹性可压缩滚动。
+   * 画布节点吸附面板不传(保持内容自适应高度)。
+   */
+  fitToHeight?: boolean;
+  /**
+   * 受控参考素材模式(出片工作台):提供后参考区改受控数据——
+   * 上传/删除直接写入 items(onChange),不建画布节点、不连线。
+   * 数据存 WorkbenchShot.references,随 node.data 云同步,协作可见。
+   */
+  controlledReferences?: {
+    items: WorkbenchShotReference[];
+    onChange: (items: WorkbenchShotReference[]) => void;
+  };
 }
 
 // ===== 类型 → 图标/名称(对齐生成器 NODE_TYPE_CONFIG) =====
@@ -116,6 +143,7 @@ function StyledSelect({
   minWidth = 64,
   maxWidth = 120,
   height = 26,
+  forceDropUp = false,
 }: {
   value: string;
   options: StyledSelectOption[];
@@ -123,11 +151,14 @@ function StyledSelect({
   minWidth?: number;
   maxWidth?: number;
   height?: number;
+  /** 强制向上弹出(底部 dock 场景);不传时按可用空间自动翻转 */
+  forceDropUp?: boolean;
 }): React.ReactElement {
   const { theme } = useTheme();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [dropUp, setDropUp] = useState(false);
   const isDark = theme.mode === 'dark';
   const hoverBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
   const selected = options.find((o) => o.value === value);
@@ -146,14 +177,21 @@ function StyledSelect({
     return () => document.removeEventListener('pointerdown', onPointer, true);
   }, [open]);
 
+  // 2026-08-31 用户拍板:底部 dock 的模型下拉必须向上弹出(向下会被视口/容器裁掉)。
+  // 策略:forceDropUp 强制向上;否则按可用空间自动翻转——下方放不下且上方更宽裕时向上。
   const handleOpen = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+      const estimatedH = Math.min(300, options.length * 29 + 8);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const up = forceDropUp || (spaceBelow < estimatedH + 12 && spaceAbove > spaceBelow);
+      setDropUp(up);
+      setDropdownPos({ top: up ? rect.top - 4 : rect.bottom + 4, left: rect.left });
     }
     setOpen((prev) => !prev);
-  }, []);
+  }, [options.length, forceDropUp]);
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
@@ -185,12 +223,18 @@ function StyledSelect({
         </svg>
       </div>
       {open && dropdownPos && createPortal(
+        <>
+        <style>{SELECT_ANIM_KEYFRAMES}</style>
         <div
           data-generator-select-panel="true"
           style={{
             position: 'fixed',
             top: dropdownPos.top,
             left: dropdownPos.left,
+            // 向上弹出:以触发器上沿为锚点整体上翻;配合 fade+rise 入场动画
+            transform: dropUp ? 'translateY(-100%)' : undefined,
+            transformOrigin: dropUp ? 'bottom center' : 'top center',
+            animation: dropUp ? 'dockSelectInUp 0.16s ease-out' : 'dockSelectInDown 0.16s ease-out',
             zIndex: 9999,
             minWidth: Math.max(minWidth, 120),
             background: theme.toolbar.panel,
@@ -235,7 +279,8 @@ function StyledSelect({
               </div>
             );
           })}
-        </div>,
+        </div>
+        </>,
         document.body,
       )}
     </div>
@@ -245,16 +290,20 @@ function StyledSelect({
 // ===== 卡片外观 tokens(主页创意简报 AiInputBar variant="elevated" 同款:无边框+圆角卡片) =====
 const DOCK_CARD_RADIUS = 24;
 
-/** NodeGenerateDock 展开态屏幕高度(供聚焦补偿 focusOnNode 使用) */
-export const NODE_DOCK_SCREEN_HEIGHT = 240;
-
-// ===== 呼吸动画关键帧(主页 AiInputBar zeroexo-ripple 同款) =====
-const dockRippleKeyframes = `
-@keyframes zeroexo-ripple {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
+/** 下拉入场动画:向下弹 = 从上沿轻微下移淡入;向上弹 = 从下沿轻微上移淡入 */
+const SELECT_ANIM_KEYFRAMES = `
+@keyframes dockSelectInDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes dockSelectInUp {
+  from { opacity: 0; transform: translateY(-100%) translateY(4px); }
+  to { opacity: 1; transform: translateY(-100%) translateY(0); }
 }
 `;
+
+/** NodeGenerateDock 展开态屏幕高度(供聚焦补偿 focusOnNode 使用) */
+export const NODE_DOCK_SCREEN_HEIGHT = 240;
 
 // ===== 参考素材区(memo 隔离:提示词输入/视口变化时不重渲染) =====
 
@@ -302,6 +351,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
   onRemoveIncoming,
   mode,
   bounds,
+  onUpload,
 }: {
   nodeId: string;
   incomingNodes: Array<{ id: string; type: string; title: string; content?: string; storageKey?: string }>;
@@ -310,6 +360,8 @@ const DockReferencesSection = memo(function DockReferencesSection({
   onRemoveIncoming: (sourceNodeId: string) => void;
   mode: string;
   bounds: VideoReferenceBounds;
+  /** 受控模式上传回调（出片工作台：上传后写入镜头 references；不传则走画布节点连线链路） */
+  onUpload?: (file: File) => void;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -333,6 +385,11 @@ const DockReferencesSection = memo(function DockReferencesSection({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // 受控模式(出片工作台):上传交给外层写入镜头 references,不建画布节点
+    if (onUpload) {
+      onUpload(file);
+      return;
+    }
     // 首尾帧模式:仅接受图片且槽位未满(最多 2 张 = 首帧 + 尾帧)
     if (isFirstLast) {
       if (!file.type.startsWith('image/')) return;
@@ -366,7 +423,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
     } catch {
       // 上传失败静默(不打断当前编辑)
     }
-  }, [nodeId, isFirstLast, slotsFull]);
+  }, [nodeId, isFirstLast, slotsFull, onUpload]);
 
   /** 单个参考缩略图(多模态统一列表 / 首尾帧非图片项共用) */
   const renderThumb = (n: { id: string; type: string; title: string; content?: string; storageKey?: string }) => {
@@ -563,14 +620,11 @@ const DockInputSection = memo(function DockInputSection({
         popupBackground={popupBg}
         popupBorderColor={popupBorder}
       />
-      <div style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', pointerEvents: 'none', textAlign: 'right', lineHeight: 1 }}>
-        {value.length} 字
-      </div>
     </>
   );
 });
 
-// ===== 底栏(memo 隔离:模型/参数/生成按钮;hasText 布尔化避免逐字重渲染) =====
+// ===== 底栏(memo 隔离:模型/参数/生成按钮 + 字数;textLength 逐字变化驱动字数显示) =====
 const DockFooterBar = memo(function DockFooterBar({
   nodeId,
   mode,
@@ -579,12 +633,14 @@ const DockFooterBar = memo(function DockFooterBar({
   paramValues,
   isRunning,
   hasText,
+  textLength = 0,
   interruptible = true,
   onAction,
   onConfigChange,
   onParamValuesChange,
   onConstraintsReady,
   mentionRequired,
+  dropUp = false,
 }: {
   nodeId: string;
   mode: GenerationMode;
@@ -593,8 +649,12 @@ const DockFooterBar = memo(function DockFooterBar({
   paramValues: Record<string, any>;
   isRunning: boolean;
   hasText: boolean;
+  /** 提示词字数(显示在生成按钮旁,2026-08-31 用户拍板从输入区底部移入) */
+  textLength?: number;
   /** 生成中是否可打断(文本可打断=停止按钮;媒体不可打断=锁徽标) */
   interruptible?: boolean;
+  /** 模型下拉强制向上弹出(内嵌于底部面板时) */
+  dropUp?: boolean;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onParamValuesChange: (patch: Record<string, any>) => void;
@@ -634,6 +694,7 @@ const DockFooterBar = memo(function DockFooterBar({
         minWidth={120}
         maxWidth={180}
         height={26}
+        forceDropUp={dropUp}
       />
 
       {/* 参数弹层(契约参数模块:模板驱动渲染,读写 node.data.paramValues;text 模式无参数面板) */}
@@ -649,7 +710,12 @@ const DockFooterBar = memo(function DockFooterBar({
       ) : null}
       {/* 未配置模型:直接不显示(用户拍板:不展示跳转入口,避免误导) */}
 
-      <div style={{ flex: 1 }} />
+      {/* 字数统计:右对齐,显示在生成按钮旁(2026-08-31 用户拍板从输入区底部移入) */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+          {textLength} 字
+        </span>
+      </div>
 
       {isRunning && !interruptible ? (
         /* 媒体类生成中:不可打断(拍板 2026-08-23 R3 D2)——锁徽标替代停止按钮,进度由 agent 消息流步骤卡承载 */
@@ -668,43 +734,35 @@ const DockFooterBar = memo(function DockFooterBar({
           {t('nodeDock.lockedGenerating', '生成中，不可取消')}
         </span>
       ) : (
-        /* 生成按钮(主页 AiInputBar 同款:圆形 accent + zeroexo-ripple 呼吸动画;文本生成中保留停止按钮=可打断) */
-        <>
-          <style>{dockRippleKeyframes}</style>
-          <button
-            type="button"
-            onClick={onAction}
-            disabled={actionDisabled}
-            aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
-            title={actionTitle}
-            style={{
-              width: 36, height: 36, flexShrink: 0,
-              borderRadius: '50%',
-              border: '2px solid transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: 0,
-              background: actionDisabled
-                ? (isDark ? '#262626' : '#e5e5e5')
-                : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent,
-              color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff',
-              cursor: actionDisabled ? 'not-allowed' : 'pointer',
-              boxShadow: actionDisabled
-                ? 'none'
-                : `0 4px 12px ${(isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent)}40`,
-              transition: 'all .2s',
-              animation: actionDisabled ? 'none' : 'zeroexo-ripple 3s ease-in-out infinite',
-              fontFamily: 'inherit',
-            }}
-          >
-            {isRunning ? (
-              <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
-                <LoaderCircle size={16} />
-              </span>
-            ) : (
-              <Sparkles size={16} />
-            )}
-          </button>
-        </>
+        /* 生成按钮(2026-08-31 用户拍板:Agent 同款方形 34px accent,无呼吸/缩放动画) */
+        <button
+          type="button"
+          onClick={onAction}
+          disabled={actionDisabled}
+          aria-label={isRunning ? t('prompt.stop', '停止') : t('prompt.generate', '生成')}
+          title={actionTitle}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            gap: 6, flexShrink: 0, minWidth: 34, height: 34, padding: 0,
+            border: 'none', borderRadius: 8,
+            background: actionDisabled
+              ? (isDark ? '#262626' : '#e5e5e5')
+              : isRunning ? (theme.toolbar.danger ?? '#dc2626') : theme.toolbar.accent,
+            color: actionDisabled ? (isDark ? '#666' : '#999') : '#fff',
+            cursor: actionDisabled ? 'not-allowed' : 'pointer',
+            opacity: actionDisabled ? 0.4 : 1,
+            transition: 'opacity 140ms ease',
+            fontFamily: 'inherit',
+          }}
+        >
+          {isRunning ? (
+            <span ref={spinRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <LoaderCircle size={16} />
+            </span>
+          ) : (
+            <Sparkles size={16} />
+          )}
+        </button>
       )}
     </>
   );
@@ -728,6 +786,12 @@ export function NodeGenerateDock({
   getAnchorBounds,
   node,
   isMobile = false,
+  inline = false,
+  radius = DOCK_CARD_RADIUS,
+  defaultCollapsed = true,
+  style,
+  fitToHeight = false,
+  controlledReferences,
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -737,7 +801,7 @@ export function NodeGenerateDock({
   const [prompt, setPrompt] = useState(initialPrompt.trim());
   // 默认收起(用户验收反馈:选中节点即弹大面板碍眼):点顶栏细条展开,展开态右上角按钮收起;
   // 聚焦补偿 NODE_DOCK_SCREEN_HEIGHT 仅预留空间,收起态下无副作用
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
   // 订阅视口(锚点换算依赖 viewport scale/offset;图变化由 getAnchorBounds 回调驱动)
   const viewport = useViewport(store);
@@ -931,10 +995,42 @@ export function NodeGenerateDock({
     return out;
   }, [incomingNodes, refUrlMap, store]);
 
-  // 断开连入节点连线(移除参考素材)
+  // ===== 受控参考素材模式(出片工作台):数据存 WorkbenchShot.references,不建画布节点 =====
+  const controlledItems = controlledReferences?.items ?? [];
+
+  // 受控模式展示数据:把 references 转成参考区需要的节点形状(无画布连线)
+  const displayIncomingNodes = useMemo(() => {
+    if (!controlledReferences) return incomingNodes;
+    return controlledItems.map((r) => ({
+      id: r.id,
+      type: r.kind,
+      title: r.title ?? (r.kind === 'image' ? '图片' : r.kind),
+      content: r.url,
+      storageKey: r.storageKey,
+    }));
+  }, [controlledReferences, controlledItems, incomingNodes]);
+
+  // 受控模式缩略图:直接用 items 的 url(无需异步解析)
+  const displayRefUrlMap = useMemo(() => {
+    if (!controlledReferences) return refUrlMap;
+    const m: Record<string, string> = {};
+    for (const r of controlledItems) {
+      if (r.url) m[r.id] = r.url;
+    }
+    return m;
+  }, [controlledReferences, controlledItems, refUrlMap]);
+
+  // 受控模式全部视为兼容(无模型兼容性校验)
+  const displayNodeCompatibility = controlledReferences ? {} : nodeCompatibility;
+
+  // 断开连入节点连线 / 受控模式下移除 references 条目
   const handleRemoveIncoming = useCallback((sourceNodeId: string) => {
+    if (controlledReferences) {
+      controlledReferences.onChange(controlledItems.filter((r) => r.id !== sourceNodeId));
+      return;
+    }
     nodeActionBus.emit('nodeDock:removeConnection', { nodeId, sourceNodeId });
-  }, [nodeId]);
+  }, [nodeId, controlledReferences, controlledItems]);
 
   // @ 引用类型过滤:按当前生成类型过滤支持媒体;文本/剧本等恒可作为提示参考
   const mentionTypeFilter = useCallback((r: ReferenceItem): boolean => {
@@ -997,6 +1093,59 @@ export function NodeGenerateDock({
     });
   }, []);
 
+  // 首尾帧模式判断(受控上传时分配槽位)
+  const refConfig = getReferenceConfigByMode(currentVideoMode, refBounds);
+  const isFirstLastMode = refConfig.isFirstLastFrameMode;
+
+  // 受控上传:上传 → 写入 references(首尾帧模式图片按槽位填入)
+  const handleControlledUpload = useCallback(async (file: File) => {
+    if (!controlledReferences) return;
+    try {
+      const uploaded = await uploadAsset(file);
+      const d = uploaded.data;
+      // 类型收窄:uploadAsset 的 data 是 text/script/plan/image/video/audio 联合,按 kind 分别取字段
+      let refKind: WorkbenchShotReference['kind'] = 'text';
+      let storageKey: string | undefined;
+      let url: string | undefined;
+      let width: number | undefined;
+      let height: number | undefined;
+      if (d.kind === 'image') {
+        refKind = 'image';
+        storageKey = d.storageKey;
+        url = d.dataUrl;
+        width = d.width;
+        height = d.height;
+      } else if (d.kind === 'video') {
+        refKind = 'video';
+        storageKey = d.storageKey;
+        url = d.url;
+        width = d.width;
+        height = d.height;
+      } else if (d.kind === 'audio') {
+        refKind = 'audio';
+        storageKey = d.storageKey;
+        url = d.url;
+      }
+      const ref: WorkbenchShotReference = {
+        id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: refKind,
+        title: uploaded.title.replace(/\.[^.]+$/, ''),
+        storageKey,
+        url,
+        width,
+        height,
+      };
+      if (isFirstLastMode && ref.kind === 'image') {
+        const images = controlledItems.filter((r) => r.kind === 'image');
+        if (images.length >= 2) return; // 首尾帧槽位已满
+        ref.slot = images.some((r) => r.slot === 'first') ? 'last' : 'first';
+      }
+      controlledReferences.onChange([...controlledItems, ref]);
+    } catch {
+      // 上传失败静默(不打断当前编辑)
+    }
+  }, [controlledReferences, controlledItems, isFirstLastMode]);
+
   const submit = useCallback(() => {
     const text = promptRef.current.trim();
     if (!text || isRunning) return;
@@ -1051,7 +1200,7 @@ export function NodeGenerateDock({
   const cardStyle: CSSProperties = {
     width: '100%',
     position: 'relative',
-    borderRadius: DOCK_CARD_RADIUS,
+    borderRadius: radius,
     background: theme.toolbar.panel ?? (isDark ? '#1e1e20' : '#fafaf7'),
     boxShadow: prompt.trim()
       ? `inset 0 0 0 1px ${accent}22, 0 8px 32px rgba(0,0,0,0.08)`
@@ -1069,26 +1218,50 @@ export function NodeGenerateDock({
   // 拖动中隐藏(移动结束恢复):剔除移动时每帧跟随计算消耗
   if (isDragging) return null;
 
-  // 折叠态:仅显示顶栏细条(同款无边框圆角卡片风)
-  if (collapsed) {
-    return (
-      <div
-        style={isMobile ? mobileWrapStyle : {
-          position: 'absolute', left: centerX, top: bottomY, transform: 'translateX(-50%)',
-          zIndex: 48, width: 220,
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        onWheel={(e) => e.stopPropagation()}
-      >
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 14px', borderRadius: DOCK_CARD_RADIUS,
-          background: theme.toolbar.panel ?? (isDark ? '#1e1e20' : '#fafaf7'),
-          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-          color: theme.toolbar.text, fontSize: 12, cursor: 'pointer',
-          userSelect: 'none',
-        }}
+  // ===== 展开/收起(2026-08-31 用户拍板:收纳要有过渡,不能硬切) =====
+  // 折叠细条与展开内容始终同在 DOM:细条 height→0 + 淡出,内容用 grid-template-rows 0fr→1fr 过渡
+  // (0fr↔1fr 是唯一能对「内容自适应高度」做平滑过渡的写法;max-height 猜值要么卡顿要么截断)。
+  // 折叠态内容 overflow hidden + pointerEvents none:不可点、不可聚焦,但不卸载 → 再次展开无白屏。
+  const COLLAPSE_EASE = '0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+  const COLLAPSED_BAR_HEIGHT = 34;
+
+  return (
+    <div
+      style={inline ? {
+        position: 'relative', width: '100%', maxWidth: '100%', zIndex: 'auto' as unknown as number,
+        ...style,
+        // fitToHeight(出片工作台底部 dock)：折叠时收起为细条并吸附到底部，而不是贴顶部
+        ...(fitToHeight
+          ? {
+              display: 'flex',
+              flexDirection: 'column',
+              transition: `height ${COLLAPSE_EASE}`,
+              ...(collapsed ? { height: COLLAPSED_BAR_HEIGHT, flexShrink: 0, marginTop: 'auto' } : {}),
+            }
+          : {}),
+      } : isMobile ? mobileWrapStyle : {
+        position: 'absolute', left: centerX, top: bottomY, transform: 'translateX(-50%)',
+        zIndex: 48, width: collapsed ? 220 : 720, maxWidth: 'calc(100vw - 24px)',
+        transition: `width ${COLLAPSE_EASE}`,
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
+      {/* 无边框卡片(主页创意简报 elevated 同款:整体单色 + 柔和阴影) */}
+      <div style={{ ...cardStyle, height: fitToHeight ? '100%' : undefined, display: fitToHeight ? 'flex' : undefined, flexDirection: fitToHeight ? 'column' : undefined, overflow: 'hidden', transition: `box-shadow ${COLLAPSE_EASE}, background ${COLLAPSE_EASE}, border-radius ${COLLAPSE_EASE}` }}>
+        {/* 折叠细条(展开时高度收为 0 并淡出) */}
+        <div
+          style={{
+            height: collapsed ? COLLAPSED_BAR_HEIGHT : 0,
+            opacity: collapsed ? 1 : 0,
+            transform: collapsed ? 'translateY(0)' : 'translateY(-6px)',
+            transition: `height ${COLLAPSE_EASE}, opacity 0.18s ease, transform ${COLLAPSE_EASE}`,
+            display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+            padding: '0 14px', boxSizing: 'border-box', overflow: 'hidden',
+            color: theme.toolbar.text, fontSize: 12, cursor: 'pointer', userSelect: 'none',
+            pointerEvents: collapsed ? 'auto' : 'none',
+          }}
           onClick={(e) => { e.stopPropagation(); setCollapsed(false); }}
           title={t('nodeDock.expand', '展开生成面板')}
         >
@@ -1098,22 +1271,24 @@ export function NodeGenerateDock({
           </span>
           <ChevronUp size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
         </div>
-      </div>
-    );
-  }
 
-  return (
-    <div
-      style={isMobile ? mobileWrapStyle : {
-        position: 'absolute', left: centerX, top: bottomY, transform: 'translateX(-50%)',
-        zIndex: 48, width: 720, maxWidth: 'calc(100vw - 24px)',
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-    >
-      {/* 无边框圆角卡片(主页创意简报 elevated 同款:整体单色 + 柔和阴影) */}
-      <div style={cardStyle}>
+        {/* 展开内容(折叠时 grid rows 收为 0fr) */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateRows: collapsed ? '0fr' : '1fr',
+            opacity: collapsed ? 0 : 1,
+            transform: collapsed ? 'translateY(-4px)' : 'translateY(0)',
+            transition: `grid-template-rows ${COLLAPSE_EASE}, opacity 0.2s ease, transform ${COLLAPSE_EASE}`,
+            pointerEvents: collapsed ? 'none' : 'auto',
+            flex: fitToHeight ? 1 : undefined,
+            minHeight: fitToHeight ? 0 : undefined,
+          }}
+          aria-hidden={collapsed}
+        >
+        <div style={fitToHeight
+          ? { overflow: 'hidden', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }
+          : { overflow: 'hidden', minHeight: 0, position: 'relative' }}>
       {/* 收起按钮(右上角小图标,替代原标题行折叠入口,节省空间) */}
       <button
         type="button"
@@ -1134,20 +1309,23 @@ export function NodeGenerateDock({
       </button>
 
       {/* 参考素材区(单色融入;memo 隔离;按 paramValues.mode 智能切换首尾帧/多模态) */}
-      <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ ...sectionStyle, flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DockReferencesSection
           nodeId={nodeId}
-          incomingNodes={incomingNodes}
-          refUrlMap={refUrlMap}
-          nodeCompatibility={nodeCompatibility}
+          incomingNodes={displayIncomingNodes}
+          refUrlMap={displayRefUrlMap}
+          nodeCompatibility={displayNodeCompatibility}
           onRemoveIncoming={handleRemoveIncoming}
           mode={currentVideoMode}
           bounds={refBounds}
+          onUpload={controlledReferences ? handleControlledUpload : undefined}
         />
       </div>
 
-      {/* 输入区(生成器同款 @ 引用 contentEditable;memo 隔离) */}
-      <div style={{ ...sectionStyle, display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
+      {/* 输入区(生成器同款 @ 引用 contentEditable;memo 隔离)
+          fitToHeight:唯一可压缩的区域——超高时内部滚动,参考区与底栏始终可见;
+          scrollbar-gutter stable:滚动条占位,避免字数统计被滚动条遮挡 */}
+      <div style={{ ...sectionStyle, flex: fitToHeight ? 1 : undefined, minHeight: fitToHeight ? 0 : undefined, overflowY: fitToHeight ? 'auto' : undefined, scrollbarGutter: fitToHeight ? 'stable' : undefined, display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
         <DockInputSection
           value={prompt}
           onChange={updatePrompt}
@@ -1158,7 +1336,7 @@ export function NodeGenerateDock({
       </div>
 
       {/* 底栏(卡片内操作行;memo 隔离 + hasText 布尔化) */}
-      <div style={{ ...sectionStyle, margin: '0 10px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ ...sectionStyle, margin: '0 10px 10px', flexShrink: fitToHeight ? 0 : undefined, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DockFooterBar
           nodeId={nodeId}
           mode={mode}
@@ -1167,14 +1345,18 @@ export function NodeGenerateDock({
           paramValues={paramValues ?? {}}
           isRunning={isRunning}
           hasText={hasText}
+          textLength={prompt.length}
           interruptible={mode === 'text'}
           onAction={handleAction}
           onConfigChange={onConfigChange}
           onParamValuesChange={handleParamValuesChange}
           onConstraintsReady={handleConstraintsReady}
           mentionRequired={mentionRequired}
+          dropUp={inline}
         />
       </div>
+        </div>
+        </div>
       </div>
     </div>
   );

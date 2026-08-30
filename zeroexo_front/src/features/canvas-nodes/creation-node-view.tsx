@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Aperture, Film, FileText } from 'lucide-react';
-import type { NodeRendererProps } from '@zeroexo/core';
+import { ResizeNodeCommand, type NodeRendererProps } from '@zeroexo/core';
 import type { ConnectionController } from '@zeroexo/plugin-connection';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { BaseNodeView } from '@zeroexo/plugin-nodes';
@@ -19,6 +19,7 @@ import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { StoryboardNodeData } from './storyboard/storyboard-types.js';
 import type { WorkbenchNodeData } from './storyboard/workbench-types.js';
 import type { CreationNodeType } from './creation-node-types.js';
+import { WORKBENCH_FIXED_SIZE } from './creation-node-types.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import { serializeScriptLines, buildSampleLines, createScriptLine } from '@/features/canvas-nodes/script-editor/script-lines.js';
 import { useReactGraphStore, useGraph } from '@zeroexo/plugin-render-react';
@@ -56,6 +57,7 @@ export function CreationNodeView({
   connectionController,
   kind,
   store,
+  commandQueue,
 }: CreationNodeViewProps): React.ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -72,17 +74,25 @@ export function CreationNodeView({
   }, [data.episodes, data.content]);
   const activeEpisodeId = (data.activeEpisodeId as string | undefined) ?? episodes[0]?.id ?? '';
   // 分镜数据（useMemo 稳定引用，避免 StoryboardSheet 不必要的重渲染）
+  // 2026-08-30 修复：白名单必须覆盖 StoryboardNodeData 全部字段——
+  // 缺 productionItems/aiSubjects 等会导致主体库(剧管合并)读空、写回后 UI 不刷新
   const storyboardData: StoryboardNodeData = useMemo(() => ({
     shots: (data.shots as StoryboardNodeData['shots']) ?? [],
     entities: (data.entities as StoryboardNodeData['entities']) ?? [],
     status: (data.status as StoryboardNodeData['status']) ?? 'idle',
     isSample: Boolean(data.isSample),
+    progress: (data.progress as StoryboardNodeData['progress']),
     sourceScriptId: (data.sourceScriptId as string | undefined),
     activeEpisodeId: (data.activeEpisodeId as string | undefined),
     shotsByEpisode: (data.shotsByEpisode as StoryboardNodeData['shotsByEpisode']),
     statusByEpisode: (data.statusByEpisode as StoryboardNodeData['statusByEpisode']),
     progressByEpisode: (data.progressByEpisode as StoryboardNodeData['progressByEpisode']),
-  }), [data.shots, data.entities, data.status, data.isSample, data.sourceScriptId, data.activeEpisodeId, data.shotsByEpisode, data.statusByEpisode, data.progressByEpisode]);
+    steps: (data.steps as StoryboardNodeData['steps']),
+    conflicts: (data.conflicts as StoryboardNodeData['conflicts']),
+    aiSubjects: (data.aiSubjects as StoryboardNodeData['aiSubjects']),
+    productionManagerId: (data.productionManagerId as string | undefined),
+    productionItems: (data.productionItems as StoryboardNodeData['productionItems']),
+  }), [data.shots, data.entities, data.status, data.isSample, data.progress, data.sourceScriptId, data.activeEpisodeId, data.shotsByEpisode, data.statusByEpisode, data.progressByEpisode, data.steps, data.conflicts, data.aiSubjects, data.productionManagerId, data.productionItems]);
   // 出片工作台数据
   const workbenchData: WorkbenchNodeData = useMemo(() => ({
     status: (data.status as WorkbenchNodeData['status']) ?? 'idle',
@@ -239,7 +249,7 @@ export function CreationNodeView({
       const sourceNode = graph.nodes.find((n) => n.id === storyboardEdge.source?.nodeId);
       if (!sourceNode) return;
       const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
-      const sourceShots = (sourceData.shots ?? []) as Array<{ id: string; number?: number; description?: string; shotType?: string; duration?: number }>;
+      const sourceShots = (sourceData.shots ?? []) as Array<any>;
       if (!Array.isArray(sourceShots) || sourceShots.length === 0) return;
       const wbShots = sourceShots.map((s, i) => ({
         id: s.id,
@@ -247,10 +257,22 @@ export function CreationNodeView({
         description: s.description ?? '',
         shotType: s.shotType ?? '',
         duration: s.duration ?? 0,
-        status: 'pending' as const,
+        imagePrompt: s.imagePrompt,
+        videoPrompt: s.videoPrompt,
+        negativePrompt: s.negativePrompt,
+        quality: s.quality,
+        promptAssembly: s.promptAssembly,
+        videos: s.videos,
+        activeVideoIndex: s.activeVideoIndex,
+        generated: s.generated,
+        manualEdit: s.manualEdit,
+        bibleRefs: s.bibleRefs,
+        audioPreview: s.audioPreview,
+        status: s.status ?? 'pending',
         sourceShotId: s.id,
       }));
       const totalDuration = wbShots.reduce((sum, s) => sum + s.duration, 0);
+      const sourceEntities = (sourceData.entities ?? []) as Array<any>;
       updateNode({
         data: {
           ...data,
@@ -259,6 +281,7 @@ export function CreationNodeView({
           totalDuration,
           completedCount: 0,
           sourceStoryboardId: sourceNode.id,
+          entities: Array.isArray(sourceEntities) ? sourceEntities : [],
         },
       });
     };
@@ -269,6 +292,25 @@ export function CreationNodeView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, node.id, graph, updateNode]);
+
+  // 出片节点固定尺寸(契约变更自愈):存量节点尺寸非 280×240 时一次性纠正
+  // 走 ResizeNodeCommand 而非 updateNode({ size }) —— CanvasView 的默认 updateNode
+  // 只处理 data/title,size 补丁会被静默丢弃
+  useEffect(() => {
+    if (kind !== 'workbench' || !commandQueue) return;
+    const w = node.size?.width ?? 0;
+    const h = node.size?.height ?? 0;
+    if (w === WORKBENCH_FIXED_SIZE.width && h === WORKBENCH_FIXED_SIZE.height) return;
+    const { x, y } = node.position;
+    commandQueue.execute(
+      new ResizeNodeCommand(
+        node.id,
+        { x, y, width: w, height: h },
+        { x, y, width: WORKBENCH_FIXED_SIZE.width, height: WORKBENCH_FIXED_SIZE.height },
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, node.id, node.size?.width, node.size?.height, commandQueue]);
 
   // 监听 workbench:resync 事件（手动重新同步）
   useEffect(() => {
@@ -282,7 +324,7 @@ export function CreationNodeView({
       const sourceNode = graph.nodes.find((n) => n.id === storyboardEdge.source?.nodeId);
       if (!sourceNode) return;
       const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
-      const sourceShots = (sourceData.shots ?? []) as Array<{ id: string; number?: number; description?: string; shotType?: string; duration?: number }>;
+      const sourceShots = (sourceData.shots ?? []) as Array<any>;
       if (!Array.isArray(sourceShots) || sourceShots.length === 0) return;
       const wbShots = sourceShots.map((s, i) => ({
         id: s.id,
@@ -290,10 +332,22 @@ export function CreationNodeView({
         description: s.description ?? '',
         shotType: s.shotType ?? '',
         duration: s.duration ?? 0,
-        status: 'pending' as const,
+        imagePrompt: s.imagePrompt,
+        videoPrompt: s.videoPrompt,
+        negativePrompt: s.negativePrompt,
+        quality: s.quality,
+        promptAssembly: s.promptAssembly,
+        videos: s.videos,
+        activeVideoIndex: s.activeVideoIndex,
+        generated: s.generated,
+        manualEdit: s.manualEdit,
+        bibleRefs: s.bibleRefs,
+        audioPreview: s.audioPreview,
+        status: s.status ?? 'pending',
         sourceShotId: s.id,
       }));
       const totalDuration = wbShots.reduce((sum, s) => sum + s.duration, 0);
+      const sourceEntities = (sourceData.entities ?? []) as Array<any>;
       updateNode({
         data: {
           ...workbenchDataRef.current,
@@ -302,6 +356,7 @@ export function CreationNodeView({
           totalDuration,
           completedCount: 0,
           sourceStoryboardId: sourceNode.id,
+          entities: Array.isArray(sourceEntities) ? sourceEntities : [],
         },
       });
     });

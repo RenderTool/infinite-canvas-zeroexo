@@ -127,10 +127,10 @@ export function previewStageStyle(theme: Theme): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: isDark ? '#1c1917' : '#f5f5f4',
+    background: isDark ? theme.canvas.background : '#f5f5f4',
     border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
     backgroundImage: isDark
-      ? `linear-gradient(45deg, #211d1a 25%, transparent 25%), linear-gradient(-45deg, #211d1a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #211d1a 75%), linear-gradient(-45deg, transparent 75%, #211d1a 75%)`
+      ? `linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.04) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.04) 75%)`
       : `linear-gradient(45deg, #e8e6e3 25%, transparent 25%), linear-gradient(-45deg, #e8e6e3 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e8e6e3 75%), linear-gradient(-45deg, transparent 75%, #e8e6e3 75%)`,
     backgroundSize: '20px 20px',
     backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
@@ -211,7 +211,7 @@ export function thumbItemStyle(theme: Theme, isActive: boolean, isCover: boolean
     overflow: 'hidden',
     flexShrink: 0,
     cursor: 'pointer',
-    background: isDark ? '#211d1a' : '#e8e6e3',
+    background: isDark ? theme.canvas.background : '#e8e6e3',
     border: isActive
       ? '2px solid #e94560'
       : isCover
@@ -347,7 +347,7 @@ export function noteInputStyle(theme: Theme): CSSProperties {
     width: '100%',
     minHeight: 56,
     maxHeight: 100,
-    background: isDark ? '#211d1a' : '#f5f5f4',
+    background: isDark ? theme.canvas.background : '#f5f5f4',
     border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
     borderRadius: 8,
     outline: 'none',
@@ -364,7 +364,7 @@ export function noteInputStyle(theme: Theme): CSSProperties {
 export function promptBlockStyle(theme: Theme): CSSProperties {
   const isDark = theme.mode === 'dark';
   return {
-    background: isDark ? '#161412' : '#fafaf9',
+    background: isDark ? theme.canvas.background : '#fafaf9',
     border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
     borderRadius: 10,
     padding: '12px 14px',
@@ -398,7 +398,7 @@ export function tagInputStyle(theme: Theme): CSSProperties {
   return {
     width: '100%',
     height: 34,
-    background: isDark ? '#211d1a' : '#f5f5f4',
+    background: isDark ? theme.canvas.background : '#f5f5f4',
     border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
     borderRadius: 8,
     outline: 'none',

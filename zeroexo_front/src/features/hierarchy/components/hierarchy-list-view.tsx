@@ -72,13 +72,14 @@ export interface HierarchyListViewProps {
 // ===== 类型 → 图标映射（与节点左上角图标一致） =====
 
 function getTypeIcon(node: SceneNode): ReactNode {
-  const cls = { size: 14, style: { opacity: 0.6 } } as const;
+  // 2026-08-31 用户拍板：资产中类型图标统一缩到 12px
+  const cls = { size: 12, style: { opacity: 0.6 } } as const;
   switch (node.type) {
     case 'group': return <FolderOpen {...cls} />;
     case 'image': return <ImageIcon {...cls} />;
     case 'text': return <TypeIcon {...cls} />;
     case 'video': return <Video {...cls} />;
-    case 'audio': return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>;
+    case 'audio': return <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>;
     case 'generator': return <Settings2 {...cls} />;
     case 'stacked-media': {
       const data = node.data as Record<string, unknown> | undefined;
@@ -230,7 +231,7 @@ function HierarchyThumbnail({
         />
       ) : (
         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: mutedColor, opacity: 0.6 }}>
-          {isVideo ? <Video size={14} /> : <ImageIcon size={14} />}
+          {isVideo ? <Video size={12} /> : <ImageIcon size={12} />}
         </div>
       )}
     </div>

@@ -8,6 +8,8 @@ import { useState, useRef, useEffect, useCallback, type CSSProperties } from 're
 import { Modal, Progress, Tooltip } from 'antd';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useTranslation } from 'react-i18next';
+// 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 ✓/✗ 等字符图标（2026-08-31）
+import { CANVAS_NODE_ICONS } from '../../icons.js';
 
 // ── 类型定义 ──
 
@@ -311,9 +313,9 @@ export function ScriptProgressPanel({
       case 'running':
         return <span style={{ ...unitStatusIconStyle, background: `${accent}20`, color: accent }}>◉</span>;
       case 'success':
-        return <span style={{ ...unitStatusIconStyle, background: `${successColor}20`, color: successColor }}>✓</span>;
+        return <span style={{ ...unitStatusIconStyle, background: `${successColor}20`, color: successColor }}><CANVAS_NODE_ICONS.check size={12} /></span>;
       case 'failed':
-        return <span style={{ ...unitStatusIconStyle, background: `${errorColor}20`, color: errorColor }}>✗</span>;
+        return <span style={{ ...unitStatusIconStyle, background: `${errorColor}20`, color: errorColor }}><CANVAS_NODE_ICONS.close size={12} /></span>;
     }
   };
 

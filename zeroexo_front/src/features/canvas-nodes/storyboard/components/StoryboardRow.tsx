@@ -3,14 +3,14 @@
  *
  * 从 StoryboardTable.tsx 中抽离的单行编辑逻辑，包含：景别选择/运镜选择/时长输入/描述编辑/删除该行数据。
  */
-import { memo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { Input, Tooltip, Button } from 'antd';
 import { Trash2, Copy, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign, AiSubject, EntityRef } from '../storyboard-types';
-import { formatLighting, formatEnvironment, entityDisplayName, resolveEntityKind, ENTITY_KIND_META } from '../storyboard-utils';
-import { MentionDropdown } from './EntityManager';
+import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign, AiSubject } from '../storyboard-types';
+import { formatLighting, formatEnvironment, resolveEntityKind, ENTITY_KIND_META, collectSubjectSources, type SubjectMatchSource } from '../storyboard-utils';
+import { SubjectMentionPopover } from './SubjectMentionPopover';
 import { ShotStatePicker } from './ShotStatePicker';
 import { CAMERA_MOVEMENT_OPTIONS, NODE_GRID_TEMPLATE, EDIT_GRID_TEMPLATE, gridCellStyle } from './StoryboardTable';
 
@@ -30,15 +30,16 @@ export interface StoryboardRowProps {
   entities: StoryboardEntity[];
   /** Plan#20 T3: 后端主体字典(主体列 kind 徽章兑底查找源) */
   aiSubjects?: AiSubject[];
-  /** Plan#20 T9c: 实体名/别名 → 画布主体卡状态列表(shot entities 的 stateId 选择选项源) */
-  subjectStatesByEntity?: Record<string, Array<{ id: string; name: string }>>;
-  /** 2026-08-21: 实体名/别名 → 剧管条目列表(主体列点击实体可映射到剧管条目, 剧管=分镜后置) */
-  pmItemsByEntity?: Record<string, Array<{ id: string; name: string; kind: string }>>;
   mentionOpen: boolean;
   mentionShotId: string | null;
-  onMentionSelect: (entity: StoryboardEntity) => void;
+  /** 2026-08-30 征集 #110: @ 选择主体 → 写入 shot.entities 关联（替代旧追加文本语义） */
+  onMentionSelect: (source: SubjectMatchSource) => void;
   onMentionOpen: (shotId: string) => void;
   onShotTypeClick: (shotId: string) => void;
+  /** 2026-08-30 征集 #110: 可匹配主体集合（entities∪aiSubjects∪productionItems），供 @ 面板与自动匹配共用 */
+  subjectSources?: SubjectMatchSource[];
+  /** 2026-08-30 征集 #110: 描述文本回车/失焦自动匹配回调（整段扫描裸词 → 命中写 shot.entities） */
+  onAutoMatchMentions?: (shotId: string, text: string) => void;
 }
 
 export const StoryboardRow = memo(function StoryboardRow({
@@ -56,13 +57,13 @@ export const StoryboardRow = memo(function StoryboardRow({
   onCameraClose,
   entities,
   aiSubjects,
-  subjectStatesByEntity,
-  pmItemsByEntity,
   mentionOpen,
   mentionShotId,
   onMentionSelect,
   onMentionOpen,
   onShotTypeClick,
+  subjectSources,
+  onAutoMatchMentions,
 }: StoryboardRowProps): ReactElement {
   const { t } = useTranslation();
   const { theme } = useTheme();
@@ -76,10 +77,46 @@ export const StoryboardRow = memo(function StoryboardRow({
   const textSecondary = isDark ? '#a8a8a8' : '#57534e';
   const accentCyan = '#5DDCFF';
 
-  // Plan#20 T9c: entities 列状态选择器(点击实体 chip 弹 ShotStatePicker)
-  const [statePicker, setStatePicker] = useState<{ index: number; rect: { top: number; left: number; width: number } } | null>(null);
   // 2026-08-22: 画面描述列统一组件(非编辑态高亮预览 + 点击进入 TextArea 编辑, blur 退出) — 全屏与节点内共用同一渲染路径, 契约色一致
   const [editingDesc, setEditingDesc] = useState(false);
+  // 2026-08-30 征集 #110: @ 搜索词（Agent 同款浮层）
+  const [mentionSearch, setMentionSearch] = useState('');
+  // 描述输入容器 ref：@ 弹层 portal 到 body 用 fixed 定位，需视口坐标
+  const descWrapRef = useRef<HTMLDivElement>(null);
+
+  /** 可匹配主体集合（entities∪aiSubjects∪productionItems），@ 面板与自动匹配共用 */
+  const mentionSubjects = useMemo(
+    () => subjectSources ?? collectSubjectSources(entities, aiSubjects),
+    [subjectSources, entities, aiSubjects],
+  );
+
+  /** @ 后已输入关键词：光标前文本匹配 /@([\w\u4e00-\u9fa5]*)$/ */
+  const extractMentionSearch = useCallback((value: string, caret: number): string => {
+    const before = value.slice(0, caret);
+    const m = before.match(/@([\w\u4e00-\u9fa5]*)$/);
+    return m ? (m[1] ?? '') : '';
+  }, []);
+
+  /** 描述列编辑 onChange：@ 触发浮层 + 更新描述 */
+  const handleDescChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    const caret = e.target.selectionStart ?? val.length;
+    const at = extractMentionSearch(val, caret);
+    if (val.endsWith('@') || at) {
+      setMentionSearch(at);
+      onMentionOpen(shot.id);
+    } else {
+      setMentionSearch('');
+      // 关闭浮层（mentionShotId 由父级管理，这里仅清本地搜索词）
+    }
+    onUpdateShot(shot.id, { description: flatten(val) });
+  }, [extractMentionSearch, onMentionOpen, onUpdateShot, shot.id]);
+
+  /** 描述列编辑 回车/失焦：触发自动匹配（整段扫描裸词，跳过已 @ 词） */
+  const handleDescCommit = useCallback(() => {
+    setEditingDesc(false);
+    onAutoMatchMentions?.(shot.id, shot.description ?? '');
+  }, [onAutoMatchMentions, shot.id, shot.description]);
 
   // R2-7: 行复制（镜头描述 + 提示词），复制成功短暂绿勾反馈
   const [copied, setCopied] = useState(false);
@@ -118,8 +155,7 @@ export const StoryboardRow = memo(function StoryboardRow({
   if (envText) moodLocParts.push(envText);
   const moodLocText = flatten(moodLocParts.join(' · ')) || null;
   const dialogueFlat = flatten(shot.dialogue);
-  // Plan#20 T3: 主体列条目(双兼容 EntityRef|string) + 描述主体名高亮词表(长名优先避免短名吞长名)
-  const entityItems = (Array.isArray(shot.entities) ? shot.entities : []).map(entityDisplayName).filter(Boolean);
+  // 描述主体名高亮词表(长名优先避免短名吞长名)
   const highlightNames = [
     ...new Set([
       ...entities.map((e) => e.name),
@@ -230,34 +266,39 @@ export const StoryboardRow = memo(function StoryboardRow({
       {/* 画面描述 — 2026-08-22 统一组件: 非编辑态一律契约色高亮预览(节点内/全屏同款); 编辑态点击进入 TextArea, blur 退出 */}
       <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px 4px' }}>
         {!readOnly && editingDesc ? (
-          <div style={{ position: 'relative', width: '100%' }}>
+          <div ref={descWrapRef} style={{ position: 'relative', width: '100%' }}>
             <Input.TextArea
               autoFocus
               size="small"
               variant="borderless"
               autoSize={{ minRows: 1, maxRows: 30 }}
               value={descFlat}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val.endsWith('@')) {
-                  onMentionOpen(shot.id);
+              onChange={handleDescChange}
+              onBlur={handleDescCommit}
+              onKeyDown={(e) => {
+                // 浮层打开时 Enter 交由浮层键盘导航处理；未打开时 Enter 提交并触发自动匹配
+                if (e.key === 'Enter' && !e.shiftKey && !(mentionOpen && mentionShotId === shot.id)) {
+                  e.preventDefault();
+                  (e.currentTarget as HTMLTextAreaElement).blur();
                 }
-                onUpdateShot(shot.id, { description: flatten(val) });
               }}
-              onBlur={() => setEditingDesc(false)}
               placeholder={t('storyboardRow.placeholderDescription')}
               style={editInput}
             />
             {mentionOpen && mentionShotId === shot.id && (
-              <MentionDropdown
-                mentionShotId={mentionShotId}
-                entities={entities}
-                onSelect={onMentionSelect}
-                textColor={textColor}
-                mutedColor={mutedColor}
-                bgHover={bgHover}
-                bgCanvas={bgCanvas}
-                borderMuted={borderMuted}
+              <SubjectMentionPopover
+                search={mentionSearch}
+                subjects={mentionSubjects}
+                position={(() => {
+                  const r = descWrapRef.current?.getBoundingClientRect();
+                  return { top: (r?.bottom ?? 0) + 4, left: r?.left ?? 0 };
+                })()}
+                theme={theme}
+                onSelect={(source) => {
+                  onMentionSelect(source);
+                  setMentionSearch('');
+                }}
+                onClose={() => setMentionSearch('')}
               />
             )}
           </div>
@@ -270,68 +311,6 @@ export const StoryboardRow = memo(function StoryboardRow({
           </div>
         )}
       </div>
-
-      {/* 主体 — Plan#20 T3 新增列: kind 徽章(角色/场景/道具色区分, 色板对齐 ENTITY_KIND_META)
-          2026-08-22 折叠契约(用户拍板): 节点内(readOnly)折叠本列——描述列已契约色高亮主体; 全屏编辑展开 */}
-      {!readOnly && (
-        <div style={{ ...gridCellStyle(borderMuted, bgCanvas), padding: '2px 4px' }}>
-          <div style={{ ...cellBase, justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-            {entityItems.length === 0 ? '—' : entityItems.map((name, i) => {
-              const kind = resolveEntityKind(name, entities, aiSubjects);
-              const meta = kind ? ENTITY_KIND_META[kind] : undefined;
-              // Plan#20 T9c: EntityRef 形态且能匹配到画布主体卡状态 → 可点击选择状态
-              const raw = shot.entities?.[i];
-              const ref = raw && typeof raw === 'object' ? (raw as EntityRef) : undefined;
-              const states = ref && subjectStatesByEntity ? (subjectStatesByEntity[name] ?? []) : [];
-              const activeState = states.find((s) => s.id === ref?.stateId);
-              // 2026-08-21: 剧管条目映射选项(剧管=分镜后置, 主体列点击实体可映射到剧管条目)
-              const pmOptions = pmItemsByEntity?.[name] ?? [];
-              const mappedItem = ref?.cardId ? pmOptions.find((it) => it.id === ref.cardId) : undefined;
-              const clickable = !readOnly && (states.length > 0 || pmOptions.length > 0);
-              return (
-                <span
-                  key={`${name}-${i}`}
-                  onClick={clickable ? (e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setStatePicker({ index: i, rect: { top: r.top, left: r.left, width: r.width } });
-                  } : undefined}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    padding: '1px 6px',
-                    borderRadius: 999,
-                    fontSize: 11,
-                    lineHeight: '16px',
-                    color: meta?.color ?? textSecondary,
-                    background: meta ? `${meta.color}1f` : 'transparent',
-                    border: `1px solid ${meta ? `${meta.color}55` : borderMuted}`,
-                    whiteSpace: 'nowrap',
-                    maxWidth: '100%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    cursor: clickable ? 'pointer' : 'default',
-                  }}
-                >
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: meta?.color ?? textSecondary, flexShrink: 0 }} />
-                  {name}
-                  {mappedItem && (
-                    <span
-                      title={t('storyboard.mappedToProduction', { name: mappedItem.name })}
-                      style={{ width: 5, height: 5, borderRadius: '50%', background: accent, flexShrink: 0, boxShadow: `0 0 0 2px ${bgCanvas}` }}
-                    />
-                  )}
-                  {activeState && (
-                    <span style={{ fontSize: 10, color: textSecondary, background: bgHover, borderRadius: 999, padding: '0 5px', lineHeight: '14px', flexShrink: 0 }}>
-                      {activeState.name}
-                    </span>
-                  )}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* 景别 — 编辑态点击弹出取景器;只读态纯文本 */}
       <div
@@ -454,41 +433,7 @@ export const StoryboardRow = memo(function StoryboardRow({
         />
       )}
 
-      {/* Plan#20 T9c + 2026-08-21: entities 列状态/剧管映射选择器(点实体 chip 弹窗, stateId/cardId 落 shot.entities) */}
-      {!readOnly && statePicker && (
-        <ShotStatePicker
-          rect={statePicker.rect}
-          options={(() => {
-            const name = entityItems[statePicker.index] ?? '';
-            const pm = (pmItemsByEntity?.[name] ?? []).map((it) => it.name);
-            return [...pm, t('storyboard.cancelMapping')];
-          })()}
-          currentValue={(() => {
-            const raw = shot.entities?.[statePicker.index];
-            const ref = raw && typeof raw === 'object' ? (raw as EntityRef) : undefined;
-            const name = entityItems[statePicker.index] ?? '';
-            return (pmItemsByEntity?.[name] ?? []).find((it) => it.id === ref?.cardId)?.name ?? '';
-          })()}
-          onSelect={(opt) => {
-            const name = entityItems[statePicker.index] ?? '';
-            const ents = Array.isArray(shot.entities) ? shot.entities.map((e, i) => {
-              if (i !== statePicker.index || typeof e !== 'object' || !e) return e;
-              if (opt === t('storyboard.cancelMapping')) return { ...e, cardId: undefined };
-              const target = (pmItemsByEntity?.[name] ?? []).find((it) => it.name === opt);
-              return { ...e, cardId: target?.id };
-            }) : shot.entities;
-            onUpdateShot(shot.id, { entities: ents as unknown as Shot['entities'] });
-            setStatePicker(null);
-          }}
-          onClose={() => setStatePicker(null)}
-          textColor={textColor}
-          mutedColor={mutedColor}
-          bgHover={bgHover}
-          bgCanvas={bgCanvas}
-          borderMuted={borderMuted}
-          accent={accent}
-        />
-      )}
+      {/* 2026-08-30: 主体列已移除,原 entities 状态/剧管映射选择器一并删除(shot.entities 仍由 @ 写入,描述列契约色高亮) */}
 
       {/* 操作 — 仅全屏编辑态;复制该行（镜头描述+提示词，R2-7）+ 删除按钮 */}
       {!readOnly && (

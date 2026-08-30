@@ -197,7 +197,10 @@ export interface ThemeConfig {
   edge: EdgeTokens;
 }
 
-/** 暗色主题(stone 暖色调 + 红色强调) */
+/**
+ * 暗色主题（2026-08-31 用户拍板：全站统一画布背景色 #11110f，无棕无黑折腾）
+ * 工具栏/面板/节点内容底色全部与画布一致；分隔描边用中性灰 #404040（无棕）。
+ */
 export const DARK_THEME: ThemeConfig = {
   mode: 'dark',
   canvas: {
@@ -215,13 +218,13 @@ export const DARK_THEME: ThemeConfig = {
     hoverColor: '#f06580',
     titleColor: '#f5f5f4',
     titleBackground: 'transparent',
-    contentBackground: '#161412',
+    contentBackground: '#11110f',
     pinDefaultColor: '#a8a29e',
   },
   toolbar: {
-    background: '#161412',
-    panel: 'rgba(22,20,18,0.96)',
-    border: '#44403c',
+    background: '#11110f',
+    panel: 'rgba(17,17,15,0.96)',
+    border: '#404040',
     text: '#f5f5f4',
     textMuted: '#a8a29e',
     accent: '#e94560',

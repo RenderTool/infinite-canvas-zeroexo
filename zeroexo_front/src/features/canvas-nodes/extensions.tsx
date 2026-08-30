@@ -15,6 +15,7 @@ import {
   CREATION_DEFAULT_SIZE,
   CREATION_MIN_SIZE,
   CREATION_PINS,
+  WORKBENCH_FIXED_SIZE,
 } from './creation-node-types.js';
 import type { CreationNodeType } from './creation-node-types.js';
 import { CreationNodeView } from './creation-node-view.js';
@@ -42,9 +43,15 @@ const CREATION_CAPABILITIES: Record<CreationNodeType, NodeCapabilities> = {
 
 /** 构建剧创节点 runtime contract(uniform 契约 + 标准 NodeShell 外观)
  * Plan#1 T3(验收修正): free→uniform 契约迁移,但**不声明 lockAspectRatio**——
- * 用户要求 script/storyboard/workbench 保持自由宽高 resize(内部列表重排不变形);
- * 非等比尺寸 isUniformScale=false 自动回退真实尺寸渲染 */
-function createCreationRuntime(defaultSize: { width: number; height: number }): NodeRuntimeContract {
+ * 用户要求 script/storyboard 保持自由宽高 resize(内部列表重排不变形);
+ * 非等比尺寸 isUniformScale=false 自动回退真实尺寸渲染
+ *
+ * 2026-08-31:出片(workbench)与音频气泡同款 → appearance:'custom' + specialAppearance,
+ * 尺寸固定 280×240,不参与全局外观配置与尺寸计算 */
+function createCreationRuntime(
+  defaultSize: { width: number; height: number },
+  options: { appearance?: 'shell' | 'custom' } = {},
+): NodeRuntimeContract {
   return {
     definition: {
       schemaVersion: 1,
@@ -54,7 +61,7 @@ function createCreationRuntime(defaultSize: { width: number; height: number }): 
         preserveAspectRatio: false,
       },
       visual: {
-        appearance: 'shell',
+        appearance: options.appearance ?? 'shell',
         selectionMode: 'runtime',
       },
     },
@@ -141,15 +148,6 @@ function getStoryboardTools(): ToolDefinition[] {
         }
       },
     },
-    {
-      id: 'production',
-      label: '剧管',
-      title: '生成/关联剧中管理(角色·场景·道具)',
-      icon: <CANVAS_NODE_ICONS.production size={14} />,
-      group: 'edit',
-      // 2026-08-21 架构修正: 剧管=分镜后置工序, 仅分镜时也可主动生成/关联剧管
-      run: (node) => { nodeActionBus.emit('storyboard:manageProduction', { nodeId: node.id }); },
-    },
   ];
 }
 
@@ -161,7 +159,8 @@ function getWorkbenchTools(): ToolDefinition[] {
       id: 'edit',
       label: '编辑',
       title: '全屏编辑',
-      icon: <CANVAS_NODE_ICONS.play size={14} />,
+      // 与分镜节点「全屏编辑」同款图标(曾误用 play,胶囊内语义不一致)
+      icon: <CANVAS_NODE_ICONS.fullscreen size={14} />,
       group: 'basic',
       run: (node) => { nodeActionBus.emit('workbench:fullscreen', { nodeId: node.id }); },
     },
@@ -192,10 +191,8 @@ function createCreationExtension(
           if (!store) return;
           const graph = store.getGraph();
           const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
-          // [DEPRECATED] 'generator' 为旧生成器节点兼容(2026-08-22 tA5),生成器节点已废弃,
-          // 生成语义由「空 media 节点三态」承担;仅保留旧项目数据中 generator→storyboard 连线兼容。
-          if (sourceNode && !['script', 'generator'].includes(sourceNode.type)) {
-            return { valid: false, reason: '分镜节点支持关联剧本或生成器节点' };
+          if (sourceNode && sourceNode.type !== 'script') {
+            return { valid: false, reason: '分镜节点支持关联剧本节点' };
           }
         }
       : kind === 'workbench'
@@ -205,8 +202,8 @@ function createCreationExtension(
             if (!store) return;
             const graph = store.getGraph();
             const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
-            if (sourceNode && !['storyboard', 'production-manager'].includes(sourceNode.type)) {
-              return { valid: false, reason: '出片节点仅支持关联分镜/剧管节点' };
+            if (sourceNode && !['storyboard'].includes(sourceNode.type)) {
+              return { valid: false, reason: '出片节点仅支持关联分镜节点' };
             }
           }
         : undefined;
@@ -218,7 +215,9 @@ function createCreationExtension(
     color: CREATION_COLOR[kind],
     defaultSize: CREATION_DEFAULT_SIZE[kind],
     minSize: CREATION_MIN_SIZE[kind],
-    resizable: true,
+    // 2026-08-31:出片节点固定尺寸(与音频气泡同款)——不可缩放、不参与尺寸计算
+    resizable: kind !== 'workbench',
+    specialAppearance: kind === 'workbench',
     // 2026-08-22 布局契约: 创建新节点的默认排序参数(统一走 resolvePlacement, 禁硬编码偏移)
     placement: {
       direction: 'right',
@@ -227,7 +226,9 @@ function createCreationExtension(
     },
     // P5 契约接入:声明领域能力(不参与堆叠)与运行时缩放/外观契约
     capabilities: CREATION_CAPABILITIES[kind],
-    runtime: createCreationRuntime(CREATION_DEFAULT_SIZE[kind]),
+    runtime: kind === 'workbench'
+      ? createCreationRuntime(WORKBENCH_FIXED_SIZE, { appearance: 'custom' })
+      : createCreationRuntime(CREATION_DEFAULT_SIZE[kind]),
     // 标准 NodeShell 状态渲染,排布边界即 node.size
     viewContract: {
       selectionEffect: 'default',

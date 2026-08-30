@@ -20,50 +20,23 @@ import { apiFetch } from '@/services/api-client.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { notifyPromptCopied } from './prompt-copy-feedback.js';
 
-// ====== 类型 ======
+// ====== 类型与多语言辅助（2026-08-30 征集 #111 抽至 public-prompts-shared 切断循环依赖） ======
+// 原先本文件自定义 PublicPromptItem / getLocalizedTitle，但本页面 import shared/components 大桶
+// → prompt-viewer → asset-library/index → use-asset-library 形成环，循环初始化时
+// getLocalizedTitle 可能是 undefined（是否触发取决于模块加载顺序，时崩时好）。
+// 现从独立文件导入并 re-export，保持既有导入路径（index.ts / 各消费方）兼容。
+import { getLocalizedTitle, type PublicPromptItem } from './public-prompts-shared.js';
 
-export interface PublicPromptItem {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  tags: string[];
-  images: { storageKey: string; width?: number; height?: number; alt?: string }[];
-  source: string;
-  sourceId?: string;
-  sourceName?: string;
-  sourceUrl?: string;
-  license?: string;
-  clusterName?: string;
-  demoTitles?: Record<string, string>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ====== 多语言辅助函数 ======
-
-export function getLocalizedTitle(item: PublicPromptItem, lang: string): string {
-  const titles = item.demoTitles || {};
-  // 如果 demoTitles 为空对象，直接回退到 title
-  if (!titles || Object.keys(titles).length === 0) return item.title;
-  if (lang.startsWith('zh')) {
-    if (lang === 'zh-Hant' || lang === 'zh-TW' || lang === 'zh-HK') {
-      return titles.zh_hant || titles.zh_hans || item.title;
-    }
-    return titles.zh_hans || titles.zh_hant || item.title;
-  }
-  return titles.en || item.title;
-}
+export { getLocalizedTitle, type PublicPromptItem };
 
 // ====== 常量 ======
 
+// 2026-08-30 用户拍板:分类收敛为 角色/场景/道具/其他,style、shot 并入 other(后端 counts/过滤已合并)
 const CATEGORIES = [
   { key: 'all', label: '全部' },
   { key: 'role', label: '角色' },
   { key: 'scene', label: '场景' },
   { key: 'prop', label: '道具' },
-  { key: 'style', label: '风格' },
-  { key: 'shot', label: '镜头' },
   { key: 'other', label: '其他' },
 ];
 

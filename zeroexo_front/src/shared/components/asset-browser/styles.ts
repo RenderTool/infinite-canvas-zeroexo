@@ -24,6 +24,8 @@ export const CONTEXT_PANEL_WIDTH = 300;
 /** 创建主题适配的样式函数 */
 export function createStyles(theme: AssetBrowserProps['theme']) {
   const isDark = theme.mode === 'dark';
+  // 2026-08-31 用户拍板：全站统一画布背景色（无棕）
+  const canvasBg = theme.canvas?.background ?? (isDark ? '#11110f' : '#ffffff');
 
   return {
     /** 主容器 */
@@ -32,7 +34,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
       flexDirection: 'row',
       height: '100%',
       overflow: 'hidden',
-      background: isDark ? '#161412' : '#ffffff',
+      background: canvasBg,
       color: theme.toolbar.text,
       fontFamily: "'DM Sans', system-ui, sans-serif",
       fontSize: 13,
@@ -43,7 +45,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
     sidebar: (collapsed: boolean, borderRadius?: number): CSSProperties => ({
       width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH,
       minWidth: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH,
-      background: isDark ? '#1c1c1c' : '#ffffff',
+      background: isDark ? canvasBg : '#ffffff',
       borderRight: `1px solid ${theme.toolbar.border}`,
       borderRadius: borderRadius ?? 0,
       display: 'flex',
@@ -197,7 +199,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
       padding: '8px 16px',
       gap: 10,
       borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'}`,
-      background: isDark ? '#161412' : '#ffffff',
+      background: canvasBg,
       flexShrink: 0,
     }),
 
@@ -277,7 +279,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
 
     /** 资产卡片 */
     assetCard: (hovered: boolean): CSSProperties => ({
-      background: isDark ? '#1c1917' : '#fafaf9',
+      background: isDark ? canvasBg : '#fafaf9',
       border: hovered
         ? `1px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`
         : '1px solid transparent',
@@ -291,7 +293,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
     /** 卡片缩略图 */
     cardThumb: (): CSSProperties => ({
       aspectRatio: '16/10',
-      background: isDark ? '#211d1a' : '#f5f5f4',
+      background: isDark ? canvasBg : '#f5f5f4',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -403,7 +405,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
       letterSpacing: '0.04em',
       color: theme.toolbar.textMuted,
       borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)'}`,
-      background: isDark ? '#1c1917' : '#fafaf9',
+      background: isDark ? canvasBg : '#fafaf9',
       position: 'sticky',
       top: 0,
       zIndex: 1,
@@ -421,7 +423,7 @@ export function createStyles(theme: AssetBrowserProps['theme']) {
       width: visible ? CONTEXT_PANEL_WIDTH : 0,
       minWidth: visible ? CONTEXT_PANEL_WIDTH : 0,
       overflow: 'hidden',
-      background: isDark ? '#1c1917' : '#fafaf9',
+      background: isDark ? canvasBg : '#fafaf9',
       borderLeft: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)'}`,
       display: 'flex',
       flexDirection: 'column',

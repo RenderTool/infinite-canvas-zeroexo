@@ -6,19 +6,26 @@
  * 数据写入 node.data，随画布 Yjs 同步。
  */
 
-import { memo, useState, useCallback, useMemo, useEffect, useRef, type CSSProperties, type ReactElement } from 'react';
+import { memo, useState, useCallback, useMemo, useEffect, type CSSProperties, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import { Film, Clapperboard, Play, List, ImageIcon } from 'lucide-react';
-import { Button, Progress, Tag, Spin, Tooltip } from 'antd';
+import { Film, Clapperboard, Play } from 'lucide-react';
+import { Button, Progress } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
+import { useReactGraphStore } from '@zeroexo/plugin-render-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
-import type { WorkbenchNodeData, WorkbenchShot } from './workbench-types';
-import { generateFrame } from './workbench-frame-api';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
-import { WorkbenchTrack } from './workbench-track';
+import { loadModelDurationBounds } from '@/features/generator-settings/dynamic-param-form.js';
+import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
+import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference } from './workbench-types';
+import type { StoryboardEntity } from './storyboard-types';
+import { extractExplicitMentions } from './storyboard-utils';
+
+import { StoryboardMergedTab } from './storyboard-merged-tab';
+
+// OpenCut 暗色专业剪辑风配色常量（模块级，供组件内外使用）
+const OPENCUT_ACCENT = '#3b82f6';
 
 export interface WorkbenchSheetProps {
   nodeId: string;
@@ -34,25 +41,28 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   const { t } = useTranslation();
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
+  // 底部 NodeGenerateDock 依赖真实 graph store(useViewport 会用 store.subscribeViewport)。
+  // 2026-08-31 修复:store 不能靠父级透传——extensions.tsx 渲染 CreationNodeView 时并不传 store
+  // (NodeRendererProps 无此字段),透传即 undefined → dock 报 "Cannot read properties of undefined"。
+  // 一律走 CanvasView context 取,与 StoryboardSheet 同款。
+  const store = useReactGraphStore();
 
   // Plan#50:工作台全屏改为顶部页签承载——本地不再持有 fullscreenOpen,显示与否由 tab store 决定
   const myTabKey = buildTabKey('workbench', nodeId);
   const tabActive = useCanvasTabStore((s) => s.activeTabKey === myTabKey);
   const tabHost = useCanvasTabStore((s) => s.contentHost);
   const openTab = useCanvasTabStore((s) => s.openTab);
-  const closeTab = useCanvasTabStore((s) => s.closeTab);
   const openWorkbenchTab = useCallback(() => {
     openTab({ kind: 'workbench', id: nodeId, title: t('canvasNodes.stage.workbench') });
   }, [openTab, nodeId, t]);
-  const [timeScale, setTimeScale] = useState(80);
+  const [pps, setPps] = useState(60);
 
-  // 主题色
+  // OpenCut 暗色专业剪辑风配色（Plan#53 §2 布局契约）
+  // 2026-08-31：全站统一画布背景色
+  const OPENCUT_BG = isDark ? theme.canvas.background : '#f8f8f8';
   const textColor = theme.toolbar.text;
   const mutedColor = theme.toolbar.textMuted;
-  const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-  const bgPage = isDark ? '#0e0e0e' : '#f8f8f8';
-  const bgCanvas = isDark ? '#171717' : '#ffffff';
-  const borderMuted = isDark ? '#2e2e2e' : '#e5e5e5';
+  const bgPage = isDark ? OPENCUT_BG : '#f8f8f8';
 
   // 进度
   const progressPercent = useMemo(() => {
@@ -73,124 +83,162 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     openWorkbenchTab();
   }, [openWorkbenchTab]);
 
-  // ===== 首帧/尾帧生成 =====
+  // ===== 生产台状态 =====
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [timelineOrder, _setTimelineOrder] = useState<string[] | null>(null);
+  const [playhead, setPlayhead] = useState(0);
 
-  /** 当前正在生成中的帧标识集合，格式 "shotId:firstFrame" 或 "shotId:lastFrame" */
-  const [generatingFrames, setGeneratingFrames] = useState<Set<string>>(new Set());
+  // 按时间轴顺序排列的 shots
+  const orderedShots = useMemo<WorkbenchShot[]>(() => {
+    if (!timelineOrder || timelineOrder.length === 0) return data.shots;
+    const shotMap = new Map(data.shots.map((s) => [s.id, s]));
+    return timelineOrder.map((id) => shotMap.get(id)).filter(Boolean) as WorkbenchShot[];
+  }, [data.shots, timelineOrder]);
 
-  /** 批量生成进度 */
-  const [batchInfo, setBatchInfo] = useState<{
-    active: boolean;
-    type: 'firstFrame' | 'lastFrame';
-    total: number;
-    completed: number;
-  } | null>(null);
+  // 当前选中镜头
+  const currentShot = useMemo<WorkbenchShot | undefined>(() => {
+    return orderedShots[activeIndex] ?? orderedShots[0];
+  }, [orderedShots, activeIndex]);
 
-  /** AbortController 引用，用于取消正在进行的生成 */
-  const abortRef = useRef<AbortController | null>(null);
+  // 当前镜头引用主体(从描述 @提及 匹配主体库) → 展示在提示词区上方
+  const shotSubjects = useMemo(() => {
+    if (!currentShot) return [];
+    const mentions = extractExplicitMentions(currentShot.description ?? '');
+    return (data.entities ?? [])
+      .filter((e) => mentions.has(e.name))
+      .map((e) => ({ id: e.id, name: e.name, kind: e.kind }));
+  }, [currentShot, data.entities]);
 
-  /** 标记某个帧为生成中 */
-  const markGenerating = useCallback(
-    (shotId: string, frameType: 'firstFrame' | 'lastFrame', generating: boolean) => {
-      setGeneratingFrames((prev) => {
-        const next = new Set(prev);
-        const key = `${shotId}:${frameType}`;
-        if (generating) {
-          next.add(key);
-        } else {
-          next.delete(key);
-        }
-        return next;
-      });
-    },
-    [],
-  );
+  // 当前生效视频
+  const activeVideo = useMemo(() => {
+    const idx = currentShot?.activeVideoIndex ?? 0;
+    return currentShot?.videos?.[idx];
+  }, [currentShot]);
 
-  /** 判断某个帧是否正在生成 */
-  const isGenerating = useCallback(
-    (shotId: string, frameType: 'firstFrame' | 'lastFrame'): boolean => {
-      return generatingFrames.has(`${shotId}:${frameType}`);
-    },
-    [generatingFrames],
-  );
+  // 时间轴数据映射
+  const timelineData = useMemo(() => {
+    return orderedShots.map((s) => ({
+      id: s.id,
+      number: s.number,
+      duration: s.duration,
+      status: s.status === 'pending' ? 'idle' as const : s.status,
+      thumbnailUrl: s.firstFrameKey,
+      label: `#${s.number} ${s.description || s.shotType}`,
+      hasAudio: !!s.audioPreview,
+    }));
+  }, [orderedShots]);
 
-  /** 单个镜头首帧/尾帧生成 */
-  const handleGenerateFrame = useCallback(
-    async (shotId: string, frameType: 'firstFrame' | 'lastFrame') => {
-      if (isGenerating(shotId, frameType)) return;
+  // 更新单个镜头字段
+  const onUpdateShot = useCallback((shotId: string, updates: Partial<WorkbenchShot>) => {
+    const updatedShots = data.shots.map((s) =>
+      s.id === shotId ? { ...s, ...updates } : s,
+    );
+    onDataChange({ ...data, shots: updatedShots });
+  }, [data, onDataChange]);
 
-      const shot = data.shots.find((s) => s.id === shotId);
-      if (!shot) return;
-
-      markGenerating(shotId, frameType, true);
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      try {
-        const { storageKey } = await generateFrame(shot, frameType, controller.signal);
-        // 更新节点数据
-        const updatedShots = data.shots.map((s) => {
-          if (s.id !== shotId) return s;
-          return {
-            ...s,
-            [frameType === 'firstFrame' ? 'firstFrameKey' : 'lastFrameKey']: storageKey,
-          };
-        });
-        onDataChange({ ...data, shots: updatedShots });
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        console.error(`[WorkbenchSheet] 生成 ${frameType} 失败:`, err);
-      } finally {
-        markGenerating(shotId, frameType, false);
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-        }
+  // 上传文件 → 追加到当前镜头 references（拖拽导入 / 外部调用共用；随 node.data 云同步）
+  const uploadFileToCurrentShot = useCallback(async (file: File) => {
+    if (!currentShot) return;
+    try {
+      const uploaded = await uploadAsset(file);
+      const d = uploaded.data;
+      let refKind: WorkbenchShotReference['kind'] = 'text';
+      let storageKey: string | undefined;
+      let url: string | undefined;
+      let width: number | undefined;
+      let height: number | undefined;
+      if (d.kind === 'image') {
+        refKind = 'image';
+        storageKey = d.storageKey;
+        url = d.dataUrl;
+        width = d.width;
+        height = d.height;
+      } else if (d.kind === 'video') {
+        refKind = 'video';
+        storageKey = d.storageKey;
+        url = d.url;
+        width = d.width;
+        height = d.height;
+      } else if (d.kind === 'audio') {
+        refKind = 'audio';
+        storageKey = d.storageKey;
+        url = d.url;
       }
-    },
-    [data, onDataChange, isGenerating, markGenerating],
-  );
+      const ref: WorkbenchShotReference = {
+        id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: refKind,
+        title: uploaded.title.replace(/\.[^.]+$/, ''),
+        storageKey,
+        url,
+        width,
+        height,
+      };
+      onUpdateShot(currentShot.id, { references: [...(currentShot.references ?? []), ref] });
+    } catch {
+      // 上传失败静默（不打断当前编辑）
+    }
+  }, [currentShot, onUpdateShot]);
 
-  /** 批量生成首帧/尾帧 */
-  const handleBatchGenerate = useCallback(
-    async (frameType: 'firstFrame' | 'lastFrame') => {
-      const targetShots = data.shots.filter(
-        (s) => !s[frameType === 'firstFrame' ? 'firstFrameKey' : 'lastFrameKey'],
-      );
-      if (targetShots.length === 0) return;
+  // ===== 模型时长上下限（真实模型参数，非前端硬编码） =====
+  // 出片轨道 clip 的最大/最小长度由所选模型的模板 duration 参数决定：
+  // 优先 channelConstraints.bounds.minDuration/maxDuration，回落 duration 参数 min/max。
+  const [durationBounds, setDurationBounds] = useState<{ min: number; max: number } | null>(null);
+  const activeModel = currentShot?.model ?? '';
+  useEffect(() => {
+    if (!activeModel) {
+      setDurationBounds(null);
+      return;
+    }
+    let cancelled = false;
+    void loadModelDurationBounds('video', activeModel).then((bounds) => {
+      if (!cancelled) setDurationBounds(bounds);
+    });
+    return () => { cancelled = true; };
+  }, [activeModel]);
 
-      setBatchInfo({ active: true, type: frameType, total: targetShots.length, completed: 0 });
+  // 边界就绪后把超出模型能力范围的存量时长一次性拉回合法区间（幂等：拉回后不再触发）
+  useEffect(() => {
+    if (!durationBounds) return;
+    const { min, max } = durationBounds;
+    const clamp = (d: number) => Math.round(Math.min(Math.max(d, min), max) * 10) / 10;
+    if (!data.shots.some((s) => clamp(s.duration) !== s.duration)) return;
+    const clampedShots = data.shots.map((s) => {
+      const d = clamp(s.duration);
+      if (d === s.duration) return s;
+      return { ...s, duration: d, paramValues: { ...(s.paramValues ?? {}), duration: d } };
+    });
+    onDataChange({ ...data, shots: clampedShots });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [durationBounds, data.shots, onDataChange]);
 
-      let completed = 0;
-      for (const shot of targetShots) {
-        if (abortRef.current?.signal.aborted) break;
-
-        try {
-          const { storageKey } = await generateFrame(shot, frameType, abortRef.current?.signal);
-          // 逐个更新节点数据
-          const updatedShots = data.shots.map((s) => {
-            if (s.id !== shot.id) return s;
-            return {
-              ...s,
-              [frameType === 'firstFrame' ? 'firstFrameKey' : 'lastFrameKey']: storageKey,
-            };
-          });
-          onDataChange({ ...data, shots: updatedShots });
-          completed += 1;
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') break;
-          console.error(`[WorkbenchSheet] 批量生成 ${frameType} 失败 (shot #${shot.number}):`, err);
-        }
-
-        setBatchInfo((prev) =>
-          prev ? { ...prev, completed } : null,
-        );
+  // 底部生成参数栏（NodeGenerateDock）配置回写：模型 + 参数值 → 镜头数据
+  // duration 双向同步的关键：参数面板改时长 → 写回 shot.duration → 轨道 clip 立即变长
+  const handleDockConfigChange = useCallback((_id: string, patch: Record<string, unknown>) => {
+    if (!currentShot) return;
+    const updates: Partial<WorkbenchShot> = {};
+    if (typeof patch.model === 'string') updates.model = patch.model;
+    if (patch.paramValues && typeof patch.paramValues === 'object') {
+      const merged = { ...(currentShot.paramValues ?? {}), ...(patch.paramValues as Record<string, unknown>) };
+      updates.paramValues = merged;
+      const d = merged.duration;
+      if (typeof d === 'number' && Number.isFinite(d) && d !== currentShot.duration) {
+        updates.duration = d;
       }
+    }
+    if (Object.keys(updates).length > 0) onUpdateShot(currentShot.id, updates);
+  }, [currentShot, onUpdateShot]);
 
-      setBatchInfo((prev) => (prev ? { ...prev, active: false } : null));
-    },
-    [data, onDataChange],
-  );
+  // 时间轴拖拽排序
+  const onReorder = useCallback((orderedIds: string[]) => {
+    const shotMap = new Map(data.shots.map((s) => [s.id, s]));
+    const reordered = orderedIds
+      .map((id, i) => {
+        const shot = shotMap.get(id);
+        return shot ? { ...shot, number: i + 1 } : null;
+      })
+      .filter(Boolean) as WorkbenchShot[];
+    onDataChange({ ...data, shots: reordered });
+  }, [data, onDataChange]);
 
   return (
     <div style={shellStyle}>
@@ -202,7 +250,6 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
           progressPercent={progressPercent}
           textColor={textColor}
           mutedColor={mutedColor}
-          cardBorder={cardBorder}
           isDark={isDark}
           onOpenFullscreen={openFullscreen}
           t={t}
@@ -213,17 +260,14 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
           progressPercent={progressPercent}
           textColor={textColor}
           mutedColor={mutedColor}
-          cardBorder={cardBorder}
           isDark={isDark}
           t={t}
         />
       ) : (
         <DoneState
           data={data}
-          progressPercent={progressPercent}
           textColor={textColor}
           mutedColor={mutedColor}
-          cardBorder={cardBorder}
           isDark={isDark}
           onOpenFullscreen={openFullscreen}
           t={t}
@@ -234,166 +278,102 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
           absolute 填满页签内容层(覆盖画布),数据(data.shots)与回调仍留在节点组件内 */}
       {tabActive && tabHost ? createPortal(
         <CanvasTabContentBoundary>
-        <div style={tabEmbeddedStyle(bgPage)}>
-          {/* 全屏顶部栏 */}
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            flexShrink: 0,
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '8px 16px',
-              borderBottom: `1px solid ${borderMuted}`,
-              background: isDark ? '#1b1b1b' : '#fafaf7',
-              gap: 8,
-            }}>
-              <Clapperboard size={18} color={textColor} />
-              <span style={{ fontSize: 14, fontWeight: 600, color: textColor }}>
-                {t('canvasNodes.stage.workbench')}
-              </span>
-              <div style={{ flex: 1 }} />
-              <span style={{ fontSize: 12, color: mutedColor }}>
-                {t('canvasNodes.workbenchShotCount', { count: data.shots.length })}
-                {data.totalDuration > 0 && ` · ${t('canvasNodes.workbenchTotalDuration', { duration: data.totalDuration })}`}
-              </span>
-              {/* 批量生成按钮 */}
-              <Tooltip title={t('canvasNodes.workbenchBatchFirstFrame')}>
-                <Button
-                  size="small"
-                  icon={<ImageIcon size={12} />}
-                  disabled={batchInfo?.active === true}
-                  loading={batchInfo?.active === true && batchInfo?.type === 'firstFrame'}
-                  onClick={() => handleBatchGenerate('firstFrame')}
-                >
-                  {t('canvasNodes.workbenchFirstFrame')}
-                </Button>
-              </Tooltip>
-              <Tooltip title={t('canvasNodes.workbenchBatchLastFrame')}>
-                <Button
-                  size="small"
-                  icon={<ImageIcon size={12} />}
-                  disabled={batchInfo?.active === true}
-                  loading={batchInfo?.active === true && batchInfo?.type === 'lastFrame'}
-                  onClick={() => handleBatchGenerate('lastFrame')}
-                >
-                  {t('canvasNodes.workbenchLastFrame')}
-                </Button>
-              </Tooltip>
-              {/* Plan#50:关闭统一走页签 X */}
-              <Button size="small" onClick={() => closeTab(myTabKey)}>
-                {t('common.close')}
-              </Button>
-            </div>
-            {/* 批量生成进度条 */}
-            {batchInfo?.active === true && (
-              <div style={{
-                padding: '4px 16px',
-                borderBottom: `1px solid ${borderMuted}`,
-                background: isDark ? '#1b1b1b' : '#fafaf7',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}>
-                <span style={{ fontSize: 11, color: mutedColor, whiteSpace: 'nowrap' }}>
-                  {t('canvasNodes.workbenchFrameProgress', {
-                    type: t(batchInfo.type === 'firstFrame' ? 'canvasNodes.workbenchFirstFrame' : 'canvasNodes.workbenchLastFrame'),
-                    completed: batchInfo.completed,
-                    total: batchInfo.total,
-                  })}
-                </span>
-                <Progress
-                  percent={batchInfo.total > 0 ? Math.round((batchInfo.completed / batchInfo.total) * 100) : 0}
-                  size="small"
-                  style={{ flex: 1, margin: 0, minWidth: 80 }}
-                  strokeColor={isDark ? '#60a5fa' : '#3b82f6'}
-                  trailColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
-                />
-              </div>
-            )}
-          </div>
+        {/* 2026-08-31：出片页签整体拦截拖拽——资产拖入导入当前镜头 references，不穿透落画布 */}
+        <div
+          style={tabEmbeddedStyle(bgPage, isDark, OPENCUT_BG)}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const files = Array.from(e.dataTransfer.files ?? []);
+            if (files.length > 0) {
+              void (async () => {
+                for (const f of files) await uploadFileToCurrentShot(f);
+              })();
+            }
+          }}
+        >
+          {/* 2026-08-31 用户拍板：首帧/尾帧按钮及其所在 div 整块移除——
+              标题栏此前已删，页签自带标题，顶部不再渲染任何栏 */}
 
-          {/* 全屏主体：左侧镜头列表 + 右侧轨道区占位 */}
-          <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
-            {/* 左侧镜头列表 */}
-            <div style={{
-              width: 220,
-              flexShrink: 0,
-              borderRight: `1px solid ${borderMuted}`,
-              background: bgCanvas,
-              overflow: 'auto',
-              padding: '8px 0',
-            }}>
-              <div style={{ padding: '4px 12px 8px', fontSize: 11, fontWeight: 600, color: mutedColor, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <List size={12} />
-                {t('canvasNodes.workbenchShotCount', { count: data.shots.length })}
-              </div>
-              {data.shots.map((shot) => (
-                <div
-                  key={shot.id}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: 12,
-                    color: textColor,
-                    borderBottom: `1px solid ${cardBorder}`,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                    cursor: 'default',
-                  }}
-                >
-                  {/* 第一行：编号 + 描述 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Tag
-                      style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px', flexShrink: 0 }}
-                      color={shot.status === 'done' ? 'green' : shot.status === 'failed' ? 'red' : 'default'}
-                    >
-                      #{shot.number}
-                    </Tag>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>
-                      {shot.description || shot.shotType}
-                    </span>
-                  </div>
-                  {/* 第二行：首帧/尾帧缩略图 + 生成按钮 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 2 }}>
-                    {/* 首帧 */}
-                    <FrameThumb
-                      shot={shot}
-                      frameType="firstFrame"
-                      textColor={textColor}
-                      mutedColor={mutedColor}
-                      cardBorder={cardBorder}
-                      isDark={isDark}
-                      isGenerating={isGenerating(shot.id, 'firstFrame')}
-                      onGenerate={() => handleGenerateFrame(shot.id, 'firstFrame')}
-                      t={t}
-                    />
-                    {/* 尾帧 */}
-                    <FrameThumb
-                      shot={shot}
-                      frameType="lastFrame"
-                      textColor={textColor}
-                      mutedColor={mutedColor}
-                      cardBorder={cardBorder}
-                      isDark={isDark}
-                      isGenerating={isGenerating(shot.id, 'lastFrame')}
-                      onGenerate={() => handleGenerateFrame(shot.id, 'lastFrame')}
-                      t={t}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* 右侧轨道区 */}
-            <WorkbenchTrack
-              shots={data.shots}
-              timeScale={timeScale}
-              onTimeScaleChange={setTimeScale}
+          {/* 全屏主体：OpenCut 五区生产台布局 */}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <StoryboardMergedTab
               theme={theme}
               isDark={isDark}
-              t={t}
+              // 出片工作台无"主体资产"语义 → 不渲染左侧资产 sidebar（含拖拽分隔条）
+              showAssetSidebar={false}
+              entities={(data.entities ?? []) as StoryboardEntity[]}
+              // 当前镜头引用主体 → 提示词区上方占位展示(2026-08-31 用户需求)
+              promptSubjectChips={shotSubjects}
+              assetPanelProps={{
+                entities: (data.entities ?? []) as StoryboardEntity[],
+              }}
+              videoStageProps={{
+                videoStorageKey: activeVideo?.status === 'done' ? activeVideo?.storageKey : undefined,
+                videoStatus: currentShot?.generated ? 'done' : (activeVideo?.status ?? 'idle'),
+                videoProgress: activeVideo?.progress ?? 0,
+                videoError: activeVideo?.error,
+                emptyLabel: t('storyboard.videoEmpty', '本镜尚无视频，点击底部「生成视频」'),
+              }}
+              alternativeVideosProps={{
+                videos: (currentShot?.videos ?? []) as any,
+                activeVideoIndex: currentShot?.activeVideoIndex ?? 0,
+                onActivate: (idx) => currentShot && onUpdateShot(currentShot.id, { activeVideoIndex: idx }),
+                onRetry: () => {},
+                onRemove: (idx) => {
+                  if (!currentShot?.videos) return;
+                  const newVideos = currentShot.videos.filter((_, i) => i !== idx);
+                  onUpdateShot(currentShot.id, { videos: newVideos });
+                },
+              }}
+              timelineProps={{
+                shots: timelineData,
+                activeShotId: currentShot?.id,
+                pixelsPerSecond: pps,
+                onPixelsPerSecondChange: setPps,
+                onSelectShot: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
+                onReorder,
+                // clip 长度上限直接取模型模板真实值（无模板时组件内走内置兜底）
+                minClipDuration: durationBounds?.min,
+                maxClipDuration: durationBounds?.max,
+                onTrim: (shotId, newDuration) => {
+                  const shot = data.shots.find((s) => s.id === shotId);
+                  if (!shot) return;
+                  // 反向同步：拖动 clip → 回写 paramValues.duration，参数面板同步刷新
+                  onUpdateShot(shotId, {
+                    duration: newDuration,
+                    paramValues: { ...(shot.paramValues ?? {}), duration: newDuration },
+                  });
+                },
+                playheadTime: playhead,
+                onPlayheadTimeChange: setPlayhead,
+                onClipDoubleClick: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
+              }}
+              // 征集 #115:底部提示词栏 = 视频节点正下方同款 NodeGenerateDock(inline + 无圆角 + 常驻展开)
+              promptDockProps={{
+                nodeId: currentShot ? `${nodeId}:${currentShot.id}` : nodeId,
+                nodeType: 'video',
+                store,
+                // 模型与参数值受控于 shot 数据 → 参数面板与轨道 clip 双向同步
+                initialPrompt: currentShot?.imagePrompt ?? '',
+                isRunning: activeVideo?.status === 'generating',
+                model: currentShot?.model,
+                paramValues: (currentShot?.paramValues ?? {}) as Record<string, any>,
+                onPromptChange: (_id, prompt) => currentShot && onUpdateShot(currentShot.id, { imagePrompt: prompt }),
+                // 契约参数/模型:patch 增量合并后落在当前镜头;
+                // duration 双向同步关键点——参数面板改时长 → 回写 shot.duration → 轨道 clip 立即变长
+                onConfigChange: handleDockConfigChange,
+                // 参考素材受控模式:数据存 WorkbenchShot.references(随 node.data 云同步,协作可见)
+                controlledReferences: currentShot ? {
+                  items: currentShot.references ?? [],
+                  onChange: (items) => onUpdateShot(currentShot.id, { references: items }),
+                } : undefined,
+                // TODO(征集 #115 后续):接入单镜视频生成链路(当前 workbench 仅有首帧/尾帧 generateFrame),
+                // UI 先按用户要求对齐 dock 同款,生成动作待下一轮接线。
+                onGenerate: () => {},
+                onStop: () => {},
+              }}
             />
           </div>
         </div>
@@ -416,13 +396,12 @@ function IdleState({ mutedColor, t }: { mutedColor: string; t: (key: string, opt
   );
 }
 
-/** ready 态：摘要卡片 + 进度条 + 进入工作台按钮 */
+/** ready 态：摘要 + 进度条 + 进入工作台按钮（无卡片外壳，纯居中堆叠） */
 function ReadyState({
   data,
   progressPercent,
   textColor,
   mutedColor,
-  cardBorder,
   isDark,
   onOpenFullscreen,
   t,
@@ -431,37 +410,24 @@ function ReadyState({
   progressPercent: number;
   textColor: string;
   mutedColor: string;
-  cardBorder: string;
   isDark: boolean;
   onOpenFullscreen: () => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }): ReactElement {
   return (
     <div style={centerStyle}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 12,
-        padding: 20,
-        borderRadius: 8,
-        border: `1px solid ${cardBorder}`,
-        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-        minWidth: 200,
-      }}>
-        <Clapperboard size={28} color={textColor} strokeWidth={1.5} />
+      <div style={stackStyle}>
+        <Clapperboard size={24} color={textColor} strokeWidth={1.5} />
         <span style={{ fontSize: 13, fontWeight: 600, color: textColor }}>{t('canvasNodes.workbenchReady')}</span>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: mutedColor }}>
-          <span>{t('canvasNodes.workbenchShotCount', { count: data.shots.length })}</span>
-          {data.totalDuration > 0 && (
-            <span>{t('canvasNodes.workbenchTotalDuration', { duration: data.totalDuration })}</span>
-          )}
-        </div>
+        <span style={{ fontSize: 11, color: mutedColor }}>
+          {t('canvasNodes.workbenchShotCount', { count: data.shots.length })}
+          {data.totalDuration > 0 && ` · ${t('canvasNodes.workbenchTotalDuration', { duration: data.totalDuration })}`}
+        </span>
         <Progress
           percent={progressPercent}
           size="small"
-          style={{ width: '100%', margin: 0 }}
-          strokeColor={isDark ? '#60a5fa' : '#3b82f6'}
+          style={{ width: '100%', maxWidth: 160, margin: 0 }}
+          strokeColor={OPENCUT_ACCENT}
           trailColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
         />
         <Button
@@ -477,13 +443,12 @@ function ReadyState({
   );
 }
 
-/** generating 态：进度条 + 生成中文案 */
+/** generating 态：进度条 + 生成中文案（无卡片外壳） */
 function GeneratingState({
   data,
   progressPercent,
   textColor,
   mutedColor,
-  cardBorder,
   isDark,
   t,
 }: {
@@ -491,30 +456,19 @@ function GeneratingState({
   progressPercent: number;
   textColor: string;
   mutedColor: string;
-  cardBorder: string;
   isDark: boolean;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }): ReactElement {
   return (
     <div style={centerStyle}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 12,
-        padding: 20,
-        borderRadius: 8,
-        border: `1px solid ${cardBorder}`,
-        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-        minWidth: 200,
-      }}>
-        <Clapperboard size={28} color={textColor} strokeWidth={1.5} />
+      <div style={stackStyle}>
+        <Clapperboard size={24} color={textColor} strokeWidth={1.5} />
         <span style={{ fontSize: 13, fontWeight: 600, color: textColor }}>{t('canvasNodes.workbenchGenerating')}</span>
         <Progress
           percent={progressPercent}
           size="small"
-          style={{ width: '100%', margin: 0 }}
-          strokeColor={isDark ? '#60a5fa' : '#3b82f6'}
+          style={{ width: '100%', maxWidth: 160, margin: 0 }}
+          strokeColor={OPENCUT_ACCENT}
           trailColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
         />
         <span style={{ fontSize: 11, color: mutedColor }}>
@@ -525,53 +479,38 @@ function GeneratingState({
   );
 }
 
-/** done 态：完成摘要 + 播放按钮 */
+/** done 态：完成摘要 + 进入工作台按钮（无卡片外壳） */
 function DoneState({
   data,
   textColor,
   mutedColor,
-  cardBorder,
   isDark,
   onOpenFullscreen,
   t,
 }: {
   data: WorkbenchNodeData;
-  progressPercent: number;
   textColor: string;
   mutedColor: string;
-  cardBorder: string;
   isDark: boolean;
   onOpenFullscreen: () => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }): ReactElement {
   return (
     <div style={centerStyle}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 12,
-        padding: 20,
-        borderRadius: 8,
-        border: `1px solid ${cardBorder}`,
-        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-        minWidth: 200,
-      }}>
-        <Clapperboard size={28} color={textColor} strokeWidth={1.5} />
+      <div style={stackStyle}>
+        <Clapperboard size={24} color={textColor} strokeWidth={1.5} />
         <span style={{ fontSize: 13, fontWeight: 600, color: textColor }}>{t('canvasNodes.workbenchDone')}</span>
+        <span style={{ fontSize: 11, color: mutedColor }}>
+          {t('canvasNodes.workbenchShotCount', { count: data.shots.length })}
+          {data.totalDuration > 0 && ` · ${t('canvasNodes.workbenchTotalDuration', { duration: data.totalDuration })}`}
+        </span>
         <Progress
           percent={100}
           size="small"
-          style={{ width: '100%', margin: 0 }}
+          style={{ width: '100%', maxWidth: 160, margin: 0 }}
           strokeColor={isDark ? '#22c55e' : '#16a34a'}
           trailColor={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}
         />
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: mutedColor }}>
-          <span>{t('canvasNodes.workbenchShotCount', { count: data.shots.length })}</span>
-          {data.totalDuration > 0 && (
-            <span>{t('canvasNodes.workbenchTotalDuration', { duration: data.totalDuration })}</span>
-          )}
-        </div>
         <Button
           type="primary"
           size="small"
@@ -585,122 +524,7 @@ function DoneState({
   );
 }
 
-// ===== 首帧/尾帧缩略图组件 =====
 
-interface FrameThumbProps {
-  shot: WorkbenchShot;
-  frameType: 'firstFrame' | 'lastFrame';
-  textColor: string;
-  mutedColor: string;
-  cardBorder: string;
-  isDark: boolean;
-  isGenerating: boolean;
-  onGenerate: () => void;
-  t: (key: string, opts?: Record<string, unknown>) => string;
-}
-
-/** 单个帧的缩略图 + 生成按钮（小方块） */
-function FrameThumb({
-  shot,
-  frameType,
-  textColor,
-  mutedColor,
-  cardBorder,
-  isDark,
-  isGenerating: generating,
-  onGenerate,
-  t,
-}: FrameThumbProps): ReactElement {
-  const storageKey = frameType === 'firstFrame' ? shot.firstFrameKey : shot.lastFrameKey;
-  const label = frameType === 'firstFrame' ? t('canvasNodes.workbenchFirstFrame') : t('canvasNodes.workbenchLastFrame');
-  const thumbSrc = storageKey ? getResourceUrl(storageKey, 'preview') : undefined;
-
-  const thumbSize = 28;
-
-  if (generating) {
-    return (
-      <Tooltip title={`${label} ${t('canvasNodes.workbenchFrameGenerating')}`}>
-        <div
-          style={{
-            width: thumbSize,
-            height: thumbSize,
-            borderRadius: 4,
-            border: `1px solid ${cardBorder}`,
-            background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'wait',
-          }}
-        >
-          <Spin size="small" />
-        </div>
-      </Tooltip>
-    );
-  }
-
-  if (thumbSrc) {
-    return (
-      <Tooltip title={label}>
-        <div
-          style={{
-            width: thumbSize,
-            height: thumbSize,
-            borderRadius: 4,
-            border: `1px solid ${cardBorder}`,
-            overflow: 'hidden',
-            flexShrink: 0,
-            background: isDark ? '#000' : '#fff',
-          }}
-        >
-          <img
-            src={thumbSrc}
-            alt={label}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-        </div>
-      </Tooltip>
-    );
-  }
-
-  // 无图片：显示生成按钮
-  return (
-    <Tooltip title={label}>
-      <button
-        type="button"
-        onClick={onGenerate}
-        style={{
-          width: thumbSize,
-          height: thumbSize,
-          borderRadius: 4,
-          border: `1px dashed ${mutedColor}`,
-          background: 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          padding: 0,
-          color: mutedColor,
-          opacity: 0.6,
-          transition: 'opacity 0.15s, border-color 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.borderColor = textColor;
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.opacity = '0.6';
-          e.currentTarget.style.borderColor = mutedColor;
-        }}
-      >
-        <ImageIcon size={12} />
-      </button>
-    </Tooltip>
-  );
-}
 
 // ===== 样式 =====
 
@@ -724,11 +548,23 @@ const centerStyle: CSSProperties = {
   height: '100%',
 };
 
+/** 节点内联态内容堆叠（无卡片外壳：不画边框/底色/内边距） */
+const stackStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  maxWidth: 200,
+  padding: '0 12px',
+  boxSizing: 'border-box',
+};
+
 /** Plan#50:页签内嵌容器(absolute 填满页签内容层,替代原 fixed 全屏 overlay) */
-const tabEmbeddedStyle = (background: string): CSSProperties => ({
+const tabEmbeddedStyle = (background: string, isDark: boolean, opencutBg: string): CSSProperties => ({
   position: 'absolute',
   inset: 0,
   display: 'flex',
   flexDirection: 'column',
-  background,
+  background: isDark ? opencutBg : background,
 });

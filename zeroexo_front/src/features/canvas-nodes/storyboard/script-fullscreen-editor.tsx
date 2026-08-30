@@ -19,7 +19,7 @@
  */
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileUp, BookOpen, ListOrdered, Eye, EyeOff, ArrowUpDown, GripVertical } from 'lucide-react';
+import { CircleX, FileUp, BookOpen, ListOrdered, Eye, EyeOff, ArrowUpDown, GripVertical } from 'lucide-react';
 import { App, Button, ConfigProvider, Tooltip, Input, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme, AnimatedThemeToggler } from '@zeroexo/plugin-theme';
@@ -513,15 +513,25 @@ export function ScriptFullscreenEditor({
               />
             </span>
           </Tooltip>
-          {/* Plan#50:embedded(页签)模式隐藏自带关闭按钮——关闭统一走页签 X */}
+          {/* Plan#50:embedded(页签)模式隐藏自带关闭按钮——关闭统一走页签 X。
+              尺寸/样式与左侧 AnimatedThemeToggler 完全对齐: 20x20 容器。
+              用 CircleX(圆+叉)而非细线 X,与太阳(圆+射线)在视觉重量上对称——
+              否则细 X vs 圆 sun 看起来一个轻一个重,即便容器对齐也不"水平对齐" */}
           {!embedded && (
-            <Button
-              type="text"
-              size="small"
-              icon={<X size={15} />}
-              onClick={onClose}
-              style={{ ...toolBtnStyle, color: textColor }}
-            />
+            <Tooltip title={t('hierarchy.close')}>
+              <button
+                type="button"
+                aria-label={t('hierarchy.close')}
+                onClick={onClose}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 20, height: 20, padding: 0, border: 'none', borderRadius: 6,
+                  background: 'transparent', color: textColor, cursor: 'pointer',
+                }}
+              >
+                <CircleX size={14} />
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -568,8 +578,8 @@ export function ScriptFullscreenEditor({
           </div>
         </div>
 
-        {/* 剧集列表 */}
-        <div style={{ width: episodeListWidth, flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* 剧集列表(paddingBottom 10 与左侧 editorArea 对齐底部新增按钮基线) */}
+        <div style={{ width: episodeListWidth, flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column', paddingBottom: 10 }}>
           <EpisodeList
             episodes={normalizedEpisodes}
             activeEpisodeId={activeEpisodeId}

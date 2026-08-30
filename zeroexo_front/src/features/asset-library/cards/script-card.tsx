@@ -110,7 +110,7 @@ function ScriptCardGrid({
           justifyContent: 'center',
         }}
       >
-        <BookOpen size={40} color={theme.toolbar.textMuted} />
+        <BookOpen size={18} color={theme.toolbar.textMuted} />
         {/* 集数标签 */}
         {episodeCount > 0 && (
           <span style={{
@@ -237,7 +237,7 @@ function ScriptCardList({
         style={{ width: '40%', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
         onClick={onClick}
       >
-        <BookOpen size={14} color={theme.toolbar.textMuted} />
+        <BookOpen size={18} color={theme.toolbar.textMuted} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {asset.title}
         </span>
@@ -280,3 +280,6 @@ registerCard('script', {
   renderGrid: ScriptCardGrid,
   renderList: ScriptCardList,
 });
+
+// 2026-08-30:导出网格渲染器,供画布资产抽屉(canvas-assets/ScriptGroup)复用同款卡片样式
+export { ScriptCardGrid };

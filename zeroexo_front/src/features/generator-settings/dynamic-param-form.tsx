@@ -53,6 +53,9 @@ export interface ChannelConstraints {
     maxReferenceImages?: number;
     maxReferenceVideos?: number;
     maxReferenceAudios?: number;
+    /** 生成时长下限/上限（秒）；视频模型模板必填，时间轴 clip 长度据此裁剪 */
+    minDuration?: number;
+    maxDuration?: number;
   };
 }
 
@@ -562,6 +565,30 @@ function matchModelParameters(
     }
   }
   return { parameters: [] };
+}
+
+/**
+ * 读取模型模板中 duration 参数的**真实边界**（2026-08-31 出片时间轴接入）
+ *
+ * clip 长度上限必须由模型模板决定，禁止前端硬编码：
+ * 优先 channelConstraints.bounds.minDuration/maxDuration，回落 duration 参数的 min/max。
+ * 模板未命中（模型无模板 / 接口失败）返回 null，调用方走内置兜底。
+ */
+export async function loadModelDurationBounds(
+  generationMode: string,
+  model: string,
+): Promise<{ min: number; max: number } | null> {
+  if (!model) return null;
+  const templates = await loadTemplates(generationMode);
+  if (templates.length === 0) return null;
+  const { parameters, constraints } = matchModelParameters(model, templates);
+  const boundsMin = constraints?.bounds?.minDuration;
+  const boundsMax = constraints?.bounds?.maxDuration;
+  const durationParam = parameters.find((p) => p.name === 'duration');
+  const min = typeof boundsMin === 'number' ? boundsMin : durationParam?.min;
+  const max = typeof boundsMax === 'number' ? boundsMax : durationParam?.max;
+  if (typeof min !== 'number' || typeof max !== 'number' || max <= min) return null;
+  return { min, max };
 }
 
 /** 参数显示排除列表(与 Admin 一致;resolution/aspectRatio 仅在存在 size 渲染器时排除)。

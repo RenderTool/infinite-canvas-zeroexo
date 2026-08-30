@@ -10,7 +10,7 @@
  * 打开性能（Plan#48-T6 重带）：动画期间延迟挂载资产库页，避免与滑入动画同帧竞争。
  */
 
-import { useState, useLayoutEffect, useEffect, useMemo } from 'react';
+import { useState, useLayoutEffect, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
@@ -18,8 +18,9 @@ import type { ReactGraphStore } from '@zeroexo/plugin-render-react';
 import { useHierarchyPanelProps } from '@zeroexo/plugin-group';
 import type { GroupPlugin } from '@zeroexo/plugin-group';
 import type { ThemeConfig } from '@zeroexo/shared';
-import { AssetLibraryPage } from '@/features/asset-library/asset-library-page.js';
-import type { HierarchyLibraryItem } from '@/features/asset-library/types.js';
+// 2026-08-30 用户拍板:画布资产抽屉与主页资产库拆为两套独立架构(抽屉用 CanvasAssetsPanel)
+import { CanvasAssetsPanel } from '@/features/canvas-assets/index.js';
+import { EDITOR_ICONS } from '@/pages/editor/editor-canvas/icons.js';
 
 export interface HierarchyPanelSidebarProps {
   closing: boolean;
@@ -39,7 +40,8 @@ export interface HierarchyPanelSidebarProps {
 }
 
 // 征集 #87 验收轮七:抽屉加宽至 450(容纳主页资产库同款卡片布局)
-const PANEL_WIDTH = 450;
+// 2026-08-30 用户拍板:PC 端抽屉尺寸减少 50px(450 → 400)
+const PANEL_WIDTH = 400;
 // 抽屉式动画:统一 0.35s cubic-bezier(0.22, 1, 0.36, 1),展开收起同节奏
 const DRAWER_TRANSITION = '0.35s cubic-bezier(0.22, 1, 0.36, 1)';
 
@@ -69,22 +71,6 @@ export function HierarchyPanelSidebar({
     const timer = window.setTimeout(() => setContentReady(true), 420);
     return () => window.clearTimeout(timer);
   }, [closing, expanded, contentReady]);
-
-  // 征集 #87 验收轮九:画布节点 → 层级分组条目(平铺;含媒体节点封面所需的 storageKey/content)
-  const hierarchyItems = useMemo<HierarchyLibraryItem[]>(() => props.tree.map((item) => {
-    const n = item.node;
-    const full = store.getNode(n.id);
-    const d = full?.data as Record<string, unknown> | undefined;
-    const title = n.title?.trim()
-      || t(`nodeTypes.${n.type.replace('ai.', '')}`, { defaultValue: n.type });
-    return {
-      id: n.id,
-      title,
-      nodeType: n.type,
-      storageKey: typeof d?.storageKey === 'string' ? d.storageKey : undefined,
-      content: typeof d?.content === 'string' ? d.content : undefined,
-    };
-  }), [props.tree, store, t]);
 
   const width = closing ? 0 : expanded ? PANEL_WIDTH : 0;
   const opacity = closing ? 0 : expanded ? 1 : 0;
@@ -116,17 +102,13 @@ export function HierarchyPanelSidebar({
         pointerEvents: closing || !expanded ? 'none' : undefined,
         transition: `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
       };
-  // 抽屉底色与画布主题色一致(征集 #92 拍板)→ 必须靠边缘与画布区分。
-  // 2026-08-29 用户反馈「PC 上根本看不到阴影」：抽屉推开画布后紧贴画布，
-  // box-shadow 是画在元素外部的投影，右侧投影全部落进不透明画布区域，被盖住。
-  // 故 PC 端改用 border-right（边框绘制在元素内部，永远可见）。
-  const drawerBorder = theme.mode === 'dark'
-    ? 'rgba(255,255,255,0.12)'
-    : 'rgba(0,0,0,0.16)';
+  // 抽屉底色与画布主题色一致(征集 #92 拍板)。
+  // 2026-08-31 用户拍板：PC 资产抽屉去掉 border-right，仅保留移动端同款阴影。
   const innerStyle: CSSProperties = (modal || overlay)
     ? {
         width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
+        // 2026-08-31：全站统一画布背景色
         overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
@@ -138,20 +120,22 @@ export function HierarchyPanelSidebar({
     : {
         width: PANEL_WIDTH, height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
+        // 2026-08-31：全站统一画布背景色
         overflow: 'hidden', backgroundColor: theme.canvas.background,
         color: theme.toolbar.text,
         transform: translate3d,
-        transition: `transform ${DRAWER_TRANSITION}`,
-        // PC 端:右边框与画布区分(内部边框不受画布遮挡),暗色用亮边、亮色用暗边
-        borderRight: expanded ? `1px solid ${drawerBorder}` : 'none',
+        transition: `transform ${DRAWER_TRANSITION}, box-shadow ${DRAWER_TRANSITION}`,
+        // 2026-08-31 用户拍板：PC 资产抽屉去掉 border-right，仅保留移动端同款阴影
+        boxShadow: expanded ? '3px 0 16px rgba(0,0,0,0.35)' : 'none',
         willChange: 'transform',
       };
 
   return (
     <div style={outerStyle}>
       <div style={innerStyle}>
-        {/* 关闭按钮(桌面端/覆盖模式悬浮右上角;modal 模式由外部外壳提供关闭入口) */}
-        {(!modal || overlay) && onClose && (
+        {/* 关闭按钮(2026-08-31 用户拍板:仅移动端抽屉(覆盖模式)显示;
+            PC 端去掉——其开合由顶栏「资产库」开关控制;modal 模式由外部外壳提供关闭入口) */}
+        {overlay && onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -159,24 +143,49 @@ export function HierarchyPanelSidebar({
             title={t('hierarchy.close')}
             style={{
               position: 'absolute', top: 8, right: 8, zIndex: 20,
-              width: 24, height: 24, border: 'none', background: 'transparent',
+              width: 32, height: 32, border: 'none', background: 'transparent',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: theme.toolbar.text, opacity: 0.5,
-              padding: 0, borderRadius: 4, transition: 'opacity 0.15s, background 0.15s',
+              cursor: 'pointer', color: theme.toolbar.text,
+              padding: 0, borderRadius: 6, transition: 'background 0.15s',
             }}
+            onMouseEnter={(e) => {
+              const isDark = theme.mode === 'dark';
+              e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
+            }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <X size={14} />
+            <X size={16} />
+          </button>
+        )}
+        {/* 收起按钮(2026-08-31 用户拍板:PC 内联抽屉要「收起」入口,箭头而非叉号。
+            此前 PC 端无任何收起控件——只能回顶栏「资产库」开关切换,用户在抽屉里收不回去) */}
+        {!modal && !overlay && onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('hierarchy.collapse', '收起')}
+            title={t('hierarchy.collapse', '收起')}
+            style={{
+              position: 'absolute', top: 8, right: 8, zIndex: 20,
+              width: 28, height: 28, border: 'none', background: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: theme.toolbar.text,
+              padding: 0, borderRadius: 6, transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              const isDark = theme.mode === 'dark';
+              e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
+            }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <EDITOR_ICONS.collapseLeft size={16} />
           </button>
         )}
         {/* 征集 #87 验收轮九/十:内嵌主页资产库同款页面;层级分组置顶且默认激活;
             层级分组 = 原树形列表(层级专属),其余分组 = 网格卡片 */}
         {contentReady ? (
-          <AssetLibraryPage
-            forceMobile
-            gridColumns={2}
-            embeddedInCanvas
-            defaultGroup="hierarchy"
-            hierarchyItems={hierarchyItems}
+          <CanvasAssetsPanel
+            theme={theme}
             hierarchyListView={{
               store,
               data: props,

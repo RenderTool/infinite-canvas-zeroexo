@@ -208,7 +208,7 @@ export function AiInputBar({
               position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 10,
               display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: '100%',
               padding: 10, borderRadius: 10,
-              background: isDark ? '#1c1917' : '#ffffff',
+              background: isDark ? theme.canvas.background : '#ffffff',
               border: `1px solid ${border}`,
               boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
             }}>

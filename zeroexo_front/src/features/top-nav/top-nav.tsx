@@ -102,8 +102,8 @@ export function TopNav({ activeRoute, onNavigate }: TopNavProps): React.ReactEle
         .zeroexo-topnav .ant-menu-horizontal > .ant-menu-item {
           background: transparent !important;
           color: ${theme.toolbar.textMuted} !important;
-          height: 54px !important;
-          line-height: 54px !important;
+          height: 45px !important;
+          line-height: 45px !important;
         }
         .zeroexo-topnav .ant-menu-horizontal > .ant-menu-item:hover {
           color: ${theme.toolbar.text} !important;
@@ -125,7 +125,7 @@ export function TopNav({ activeRoute, onNavigate }: TopNavProps): React.ReactEle
         /* Dropdown/Popover 弹出层背景颜色(全局,因为 antd 渲染在 body 层) */
         .ant-dropdown .ant-dropdown-menu,
         .ant-popover .ant-popover-inner {
-          background: ${isDark ? '#1c1917' : '#ffffff'} !important;
+          background: ${isDark ? theme.canvas.background : '#ffffff'} !important;
         }
 
         /* 抽屉内 Inline Menu 背景透明(继承抽屉背景色) */
@@ -316,7 +316,7 @@ function headerStyle(theme: { toolbar: { background: string; border: string } })
     position: 'sticky',
     top: 0,
     zIndex: 20,
-    height: 54,
+    height: 45,
     flexShrink: 0,
     display: 'flex',
     alignItems: 'center',
@@ -357,8 +357,8 @@ const rightSectionStyle: CSSProperties = {
 const menuStyle: CSSProperties = {
   borderBottom: 'none',
   background: 'transparent',
-  height: 54,
-  lineHeight: '54px',
+  height: 45,
+  lineHeight: '45px',
   marginLeft: 8,
   marginRight: 8,
 };
@@ -370,7 +370,7 @@ function brandStyle(theme: { toolbar: { text: string } }): CSSProperties {
     alignItems: 'center',
     gap: 10,
     cursor: 'pointer',
-    height: 54,
+    height: 45,
     userSelect: 'none',
     color: theme.toolbar.text,
   };

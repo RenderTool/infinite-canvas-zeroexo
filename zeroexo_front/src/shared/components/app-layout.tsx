@@ -11,8 +11,8 @@
  * - 渲染统一的 MobileNavButton(右上角)+ MobileNavDrawer(由 mobileNavDrawer prop 注入)
  * - 解决主页/创作/画布移动端 NAV 按钮位置不统一、主页不显示的问题
  *
- * 背景色精确匹配原始配色方案:
- * - 暗色: radial-gradient(ellipse at top, #211d1a 0%, canvas.background 50%)
+ * 背景色匹配配色方案:
+ * - 暗色: 全量画布背景色 canvas.background（2026-08-31 统一，无棕）
  * - 亮色: canvas.background
  *
  * 移动端防溢出:
@@ -53,8 +53,9 @@ export function AppLayout({
 }: AppLayoutProps): React.ReactElement {
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
+  // 2026-08-31 用户拍板：全站统一画布背景色（#11110f），无棕无黑折腾
   const bg = isDark
-    ? `radial-gradient(ellipse at top, #211d1a 0%, ${theme.canvas.background} 50%)`
+    ? `radial-gradient(ellipse at top, ${theme.canvas.background} 0%, ${theme.canvas.background} 50%)`
     : '#ffffff';
 
   return (

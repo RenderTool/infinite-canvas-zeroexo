@@ -86,6 +86,16 @@ export interface NodeLayerProps {
   mode?: 'select' | 'pan';
   /** 双击节点回调:缩放画布以聚焦该节点,传递实际尺寸(含 ext.defaultSize 回退) */
   onNodeDoubleClick?: (nodeId: string, width: number, height: number) => void;
+  /**
+   * culling 豁免白名单：这些节点**永不因视口外被裁剪**（始终渲染 DOM）。
+   *
+   * 必要性（2026-08-31 根治「缩放浏览器窗口 → 页签内容看不见」）：
+   * 应用层的剧本/分镜/出片节点通过 `createPortal` 把编辑器渲染到画布之外的页签内容层，
+   * 一旦节点被 culling 剔除，节点组件卸载 → portal 内容随之销毁 → 「页签在、内容空」。
+   * 窗口 resize 会改变 cullRect，节点随时可能被判为视口外。
+   * 因此承载页签内容的节点必须豁免裁剪（数量极小，无性能负担）。
+   */
+  pinnedNodeIds?: ReadonlySet<string>;
 }
 
 /** 单个节点项(P1-1: 改用 nodeId+store+useNodeById 订阅,避免全量 graph 订阅) */
@@ -499,6 +509,7 @@ export const NodeLayer = React.memo(function NodeLayer({
   onRenameFinish,
   mode,
   onNodeDoubleClick,
+  pinnedNodeIds,
 }: NodeLayerProps): React.ReactElement {
   const layerRef = useRef<HTMLDivElement>(null);
 
@@ -659,8 +670,14 @@ export const NodeLayer = React.memo(function NodeLayer({
     const candidateIds = store.getSpatialIndex().queryRect(
       cullRect.left, cullRect.top, cullRect.right, cullRect.bottom,
     );
-    return visibleNodes.filter((n) => candidateIds.has(n.id));
-  }, [cullRect, visibleNodes, store]);
+    // pinnedNodeIds 豁免：承载页签内容（portal）的节点永不裁剪，
+    // 否则节点组件卸载会连带销毁 portal 出去的编辑器内容（页签在、内容空）。
+    const pinned = pinnedNodeIds;
+    if (!pinned || pinned.size === 0) {
+      return visibleNodes.filter((n) => candidateIds.has(n.id));
+    }
+    return visibleNodes.filter((n) => candidateIds.has(n.id) || pinned.has(n.id));
+  }, [cullRect, visibleNodes, store, pinnedNodeIds]);
 
   return (
       <div

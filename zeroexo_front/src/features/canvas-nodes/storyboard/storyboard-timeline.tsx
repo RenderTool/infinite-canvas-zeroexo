@@ -8,17 +8,19 @@
  * 验收硬标准：带间距 clip + 外部 trim handle + 拖拽排序 + 选中高亮 +
  * 帧级水平缩放看清每一帧。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactElement, type CSSProperties } from 'react';
 
 // ===== 常量（对齐 workbench-track 视觉层 + freecut-main MINI 几何） =====
 
-const TRACK_HEIGHT = 44;
-const TRACK_GAP = 4;
+const TRACK_HEIGHT = 58;            // 对齐参考 AI Video Studio.html 的 clip 高度
 const RULER_HEIGHT = 24;
-const CLIP_GAP = 3;                 // clip 间距（验收硬标准）
-const TRIM_HANDLE_WIDTH = 6;        // 外部 trim handle
+const CLIP_GAP = 2;                 // 2026-08-31 用户拍板:占位节点(clip)之间稍微分开一点(2px 即可)
+const TRIM_HANDLE_WIDTH = 8;        // trim 命中区（须落在 clip 内部，clip 有 overflow:hidden）
 const CLIP_MIN_WIDTH = 10;
-const CLIP_BORDER_RADIUS = 6;
+const CLIP_BORDER_RADIUS = 4;
+/** clip 时长兜底边界（模型模板未命中时用；真实上限一律取模板 duration.max） */
+const DEFAULT_MIN_CLIP_DURATION = 0.5;
+const DEFAULT_MAX_CLIP_DURATION = 30;
 /** 默认像素比 60px/s（每帧 @30fps = 2px，帧级缩放上限可看清 1 帧 = 30px/s → 5px/帧） */
 const MIN_PIXELS_PER_SECOND = 4;
 const MAX_PIXELS_PER_SECOND = 240;
@@ -42,8 +44,18 @@ export interface StoryboardTimelineProps {
   onSelectShot: (shotId: string) => void;
   /** 拖拽排序：返回新顺序的 shot id 数组 */
   onReorder?: (orderedIds: string[]) => void;
-  /** trim：返回新的 duration（秒） */
+  /** trim：返回新的 duration（秒，已按模型上下限裁剪） */
   onTrim?: (shotId: string, newDuration: number) => void;
+  /**
+   * clip 时长下限（秒）——来自模型模板 duration 参数 min。
+   * 缺省回落 DEFAULT_MIN_CLIP_DURATION。
+   */
+  minClipDuration?: number;
+  /**
+   * clip 时长上限（秒）——来自模型模板 duration 参数 max（真实模型能力上限，非硬编码）。
+   * 缺省回落 DEFAULT_MAX_CLIP_DURATION。
+   */
+  maxClipDuration?: number;
   /** 播放头时间（秒，0 起步） */
   playheadTime?: number;
   onPlayheadTimeChange?: (time: number) => void;
@@ -84,25 +96,84 @@ function statusBgColor(status: TimelineClipData['status'], isDark: boolean): str
   }
 }
 
+/**
+ * 轨道外壳主题配色（2026-08-31 二次适配：底色统一用画布背景主题色，
+ * 分隔线/标尺线用中性 rgba 分割线——此前写死 #151617/#242629/#25272a 偏棕且不随主题）。
+ */
+function timelinePalette(isDark: boolean, canvasBg: string | undefined) {
+  const divider = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  return isDark
+    ? {
+        bg: canvasBg ?? '#11110f',
+        border: divider,
+        text: '#e6e7e9',
+        muted: '#9b9ea4',
+        rulerLine: divider,
+        empty: '#65686d',
+        playhead: '#f2f3f4',
+        clipSelected: '#f1f2f3',
+        clipText: '#ffffff',
+        trimHandle: 'rgba(241,242,243,0.9)',
+      }
+    : {
+        bg: '#ffffff',
+        border: 'rgba(0,0,0,0.10)',
+        text: '#1c1917',
+        muted: '#78716c',
+        rulerLine: 'rgba(0,0,0,0.12)',
+        empty: '#a8a29e',
+        playhead: '#18181b',
+        clipSelected: '#18181b',
+        clipText: '#1c1917',
+        trimHandle: 'rgba(24,24,27,0.85)',
+      };
+}
+
 export const StoryboardTimeline = memo(function StoryboardTimeline({
   shots, activeShotId, pixelsPerSecond, onPixelsPerSecondChange, onSelectShot, onReorder, onTrim,
+  minClipDuration, maxClipDuration,
   playheadTime = 0, onPlayheadTimeChange, onClipDoubleClick, t, theme, isDark,
 }: StoryboardTimelineProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [, setTrimId] = useState<string | null>(null);
   const [, setTrimSide] = useState<'left' | 'right' | null>(null);
+  /** 2026-08-31 主题适配：轨道外壳配色随明暗主题切换；暗色底色=画布背景色 */
+  const C = useMemo(
+    () => timelinePalette(isDark, theme?.canvas?.background),
+    [isDark, theme?.canvas?.background],
+  );
 
-  const textColor = theme.toolbar.text;
-  const mutedColor = theme.toolbar.textMuted;
-  const borderColor = isDark ? '#2e2e2e' : '#e5e5e5';
-  const trackBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)';
-  const rulerBg = isDark ? '#1b1b1b' : '#fafaf7';
-  const labelBg = isDark ? '#161412' : '#f5f5f4';
-  const playheadColor = theme.toolbar.accent ?? '#e94560';
+  // ===== 滚轮缩放（2026-08-31 用户要求：轨道支持鼠标滚动缩放）=====
+  // pps 用 ref 读取：监听只注册一次，避免每次缩放都重建 wheel 监听。
+  const ppsRef = useRef(pixelsPerSecond);
+  ppsRef.current = pixelsPerSecond;
+  const zoomBy = useCallback((factor: number) => {
+    const next = ppsRef.current * factor;
+    onPixelsPerSecondChange(
+      Math.round(Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, next)) * 10) / 10,
+    );
+  }, [onPixelsPerSecondChange]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent): void => {
+      // Shift + 滚轮 = 横向滚动（看远处镜头）；普通滚轮 / Ctrl(⌘) + 滚轮 = 缩放
+      if (e.shiftKey) {
+        el.scrollLeft += e.deltaY;
+        e.preventDefault();
+        return;
+      }
+      // 必须 preventDefault：Ctrl+滚轮 默认触发浏览器整页缩放，普通滚轮会触发外层滚动
+      e.preventDefault();
+      zoomBy(Math.exp(-e.deltaY * 0.0015));
+    };
+    // passive:false 才能 preventDefault（React onWheel 为 passive，无法阻止浏览器缩放）
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomBy]);
 
-  // clip 布局：带间距（CLIP_GAP），宽度 = duration × pixelsPerSecond
+  // clip 布局：宽度 = duration × pixelsPerSecond
   const clips = useMemo(() => {
     const arr: Array<{ id: string; left: number; width: number; data: TimelineClipData }> = [];
     let acc = 0;
@@ -123,9 +194,15 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const totalDuration = useMemo(() => shots.reduce((s, x) => s + x.duration, 0), [shots]);
 
   // ===== 帧级水平缩放（freecut-mini scrub 引擎：rAF + 节流） =====
+  // 2026-08-31 修复「时间预览线拖不动/不顺滑」：
+  // 1. 拖动中标记用 ref（此前用 isDraggingPlayhead state——handleMove 闭包捕获的是
+  //    pointerdown 那一帧的 false，rAF 循环第一帧就被短路退出 → 预览线根本不跟随）；
+  // 2. 标尺 rect 在按下时只取一次（此前每帧 getBoundingClientRect 强制布局回流）。
   const scrubThrottleRef = useRef(createScrubThrottleState());
   const pendingXRef = useRef<number | null>(null);
   const scrubRafRef = useRef<number | null>(null);
+  const draggingPlayheadRef = useRef(false);
+  const rulerRectRef = useRef<DOMRect | null>(null);
 
   const cancelScrubRaf = useCallback(() => {
     if (scrubRafRef.current !== null) { cancelAnimationFrame(scrubRafRef.current); scrubRafRef.current = null; }
@@ -146,34 +223,39 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
 
   const runScrubLoop = useCallback(() => {
     const clientX = pendingXRef.current;
-    const el = scrollRef.current;
-    if (!isDraggingPlayhead || clientX === null || !el) { scrubRafRef.current = null; return; }
-    const rulerEl = el.querySelector('[data-ruler]') as HTMLElement;
-    if (rulerEl) commitPlayheadFromX(clientX, rulerEl.getBoundingClientRect());
+    const rect = rulerRectRef.current;
+    if (!draggingPlayheadRef.current || clientX === null || !rect) { scrubRafRef.current = null; return; }
+    commitPlayheadFromX(clientX, rect);
     scrubRafRef.current = requestAnimationFrame(runScrubLoop);
-  }, [isDraggingPlayhead, commitPlayheadFromX]);
+  }, [commitPlayheadFromX]);
 
   const handleRulerClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
-    if (isDraggingPlayhead) return;
+    if (draggingPlayheadRef.current) return;
     commitPlayheadFromX(e.clientX, e.currentTarget.getBoundingClientRect());
-  }, [isDraggingPlayhead, commitPlayheadFromX]);
+  }, [commitPlayheadFromX]);
 
   const handlePlayheadDown = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDraggingPlayhead(true);
+    const rulerEl = scrollRef.current?.querySelector('[data-ruler]') as HTMLElement | null;
+    if (!rulerEl) return;
+    draggingPlayheadRef.current = true;
+    rulerRectRef.current = rulerEl.getBoundingClientRect();
+    pendingXRef.current = e.clientX;
+    scrubRafRef.current = requestAnimationFrame(runScrubLoop);
     const handleMove = (moveE: globalThis.MouseEvent) => {
       pendingXRef.current = moveE.clientX;
       if (scrubRafRef.current === null) scrubRafRef.current = requestAnimationFrame(runScrubLoop);
     };
     const handleUp = () => {
-      setIsDraggingPlayhead(false);
+      draggingPlayheadRef.current = false;
       cancelScrubRaf();
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('mousemove', handleMove, true);
+      window.removeEventListener('mouseup', handleUp, true);
     };
-    document.addEventListener('mousemove', handleMove);
-    document.addEventListener('mouseup', handleUp);
+    // window + capture：规避 CanvasTabContentBoundary 对冒泡阶段事件的阻断（与分割条同款）
+    window.addEventListener('mousemove', handleMove, true);
+    window.addEventListener('mouseup', handleUp, true);
   }, [cancelScrubRaf, runScrubLoop]);
 
   // ===== 拖拽排序（点击 clip 拖到另一 clip 位置） =====
@@ -230,22 +312,24 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       if (!trackEl) return;
       const rect = trackEl.getBoundingClientRect();
       const x = moveE.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
-      const time = Math.max(0, x / pixelsPerSecond);
+      // ⚠️ 全部换算到「秒」再比较（2026-08-31 修复：此前 prevEnd 是像素、time 是秒，
+      // 二者直接相减 → 右侧 trim 结果恒为负/被下限截断；左侧还把「像素-秒」当秒用且上限写死 10）
+      const timeSec = Math.max(0, x / pixelsPerSecond);
       const currentIdx = shots.findIndex((s) => s.id === id);
+      const curClip = clips[currentIdx];
+      if (!curClip) return;
       const prevClip = currentIdx > 0 ? clips[currentIdx - 1] : undefined;
-      const prevEnd = prevClip ? prevClip.left + prevClip.width : 0;
-      const nextClip = currentIdx < shots.length - 1 ? clips[currentIdx + 1] : undefined;
-      const maxDur = side === 'right'
-        ? totalWidth / pixelsPerSecond
-        : (nextClip ? nextClip.left - prevEnd - CLIP_GAP : 10);
-      const minDur = 0.5;
+      const prevEndSec = prevClip ? (prevClip.left + prevClip.width) / pixelsPerSecond : 0;
+      // 时长上限 = 模型模板真实上限（缺省兜底），左侧 trim 再叠加「不得越过上一 clip 右边缘」
+      const minDur = minClipDuration ?? DEFAULT_MIN_CLIP_DURATION;
+      const modelMax = maxClipDuration ?? DEFAULT_MAX_CLIP_DURATION;
       if (side === 'right') {
-        const dur = Math.min(Math.max(time - prevEnd, minDur), maxDur);
+        const dur = Math.min(Math.max(timeSec - prevEndSec, minDur), modelMax);
         onTrim?.(id, Math.round(dur * 10) / 10);
       } else {
-        const curClip = clips[currentIdx];
-        if (!curClip) return;
-        const dur = Math.min(Math.max((curClip.left + curClip.width) - time, minDur), 10);
+        const rightEdgeSec = (curClip.left + curClip.width) / pixelsPerSecond;
+        const spaceMax = Math.max(minDur, rightEdgeSec - prevEndSec);
+        const dur = Math.min(Math.max(rightEdgeSec - timeSec, minDur), Math.min(modelMax, spaceMax));
         onTrim?.(id, Math.round(dur * 10) / 10);
       }
     };
@@ -256,27 +340,42 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [shots, clips, pixelsPerSecond, totalWidth, onTrim]);
+  }, [shots, clips, pixelsPerSecond, minClipDuration, maxClipDuration, onTrim]);
 
-  // ===== 渲染标尺（workbench-track 视觉层） =====
+  // ===== 渲染标尺（对齐 AI Video Studio.html：底部分布时间标签 + 背景刻度线） =====
+  const formatTime = useCallback((s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  }, []);
   const renderRuler = useCallback(() => {
-    const marks: ReactElement[] = [];
-    const step = pixelsPerSecond >= 60 ? 1 : (pixelsPerSecond >= 20 ? 5 : 10);
+    const labels: ReactElement[] = [];
+    // 参考页面每 3 秒一个时间标签；缩放极大时切到 1 秒避免过密
+    const step = pixelsPerSecond > 100 ? 1 : 3;
     for (let s = 0; s <= Math.ceil(totalDuration); s += step) {
       const x = s * pixelsPerSecond;
-      const isLong = s % (step * 5) === 0;
       if (x > totalWidth * 1.5) break;
-      marks.push(
-        <div key={`ruler-${s}`} style={{ position: 'absolute', left: x, top: 0, width: 1, height: isLong ? RULER_HEIGHT : RULER_HEIGHT / 2, background: isLong ? (isDark ? '#57534e' : '#a8a29e') : (isDark ? '#3e3e3e' : '#d4d4d4'), pointerEvents: 'none' }} />,
+      labels.push(
+        <span
+          key={`ruler-label-${s}`}
+          style={{
+            position: 'absolute',
+            left: x,
+            bottom: 4,
+            fontSize: 8,
+            color: C.empty,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            userSelect: 'none',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {formatTime(s)}
+        </span>,
       );
-      if (isLong) {
-        marks.push(
-          <div key={`ruler-label-${s}`} style={{ position: 'absolute', left: x + 4, top: 3, fontSize: 10, color: mutedColor, pointerEvents: 'none', whiteSpace: 'nowrap', userSelect: 'none' }}>{s}s</div>,
-        );
-      }
     }
-    return marks;
-  }, [totalDuration, pixelsPerSecond, totalWidth, isDark, mutedColor]);
+    return labels;
+  }, [totalDuration, pixelsPerSecond, totalWidth, formatTime, C]);
 
   // ===== 缩放控件（workbench-track 视觉层） =====
   const handleZoomIn = useCallback(() => {
@@ -285,134 +384,127 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const handleZoomOut = useCallback(() => {
     onPixelsPerSecondChange(Math.max(pixelsPerSecond - 10, MIN_PIXELS_PER_SECOND));
   }, [pixelsPerSecond, onPixelsPerSecondChange]);
-  const handleSlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    onPixelsPerSecondChange(Number(e.target.value));
-  }, [onPixelsPerSecondChange]);
-
-  // ===== 渲染 =====
+  // ===== 渲染（对齐 AI Video Studio.html：暗色 toolbar + 刻度 ruler + 全高 playhead + 缩略图 clip） =====
   const totalTrackWidth = Math.max(totalWidth, 200);
+  const timecode = `${formatTime(playheadTime)} / ${formatTime(totalDuration)}`;
+  const zoomPercent = `${Math.round((pixelsPerSecond / 60) * 100)}%`;
+  const toolBtnStyle: CSSProperties = { height: 25, padding: '0 8px', border: 0, borderRadius: 5, background: 'transparent', color: C.muted, fontSize: 11, cursor: 'pointer' };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', background: trackBg, border: `1px solid ${borderColor}`, borderRadius: 8, overflow: 'hidden' }}>
-      {/* 标尺行 + 播放头 */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', background: C.bg, borderTop: `1px solid ${C.border}`, color: C.text, overflow: 'hidden', boxSizing: 'border-box' }}>
+      {/* Toolbar */}
+      <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 10px', borderBottom: `1px solid ${C.border}` }}>
+        <button type="button" onClick={handleZoomOut} style={toolBtnStyle}>−</button>
+        <button type="button" style={toolBtnStyle}>{zoomPercent}</button>
+        <button type="button" onClick={handleZoomIn} style={toolBtnStyle}>+</button>
+        <div style={{ margin: '0 auto', fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11 }}>{timecode}</div>
+        <span style={{ fontSize: 10, color: C.muted, marginLeft: 8, whiteSpace: 'nowrap', userSelect: 'none' }}>
+          {t('storyboard.timeline.wheelHint') || '滚轮缩放 · Shift+滚轮横向滚动'}
+        </span>
+      </div>
+      {/* Timeline body（ruler + track + playhead） */}
       <div
         ref={scrollRef}
-        data-ruler
-        onClick={handleRulerClick}
-        style={{ position: 'relative', height: RULER_HEIGHT, background: rulerBg, borderBottom: `1px solid ${borderColor}`, overflowX: 'hidden', overflowY: 'hidden', cursor: 'crosshair', flexShrink: 0 }}
+        data-timeline-body
+        style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', paddingLeft: 14 }}
       >
-        <div style={{ position: 'absolute', left: 0, top: 0, width: totalTrackWidth, height: RULER_HEIGHT }}>
+        {/* Ruler */}
+        <div
+          data-ruler
+          onClick={handleRulerClick}
+          style={{ position: 'relative', height: RULER_HEIGHT, borderBottom: `1px solid ${C.rulerLine}`, display: 'flex', alignItems: 'flexEnd', overflow: 'hidden', background: `repeating-linear-gradient(to right, transparent 0, transparent 49px, ${C.rulerLine} 50px)` }}
+        >
           {renderRuler()}
         </div>
-        {/* 播放头 */}
-        <div
-          onMouseDown={handlePlayheadDown}
-          style={{ position: 'absolute', left: playheadTime * pixelsPerSecond, top: 0, width: 2, height: RULER_HEIGHT, background: playheadColor, cursor: 'ew-resize', zIndex: 5 }}
-        >
-          <div style={{ position: 'absolute', left: -4, top: 0, width: 10, height: 10, background: playheadColor, borderRadius: '0 0 4px 4px', transform: 'rotate(45deg)', transformOrigin: 'top center' }} />
-        </div>
-      </div>
-      {/* 轨道区 */}
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {/* Track area */}
         <div
           data-track-area
-          style={{ position: 'relative', height: TRACK_HEIGHT + TRACK_GAP * 2, width: totalTrackWidth, minWidth: '100%', background: trackBg, borderRadius: 4, margin: TRACK_GAP, overflow: 'visible' }}
+          style={{ position: 'relative', flex: 1, minHeight: 0, padding: '7px 10px 9px 0', overflow: 'hidden' }}
         >
-          {clips.map((clip) => {
-            const isSelected = activeShotId === clip.id;
-            const color = statusColor(clip.data.status, isDark);
-            const bg = statusBgColor(clip.data.status, isDark);
-            const isDragging = draggingId === clip.id;
-            const isNarrow = clip.width < 46;
-            return (
-              <div
-                key={clip.id}
-                data-clip-id={clip.id}
-                onPointerDown={(e) => handleClipPointerDown(e, clip.id)}
-                onPointerMove={handleClipPointerMove}
-                onPointerUp={handleClipPointerUp}
-                onDoubleClick={() => onClipDoubleClick?.(clip.id)}
-                title={`#${clip.data.number} ${clip.data.label ?? ''} (${clip.data.duration}s)`}
-                style={{
-                  position: 'absolute',
-                  left: clip.left,
-                  top: TRACK_GAP,
-                  width: clip.width,
-                  height: TRACK_HEIGHT,
-                  borderRadius: CLIP_BORDER_RADIUS,
-                  background: bg,
-                  border: `1px solid ${isSelected ? color : 'transparent'}`,
-                  boxShadow: isSelected ? `0 0 0 1px ${color}` : (isDragging ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'),
-                  cursor: 'grab',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: isNarrow ? '0 2px' : '0 8px',
-                  boxSizing: 'border-box',
-                  overflow: 'hidden',
-                  transition: 'box-shadow 0.1s, border-color 0.1s',
-                  userSelect: 'none',
-                  touchAction: 'none',
-                }}
-                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = color; }}
-                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = 'transparent'; }}
-              >
-                {isNarrow ? (
-                  <div style={{ width: 4, height: '60%', borderRadius: 2, background: color, flexShrink: 0 }} />
-                ) : (
-                  <>
-                    <span style={{ fontSize: 10, fontWeight: 600, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, marginRight: 4 }}>
-                      #{clip.data.number}
-                    </span>
-                    {clip.data.hasAudio && (
-                      <span style={{ fontSize: 9, color: isDark ? '#fbbf24' : '#d97706', flexShrink: 0, marginRight: 4 }}>♪</span>
-                    )}
-                    {clip.data.status === 'generating' && (
-                      <span style={{ fontSize: 9, color, marginRight: 4, flexShrink: 0 }}>⏳</span>
-                    )}
-                    {clip.data.status === 'failed' && (
-                      <span style={{ fontSize: 9, color, marginRight: 4, flexShrink: 0 }}>⚠</span>
-                    )}
-                    <span style={{ fontSize: 10, color: textColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                      {clip.data.label ?? ''}
-                    </span>
-                  </>
-                )}
-                {/* 外部 trim handle */}
+          <div style={{ position: 'relative', height: TRACK_HEIGHT + 16, width: totalTrackWidth, minWidth: '100%' }}>
+            {clips.map((clip) => {
+              const isSelected = activeShotId === clip.id;
+              const color = statusColor(clip.data.status, isDark);
+              const bg = statusBgColor(clip.data.status, isDark);
+              const isDragging = draggingId === clip.id;
+              const isNarrow = clip.width < 50;
+              const hasThumb = !!clip.data.thumbnailUrl;
+              const thumbBg = hasThumb
+                ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${clip.data.thumbnailUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                : { background: bg };
+              return (
                 <div
-                  onMouseDown={(e) => handleTrimStart(e, clip.id, 'right')}
-                  style={{ position: 'absolute', right: -TRIM_HANDLE_WIDTH / 2, top: 0, width: TRIM_HANDLE_WIDTH, height: '100%', cursor: 'ew-resize', zIndex: 3, background: isSelected ? color : 'transparent', opacity: isSelected ? 0.8 : 0, borderRadius: 2 }}
-                  title={t('storyboard.timeline.trim') || '拖动调整时长'}
-                />
+                  key={clip.id}
+                  data-clip-id={clip.id}
+                  onPointerDown={(e) => handleClipPointerDown(e, clip.id)}
+                  onPointerMove={handleClipPointerMove}
+                  onPointerUp={handleClipPointerUp}
+                  onDoubleClick={() => onClipDoubleClick?.(clip.id)}
+                  title={`#${clip.data.number} ${clip.data.label ?? ''} (${clip.data.duration}s)`}
+                  style={{
+                    position: 'absolute',
+                    left: clip.left,
+                    top: 7,
+                    width: clip.width,
+                    height: TRACK_HEIGHT,
+                    borderRadius: CLIP_BORDER_RADIUS,
+                    border: `2px solid ${isSelected ? C.clipSelected : 'transparent'}`,
+                    boxShadow: isSelected ? '0 0 0 1px rgba(0,0,0,0.6)' : (isDragging ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'),
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: isNarrow ? '0 2px' : '0 8px',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
+                    transition: 'box-shadow 0.1s, border-color 0.1s',
+                    userSelect: 'none',
+                    touchAction: 'none',
+                    // 有缩略图时压了深色遮罩 → 白字；无缩略图时背景是状态浅色 → 亮色主题下必须深字
+                    color: hasThumb ? '#ffffff' : C.clipText,
+                    textShadow: hasThumb ? '0 1px 2px rgba(0,0,0,0.6)' : 'none',
+                    ...thumbBg,
+                  }}
+                >
+                  {isNarrow ? (
+                    <div style={{ width: 4, height: '60%', borderRadius: 2, background: color, flexShrink: 0 }} />
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, marginRight: 6 }}>
+                        #{clip.data.number}
+                      </span>
+                      <span style={{ fontSize: 9, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, marginRight: 6 }}>
+                        {clip.data.label ?? ''}
+                      </span>
+                      <b style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{clip.data.duration}s</b>
+                    </>
+                  )}
+                  {/* 右侧 trim handle
+                   * ⚠️ 必须落在 clip 内部（right: 0 而非负值）：clip 有 overflow:hidden，
+                   * 负偏移的 handle 会被裁掉 → 完全不可见不可点（2026-08-31 修复 trim 拖不动）。
+                   * onPointerDown 阻断冒泡：否则 clip 的拖拽排序会同时触发，trim 变成重排。 */}
+                  <div
+                    onMouseDown={(e) => handleTrimStart(e, clip.id, 'right')}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{ position: 'absolute', right: 0, top: 0, width: TRIM_HANDLE_WIDTH, height: '100%', cursor: 'ew-resize', zIndex: 4, background: isSelected ? C.trimHandle : 'transparent', opacity: isSelected ? 0.85 : 0, borderRadius: 0 }}
+                    title={t('storyboard.timeline.trim') || '拖动调整时长'}
+                  />
+                </div>
+              );
+            })}
+            {shots.length === 0 && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.empty, fontSize: 12 }}>
+                {t('storyboard.timeline.empty') || '暂无镜头'}
               </div>
-            );
-          })}
-          {shots.length === 0 && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: mutedColor, fontSize: 12 }}>
-              {t('storyboard.timeline.empty') || '暂无镜头'}
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
-      {/* 缩放控件条 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderTop: `1px solid ${borderColor}`, background: labelBg, flexShrink: 0 }}>
-        <span style={{ fontSize: 10, color: mutedColor }}>{t('storyboard.timeline.zoom') || '缩放'}</span>
-        <button type="button" onClick={handleZoomOut} style={{ width: 20, height: 18, fontSize: 12, color: mutedColor, background: 'transparent', border: `1px solid ${borderColor}`, borderRadius: 4, cursor: 'pointer' }}>−</button>
-        <input
-          type="range"
-          min={MIN_PIXELS_PER_SECOND}
-          max={MAX_PIXELS_PER_SECOND}
-          step={1}
-          value={pixelsPerSecond}
-          onChange={handleSlider}
-          style={{ width: 100, height: 3 }}
-        />
-        <button type="button" onClick={handleZoomIn} style={{ width: 20, height: 18, fontSize: 12, color: mutedColor, background: 'transparent', border: `1px solid ${borderColor}`, borderRadius: 4, cursor: 'pointer' }}>+</button>
-        <span style={{ fontSize: 10, color: mutedColor, whiteSpace: 'nowrap' }}>
-          {pixelsPerSecond}px/s · {t('storyboard.timeline.framePerSec') || '帧级'} {Math.round(FRAME_FPS / pixelsPerSecond * 100) / 100}s/帧
-        </span>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 10, color: mutedColor, whiteSpace: 'nowrap' }}>
-          {t('storyboard.shotCountSummary', { count: shots.length })}
-        </span>
+        {/* Playhead spans full body */}
+        <div
+          onMouseDown={handlePlayheadDown}
+          style={{ position: 'absolute', zIndex: 5, left: playheadTime * pixelsPerSecond, top: 0, bottom: 0, width: 1, background: C.playhead, cursor: 'ew-resize' }}
+        >
+          <div style={{ position: 'absolute', top: -2, left: -3, width: 7, height: 7, background: C.playhead, clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }} />
+        </div>
       </div>
     </div>
   );

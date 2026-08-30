@@ -169,7 +169,7 @@ export function AssetCategorySidebar({
                     left: 56,
                     top: groupRefs.current[cat.group]?.getBoundingClientRect().top ?? 0,
                     minWidth: 140,
-                    background: theme.mode === 'dark' ? '#1c1917' : '#fff',
+                    background: theme.mode === 'dark' ? (theme.canvas?.background ?? '#11110f') : '#fff',
                     border: `1px solid ${theme.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
                     borderRadius: 8,
                     padding: '6px 0',

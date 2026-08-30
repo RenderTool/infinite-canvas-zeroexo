@@ -381,6 +381,7 @@
     "close": "閉じる",
     "confirm": "確認",
     "cancel": "キャンセル",
+    "ok": "OK",
     "copy": "コピー",
     "save": "保存",
     "copySuccess": "コピーしました",
@@ -401,6 +402,7 @@
     "next": "次へ",
     "expand": "展開",
     "delete": "削除",
+    "confirmDelete": "削除を確認",
     "export": "エクスポート",
     "add": "追加",
     "edit": "編集",
@@ -942,6 +944,7 @@
   },
   "hierarchy": {
     "title": "キャンバス構造",
+    "collapse": "折りたたむ",
     "empty": "キャンバスは空です",
     "nodeCount": "{{count}} ノード",
     "noSearchResults": "該当する結果がありません",
@@ -1326,6 +1329,7 @@
     "savedToast": "保存しました",
     "deletedToast": "削除しました",
     "nameRequired": "名前は必須です",
+    "loginRequired": "続行するにはログインしてください",
     "loadFailed": "読み込みに失敗しました",
     "saveFailed": "保存に失敗しました",
     "imagesTitle": "参考画像",
@@ -1698,6 +1702,31 @@
     "switchToTableView": "テーブルビューに切り替え",
     "switchToStepView": "ステップビューに切り替え",
     "switchToShotView": "単鏡ビューに切り替え",
+    "switchToSubjectView": "主体ライブラリに切り替え",
+    "subjectDock": "実画像を生成",
+    "subjectDockGenerate": "生成",
+    "subjectDockPlaceholder": "AIが現在の主体のプロンプトを自動マッピングしました。ここで編集…",
+    "subjectDockPhase2": "実画像生成パイプラインは Phase 2 で接続予定。プロンプトは準備完了です。",
+    "subjectAdded": "主体を作成しました。主体ライブラリ/全画面で名前とプロンプトを入力できます。",
+    "autoMatchedSubjects": "{{count}} 個の主体を自動関連付けしました",
+    "addSubject": "主体を追加",
+    "confirmDeleteSubject": "主体「{{name}}」を削除しますか？",
+    "confirmDeleteProductionItem": "主体「{{name}}」を削除しますか？",
+    "subjectName": "主体名",
+    "mappedToProduction": "プロダクション「{{name}}」にマッピング済み",
+    "wizard": {
+      "title": "絵コンテ制作台",
+      "subtitle": "このカットにはまだ内容がありません。3ステップで開始：",
+      "promptTitle": "プロンプトを補完",
+      "promptHint": "下部プロンプト欄で Image/Video Prompt を入力するか、「聖書から組み立て」をクリックしてください。",
+      "promptDesc": "聖書から組み立てるか、AIでこのカットのプロンプトを補完",
+      "generateTitle": "動画を生成",
+      "generateHint": "プロンプトを入力し品質ゲートを通過後、「動画を生成」をクリックしてください。",
+      "generateDesc": "品質ゲート通過後、ワンクリックでメイン動画を生成",
+      "voiceTitle": "ナレーション確認",
+      "voiceHint": "ナレーション録音・アップロードは Phase 2 で接続予定。現在はカットに audioPreview.storageKey を入力して試聴できます。",
+      "voiceDesc": "自分の声を録音・アップロードして、このカットの音声を試聴"
+    },
     "generatingEpisode": "絵コンテを生成中",
     "addShot": "カットを追加",
     "deselectAll": "すべて選択解除",
@@ -1724,6 +1753,9 @@
     "createSubjectStack": "主体スタックを同期作成",
     "createSubjectStackDesc": "スクリプト内のキャラクター/シーン/小物を自動識別し、下流に主体ノードを作成",
     "subjectStackCreated": "{{count}} 個のプレースホルダー主体を作成しました",
+    "subjectAll": "すべて",
+    "subjectEmpty": "主体はまだありません。Agent に占位提示詞カードの生成を依頼できます",
+    "subjectPromptEmpty": "（この主体はまだ提示詞がありません。Agent に補完を依頼できます）",
     "previousStep": "前へ",
     "nextStep": "次へ",
     "startOverwrite": "上書きを開始",
@@ -2103,6 +2135,10 @@
     "licenseFallback": "オープン",
     "source": "出典",
     "resourceExpired": "リソースは無効になりました"
+  },
+  "promptSource": {
+    "mine": "マイ",
+    "public": "パブリック"
   },
   "promptViewer": {
     "discardUnsavedTitle": "保存されていない変更を破棄しますか？",
@@ -2574,6 +2610,17 @@
     "retryFailed": "失敗したエピソードを再試行",
     "viewResults": "結果を見る",
     "close": "閉じる"
+  },
+  "subjectMention": {
+    "searchPlaceholder": "主体を検索…",
+    "notFound": "主体が見つかりません。主体ライブラリで新規作成できます"
+  },
+  "nodeDock": {
+    "expand": "生成パネルを展開",
+    "collapse": "閉じる",
+    "generate": "生成",
+    "removeRef": "参照素材を削除",
+    "placeholder": "プロンプトを入力... 接続した素材は自動で入力ソースになります（スタックは @ 参照が必要）"
   },
   "entity": {
     "character": "キャラクター",

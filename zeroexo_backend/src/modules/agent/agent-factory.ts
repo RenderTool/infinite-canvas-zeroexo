@@ -191,6 +191,8 @@ export class AgentFactory {
         'shot-duration.md',
         'content-safety.md',
         'prompt-template.md',
+        'prompt-assembly-rules.md',
+        'quality-gate.md',
       ],
     };
 

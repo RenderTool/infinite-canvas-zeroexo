@@ -347,7 +347,7 @@ function playGhostFlyIn(source: Rect, target: Rect, theme: ThemeConfig, onLand: 
     'position:fixed', 'left:0', 'top:0', 'z-index:2100', 'pointer-events:none',
     `width:${source.width}px`, `height:${source.height}px`,
     'border-radius:10px', 'overflow:hidden',
-    `background:${isDark ? '#1c1917' : '#ffffff'}`,
+    `background:${isDark ? theme.canvas.background : '#ffffff'}`,
     `border:1px solid ${theme.toolbar.accent}`,
     `box-shadow:${isDark ? '0 16px 48px rgba(0,0,0,0.5)' : '0 16px 40px rgba(28,25,23,0.25)'}`,
     'transform-origin:top left',

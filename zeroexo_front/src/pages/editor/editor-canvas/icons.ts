@@ -8,6 +8,7 @@
 import {
   GalleryThumbnails, Group, SquareDashed, Ungroup,
   Trash2, Copy, Pencil, Palette, Maximize2, FolderOpen, Download, Crosshair, RefreshCw, History,
+  ChevronLeft,
 } from 'lucide-react';
 
 /** 画布模块（右键菜单/画布操作菜单/组工具）图标映射 */
@@ -36,4 +37,9 @@ export const EDITOR_ICONS = {
   replace: RefreshCw,
   /** 一键同款(复原生成链路,征集#43) */
   replay: History,
+  /**
+   * 收起左侧抽屉(2026-08-31 用户拍板:PC 画布资产抽屉要「收起」语义,
+   * 用向左箭头而非叉号——叉号是关闭/销毁语义,箭头才是折叠语义)
+   */
+  collapseLeft: ChevronLeft,
 } as const;

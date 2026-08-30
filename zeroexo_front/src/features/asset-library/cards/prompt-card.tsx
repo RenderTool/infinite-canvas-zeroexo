@@ -21,7 +21,9 @@ function PromptCardGrid({
   theme,
   t,
 }: GridCardRendererProps<Prompt>): React.ReactElement {
-  const categoryLabel = t(`promptCreate.category${prompt.category.charAt(0).toUpperCase() + prompt.category.slice(1)}`);
+  // 2026-08-30 用户拍板:分类收敛,style/shot 并入 other(卡片标签显示「其他」且不展示徽章)
+  const displayCategory = prompt.category === 'style' || prompt.category === 'shot' ? 'other' : prompt.category;
+  const categoryLabel = t(`promptCreate.category${displayCategory.charAt(0).toUpperCase() + displayCategory.slice(1)}`);
   return (
     <div
       onContextMenu={onContextMenu}
@@ -38,7 +40,7 @@ function PromptCardGrid({
     >
       <SharedPromptCard
         title={prompt.title}
-        category={prompt.category}
+        category={displayCategory}
         categoryLabel={categoryLabel}
         tags={prompt.tags}
         imageKeys={prompt.imageKeys}

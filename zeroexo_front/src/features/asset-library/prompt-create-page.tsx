@@ -1226,7 +1226,7 @@ function pageStyle(theme: ReturnType<typeof useTheme>['theme'], modal?: boolean)
     flexDirection: 'column',
     height: '100%',
     width: '100%',
-    // 弹窗内用画布底色，让 toolbar 底色的卡片浮起产生层次
+    // 弹窗内用画布底色，让卡片浮起产生层次（2026-08-31 全站统一画布背景色）
     background: theme.canvas.background,
     overflow: modal ? 'visible' : 'hidden',
   };
@@ -1559,7 +1559,7 @@ function thumbItemStyle(
     overflow: 'hidden',
     flexShrink: 0,
     cursor: 'pointer',
-    background: isDark ? '#211d1a' : '#e8e6e3',
+    background: isDark ? theme.canvas.background : '#e8e6e3',
     border: isActive
       ? '2px solid #e94560'
       : isCover

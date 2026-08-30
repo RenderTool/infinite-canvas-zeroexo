@@ -8,6 +8,8 @@ import { memo, useCallback, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, RefreshCw, RotateCcw } from 'lucide-react';
 import type { ShotVideo } from './storyboard-types';
+// 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
+import { CANVAS_NODE_ICONS } from '../icons.js';
 
 export interface StoryboardAlternativeVideosProps {
   videos: ShotVideo[];
@@ -56,7 +58,7 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
       <div style={{ flex: 1, overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {videos.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7 }}>
-            <span>🎞</span>
+            <CANVAS_NODE_ICONS.videoEmpty size={22} strokeWidth={1.5} />
             <span>{t('storyboard.noVideos', '暂无生成产物')}</span>
           </div>
         )}
@@ -80,12 +82,12 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
               }}
             >
               {/* 缩略区（16:9 小图） */}
-              <div style={{ position: 'relative', width: 64, height: 36, borderRadius: 4, overflow: 'hidden', background: isDark ? '#211d1a' : '#f5f5f4', flexShrink: 0 }}>
+              <div style={{ position: 'relative', width: 64, height: 36, borderRadius: 4, overflow: 'hidden', background: isDark ? theme.canvas.background : '#f5f5f4', flexShrink: 0 }}>
                 {v.status === 'done' ? (
                   <video src={v.storageKey} muted preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: color, fontSize: 14 }}>
-                    {v.status === 'generating' ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : v.status === 'failed' ? '✕' : '·'}
+                    {v.status === 'generating' ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : v.status === 'failed' ? <CANVAS_NODE_ICONS.close size={12} /> : '·'}
                   </div>
                 )}
                 {isPrimary && (
@@ -134,9 +136,9 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onRemove(idx); }}
                     title={t('storyboard.remove', '移除')}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: textMuted, padding: 2 }}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: textMuted, padding: 2, display: 'flex', alignItems: 'center' }}
                   >
-                    ✕
+                    <CANVAS_NODE_ICONS.close size={12} />
                   </button>
                 )}
               </div>

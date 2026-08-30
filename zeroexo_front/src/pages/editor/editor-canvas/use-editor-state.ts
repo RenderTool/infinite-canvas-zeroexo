@@ -30,7 +30,6 @@ import type { AwarenessState } from '@/features/collaboration/collaboration-type
 // 光标链路调试埋点(左上角调试面板数据总线,O(1) 计数)
 import { collabDebug } from '@/features/dev-performance/collab-debug.js';
 import { createCreationExtensions } from '@/features/canvas-nodes/extensions.js';
-import { createProductionManagerExtensions } from '@/features/canvas-nodes/production-manager/production-manager-extension.js';
 import { canConnect } from '@/shared/connection-rules.js';
 import { isAgentBatching } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
 import { PROJECT_RELOAD_EVENT, PROJECT_DIFF_EVENT, PROJECT_DELETED_EVENT } from '@/services/sync/broadcast-channel-service.js';
@@ -51,8 +50,8 @@ function normalizeRemoteNodes(nodes: unknown[]): GraphModel['nodes'] {
 
 export type InteractionMode = 'select' | 'pan';
 
-/** 画布支持的节点类型(资产节点 + 剧创节点 + 堆叠节点) */
-export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager';
+/** 画布支持的节点类型(资产节点 + 剧创节点 + 堆叠节点；2026-08-30 移除 production-manager 剧管) */
+export type EditorNodeType = 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench';
 
 /**
  * 收集节点列表中的视频/音频 storageKey(用于删除时清理本地媒体文件与视频缩略图)。
@@ -249,13 +248,6 @@ export function useEditorState(canvasId: string): {
         () => ed.store,
       ),
     );
-    // Plan#29 T1: 注册统筹节点扩展(剧级资产管理器;Plan#20 主体散落卡已移除)
-    ed.plugins.nodes.registerAll(
-      createProductionManagerExtensions(
-        ed.plugins.connection?.getController() ?? null,
-      ),
-    );
-
     // Phase 2.5: 注入节点类型扩展访问器到连线控制器
     const nodeRegistry = ed.core.plugins.get<any>('node-registry');
     const connectionController = ed.plugins.connection?.getController();

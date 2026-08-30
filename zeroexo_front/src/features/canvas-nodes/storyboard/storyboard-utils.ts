@@ -4,6 +4,7 @@
  * 从 storyboard-sheet.tsx 中抽离的辅助函数。
  */
 import type { Shot, StoryboardNodeData, StoryboardEntity, EntityRef, EntityKind, AiSubject } from './storyboard-types';
+import type { ProductionItem } from '../production-manager/production-manager-types';
 
 /** 创建新空 shot */
 export function createNewShot(shots: Shot[]): Shot {
@@ -135,4 +136,62 @@ export function resolveEntityKind(
   if (ent) return ent.kind;
   const subj = aiSubjects?.find((s) => s.name === trimmed || s.aliases.includes(trimmed));
   return subj?.kind;
+}
+
+// ===== 2026-08-30 征集 #110: 描述文本主体自动匹配 =====
+
+/** 主体匹配源：entities ∪ aiSubjects ∪ 剧管 items（征集 #110：三者都匹配，entities 优先） */
+export interface SubjectMatchSource {
+  name: string;
+  kind: EntityKind;
+  id: string;
+  aliases?: string[];
+}
+
+/**
+ * 收集全部可匹配主体（entities 优先，aiSubjects 与 productionItems 兜底去重）。
+ * 供 @ 搜索面板与描述文本自动匹配共用单一数据源。
+ */
+export function collectSubjectSources(
+  entities: StoryboardEntity[],
+  aiSubjects?: AiSubject[],
+  productionItems?: ProductionItem[],
+): SubjectMatchSource[] {
+  const out: SubjectMatchSource[] = [];
+  const seen = new Set<string>();
+  const push = (s: SubjectMatchSource) => {
+    if (!s.name.trim() || seen.has(s.name)) return;
+    seen.add(s.name);
+    out.push(s);
+  };
+  for (const e of entities ?? []) push({ name: e.name, kind: e.kind, id: e.id, aliases: [] });
+  for (const s of aiSubjects ?? []) push({ name: s.name, kind: s.kind ?? 'character', id: `subj-${s.name}`, aliases: s.aliases ?? [] });
+  for (const it of productionItems ?? []) push({ name: it.name, kind: it.kind, id: it.id, aliases: it.aliases ?? [] });
+  return out;
+}
+
+/**
+ * 精确匹配：输入文本与主体名/别名完全相等时命中。
+ * 用于 @ 面板搜索过滤与失焦自动匹配。
+ */
+export function matchSubjectByText(
+  text: string,
+  sources: SubjectMatchSource[],
+): SubjectMatchSource | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  const exact = sources.find((s) => s.name === trimmed);
+  if (exact) return exact;
+  return sources.find((s) => (s.aliases ?? []).includes(trimmed));
+}
+
+/** 描述文本中已用 @ 引用的主体名集合（扫描 @xxx 词，跳过不重复匹配） */
+export function extractExplicitMentions(text: string): Set<string> {
+  const set = new Set<string>();
+  const re = /@([\w\u4e00-\u9fa5]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) != null) {
+    if (m[1]) set.add(m[1]);
+  }
+  return set;
 }

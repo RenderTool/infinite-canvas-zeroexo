@@ -9,14 +9,15 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { FileText, X } from 'lucide-react';
+import { X, type LucideIcon } from 'lucide-react';
 import { CANVAS_TAB_KEY, useCanvasTabStore } from './canvas-tab-store.js';
 import type { CanvasTabKind } from './canvas-tab-store.js';
+import { CANVAS_TAB_ICONS } from './icons.js';
 
 function TabIcon({ kind }: { kind: CanvasTabKind }): React.ReactElement {
-  // 剧本/分镜/工作台均用文字符号图标（后续可按 kind 细分）
-  void kind;
-  return <FileText size={12} />;
+  // 与画布节点左上角/层级面板类型图标同源（出片=Film 而非通用文档图标）
+  const Icon: LucideIcon = CANVAS_TAB_ICONS[kind];
+  return <Icon size={12} />;
 }
 
 export function CanvasTabBar(): React.ReactElement | null {

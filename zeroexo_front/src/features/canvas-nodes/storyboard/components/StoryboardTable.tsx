@@ -12,6 +12,7 @@ import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import i18n from '@/i18n/config';
 import type { Shot, StoryboardEntity, EpisodeStatus, AiSubject } from '../storyboard-types';
+import type { SubjectMatchSource } from '../storyboard-utils';
 import { StoryboardRow } from './StoryboardRow';
 import { StoryboardGeneratingLoader } from './StoryboardGeneratingLoader';
 
@@ -40,12 +41,12 @@ export const COLUMN_CONFIG = {
   ],
 };
 
-// 2026-08-22 主体列折叠契约(用户拍板): 节点内(readOnly)折叠主体列——描述列已用契约色高亮主体, 不重复占宽;
-// 全屏编辑展开主体列(EDIT_COLUMN_KEYS/EDIT_GRID_TEMPLATE 保留, 不可从 NODE 派生)。折叠后宽度补给描述/对白等阅读主体列。
+// 2026-08-22 主体列折叠契约: 节点内(readOnly)折叠主体列——描述列已用契约色高亮主体, 不重复占宽;
+// 2026-08-30 用户拍板: 全屏编辑同样移除主体列——@主体 关联仍生效(描述列契约色高亮), 空出的宽度补给描述列。
 export const NODE_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement'];
 export const NODE_GRID_TEMPLATE = '6.0% 5.5% 6.0% 24.5% 10.0% 12.5% 19.0% 8.0% 8.5%';
-export const EDIT_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'entities', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement', 'actions'];
-export const EDIT_GRID_TEMPLATE = '5.6% 5.1% 5.6% 18.2% 12.1% 7.5% 9.8% 14.0% 7.5% 8.0% 6.6%';
+export const EDIT_COLUMN_KEYS = ['number', 'dayNight', 'duration', 'description', 'shotType', 'lighting', 'dialogue', 'sfx', 'cameraMovement', 'actions'];
+export const EDIT_GRID_TEMPLATE = '5.6% 5.1% 5.6% 30.3% 7.5% 9.8% 14.0% 7.5% 8.0% 6.6%';
 
 // ===== 网格样式函数 =====
 
@@ -91,9 +92,13 @@ export interface StoryboardTableProps {
   pmItemsByEntity?: Record<string, Array<{ id: string; name: string; kind: string }>>;
   mentionOpen: boolean;
   mentionShotId: string | null;
-  onMentionSelect: (entity: StoryboardEntity) => void;
+  onMentionSelect: (source: SubjectMatchSource) => void;
   onMentionOpen: (shotId: string) => void;
   onShotTypeClick: (shotId: string) => void;
+  /** 2026-08-30 征集 #110: 可匹配主体集合（@ 面板与自动匹配共用） */
+  subjectSources?: SubjectMatchSource[];
+  /** 2026-08-30 征集 #110: 描述文本回车/失焦自动匹配回调 */
+  onAutoMatchMentions?: (shotId: string, text: string) => void;
   status: EpisodeStatus;
   /** 当前集生成进度 0-100(生成中有效) */
   progress?: number;
@@ -128,6 +133,8 @@ export const StoryboardTable = memo(function StoryboardTable({
   onMentionSelect,
   onMentionOpen,
   onShotTypeClick,
+  subjectSources,
+  onAutoMatchMentions,
   status,
   progress,
   nodeId,
@@ -135,6 +142,8 @@ export const StoryboardTable = memo(function StoryboardTable({
   activeEpisode,
   activeEpisodeId,
 }: StoryboardTableProps): ReactElement {
+  void subjectStatesByEntity;
+  void pmItemsByEntity;
   const { t } = useTranslation();
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
@@ -251,13 +260,13 @@ export const StoryboardTable = memo(function StoryboardTable({
               onCameraClose={onCameraClose}
               entities={entities}
               aiSubjects={aiSubjects}
-              subjectStatesByEntity={subjectStatesByEntity}
-              pmItemsByEntity={pmItemsByEntity}
               mentionOpen={mentionOpen}
               mentionShotId={mentionShotId}
               onMentionSelect={onMentionSelect}
               onMentionOpen={onMentionOpen}
               onShotTypeClick={onShotTypeClick}
+              subjectSources={subjectSources}
+              onAutoMatchMentions={onAutoMatchMentions}
             />
           ))}
         </div>

@@ -34,6 +34,7 @@ export function AntdThemeProvider({ children, light = false }: AntdThemeProvider
       // 由 script-fullscreen-editor 局部 ConfigProvider 覆盖为 40000——禁止再手动传 zIndex。
       zIndexPopupBase: 20000,
       colorPrimary: theme.toolbar.accent,
+      // 2026-08-31：全站统一画布背景色
       colorBgLayout: light ? '#ffffff' : theme.canvas.background,
       colorBgContainer: light ? '#ffffff' : theme.toolbar.background,
       colorBgElevated: light ? '#ffffff' : theme.toolbar.panel,

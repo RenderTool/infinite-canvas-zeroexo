@@ -18,7 +18,7 @@
  * 弹窗状态和交互回调已提取到 use-editor-dialogs 和 use-editor-interactions 两个 Hook。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -130,15 +130,39 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // Plan#50:顶部页签——activeTabKey 决定画布显隐;setTabContentHost 注册页签内容层挂载点
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const setTabContentHost = useCanvasTabStore((s) => s.setContentHost);
+  const setCanvasHost = useCanvasTabStore((s) => s.setCanvasHost);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
   // 2026-08-29:剧本页签开着时资产抽屉必须保持挂载(否则其 portal 出的编辑器内容会消失)
   const tabList = useCanvasTabStore((s) => s.tabs);
   const hasScriptTabOpen = tabList.some((tab) => tab.kind === 'script');
+  // 2026-08-31 根治「缩放浏览器窗口 → 页签内容看不见」:
+  // 页签内容由节点组件 createPortal 到页签内容层,而画布有视口裁剪(culling)——
+  // 窗口 resize 改变 cullRect 后承载页签的节点可能被判为视口外 → 节点组件卸载
+  // → portal 出去的编辑器一起销毁(页签还在,内容空白)。
+  // 前几轮只修了「抽屉卸载」(2026-08-29)与「响应式分支切换」(2026-08-30),
+  // 没触及 culling,所以换个触发路径就复发。这里把打开页签的节点加入裁剪白名单。
+  const tabPinnedNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tab of tabList) {
+      // plan 页签 id 是资产 id 而非画布节点 id,不参与裁剪豁免
+      if (tab.kind === 'plan') continue;
+      ids.add(tab.id);
+    }
+    return ids;
+  }, [tabList]);
   // Plan#50 T13 回归修复:ref 必须稳定——内联箭头会在每次渲染触发 ref(null)+ref(el),
   // 经 setContentHost 反写 store 造成「null→el→null→el」无限渲染循环,表现为关闭页签后再打开剧本失败
   const handleTabHostRef = useCallback((el: HTMLElement | null) => {
     setTabContentHost(el);
   }, [setTabContentHost]);
+  // 2026-08-30 征集 #110: 画布容器注册到全局 store,供节点内浮层(主体库复用 NodeGenerateDock)portal 定位
+  const handleCanvasHostRef = useCallback((el: HTMLElement | null) => {
+    setCanvasHost(el);
+  }, [setCanvasHost]);
+  // containerRef 由 useEditorState 创建（RefObject，.current 只读），用 effect 同步到 store
+  useEffect(() => {
+    handleCanvasHostRef(containerRef.current);
+  }, [containerRef, handleCanvasHostRef]);
 
   // ===== Plan#51 页签联动已随 Plan 移除(2026-08-29),逻辑注释保留 =====
   // const handlePlanSendToAgent = useCallback((payload) => { void sendMessage(payload.text); }, [sendMessage]);
@@ -1123,6 +1147,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
             onCanvasDragOver={dropHandlers.onDragOver}
             welcomeHint={t('editor.canvasHint')}
             onNodeDoubleClick={handleNodeDoubleClick}
+            pinnedNodeIds={tabPinnedNodeIds}
             belowNodesLayer={
               refs.groupPlugin ? (
                 <GroupLayer
@@ -1605,7 +1630,7 @@ function layoutStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties
   // AgentDock 脱离视口右缘,右侧露出大片空白
   return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: theme.canvas.background };
 }
-const headerStyle: CSSProperties = { minHeight: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
+const headerStyle: CSSProperties = { minHeight: 45, background: 'transparent', padding: 0, lineHeight: '45px', position: 'relative', zIndex: 100 };
 /**
  * 资产抽屉覆盖模式（移动端 fixed 包裹层）层级。
  * 需高于顶栏 CanvasTabBar（headerStyle zIndex 100）以盖住页签条、避免双重页签。

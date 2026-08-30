@@ -41,11 +41,12 @@ function clampWidth(w: number): number {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
 }
 
-/** 主题 CSS 变量（分层背景色，代替磨砂玻璃与内部边线）——桌面 Dock 与移动端 Drawer 共用 */
+/** 主题 CSS 变量（分层背景色，代替磨砂玻璃与内部边线）——桌面 Dock 与移动端 Drawer 共用
+ *  2026-08-31 用户拍板：全站统一画布背景色（t.background = toolbar.background = #11110f） */
 export function getAgentThemeVars(t: ReturnType<typeof useAgentTheme>): CSSProperties {
   return {
-    '--agent-bg': t.isDark ? '#161412' : '#ffffff',
-    '--agent-panel': t.isDark ? 'rgba(22,20,18,0.97)' : 'rgba(248,246,242,0.97)',
+    '--agent-bg': t.background,
+    '--agent-panel': t.background,
     '--agent-surface': t.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
     '--agent-surface-2': t.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
     '--agent-border': t.border,
@@ -182,7 +183,7 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
         width: dockOpen ? width : 0,
         minWidth: dockOpen ? width : 0,
         overflow: 'hidden',
-        background: t.isDark ? '#161412' : '#ffffff',
+        background: t.background,
         // 2026-08-30 一致性修复:原先 dockOpen 时 transition 为 'none',
         // 导致面板「打开瞬间弹出、只有关闭有动画」。现改为常驻过渡
         // (仅拖拽调宽时挂起),节奏与资产抽屉统一。

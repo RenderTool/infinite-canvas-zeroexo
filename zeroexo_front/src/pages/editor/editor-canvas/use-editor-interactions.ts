@@ -920,7 +920,7 @@ export function useEditorInteractions({
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
   // 节点语义重构(Plan#33 延伸):创建逻辑恢复原逻辑——直接创建空节点。
   // 空节点默认即为生成器态(选中后显示生成面板),无需再创建独立生成器节点。
-  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench' | 'production-manager') => {
+  const handleNodeCreateMenuSelect = useCallback((type: 'text' | 'image' | 'video' | 'audio' | 'generator' | 'stacked-media' | 'script' | 'storyboard' | 'workbench') => {
     setNodeCreateMenuPos(null);
     if (!nodeCreateMenuPos || !containerRef.current || !refs.store) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -931,12 +931,10 @@ export function useEditorInteractions({
     const offsetY = (Math.random() - 0.5) * 80;
     const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const sameTypeCount = refs.store?.getGraph().nodes.filter((n: any) => n.type === type).length ?? 0;
-    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench' || type === 'production-manager';
+    const isCreation = type === 'script' || type === 'storyboard' || type === 'workbench';
     const isGenerator = type === 'generator';
     const isStackedMedia = type === 'stacked-media';
-    const baseNameKey = type === 'production-manager'
-      ? 'canvasNodes.stage.productionManager'
-      : isCreation
+    const baseNameKey = isCreation
       ? `canvasNodes.stage.${type}`
       : isGenerator ? 'nodes.generatorTitle'
         : isStackedMedia ? 'nodes.stackedMediaTitle'
@@ -956,9 +954,7 @@ export function useEditorInteractions({
         data: isCreation
           ? type === 'script'
             ? { title: nodeTitle, status: 'idle', content: '' }
-            : type === 'production-manager'
-                ? { title: nodeTitle, items: [] }
-                : { title: nodeTitle, status: 'idle' }
+            : { title: nodeTitle, status: 'idle' }
           : isStackedMedia
             ? { cards: [], activeIndex: 0, title: nodeTitle }
             : isGenerator
@@ -1527,10 +1523,11 @@ export function useEditorInteractions({
       const ctlInfo = { taskId: '' };
       nodeCtlMap.set(epKey, ctlInfo);
 
-      // Plan#29: 注入统筹条目字典(跨集续写时后端提示 AI 沿用既有命名, 不重复登记)
-      const existingSubjects = _store.getGraph().nodes
-        .filter((n: any) => n.type === 'production-manager')
-        .flatMap((n: any) => (Array.isArray(n.data?.items) ? n.data.items : []) as Array<{ name?: string; kind?: string; aliases?: string[]; consistency?: string }>)
+      // 2026-08-30 剧管并入分镜：注入主体字典从分镜节点自身 productionItems 收集（原从独立 production-manager 节点收集）
+      const sbGraphNode = _store.getGraph().nodes.find((n: any) => n.id === storyboardId);
+      const sbNodeData = (sbGraphNode?.data ?? {}) as Record<string, unknown>;
+      const pmItems = (Array.isArray(sbNodeData.productionItems) ? sbNodeData.productionItems : []) as Array<{ name?: string; kind?: string; aliases?: string[]; consistency?: string }>;
+      const existingSubjects = pmItems
         .map((it: { name?: string; kind?: string; aliases?: string[]; consistency?: string }) => ({ name: it.name ?? '', kind: it.kind, aliases: it.aliases ?? [], description: it.consistency ?? '' }))
         .filter((s: { name: string }) => s.name.trim());
 

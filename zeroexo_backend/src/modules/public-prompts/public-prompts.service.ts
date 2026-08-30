@@ -21,7 +21,9 @@ export class PublicPromptsService {
     const skip = ((page ?? 1) - 1) * take;
     const where: Record<string, unknown> = {};
     if (category && category.trim()) {
-      where.category = category.trim();
+      const cat = category.trim();
+      // 业务分类收敛(用户拍板):style/shot 并入 other
+      where.category = cat === 'other' ? { in: ['other', 'style', 'shot'] } : cat;
     }
     if (keyword && keyword.trim()) {
       where.title = { contains: keyword.trim(), mode: 'insensitive' };
@@ -33,7 +35,13 @@ export class PublicPromptsService {
       // 种子随机: md5(id + seed) 稳定打乱,同 seed 翻页不重复;where 条件用参数化 SQL 防注入
       const conditions: Prisma.Sql[] = [];
       if (category && category.trim()) {
-        conditions.push(Prisma.sql`"category" = ${category.trim()}`);
+        const cat = category.trim();
+        // 业务分类收敛(用户拍板):style/shot 并入 other
+        conditions.push(
+          cat === 'other'
+            ? Prisma.sql`"category" IN (${Prisma.join(['other', 'style', 'shot'])})`
+            : Prisma.sql`"category" = ${cat}`,
+        );
       }
       if (keyword && keyword.trim()) {
         conditions.push(Prisma.sql`"title" ILIKE ${'%' + keyword.trim() + '%'}`);
@@ -89,6 +97,11 @@ export class PublicPromptsService {
       counts[row.category] = row._count.id;
       counts.all += row._count.id;
     }
+    // 业务分类收敛(用户拍板):style/shot 并入 other
+    const mergedOther = (counts.other ?? 0) + (counts.style ?? 0) + (counts.shot ?? 0);
+    delete counts.style;
+    delete counts.shot;
+    if (mergedOther > 0) counts.other = mergedOther;
     return counts;
   }
 

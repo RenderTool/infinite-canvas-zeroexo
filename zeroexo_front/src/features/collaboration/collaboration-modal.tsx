@@ -713,8 +713,9 @@ export function CollaborationPanel({
             members.map((member) => {
               const isSelf = member.isSelf;
               // 状态标签优先级: 禁言 > 在线/离线(被封禁成员已被列表过滤,移出就是移出)
-              const muted = member.sessions.some((s) => s.status === 'muted');
-              const isOnline = member.sessions.some((s) => s.status === 'online');
+              // ⚠️ sessions 可能缺省（后端契约漂移），必须可选链兜底
+              const muted = member.sessions?.some((s) => s.status === 'muted') ?? false;
+              const isOnline = member.sessions?.some((s) => s.status === 'online') ?? false;
               return (
                 <div key={member.userId} style={memberItemStyle(isSelf)}>
                   <div style={memberInfoStyle}>

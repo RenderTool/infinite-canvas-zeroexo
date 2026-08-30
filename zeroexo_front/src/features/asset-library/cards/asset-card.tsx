@@ -31,13 +31,14 @@ import { registerCard, type GridCardRendererProps, type ListCardRendererProps } 
 
 function getKindIcon(kind: string, theme: ThemeConfig): React.ReactElement {
   const color = theme.toolbar.textMuted;
+  // 2026-08-31 用户拍板：资产卡片图标统一 18px（与 sidebar/播放按钮一致）
   switch (kind) {
-    case 'image': return <ImageIcon size={40} color={color} />;
-    case 'video': return <VideoIcon size={40} color={color} />;
-    case 'audio': return <MusicIcon size={40} color={color} />;
-    case 'text': return <FileText size={40} color={color} />;
-    case 'script': return <BookOpen size={40} color={color} />;
-    default: return <FileText size={40} color={color} />;
+    case 'image': return <ImageIcon size={18} color={color} />;
+    case 'video': return <VideoIcon size={18} color={color} />;
+    case 'audio': return <MusicIcon size={18} color={color} />;
+    case 'text': return <FileText size={18} color={color} />;
+    case 'script': return <BookOpen size={18} color={color} />;
+    default: return <FileText size={18} color={color} />;
   }
 }
 
@@ -207,7 +208,7 @@ function AssetCardGrid({
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              <Play size={20} color="#fff" fill="#fff" />
+              <Play size={18} color="#fff" fill="#fff" />
             </div>
           </div>
         )}
@@ -250,7 +251,7 @@ function AssetCardGrid({
       }}>
         <div style={{ display: 'flex', alignItems: 'center', height: 24 }}>
           <span style={{
-            fontSize: 14,
+            fontSize: 12,
             lineHeight: '22px',
             fontWeight: 500,
             color: theme.toolbar.text,
@@ -324,13 +325,14 @@ function AssetCardList({
 }: ListCardRendererProps<any>): React.ReactElement {
   const kind = asset.kind as string;
   const iconMap: Record<string, React.ReactElement> = {
-    image: <ImageIcon size={14} color={theme.toolbar.textMuted} />,
-    video: <VideoIcon size={14} color={theme.toolbar.textMuted} />,
-    audio: <MusicIcon size={14} color={theme.toolbar.textMuted} />,
-    text: <FileText size={14} color={theme.toolbar.textMuted} />,
-    script: <BookOpen size={14} color={theme.toolbar.textMuted} />,
+    // 2026-08-31 用户拍板：资产卡片图标统一 18px
+    image: <ImageIcon size={18} color={theme.toolbar.textMuted} />,
+    video: <VideoIcon size={18} color={theme.toolbar.textMuted} />,
+    audio: <MusicIcon size={18} color={theme.toolbar.textMuted} />,
+    text: <FileText size={18} color={theme.toolbar.textMuted} />,
+    script: <BookOpen size={18} color={theme.toolbar.textMuted} />,
   };
-  const kindIcon = iconMap[kind] || <FileText size={14} color={theme.toolbar.textMuted} />;
+  const kindIcon = iconMap[kind] || <FileText size={18} color={theme.toolbar.textMuted} />;
 
   return (
     <>
@@ -381,3 +383,6 @@ registerCard('asset', {
   renderGrid: AssetCardGrid,
   renderList: AssetCardList,
 });
+
+// 2026-08-30:导出网格渲染器,供画布资产抽屉(canvas-assets/MaterialGroup)复用同款卡片样式
+export { AssetCardGrid };

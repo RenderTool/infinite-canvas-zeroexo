@@ -46,6 +46,9 @@ export interface CanvasTabState {
    */
   contentHost: HTMLElement | null;
   setContentHost: (el: HTMLElement | null) => void;
+  /** 画布容器（2026-08-30 征集 #110）：由 editor-page 注册，节点内浮层（如主体库复用 NodeGenerateDock）portal 到此处获得画布坐标系 */
+  canvasHost: HTMLElement | null;
+  setCanvasHost: (el: HTMLElement | null) => void;
   /** 打开（或复用激活）一个资源页签——幂等 */
   openTab: (input: { kind: CanvasTabKind; id: string; title?: string }) => void;
   /** 激活页签 */
@@ -63,6 +66,8 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
   activeTabKey: CANVAS_TAB_KEY,
   contentHost: null,
   setContentHost: (el) => set({ contentHost: el }),
+  canvasHost: null,
+  setCanvasHost: (el) => set({ canvasHost: el }),
 
   openTab: ({ kind, id, title }) => {
     const key = buildTabKey(kind, id);

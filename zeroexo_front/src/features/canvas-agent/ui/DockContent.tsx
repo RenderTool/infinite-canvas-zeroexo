@@ -532,7 +532,8 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
     if (!collabRoom) return;
     setBusyUserId(member.userId);
     try {
-      const muted = member.sessions.some((s) => s.status === 'muted');
+      // ⚠️ sessions 可能缺省（后端契约漂移），必须可选链兜底
+      const muted = member.sessions?.some((s) => s.status === 'muted') ?? false;
       if (muted) {
         await unmuteMember(collabRoom.canvasId, member.userId);
         message.success(t('collab.memberUnmutedSuccess'));
@@ -1137,8 +1138,9 @@ export function DockContent({ projectId }: DockContentProps): React.ReactElement
             </div>
           ) : (
             collabMembers.map((member) => {
-              const online = member.sessions.some((s) => s.status === 'online');
-              const muted = member.sessions.some((s) => s.status === 'muted');
+              // ⚠️ sessions 可能缺省（后端契约漂移），必须可选链兜底
+              const online = member.sessions?.some((s) => s.status === 'online') ?? false;
+              const muted = member.sessions?.some((s) => s.status === 'muted') ?? false;
               return (
                 <div
                   key={member.userId}

@@ -381,6 +381,7 @@
     "close": "Close",
     "confirm": "Confirm",
     "cancel": "Cancel",
+    "ok": "OK",
     "copy": "Copy",
     "save": "Save",
     "copySuccess": "Copied",
@@ -401,6 +402,7 @@
     "next": "Next",
     "expand": "Expand",
     "delete": "Delete",
+    "confirmDelete": "Confirm delete",
     "export": "Export",
     "add": "Add",
     "edit": "Edit",
@@ -960,6 +962,7 @@
   },
   "hierarchy": {
     "title": "Canvas Structure",
+    "collapse": "Collapse",
     "empty": "Canvas is empty",
     "nodeCount": "{{count}} nodes",
     "noSearchResults": "No matching results",
@@ -1345,6 +1348,7 @@
     "savedToast": "Saved",
     "deletedToast": "Deleted",
     "nameRequired": "Name is required",
+    "loginRequired": "Please sign in before continuing",
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
     "imagesTitle": "Reference images",
@@ -1758,6 +1762,30 @@
     "switchToTableView": "Switch to table view",
     "switchToStepView": "Switch to step view",
     "switchToShotView": "Switch to single-shot view",
+    "switchToSubjectView": "Switch to subject library",
+    "subjectDock": "Generate real image",
+    "subjectDockGenerate": "Generate",
+    "subjectDockPlaceholder": "AI has auto-mapped the current subject prompt; edit it here…",
+    "subjectDockPhase2": "Real image generation pipeline will be wired in Phase 2; the prompt is ready.",
+    "subjectAdded": "Subject created. Add name & prompt in subject library / fullscreen.",
+    "autoMatchedSubjects": "Auto-linked {{count}} subjects",
+    "addSubject": "Add subject",
+    "confirmDeleteSubject": "Delete subject「{{name}}」?",
+    "confirmDeleteProductionItem": "Delete subject「{{name}}」?",
+    "subjectName": "Subject name",
+    "wizard": {
+      "title": "Storyboard Studio",
+      "subtitle": "This shot is empty. Start in 3 steps:",
+      "promptTitle": "Complete prompt",
+      "promptHint": "Fill in Image/Video prompt in the bottom editor, or click \"Assemble from bible\".",
+      "promptDesc": "Assemble from bible or AI-complete this shot's prompt",
+      "generateTitle": "Generate video",
+      "generateHint": "Fill the prompt and pass the quality gate, then click \"Generate video\".",
+      "generateDesc": "Generate the main video with one click after passing the quality gate",
+      "voiceTitle": "Voice preview",
+      "voiceHint": "Voice recording & upload will be wired in Phase 2; you can fill audioPreview.storageKey on the shot to preview.",
+      "voiceDesc": "Record your own voice, upload and preview this shot's audio"
+    },
     "generatingEpisode": "Generating storyboard",
     "addShot": "Add shot",
     "deselectAll": "Deselect all",
@@ -1784,6 +1812,9 @@
     "createSubjectStack": "Sync Create Subject Stack",
     "createSubjectStackDesc": "Auto-identify characters/scenes/props and create subject nodes downstream",
     "subjectStackCreated": "Created {{count}} placeholder subjects",
+    "subjectAll": "All",
+    "subjectEmpty": "No subjects yet. Ask Agent to generate placeholder prompt cards.",
+    "subjectPromptEmpty": "（This subject has no prompt yet. Ask Agent to complete it.）",
     "previousStep": "Previous",
     "nextStep": "Next",
     "startOverwrite": "Start overwrite",
@@ -2125,6 +2156,10 @@
     "licenseFallback": "Open",
     "source": "Source",
     "resourceExpired": "Resource is no longer available"
+  },
+  "promptSource": {
+    "mine": "Mine",
+    "public": "Public"
   },
   "promptViewer": {
     "discardUnsavedTitle": "Discard unsaved changes?",
@@ -2596,6 +2631,17 @@
     "retryFailed": "Retry failed episodes",
     "viewResults": "View results",
     "close": "Close"
+  },
+  "subjectMention": {
+    "searchPlaceholder": "Search subjects…",
+    "notFound": "No subject found. Create one in the subject library."
+  },
+  "nodeDock": {
+    "expand": "Expand generation panel",
+    "collapse": "Collapse",
+    "generate": "Generate",
+    "removeRef": "Remove reference",
+    "placeholder": "Enter prompt... Connected assets are auto-used as input (stacked nodes need @ reference)"
   },
   "entity": {
     "character": "Character",

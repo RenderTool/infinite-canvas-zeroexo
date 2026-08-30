@@ -1,0 +1,46 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e7]:
+      - generic [ref=e18]:
+        - button [ref=e19] [cursor=pointer]
+        - button [ref=e23] [cursor=pointer]
+        - button [ref=e27] [cursor=pointer]
+        - button [ref=e31] [cursor=pointer]
+      - button [ref=e36] [cursor=pointer]
+    - main [ref=e40]:
+      - generic [ref=e42]:
+        - generic [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]: ZEROEXO · 懂君心意，演尽风华
+            - generic [ref=e56]: 懂君心上事，演作剧中人；一念风云起，万象自此新。
+            - generic [ref=e58]:
+              - textbox "制作一支30秒的赛博朋克旅行箱TVC广告，目标受众Z世代" [ref=e59]
+              - generic [ref=e60]:
+                - generic [ref=e61]:
+                  - generic [ref=e62]: 创意简报
+                  - generic [ref=e63]: Enter 发送 · Shift+Enter 换行
+                - button "发送" [disabled] [ref=e64]
+          - generic [ref=e68]:
+            - generic [ref=e69]: 选择预设模板快速开始
+            - generic [ref=e70]:
+              - button [ref=e71] [cursor=pointer]
+              - button [ref=e78] [cursor=pointer]
+              - button [ref=e83] [cursor=pointer]
+              - button [ref=e88] [cursor=pointer]
+              - button [ref=e96] [cursor=pointer]
+              - button [ref=e102] [cursor=pointer]
+              - button [ref=e107] [cursor=pointer]
+        - generic [ref=e111]: 最近画布
+        - generic [ref=e140]:
+          - generic [ref=e141]: 公共提示词
+          - button "查看更多 →" [ref=e142] [cursor=pointer]
+        - generic [ref=e168]:
+          - button "返回顶部"
+  - banner [ref=e169]:
+    - generic [ref=e171]:
+      - button [ref=e172] [cursor=pointer]
+      - link [ref=e177] [cursor=pointer]:
+        - /url: https://github.com/RenderTool/zeroexo-platform-infinite-canvas
+      - button [ref=e182] [cursor=pointer]
+      - button [ref=e188] [cursor=pointer]
+      - button [ref=e194] [cursor=pointer]
