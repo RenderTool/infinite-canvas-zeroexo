@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
 import type { WorkbenchNodeData, WorkbenchShot } from './workbench-types';
 import { generateFrame } from './workbench-frame-api';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
@@ -232,6 +233,7 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       {/* Plan#50:工作台全屏改为画布顶部页签承载(幂等 key = workbench:<nodeId>)——embedded 用
           absolute 填满页签内容层(覆盖画布),数据(data.shots)与回调仍留在节点组件内 */}
       {tabActive && tabHost ? createPortal(
+        <CanvasTabContentBoundary>
         <div style={tabEmbeddedStyle(bgPage)}>
           {/* 全屏顶部栏 */}
           <div style={{
@@ -394,7 +396,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
               t={t}
             />
           </div>
-        </div>,
+        </div>
+        </CanvasTabContentBoundary>,
         tabHost,
         ) : null}
     </div>

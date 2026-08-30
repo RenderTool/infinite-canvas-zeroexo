@@ -290,6 +290,12 @@ async function fetchCloudAssetMap(): Promise<Map<string, string>> {
 async function pushAssetToCloud(asset: Asset): Promise<string | undefined> {
   const local = asset;
 
+  // Plan 资产为纯本地创作资产（内容含本地版本历史 data.history，无 storageKey/二进制文件）。
+  // 若走云同步会被下方「missing local storageKey → 删除本地记录」分支误删，故整体跳过同步。
+  if ((local.kind as string) === 'plan') {
+    return undefined;
+  }
+
   if (!local.cloudId) {
     if ((local.kind as string) === 'text' || (local.kind as string) === 'script') {
       const data = local.data as { content?: string };

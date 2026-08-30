@@ -25,6 +25,7 @@ import { createPortal } from 'react-dom';
 import { ListVideo } from 'lucide-react';
 import { Button, App } from 'antd';
 import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
 import DOMPurify from 'dompurify';
 import ReactMarkdown from 'react-markdown';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -409,6 +410,7 @@ export function ScriptEditorSheet({
           仅在页签激活且页签内容层已挂载时,通过 createPortal 渲染到页签挂载点;
           数据(episodes)与所有回调仍留在节点组件内,关闭统一走页签 X(closeTab) */}
       {tabActive && tabContentHost ? createPortal(
+      <CanvasTabContentBoundary>
       <ScriptFullscreenEditor
         open
         embedded
@@ -427,7 +429,8 @@ export function ScriptEditorSheet({
         isSample={isSample}
         onIsSampleChange={handleSampleChange}
         onImportClick={() => setImportFlowOpen(true)}
-      />,
+      />
+      </CanvasTabContentBoundary>,
       tabContentHost,
       ) : null}
 

@@ -414,7 +414,7 @@ export function ScriptFullscreenEditor({
     <ConfigProvider theme={{ token: { zIndexPopupBase: 40000 } }}>
     <div style={overlayStyle(theme, embedded)}>
       {/* ===== 顶部 header ===== */}
-      <div style={headerStyle(cardBorder, theme)}>
+      <div style={headerStyle(cardBorder, theme, embedded)}>
         {/* 左侧：工具按钮 */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <Tooltip title={t('scriptEditor.importScript') || '导入'}>
@@ -655,9 +655,16 @@ const overlayStyle = (
   background: theme.toolbar.editorPaper,
 });
 
-const headerStyle = (border: string, theme: ReturnType<typeof useTheme>['theme']): React.CSSProperties => ({
+const headerStyle = (
+  border: string,
+  theme: ReturnType<typeof useTheme>['theme'],
+  embedded = false,
+): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '8px 16px', flexShrink: 0,
+  // embedded 模式被包在 antd Modal 内，Modal 右上角自带 56px 关闭按钮；
+  // 留出空间避免 header 右侧的换肤/关闭按钮与 Modal 关闭按钮重叠
+  padding: embedded ? '8px 56px 8px 16px' : '8px 16px',
+  flexShrink: 0,
   borderBottom: `1px solid ${border}`,
   background: theme.toolbar.editorSurface,
 });
@@ -670,7 +677,8 @@ const mainRowStyle: React.CSSProperties = {
 const editorAreaStyle = (theme: ReturnType<typeof useTheme>['theme']): React.CSSProperties => ({
   flex: 1, display: 'flex', flexDirection: 'column',
   minWidth: 0, minHeight: 0, overflow: 'hidden',
-  padding: '16px 16px 12px 16px', borderRadius: 8,
+  // paddingBottom 与 EpisodeList wrap 的 paddingBottom(10) 对齐，使两侧底部按钮在同一水平线
+  padding: '16px 16px 10px 16px', borderRadius: 8,
   background: theme.toolbar.editorPaper,
 });
 

@@ -19,8 +19,8 @@ export interface HierarchyLibraryItem {
   content?: string;
 }
 
-/** 资产类型筛选 */
-export type AssetKindFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'zeroexo-text';
+/** 资产类型筛选（plan 为 Plan#51 制作计划） */
+export type AssetKindFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'zeroexo-text' | 'plan';
 
 /** 页面列表项（统一分页用） */
 export type PageItem =

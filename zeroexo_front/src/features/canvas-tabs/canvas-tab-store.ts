@@ -52,6 +52,8 @@ export interface CanvasTabState {
   activateTab: (key: string) => void;
   /** 关闭页签（画布页签不可关闭）；关闭当前激活时回退相邻/画布 */
   closeTab: (key: string) => void;
+  /** 资源页签拖拽排序（from→to，仅资源页签参与，画布/计划固定页签不受影响） */
+  reorderTabs: (from: number, to: number) => void;
   /** 关闭全部资源页签，回到画布 */
   closeAllTabs: () => void;
 }
@@ -85,7 +87,7 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
   activateTab: (key) => {
     const { tabs, activeTabKey } = get();
     if (key === CANVAS_TAB_KEY) {
-      set({ activeTabKey: CANVAS_TAB_KEY });
+      set({ activeTabKey: key });
       return;
     }
     if (!tabs.some((t) => t.key === key)) return;
@@ -106,6 +108,16 @@ export const useCanvasTabStore = create<CanvasTabState>((set, get) => ({
     // 关闭当前激活：回退到左侧相邻页签，无则回画布
     const fallback = nextTabs[idx - 1]?.key ?? CANVAS_TAB_KEY;
     set({ tabs: nextTabs, activeTabKey: fallback });
+  },
+
+  reorderTabs: (from, to) => {
+    const { tabs } = get();
+    if (from === to || from < 0 || from >= tabs.length || to < 0 || to >= tabs.length) return;
+    const next = [...tabs];
+    const [moved] = next.splice(from, 1);
+    if (!moved) return;
+    next.splice(to, 0, moved);
+    set({ tabs: next });
   },
 
   closeAllTabs: () => set({ tabs: [], activeTabKey: CANVAS_TAB_KEY }),

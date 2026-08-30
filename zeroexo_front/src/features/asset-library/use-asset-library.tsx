@@ -24,7 +24,6 @@ import { notifyPromptCopied } from './prompt-copy-feedback.js';
 import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { apiPost, getToken } from '@/services/api-client.js';
 import { chapterDetectPipeline } from '@/shared/utils/chapter-detect-pipeline.js';
-import { openCanvasTab } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type { Episode } from '@/features/canvas-nodes/storyboard/script-types.js';
 import type { AssetCategory, ViewMode } from '@/shared/components/index.js';
 import type {
@@ -280,9 +279,9 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       label: t('assetLibrary.filterMaterial'),
       icon: <Package size={16} />,
       color: '#f59e0b',
-      count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity').length,
+      count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan').length,
       children: [
-        { key: 'all', label: t('assetLibrary.filterAll'), count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity').length },
+        { key: 'all', label: t('assetLibrary.filterAll'), count: assets.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan').length },
         { key: 'image', label: t('assetLibrary.filterImage'), count: assets.filter((a) => a.kind === 'image').length },
         { key: 'video', label: t('assetLibrary.filterVideo'), count: assets.filter((a) => a.kind === 'video').length },
         { key: 'audio', label: t('assetLibrary.filterAudio'), count: assets.filter((a) => a.kind === 'audio').length },
@@ -314,6 +313,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       count: assets.filter((a) => (a.kind as string) === 'script').length,
       children: [],
     },
+    // Plan 已定为画布强关联对象（每画布一份，入口在画布 TopBar），资产库不设分组
   ], [prompts, assets, t, props.hierarchyItems]);
 
   // ── 分类筛选逻辑（子分类值做合法性校验，非法残留值回退 all） ──
@@ -374,7 +374,8 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
   const filteredAssets = useMemo(() => {
     let result = assets;
     if (activeGroup === 'material') {
-      result = result.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity');
+      // Plan 为画布强关联对象，资产库任何分组都不展示
+      result = result.filter((a) => (a.kind as string) !== 'script' && (a.kind as string) !== 'zeroexo-entity' && (a.kind as string) !== 'plan');
     }
     if (assetKindFilter !== 'all') {
       result = result.filter((a) => (a.kind as string) === assetKindFilter);
@@ -402,7 +403,10 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
       // FIX（2026-08-25 实测：剧本存入资产后「全部」视图不可见）：不再在此滤除 script——
       // material 组已在 filteredAssets 源头排除剧本（L361），「全部」视图应完整展示包括剧本在内的所有资产；
       // 发送到画布的真实类型由发送入口按 data.kind 判定（见 asset-library-page）
-      filteredAssets.forEach((a) => items.push({ type: 'asset', data: a }));
+      // Plan 为画布强关联对象，资产库列表不展示
+      filteredAssets
+        .filter((a) => (a.kind as string) !== 'plan')
+        .forEach((a) => items.push({ type: 'asset', data: a }));
     }
     if (showScripts) {
       filteredScripts.forEach((a) => items.push({ type: 'asset', data: a }));
@@ -845,10 +849,7 @@ export function useAssetLibrary(props: UseAssetLibraryProps): UseAssetLibraryRet
     if (item.type === 'prompt') {
       setPromptViewId(item.data.id);
     } else if (item.type === 'asset') {
-      if (item.data.kind === 'plan') {
-        // Plan#51：制作计划走画布顶部页签（幂等 key plan:<assetId>）
-        openCanvasTab({ kind: 'plan', id: item.data.id, title: item.data.title });
-      } else if (item.data.kind === 'script') {
+      if (item.data.kind === 'script') {
         handleOpenScriptAsset(item.data);
       } else {
         setAssetDetail(item.data);

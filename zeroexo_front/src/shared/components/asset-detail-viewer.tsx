@@ -527,7 +527,7 @@ function AssetDetailViewerInner({
         onCancel={onClose}
         footer={null}
         width="calc(100vw - 32px)"
-        style={{ maxWidth: 1300 }}
+        style={{ maxWidth: 1400 }}
         centered
         destroyOnHidden
         {...(zIndex !== undefined ? { zIndex } : {})}

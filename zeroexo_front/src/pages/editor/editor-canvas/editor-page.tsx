@@ -60,9 +60,6 @@ import { consumePendingAgentPrompt } from '@/features/canvas-agent/ui/pending-ag
 import { useAssets } from '@/features/asset-picker/index.js';
 import { HierarchyPanelSidebar } from '@/features/hierarchy/index.js';
 import { CANVAS_TAB_KEY, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
-import { PlanWorkbench } from '@/features/plan/index.js';
-import { executeCanvasOp, getCanvasOpBridge, type AgentCanvasOp } from '@/features/canvas-agent/ui/canvas-op-bridge.js';
-import { getResourceUrl } from '@/shared/utils/resource-url.js';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import type { KeyboardPlugin } from '@zeroexo/plugin-keyboard';
 import { getProject } from '@zeroexo/plugin-persistence';
@@ -143,12 +140,10 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     setTabContentHost(el);
   }, [setTabContentHost]);
 
-  // ===== Plan#51：制作计划（Plan）页签联动 =====
-  // 发送到 Agent：把主体/分镜块上下文注入 Agent 会话，让 AI 据此改 Plan
-  const handlePlanSendToAgent = useCallback((payload: { scope: 'subject' | 'shot'; refId: string; text: string }) => {
-    void sendMessage(payload.text);
-  }, [sendMessage]);
+  // ===== Plan#51 页签联动已随 Plan 移除(2026-08-29),逻辑注释保留 =====
+  // const handlePlanSendToAgent = useCallback((payload) => { void sendMessage(payload.text); }, [sendMessage]);
 
+  /* [2026-08-29 Plan 已移除:发送到画布逻辑保留注释]
   // 发送到画布：素材副本列 → 视频产物空节点 → 连线 → 聚焦，然后切回画布页签
   const handlePlanSendToCanvas = useCallback((payload: { shotId: string; images: string[]; prompt: string; title: string }) => {
     const { shotId, images, prompt, title } = payload;
@@ -216,6 +211,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
     // 切回画布页签，让用户看到刚落地的链
     activateTab(CANVAS_TAB_KEY);
   }, [activateTab]);
+  ===== Plan 发送逻辑注释结束 ===== */
 
   // 2026-08-29 修复「节点选中后切换页签会错位穿透」:
   // 画布在页签激活时仍保持挂载(Plan#50 要求,display:none 会破坏 ResizeObserver/视口),
@@ -351,7 +347,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
   // → 禁用编辑入口,避免"改了刷新又变回去"的假可编辑
   const isCollabGuest = !!collabRoom && !collabRoom.isOwner;
 
-  // 素材库
+  // 素材库（addAsset 供交互层上传资源使用）
   const { addAsset: addAssetToStore } = useAssets();
 
   // 交互回调
@@ -946,8 +942,25 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
         <div style={flexContainerStyle}>
           {/* 桌面端:资产抽屉(2026-08-29 用户拍板)放在 Content 行内(Nav 下方),展开仅推开画布内容,
               不再整行推走 TopBar;HierarchyPanelSidebar 非 overlay 模式 flexShrink:0 占位推开右侧画布 */}
-          {!state.loading && !isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing || hasScriptTabOpen) && state.editor && refs.groupPlugin ? (
+          {/* 2026-08-30 修复「资产抽屉打开状态下缩放窗口 → 剧本/分镜页签内容消失」:
+              PC 抽屉与移动抽屉原为两个互斥 JSX 分支,useIsMobile 在 resize 翻转时
+              抽屉组件被卸载重建,抽屉内 portal 出的编辑器内容随之销毁(页签在、内容空)。
+              2026-08-29 的 hasScriptTabOpen 修复只覆盖「抽屉关闭」,未覆盖「响应式断点切换」。
+              现合并为单一实例:包裹层用 style 切换(display:contents ↔ fixed),组件永不卸载。 */}
+          {!state.loading && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing || hasScriptTabOpen) && state.editor && refs.groupPlugin ? (
+            <div
+              style={
+                isMobile
+                  // 覆盖模式:fixed 全视口盖住顶栏 CanvasTabBar,避免资产抽屉分类 Tab
+                  // 与画布页签条同时可见形成双重页签(征集 #95 / 2026-08-29 修正)
+                  ? { position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: HIERARCHY_OVERLAY_Z }
+                  // 非覆盖模式:display:contents 不产生盒子,抽屉直接作为 flex item 占位推开画布,
+                  // 布局行为与原先无包裹层时完全一致
+                  : { display: 'contents' }
+              }
+            >
             <HierarchyPanelSidebar
+              overlay={isMobile}
               // 2026-08-29 修复「资产面板关闭后剧本页签内容消失」:
               // 剧本编辑器由抽屉内 AssetLibraryPage 用 createPortal 挂到页签内容层,
               // 抽屉一卸载 portal 内容即消失(页签还在全局 store,于是「页签在、内容空」)。
@@ -1020,6 +1033,7 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
                 store.focusOnNode(nodeId, state.containerSize, size.width, size.height, 400, 51);
               }}
             />
+            </div>
           ) : null}
           {/* 画布区域(flex-1 自适应)
               Plan#50:页签激活时画布保持挂载与渲染(不可 display:none——CanvasView/ResizeObserver
@@ -1253,36 +1267,9 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
 
         {/* BUG5: RightSideToolBar 已移除 — 节点创建功能并入 LeftSideToolBar 加号菜单 */}
 
-        {/* 征集 #95(Plan#49 T28):移动端不再单独设计抽屉(MobileHierarchyDrawer 退役),
-            直接复用 PC 同款 HierarchyPanelSidebar,改为覆盖模式——在画布左缘之上覆盖拉开,不推开布局。
-            2026-08-29 修正:包裹层改 fixed 全视口覆盖(zIndex 300),盖住顶栏 CanvasTabBar——
-            否则资产抽屉的分类 Tab 与画布页签条同时可见,形成双重页签 */}
-        {!state.loading && isMobile && (dialogs.isHierarchyOpen || dialogs.isHierarchyClosing || hasScriptTabOpen) && state.editor && refs.groupPlugin ? (
-          <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 300 }}>
-            <HierarchyPanelSidebar
-              // 同 PC:剧本页签开着时保持挂载(覆盖模式靠 translate3d 移出视口隐藏),内容不丢
-              closing={dialogs.isHierarchyClosing || !dialogs.isHierarchyOpen}
-              overlay
-              store={state.editor.store}
-              groupPlugin={refs.groupPlugin}
-              theme={theme}
-              onSendToCanvas={dialogs.handleAssetInsert}
-              onClose={dialogs.toggleHierarchy}
-              onFocusNode={(nodeId) => {
-                // Plan#50 T13:非画布页签激活时,点击层级节点先切回画布页签再聚焦
-                activateTab(CANVAS_TAB_KEY);
-                const store = state.editor?.store;
-                if (!store?.focusOnNode) return;
-                const graph = store.getGraph();
-                const targetNode = graph.nodes.find((n) => n.id === nodeId);
-                if (!targetNode) return;
-                const w = targetNode.size?.width ?? 200;
-                const h = targetNode.size?.height ?? 200;
-                store.focusOnNode(nodeId, state.containerSize, w, h, 400, 51);
-              }}
-            />
-          </div>
-        ) : null}
+        {/* 2026-08-30:移动端抽屉分支已删除——与 PC 抽屉合并为单一实例(见上方 Content 行内抽屉)。
+            原因:两个互斥分支会在 useIsMobile 翻转时卸载重建抽屉,导致其 portal 出的
+            剧本/分镜编辑器内容消失。现在由同一实例的 overlay={isMobile} + 包裹层 style 切换承担。 */}
 
         {/* 小地图(桌面端右下角 / 移动端左下角上移,isMiniMapOpen 时显示) */}
         {/* 只读时 zIndex 提到 46 > 遮罩 45：小地图点击跳转是无害浏览导航，viewer 可用 */}
@@ -1330,21 +1317,15 @@ export function EditorPage({ canvasId, onBack, onOpenProject }: EditorPageProps)
           <div
             ref={handleTabHostRef}
             style={{
-              position: 'absolute', inset: 0, zIndex: 100,
+              position: 'absolute', inset: 0, zIndex: TAB_CONTENT_Z,
+              // 2026-08-29 修复:画布容器在页签激活时 pointer-events:none 会继承到本层,
+              // 导致页签内剧本/分镜编辑器整体无法交互——显式恢复 auto
+              pointerEvents: 'auto',
               overflow: 'hidden',
               background: theme.canvas.background,
               borderLeft: `1px solid ${theme.toolbar.border || 'rgba(128,128,128,0.25)'}`,
             }}
           >
-            {/* Plan#51：制作计划页签（key = plan:<assetId>） */}
-            {activeTabKey.startsWith('plan:') && (
-              <PlanWorkbench
-                planAssetId={activeTabKey.slice('plan:'.length)}
-                embedded
-                onSendToAgent={handlePlanSendToAgent}
-                onSendToCanvas={handlePlanSendToCanvas}
-              />
-            )}
           </div>
         )}
 
@@ -1625,6 +1606,17 @@ function layoutStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties
   return { position: 'relative', height: '100%', width: '100%', flex: 1, overflow: 'hidden', background: theme.canvas.background };
 }
 const headerStyle: CSSProperties = { minHeight: 54, background: 'transparent', padding: 0, lineHeight: '54px', position: 'relative', zIndex: 100 };
+/**
+ * 资产抽屉覆盖模式（移动端 fixed 包裹层）层级。
+ * 需高于顶栏 CanvasTabBar（headerStyle zIndex 100）以盖住页签条、避免双重页签。
+ */
+const HIERARCHY_OVERLAY_Z = 300;
+/**
+ * 画布页签内容层层级：必须 **高于** HIERARCHY_OVERLAY_Z，
+ * 否则移动端抽屉会盖住剧本/分镜编辑器内容（视觉上等同「内容消失」）。
+ * 同时需高于画布内浮层：只读遮罩 45 / 小地图 40（2026-08-29 修复）。
+ */
+const TAB_CONTENT_Z = 310;
 const contentLayoutStyle: CSSProperties = { position: 'relative', overflow: 'hidden' };
 const flexContainerStyle: CSSProperties = { display: 'flex', width: '100%', height: '100%', overflow: 'hidden' };
 // 顶层行布局:右列(TopBar + 内容)。PC 资产抽屉已移入 Content 行内(2026-08-29),

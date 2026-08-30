@@ -42,6 +42,17 @@ export interface StoryboardEntity {
   defaultStateId?: string;
   mergedFrom?: string[];
   placeholderImageUrl?: string;
+
+  // ===== Plan#53: 主体资产卡扩展（§4.2，承载 #51 圣经能力） =====
+
+  /** 身份锚点句：同角色所有提示词逐字复用（#51 圣经核心） */
+  anchorSentence?: string;
+  /** 锚点句锁定：锁定后禁止自动改写 */
+  anchorLocked?: boolean;
+  /** 画风/光线继承标记：false = 用户覆盖，不随圣经刷新 */
+  inheritStyle?: boolean;
+  /** 生成的定妆/场景/道具图 */
+  referenceImages?: Array<{ storageKey: string; prompt?: string; isPrimary?: boolean }>;
 }
 
 // ===== 摄影参数 =====
@@ -107,6 +118,68 @@ export interface Shot {
   promptEn?: string;
   /** Plan#33 C2: 镜头剧照集（一镜对多图，一图一提示词；旧数据无此字段兼容空） */
   images?: ShotImage[];
+
+  // ===== Plan#53: 分镜生产台扩展（§4.2，全部可选兼容旧数据） =====
+
+  /** 圣经引用（取代不可信的 entities[].entityId） */
+  bibleRefs?: {
+    characters: string[];
+    scenes: string[];
+    props: string[];
+  };
+
+  /** 提示词三段（统一语义，取代 prompt/promptText/promptEn 混用） */
+  imagePrompt?: string;
+  videoPrompt?: string;
+  negativePrompt?: string;
+
+  /** 组装式引擎元信息 */
+  promptAssembly?: {
+    form: 'S1' | 'S2' | 'S3' | 'S4';
+    anchorSentences: string[];
+    motionBudget: { subject: number; camera: number; environment: number };
+    aspectRatio: string;
+    assembledAt: string;
+  };
+
+  /** 质量门评分（10 分制，< 7 禁止输出） */
+  quality?: {
+    score: number;
+    deductions: Array<{ item: number; reason: string }>;
+    checkedAt: string;
+  };
+
+  /** 生成产物：一镜多视频（首个为主视频，其余为备选） */
+  videos?: ShotVideo[];
+  /** 当前生效的视频 index（默认 0） */
+  activeVideoIndex?: number;
+
+  /** 音频预览（2026-08-30 用户追加：自己配音试听）；单轨试听，非混音 */
+  audioPreview?: {
+    storageKey: string;
+    duration?: number;
+    name?: string;
+  };
+
+  /** 用户手动改过 → LLM/Agent 禁止自动覆盖（C9 原则） */
+  manualEdit?: boolean;
+  /** 生成过（区分「空位待生成」与「已生成」） */
+  generated?: boolean;
+}
+
+/** Plan#53: 一镜多视频（首个为主视频，其余为备选） */
+export interface ShotVideo {
+  storageKey: string;
+  model?: string;
+  duration?: number;
+  aspectRatio?: string;
+  prompt?: string;
+  status: 'pending' | 'generating' | 'done' | 'failed';
+  progress?: number;
+  error?: string;
+  diagnosis?: Array<{ code: string; mechanism: string; fix: string }>;
+  createdAt?: string;
+  tags?: string[];
 }
 
 // ===== 实体关联 =====
@@ -217,30 +290,4 @@ export interface SubjectAudio {
   name: string;
   kind: 'voice' | 'ambient' | 'sfx';
   note: string;
-}
-
-/** 主体节点 node.data 结构（Plan#20 T5） */
-export interface SubjectCardData {
-  /** 主体名 */
-  name: string;
-  /** 主体类型 */
-  kind: EntityKind;
-  /** 一致性描述（逐字复用到视频生成提示词） */
-  consistency: string;
-  /** 别名列表（再生成对账用） */
-  aliases: string[];
-  /** 封面立绘 storageKey */
-  coverKey: string | null;
-  /** 状态集合 */
-  states: SubjectState[];
-  /** 当前活跃状态 id */
-  activeStateId: string | null;
-  /** 音效素材 */
-  audio: SubjectAudio[];
-  /** 跨集归属（多集关联用） */
-  episodeIds: string[];
-  /** 资产库 Subject id（用户「发送资产」后回填） */
-  assetSubjectId: string | null;
-  /** AI 占位创建未转正（AI 建卡标记 true；用户任何编辑后清除；占位未转正风险检测依据） */
-  placeholder?: boolean;
 }

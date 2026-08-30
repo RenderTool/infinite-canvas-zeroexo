@@ -532,6 +532,13 @@ async function main(): Promise<void> {
         '通过对话编排画布节点操作，覆盖需求分析、节点管理、连线管理、配置管理、流程编排等',
       maxIterations: 20,
     },
+    {
+      agentType: 'plan_agent',
+      name: '制作计划助手',
+      description:
+        '读取剧本生成并维护制作计划（Plan）：色卡 + 主体清单 + 视频提示词分镜块，以结构化操作序列（PlanOp）落地',
+      maxIterations: 20,
+    },
   ];
   for (const cfg of agentConfigs) {
     await prisma.aiAgentConfig.upsert({

@@ -238,3 +238,60 @@ export function nextVariantRefId(subject: Subject): string {
   while (used.has(`${subject.refId}-v${n}`)) n += 1;
   return `${subject.refId}-v${n}`;
 }
+
+// ===== 版本历史 =====
+
+/** Plan 版本历史条目（快照模型，存资产 data.history） */
+export interface PlanHistoryEntry {
+  id: string;
+  /** 版本名（可选，如「初稿v2」） */
+  label?: string;
+  timestamp: string;
+  updatedBy: PlanUpdatedBy;
+  /** 完整快照（PlanDoc 副本，恢复时整体覆盖） */
+  snapshot: PlanDoc;
+}
+
+/** 历史保留上限（超出丢弃最旧，防本地存储膨胀） */
+export const PLAN_HISTORY_MAX = 20;
+
+/** 生成一个版本条目（深拷贝当前 Plan 作为快照） */
+export function createPlanHistoryEntry(
+  plan: PlanDoc,
+  updatedBy: PlanUpdatedBy = 'user',
+  label?: string,
+): PlanHistoryEntry {
+  return {
+    id: `ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: label?.trim() || undefined,
+    timestamp: new Date().toISOString(),
+    updatedBy,
+    snapshot: JSON.parse(JSON.stringify(plan)) as PlanDoc,
+  };
+}
+
+/** 解析历史（容错：非数组/损坏条目直接丢弃） */
+export function parsePlanHistory(raw: unknown): PlanHistoryEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (e): e is PlanHistoryEntry =>
+        !!e &&
+        typeof e === 'object' &&
+        typeof (e as { timestamp?: unknown }).timestamp === 'string' &&
+        (e as { snapshot?: unknown }).snapshot !== undefined,
+    )
+    .map((e) => ({
+      ...e,
+      label: typeof e.label === 'string' ? e.label : undefined,
+      snapshot: parsePlanDoc(JSON.stringify(e.snapshot), '历史版本'),
+    }));
+}
+
+/** 追加版本条目（保留最近 PLAN_HISTORY_MAX 条） */
+export function appendPlanHistory(
+  history: PlanHistoryEntry[],
+  entry: PlanHistoryEntry,
+): PlanHistoryEntry[] {
+  return [...history, entry].slice(-PLAN_HISTORY_MAX);
+}

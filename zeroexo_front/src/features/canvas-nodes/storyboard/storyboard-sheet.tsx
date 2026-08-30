@@ -8,6 +8,7 @@ import { memo, useState, useCallback, useEffect, useMemo, useRef, ReactElement }
 import { createPortal } from 'react-dom';
 import { Link2, ListVideo, Aperture, Table } from 'lucide-react';
 import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
 import { Button, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -67,31 +68,6 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     }
     return map;
   }, [graph, data]);
-  // Plan#33 C3: @ 引用连入剧管——收集画布剧管条目(优先连入的剧管, 兜底全部剧管并集)
-  const linkedPmItems = useMemo<Array<{ id: string; name: string; kind: 'character' | 'scene' | 'prop'; aliases?: string[] }>>(() => {
-    const pmNodes = graph.nodes.filter((n: any) => n.type === 'production-manager');
-    if (pmNodes.length === 0) return [];
-    const linkedIds = new Set<string>();
-    const pmId = (data as StoryboardNodeData).productionManagerId;
-    if (pmId) linkedIds.add(pmId);
-    for (const e of graph.edges) {
-      if (e.target?.nodeId === nodeId && e.source?.pinId === 'output' && e.source?.nodeId
-        && pmNodes.some((n) => n.id === e.source?.nodeId)) {
-        linkedIds.add(e.source.nodeId);
-      }
-    }
-    const pool = linkedIds.size > 0 ? pmNodes.filter((n) => linkedIds.has(n.id)) : pmNodes;
-    return pool.flatMap((n: any) =>
-      (Array.isArray(n.data?.items) ? n.data.items : [])
-        .map((it: any) => ({
-          id: it.id ?? '',
-          name: it.name ?? '',
-          kind: (it.kind ?? 'character') as 'character' | 'scene' | 'prop',
-          aliases: Array.isArray(it.aliases) ? it.aliases : [],
-        }))
-        .filter((it: any) => it.id && it.name.trim()),
-    );
-  }, [graph, nodeId, data]);
   const scriptOptionLabel = useCallback((n: { id?: string; title?: string }) => {
     const scriptDefault = t('storyboard.script');
     const title = n.title || scriptDefault;
@@ -368,6 +344,7 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
       {/* Plan#50:分镜编辑器改为画布顶部页签内嵌呈现(不再全屏覆盖)——幂等 key = storyboard:<nodeId>;
           数据(shots)与回调仍留在节点组件内,关闭统一走页签 X(closeTab) */}
       {tabActive && tabHost ? createPortal(
+        <CanvasTabContentBoundary>
         <StoryboardFullscreenEditor
           open
           embedded
@@ -379,7 +356,6 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           episodes={scriptEpisodes}
           activeEpisodeId={activeEpisodeId}
           onEpisodeChange={handleEpisodeChange}
-          pmItems={linkedPmItems}
           entities={entities}
           aiSubjects={aiSubjects}
           subjectStatesByEntity={subjectStatesByEntity}
@@ -392,7 +368,8 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
           scriptNodes={scriptNodes}
           scriptOptionLabel={scriptOptionLabel}
           onAssociateScript={openAssociateModal}
-        />,
+        />
+        </CanvasTabContentBoundary>,
         tabHost,
         ) : null}
 

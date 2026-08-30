@@ -5,6 +5,7 @@
  * 视觉：与画布顶栏同高的紧凑横条（36px），激活态 accent 下划线；横向溢出可滚动。
  */
 
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@zeroexo/plugin-theme';
@@ -25,8 +26,10 @@ export function CanvasTabBar(): React.ReactElement | null {
   const activeTabKey = useCanvasTabStore((s) => s.activeTabKey);
   const activateTab = useCanvasTabStore((s) => s.activateTab);
   const closeTab = useCanvasTabStore((s) => s.closeTab);
+  const reorderTabs = useCanvasTabStore((s) => s.reorderTabs);
+  // 拖拽中的资源页签下标（画布固定页签不参与排序）
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  // 无资源页签时不占高度（保持画布页原样）
   if (tabs.length === 0) return null;
 
   // Plan#50 修正(用户拍板):页签条与标题同行(inline 于顶栏行),紧凑高度、无下边框/背景
@@ -102,14 +105,32 @@ export function CanvasTabBar(): React.ReactElement | null {
         <span style={underlineStyle(activeTabKey === CANVAS_TAB_KEY)} />
       </button>
 
-      {/* 资源页签（可关闭） */}
-      {tabs.map((tab) => {
+      {/* 资源页签（可关闭，支持拖拽排序） */}
+      {tabs.map((tab, idx) => {
         const active = activeTabKey === tab.key;
         return (
           <button
             key={tab.key}
             type="button"
+            draggable
             onClick={() => activateTab(tab.key)}
+            onDragStart={(e) => {
+              setDragIndex(idx);
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', tab.key);
+            }}
+            onDragOver={(e) => {
+              // 仅当有拖拽源时允许放置，避免误触
+              if (dragIndex === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIndex !== null && dragIndex !== idx) reorderTabs(dragIndex, idx);
+              setDragIndex(null);
+            }}
+            onDragEnd={() => setDragIndex(null)}
             style={tabStyle(active)}
             title={tab.title}
           >

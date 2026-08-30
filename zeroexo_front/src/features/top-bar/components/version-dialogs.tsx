@@ -14,7 +14,6 @@ import { App, Drawer, Input, Button, Empty, Tag, Tooltip, Spin, Tabs } from 'ant
 import type { ThemeConfig } from '@zeroexo/shared';
 import { useTranslation } from 'react-i18next';
 import { History, Users, X, RotateCcw, Trash2 } from 'lucide-react';
-import { Virtuoso } from 'react-virtuoso';
 import { apiGet, apiPost, apiDelete, ApiError } from '@/services/api-client.js';
 import { updateProject, loadProjectGraph, saveProjectGraph } from '@zeroexo/plugin-persistence';
 import type { GraphModel } from '@zeroexo/core';
@@ -116,22 +115,14 @@ export function VersionDialogs({
     if (readOnly) return;
     setSaving(true);
     try {
-      // 2026-08-29:直接用后端返回的新版本记录插入列表头部(version 降序),
-      // 不依赖 loadVersions 重新拉取的时序——保存后立即可见
-      const created = await apiPost<VersionRecord | null>(
+      // 2026-08-29:保存后一律以服务端列表为准全量刷新(await 保证列表更新完成),
+      // 修复"提示保存成功但列表不刷新"——不再依赖 POST 返回值结构判断
+      await apiPost<VersionRecord | null>(
         `/projects/${canvasId}/versions`,
         { label: label.trim() || undefined },
       );
       setLabel('');
-      if (created && typeof created.version === 'number') {
-        setVersions((prev) =>
-          [created, ...prev.filter((v) => v.version !== created.version)]
-            .sort((a, b) => b.version - a.version),
-        );
-      } else {
-        // 兜底:返回无记录(如内容去重跳过)时仍全量刷新
-        void loadVersions();
-      }
+      await loadVersions();
       message.success(t('versions.saveSuccessTitle'));
     } catch (err) {
       // 新画布尚未同步到云端时版本接口返回 404,给出明确提示而非笼统失败
@@ -352,11 +343,10 @@ export function VersionDialogs({
                     description={t('versions.emptyHint')}
                   />
                 ) : (
-                  <Virtuoso
-                    style={{ flex: 1, minHeight: 0 }}
-                    data={versions}
-                    itemContent={(_index, v) => (
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                    {versions.map((v) => (
                       <div
+                        key={v.id}
                         style={{
                           padding: '10px 4px',
                           borderBottom: `1px solid ${theme.toolbar.border}`,
@@ -405,8 +395,8 @@ export function VersionDialogs({
                           />
                         </Tooltip>
                       </div>
-                    )}
-                  />
+                    ))}
+                  </div>
                 )}
               </div>
             ),

@@ -40,6 +40,7 @@ import { saveEntitiesV2, mergeEntities, replaceEntityImage, addVariant, removeVa
 import { aiImage, aiAudio, listExistingAssets } from './tools/generation-tools';
 import { createScriptNode, createStoryboardNode, canvasSetConfig, readContentChunked, readAssetContent, workflowGenerate, artifactLibrary, agentSelfUpgrade } from './tools/canvas-agent-tools';
 import { searchWeb, saveShotsLegacy, saveEntitiesLegacy } from './tools/legacy-tools';
+import { planReadScript, planSubmitOps } from './tools/plan-tools';
 
 const toolLogger = new Logger('AgentTool');
 
@@ -122,6 +123,14 @@ export function createToolsForAgentType(
       );
     }
     return storyboardAssistantTools(ctx);
+  }
+
+  // plan_agent: 制作计划 Agent（读剧本 → 生成 PlanOp → 提交前端落地）
+  if (agentType === 'plan_agent') {
+    return [
+      planReadScript(ctx),
+      planSubmitOps(),
+    ];
   }
 
   // canvas_agent: 画布编排助手

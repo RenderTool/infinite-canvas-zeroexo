@@ -555,7 +555,9 @@ const inputStyle = (
 const addLineBtnStyle = (border: string, text: string): CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
   marginTop: 8, marginBottom: 0, height: 32,
-  border: `1px dashed ${border}`, borderRadius: 0,
+  // 与右侧 antd Button 统一为 border-box，避免 1px border 导致实际高度变成 34
+  boxSizing: 'border-box',
+  border: `1px dashed ${border}`, borderRadius: 6,
   background: 'transparent', color: text, fontSize: 12, cursor: 'pointer',
   transition: 'background 0.12s',
 });

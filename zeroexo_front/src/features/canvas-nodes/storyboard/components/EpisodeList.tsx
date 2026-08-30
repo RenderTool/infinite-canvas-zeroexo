@@ -275,7 +275,7 @@ export function EpisodeList({
           type="dashed"
           size="small"
           icon={<Plus size={13} />}
-          style={{ width: '100%', height: 32, padding: '0 11px', lineHeight: '30px', color: text, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: '100%', height: 32, padding: '0 11px', lineHeight: '30px', color: text, fontSize: 12, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={(e) => {
             e.stopPropagation();
             e.preventDefault();

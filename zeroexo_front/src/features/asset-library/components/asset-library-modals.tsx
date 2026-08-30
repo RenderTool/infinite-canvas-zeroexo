@@ -5,10 +5,9 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Input, Modal } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
+import { Z_INDEX } from '@/shared/constants/z-index.js';
 import type { ThemeConfig } from '@zeroexo/shared';
 import type { ContextMenuItem } from '@/shared/components/index.js';
 import { ContextMenu, AssetDetailViewer } from '@/shared/components/index.js';
@@ -168,22 +167,6 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
     }
   }, [textDraft, props.onAssetDetailSave]);
 
-  // Plan#50:画布抽屉内嵌时,剧本编辑器改为顶部页签呈现(幂等 key = script:<assetId>)
-  const scriptTabKey = props.embeddedInCanvas && props.scriptAssetId
-    ? buildTabKey('script', props.scriptAssetId)
-    : null;
-  const scriptTabActive = useCanvasTabStore((s) => (scriptTabKey ? s.activeTabKey === scriptTabKey : false));
-  const scriptTabHost = useCanvasTabStore((s) => s.contentHost);
-  const closeScriptTab = useCanvasTabStore((s) => s.closeTab);
-  useEffect(() => {
-    if (!props.embeddedInCanvas || !props.scriptEditorOpen || !props.scriptAssetId) return;
-    useCanvasTabStore.getState().openTab({
-      kind: 'script',
-      id: props.scriptAssetId,
-      title: props.scriptEditorTitle,
-    });
-  }, [props.embeddedInCanvas, props.scriptEditorOpen, props.scriptAssetId, props.scriptEditorTitle]);
-
   return (
     <>
       {/* 上传队列 */}
@@ -263,6 +246,7 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
         <AssetDetailViewer
           asset={props.assetDetail}
           onClose={props.onAssetDetailClose}
+          zIndex={Z_INDEX.FULLSCREEN}
           // 文本类资产可编辑：与提示词同一套「编辑 → 保存」交互（图片/视频/音频仍只读）
           editable={isTextAsset}
           editing={textEditing}
@@ -273,30 +257,22 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
         />
       )}
 
-      {/* 剧本编辑器(Plan#50:画布抽屉内嵌 → 顶部页签呈现;主页/独立页 → 保持全屏 Modal) */}
-      {props.embeddedInCanvas && scriptTabKey ? (
-        scriptTabActive && scriptTabHost ? createPortal(
-          <ScriptFullscreenEditor
-            open
-            embedded
-            onClose={() => {
-              closeScriptTab(scriptTabKey);
-              props.onScriptEditorClose();
-            }}
-            title={props.scriptEditorTitle}
-            episodes={props.scriptEditorEpisodes}
-            activeEpisodeId={props.scriptEditorActiveId}
-            onEpisodesChange={props.onScriptEditorEpisodesChange}
-            onActiveEpisodeChange={props.onScriptEditorActiveChange}
-            onEpisodesAndActiveChange={props.onScriptEditorEpisodesAndActiveChange}
-            onAddEpisode={props.onScriptEditorAddEpisode}
-            onImportClick={props.onScriptEditorImportClick}
-          />,
-          scriptTabHost,
-        ) : null
-      ) : (
+      {/* 剧本编辑器(2026-08-29 统一改为 Modal 打开,与素材/提示词同尺寸;剧本与画布无关,不再走页签) */}
+      <Modal
+        open={props.scriptEditorOpen}
+        onCancel={props.onScriptEditorClose}
+        footer={null}
+        width="calc(100vw - 32px)"
+        style={{ maxWidth: 1400 }}
+        centered
+        destroyOnHidden
+        // antd Modal 默认 zIndex=1000 会被画布工具栏/浮层盖住(实测 2026-08-29),提到全屏层
+        zIndex={Z_INDEX.FULLSCREEN}
+        styles={{ body: { height: 'calc(100vh - 140px)', padding: 0, overflow: 'hidden' } }}
+      >
         <ScriptFullscreenEditor
-          open={props.scriptEditorOpen}
+          open
+          embedded
           onClose={props.onScriptEditorClose}
           title={props.scriptEditorTitle}
           episodes={props.scriptEditorEpisodes}
@@ -307,7 +283,7 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
           onAddEpisode={props.onScriptEditorAddEpisode}
           onImportClick={props.onScriptEditorImportClick}
         />
-      )}
+      </Modal>
 
       {/* 剧本导入弹窗 */}
       <ScriptImportFlow
@@ -346,6 +322,7 @@ export const AssetLibraryModals = memo(function AssetLibraryModals(props: AssetL
             data: { kind: 'prompt' },
           } as AssetDetailData}
           onClose={props.onPromptCreateClose}
+          zIndex={Z_INDEX.FULLSCREEN}
           renderPromptStage={({ editing }) => (
             <PromptCreatePage
               ref={promptPageRef}

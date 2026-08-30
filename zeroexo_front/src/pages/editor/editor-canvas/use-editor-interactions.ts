@@ -11,6 +11,7 @@ import { EDITOR_ICONS } from './icons.js';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { AddNodeCommand, AddEdgeCommand, RemoveEdgeCommand, RemoveNodeCommand, DuplicateNodeCommand, UpdateNodeDataCommand, UpdateNodeTitleCommand, MoveNodeCommand, ResizeNodeCommand, BatchCommand, resolveNodeSize, resolvePlacement } from '@zeroexo/core';
 import type { Command, NodeRecord, NodeTypeExtension, ToolContext, ToolDefinition } from '@zeroexo/core';
+import { useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import type {
   ImageNodeData,
   VideoNodeData,
@@ -37,7 +38,6 @@ import type { ContextMenuItem } from '@/shared/components/index.js';
 import type { ImageDialogState } from '@/features/image-editor/image-dialog-renderer.js';
 import type { Shot, StoryboardNodeData } from '@/features/canvas-nodes/storyboard/storyboard-types.js';
 import { normalizeShotForUi, SAMPLE_SUBJECTS } from '@/features/canvas-nodes/storyboard/storyboard-utils.js';
-import { createProductionItem, productionItemKeys, type ProductionItem, type ProductionItemKind } from '@/features/canvas-nodes/production-manager/production-manager-types.js';
 import { agentClient } from '@/features/agent-panel/AgentClient.js';
 import { buildTemplateParams } from './interactions/ai-generation-utils.js';
 import { promptTitleSummary } from './interactions/ai-generation.js';
@@ -900,6 +900,23 @@ export function useEditorInteractions({
     setContextMenuItems(null);
   }, [refs, setRenamingNodeId, setNodeCreateMenuPos, setContextMenuItems, containerRef, t, addAssetToStore, message, setAssetPickerOpen, state.extensions, getNodeSize, onRenameGroup, setReplaceNodeId, setReplaceAccept, setGroupStyleDialog, handleReplayGeneration]);
 
+  // 2026-08-29 修复:节点删除后自动移除对应页签(剧本/分镜/工作台等资源页签),避免"节点没了页签还在"
+  useEffect(() => {
+    const store = refs.store;
+    if (!store) return;
+    const onGraphChanged = () => {
+      const nodeIds = new Set(store.getGraph().nodes.map((n: any) => n.id));
+      const { tabs, closeTab } = useCanvasTabStore.getState();
+      for (const tab of tabs) {
+        if ((tab.kind === 'script' || tab.kind === 'storyboard' || tab.kind === 'workbench') && !nodeIds.has(tab.id)) {
+          closeTab(tab.key);
+        }
+      }
+    };
+    const unsub = store.subscribeGraph(onGraphChanged);
+    return () => unsub?.();
+  }, [refs.store]);
+
   // 空白区域 NodeCreateMenu 选择节点类型后创建节点
   // 节点语义重构(Plan#33 延伸):创建逻辑恢复原逻辑——直接创建空节点。
   // 空节点默认即为生成器态(选中后显示生成面板),无需再创建独立生成器节点。
@@ -1376,6 +1393,7 @@ export function useEditorInteractions({
     });
     // ==== AI 生成分镜(真实剧本)的复用逻辑:支持进度条与按集生成,供初次生成/重试/切换集共用 ====
     // Plan#9: 直连 provider 改为后端 storyboard_generate 任务(后端 storyboard_assistant 分块编排 + SSE)
+    /* ===== 2026-08-29 剧管自动创建已移除(主体并入分镜主体清单页签),旧逻辑注释保留 =====
     // Plan#29 T6 + 2026-08-21 架构修正: 剧管 = 分镜后置工序(剧本→分镜→剧管)
     // 剧管节点锚定分镜节点(右侧 + storyboard→pm 连线 + 双向关联), 一个分镜节点对应一个剧管,
     // 生成新分镜节点 → 新建对应剧管, 不再按 scriptId 复用导致旧分镜引用被覆盖(幂等)
@@ -1459,6 +1477,7 @@ export function useEditorInteractions({
       q.execute(new UpdateNodeDataCommand(pmId, nextDeleted.length !== deletedNames.length ? { items, deletedNames: nextDeleted } : { items }));
       if (added > 0) message.success(i18n.t('productionManager.registered', { count: added }));
     };
+    ===== 剧管自动创建旧逻辑注释结束 ===== */
 
     const runAiStoryboard = (_store: any, q: any, scriptNode: any, storyboardId: string, episodeId?: string, _createSubjects?: boolean, autoExtractSubjects = true) => {
       const scriptData = (scriptNode.data ?? {}) as { episodes?: Array<{ id: string; content?: string }>; activeEpisodeId?: string };
@@ -1540,17 +1559,26 @@ export function useEditorInteractions({
               }
               setEpData({ shotsByEpisode: shots, statusByEpisode: 'ready', progressByEpisode: 100 });
               // Plan#20 T4: 后端主体字典落节点数据(供 T5/T8 占位主体堆叠创建与主体标注匹配)
-              const aiSubjects = Array.isArray(result?.subjects) ? result.subjects : undefined;
+              let aiSubjects = Array.isArray(result?.subjects) ? result.subjects : undefined;
+              // 2026-08-29 兜底:后端未返回主体字典(提取规则未命中/接口异常)时,从本集 shots.entities
+              // 收集主体(与表格主体列同源),保证「主体清单」页签与占位主体不空
+              if (!Array.isArray(aiSubjects) || aiSubjects.length === 0) {
+                const subjectNames = new Set<string>();
+                for (const s of shots as Array<{ entities?: Array<{ mention?: string } | string> }>) {
+                  for (const e of s.entities ?? []) {
+                    const name = (typeof e === 'string' ? e : e?.mention ?? '').trim();
+                    if (name) subjectNames.add(name);
+                  }
+                }
+                aiSubjects = [...subjectNames].map((name) => ({ name, kind: 'character' as const, aliases: [], description: '' }));
+              }
               q.execute(new UpdateNodeDataCommand(storyboardId, {
                 status: 'ready',
                 aiSubjects,
               }));
-              // Plan#29 T5/T6 + 2026-08-21: AI 主体幂等登记进剧管条目(剧管=分镜后置,锚定分镜节点)
-              // Plan#33 A4/B3: autoExtractSubjects=false 时跳过自动提取(生成器参数「自动提取剧管」可关闭)
-              if (aiSubjects && aiSubjects.length > 0 && autoExtractSubjects) {
-                const sbNode = _store.getGraph().nodes.find((n: any) => n.id === storyboardId);
-                if (sbNode) registerAiSubjectsToProduction(_store, q, sbNode, aiSubjects, epKey);
-              }
+              // 2026-08-29 收敛:不再登记进剧管节点(剧管已并入分镜主体清单页签)——aiSubjects 已落分镜节点 data
+              // 原逻辑: if (aiSubjects && aiSubjects.length > 0 && autoExtractSubjects) { ...registerAiSubjectsToProduction... }
+              void autoExtractSubjects;
               if (Array.isArray(failed) && failed.length > 0) {
                 message.warning(i18n.t('editor.storyboardPartialFailed', { failed: failed.length, total: result?.blocks?.total ?? 0 }));
               }
@@ -1896,22 +1924,9 @@ export function useEditorInteractions({
       }
     });
 
-    // 2026-08-21 架构修正: 分镜胶囊菜单「剧管」入口——仅分镜时主动生成/关联剧管(分镜后置工序)
-    // 从分镜节点 aiSubjects 幂等登记进关联剧管, 无识别主体时给出提示
-    const unsubManageProduction = nodeActionBus.on('storyboard:manageProduction', (event: { nodeId: string }) => {
-      const store = refs.store;
-      const q = refs.commandQueue;
-      if (!store || !q) return;
-      const sbNode = store.getGraph().nodes.find((n: any) => n.id === event.nodeId);
-      if (!sbNode) return;
-      const aiSubjects = Array.isArray((sbNode.data as any)?.aiSubjects) ? (sbNode.data as any).aiSubjects : [];
-      if (aiSubjects.length === 0) {
-        message.info(i18n.t('storyboard.noSubjectsToManage'));
-        return;
-      }
-      const pmId = ensureProductionManager(store, q, sbNode);
-      registerAiSubjectsToProduction(store, q, sbNode, aiSubjects);
-      store.setSelection({ selectedNodeIds: new Set([pmId]), selectedEdgeIds: new Set() });
+    // 2026-08-29 收敛:剧管节点已移除——分镜胶囊「剧管」入口改为提示(主体并入分镜「主体清单」页签)
+    const unsubManageProduction = nodeActionBus.on('storyboard:manageProduction', () => {
+      message.info(i18n.t('storyboard.noSubjectsToManage', '主体已并入分镜「主体清单」页签，请在分镜页签中查看'));
     });
 
     // Plan#20 T9: 删集级联清理——主体卡 episodeIds 过滤 + 分镜按集映射(shots/status/progress)删除 + activeEpisodeId 回退

@@ -40,6 +40,16 @@ export interface Asset {
     | {
         kind: 'plan';
         content: string;
+        /** 画布强关联：所属画布 id（每画布一份，TopBar「计划」入口创建/打开） */
+        canvasId?: string;
+        /** Plan 版本历史快照（本地存储） */
+        history?: Array<{
+          id: string;
+          label?: string;
+          timestamp: string;
+          updatedBy: 'ai' | 'user';
+          snapshot: unknown;
+        }>;
         storageKey?: string;
         dataUrl?: string;
         url?: string;

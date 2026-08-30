@@ -23,6 +23,19 @@ const MIN_WIDTH = 340;
 const MAX_WIDTH = 640;
 const RESIZER_WIDTH = 8;
 const WIDTH_STORAGE_KEY = 'zeroexo:agent-dock-width';
+/**
+ * 2026-08-30 一致性需求：与资产抽屉 HierarchyPanelSidebar 的 DRAWER_TRANSITION
+ * 完全同节奏（0.35s cubic-bezier(0.22, 1, 0.36, 1)），开闭动画观感统一。
+ */
+const DOCK_TRANSITION = '0.35s cubic-bezier(0.22, 1, 0.36, 1)';
+/** 与 DOCK_TRANSITION 对齐的动画时长(ms) */
+const DOCK_ANIM_MS = 350;
+/**
+ * 内容延迟挂载时机(对齐资产抽屉 HierarchyPanelSidebar 的 Plan#48-T6:420ms)。
+ * width 是非合成属性,过渡期间每帧触发 layout;若与 DockContent(消息列表 + antd 控件)
+ * 的挂载同帧竞争,打开会明显卡顿。故动画结束后再挂载真实内容,期间显示骨架屏。
+ */
+const CONTENT_MOUNT_DELAY_MS = DOCK_ANIM_MS + 70;
 
 function clampWidth(w: number): number {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
@@ -54,6 +67,38 @@ export interface AgentDockProps {
   projectId?: string;
 }
 
+/**
+ * AgentDockSkeleton - 打开动画期间的骨架屏
+ *
+ * 复用 AgentDock.css 已有的 .agent-shimmer（Plan#43 生成中微光骨架行，shimmer-sweep 动画），
+ * 不新增动画定义。作用有二：
+ * 1) 避免 0.35s 展开动画期间面板空白——空面板会放大卡顿感；
+ * 2) 把 DockContent 的挂载推迟到动画结束后，消除与每帧 layout 的同帧竞争。
+ */
+function AgentDockSkeleton(): React.ReactElement {
+  const barHeights = [72, 44, 96, 60, 44];
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        padding: 16,
+        height: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
+      {barHeights.map((h, i) => (
+        <div
+          key={i}
+          className="agent-shimmer"
+          style={{ height: h, borderRadius: 10, flexShrink: 0 }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
   const dockOpen = useCanvasAgentStore((s) => s.dockOpen);
   const t = useAgentTheme();
@@ -69,6 +114,8 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
   });
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** 拖拽调宽中：挂起宽度过渡，否则每帧 setState 都被过渡平滑，手感拖沓 */
+  const [isResizing, setIsResizing] = useState(false);
 
   // 注入当前项目 ID 到真连层
   useEffect(() => {
@@ -93,6 +140,7 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
 
   const handleResizeUp = useCallback(() => {
     dragRef.current = null;
+    setIsResizing(false);
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', handleResizeUp);
     document.body.style.userSelect = '';
@@ -102,6 +150,7 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
   const handleResizeDown = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       e.preventDefault();
+      setIsResizing(true);
       dragRef.current = { startX: e.clientX, startWidth: width };
       window.addEventListener('mousemove', handleResizeMove);
       window.addEventListener('mouseup', handleResizeUp);
@@ -114,6 +163,19 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
   // 主题 CSS 变量（分层背景色，代替磨砂玻璃与内部边线）
   const themeVars = getAgentThemeVars(t);
 
+  // 2026-08-30 打开性能:0.35s width 过渡期间不挂载 DockContent 重组件。
+  // 复刻资产抽屉(Plan#48-T6)的做法——先出骨架屏,动画结束后再挂载真实内容,
+  // 避免「每帧 layout」与「消息列表/antd 控件挂载」同帧竞争导致的明显卡顿。
+  // 注意:关闭时不回退 contentReady —— 否则 0.35s 收起动画期间会闪出骨架屏。
+  // 且再次打开时 DockContent 已挂载过(组件始终挂载,仅靠外层 width 裁剪),
+  // 无重复挂载开销,直接显示即可。
+  const [contentReady, setContentReady] = useState(false);
+  useEffect(() => {
+    if (!dockOpen || contentReady) return;
+    const timer = window.setTimeout(() => setContentReady(true), CONTENT_MOUNT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [dockOpen, contentReady]);
+
   return (
     <div
       style={{
@@ -121,9 +183,12 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
         minWidth: dockOpen ? width : 0,
         overflow: 'hidden',
         background: t.isDark ? '#161412' : '#ffffff',
-        transition: dockOpen
+        // 2026-08-30 一致性修复:原先 dockOpen 时 transition 为 'none',
+        // 导致面板「打开瞬间弹出、只有关闭有动画」。现改为常驻过渡
+        // (仅拖拽调宽时挂起),节奏与资产抽屉统一。
+        transition: isResizing
           ? 'none'
-          : 'width 0.32s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
+          : `width ${DOCK_TRANSITION}, min-width ${DOCK_TRANSITION}`,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'row',
@@ -173,12 +238,15 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
         />
       </div>
 
-      {/* 聊天面板内容 */}
+      {/* 聊天面板内容
+          2026-08-30 性能修复:内层不再做 width 过渡(原先内外双层同时动画,
+          每帧触发 2 次 layout)。改为固定宽度,靠外层 width + overflow:hidden 裁剪,
+          展开/收起期间内层内容完全不重排。 */}
       <div
         style={{
           ...themeVars,
-          width: dockOpen ? width - RESIZER_WIDTH : 0,
-          minWidth: dockOpen ? width - RESIZER_WIDTH : 0,
+          width: width - RESIZER_WIDTH,
+          minWidth: width - RESIZER_WIDTH,
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
@@ -187,7 +255,7 @@ export function AgentDock({ projectId }: AgentDockProps): React.ReactElement {
       >
         {/* R2：顶部工具行已移除（渠道选择迁入输入框附件旁） */}
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <DockContent projectId={projectId} />
+          {contentReady ? <DockContent projectId={projectId} /> : <AgentDockSkeleton />}
         </div>
       </div>
     </div>

@@ -23,6 +23,14 @@ import i18n from '@/i18n/config';
 import { useReadOnly } from '@/shared/readonly-context.js';
 import type { EditorRefs } from './use-editor-state.js';
 
+/**
+ * 资产抽屉（层级面板）收起动画时长(ms)。
+ * 必须与 HierarchyPanelSidebar 的 DRAWER_TRANSITION(0.35s cubic-bezier(0.22, 1, 0.36, 1))
+ * 对齐:收起时先置 isHierarchyClosing 播放动画,到点后再卸载;
+ * 否则组件会在动画第一帧之前就被卸载,表现为「收起无动画、瞬间消失」。
+ */
+const HIERARCHY_ANIM_MS = 350;
+
 export function useEditorDialogs({
   canvasId,
   onBack,
@@ -51,6 +59,11 @@ export function useEditorDialogs({
   // 只读防护（2026-08-25 系统性只读防护）：所有项目级写操作（新建/拷贝/删除/清空）在此 hook 内统一拦截，
   // 与 UI 层隐藏互为纵深——即使未来新增入口调用了 handleXxx，readOnly 时也直接早退
   const readOnly = useReadOnly();
+
+  // 2026-08-30:toggleHierarchy 原「移动端直接关闭」分支已与 PC 统一(两端都走 0.35s 收起动画),
+  // isMobile 在本 hook 内暂无其他消费点;保留参数以备后续平台差异化,
+  // 显式 void 消费以满足 tsconfig 的 noUnusedParameters。
+  void isMobile;
 
   // ===== 画布标题 =====
   const [title, setTitle] = useState(() => t('editor.untitled'));
@@ -151,22 +164,22 @@ export function useEditorDialogs({
 
   // ===== 回调函数 =====
 
-  // 层级面板展开/收起（桌面端：收起时先动画 350ms 再卸载；移动端：直接关闭弹窗）
+  // 层级面板展开/收起
+  // 2026-08-30 一致性修复:征集 #95 之后移动端已改为复用 PC 同款 HierarchyPanelSidebar
+  // (overlay 模式,收起动画 = opacity + translate3d 0.35s),但此处仍沿用旧弹窗时代的
+  // 「移动端直接关闭」分支——组件在动画开始第一帧之前即被卸载,表现为收起无动画、瞬间消失。
+  // 现统一:两端都先置 closing 播放 HIERARCHY_ANIM_MS 收起动画,再卸载。
   const toggleHierarchy = useCallback(() => {
     if (isHierarchyOpen) {
-      if (isMobile) {
+      setIsHierarchyClosing(true);
+      setTimeout(() => {
         setIsHierarchyOpen(false);
-      } else {
-        setIsHierarchyClosing(true);
-        setTimeout(() => {
-          setIsHierarchyOpen(false);
-          setIsHierarchyClosing(false);
-        }, 350);
-      }
+        setIsHierarchyClosing(false);
+      }, HIERARCHY_ANIM_MS);
     } else {
       setIsHierarchyOpen(true);
     }
-  }, [isHierarchyOpen, isMobile]);
+  }, [isHierarchyOpen]);
 
   // 征集 #87 验收轮七:层级/资产库合一抽屉(四 Tab),模式状态改为面板内部管理,原 hierarchyMode 双轨状态已删除
 
