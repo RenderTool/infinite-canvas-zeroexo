@@ -209,7 +209,13 @@ export function ComposerInput(): React.ReactElement | null {
       setAttachments([]);
     }
 
-    void sendMessage(prompt);
+    // 出片 Agent 智能感知(2026-08-31):taskType 按当前模式动态切换 + 注入当前镜头锚点
+    const agentState = useCanvasAgentStore.getState();
+    const taskType = agentState.agentTaskType;
+    const shotCtx = agentState.workbenchShotContext;
+    const finalPrompt =
+      taskType === 'production_agent' && shotCtx ? `${shotCtx}\n\n${prompt}` : prompt;
+    void sendMessage(finalPrompt, { taskType });
   }, [inputText, attachments, isGenerating, references, setInputText, addMessage, clearReferences, persistAttachments, message]);
 
   const handleKeyDown = useCallback(

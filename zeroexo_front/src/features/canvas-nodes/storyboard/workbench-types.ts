@@ -50,6 +50,8 @@ export interface WorkbenchShot {
     progress?: number;
     error?: string;
     createdAt?: string;
+    /** 来源：generated=本镜生成 / external=外部拖入（2026-08-31 候选语义） */
+    source?: 'generated' | 'external';
   }>;
   /** 当前生效的视频 index */
   activeVideoIndex?: number;

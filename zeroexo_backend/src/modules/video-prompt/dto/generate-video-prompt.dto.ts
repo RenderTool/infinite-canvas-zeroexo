@@ -28,6 +28,16 @@ export class EntityInputDto {
   @IsOptional()
   @IsString()
   imageKey?: string;
+
+  @ApiPropertyOptional({ description: '身份锚点句(圣经不变量,逐字复用,优先于 description)' })
+  @IsOptional()
+  @IsString()
+  anchorSentence?: string;
+
+  @ApiPropertyOptional({ description: '当前引用状态名(主体状态细分,如 少年/白发/重伤)' })
+  @IsOptional()
+  @IsString()
+  stateName?: string;
 }
 
 export class ShotInputDto {
@@ -88,6 +98,12 @@ export class ShotInputDto {
   @IsNumber()
   @Min(1)
   duration!: number;
+
+  @ApiPropertyOptional({ description: '参考素材 storageKey 列表(生成时自动 @图片N 占位,顺序对应 referenceImages)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  referenceKeys?: string[];
 }
 
 /**

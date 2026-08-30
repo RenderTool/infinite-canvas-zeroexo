@@ -111,6 +111,14 @@ export interface CanvasAgentState {
   currentPlan: AgentPlanData | null;
   setCurrentPlan: (plan: AgentPlanData | null) => void;
 
+  // ---- 出片 Agent 模式（2026-08-31 智能感知） ----
+  /** 当前 Agent 类型: 'canvas_agent'(默认) | 'production_agent'(出片工作台激活时) */
+  agentTaskType: string;
+  setAgentTaskType: (t: string) => void;
+  /** 当前镜头锚点摘要（出片工作台点击时间轴片段时注入，Agent 提问自动感知） */
+  workbenchShotContext: string | null;
+  setWorkbenchShotContext: (ctx: string | null) => void;
+
   // ---- 重置 ----
   reset: () => void;
 }
@@ -230,6 +238,12 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
   currentPlan: null,
   setCurrentPlan: (plan) => set({ currentPlan: plan }),
 
+  // 出片 Agent 模式（2026-08-31 智能感知）
+  agentTaskType: 'canvas_agent',
+  setAgentTaskType: (t) => set({ agentTaskType: t }),
+  workbenchShotContext: null,
+  setWorkbenchShotContext: (ctx) => set({ workbenchShotContext: ctx }),
+
   // 重置
   reset: () =>
     set({
@@ -247,5 +261,6 @@ export const useCanvasAgentStore = create<CanvasAgentState>((set) => ({
       currentPlan: null,
       phase: null,
       phaseLabel: null,
+      workbenchShotContext: null,
     }),
 }));

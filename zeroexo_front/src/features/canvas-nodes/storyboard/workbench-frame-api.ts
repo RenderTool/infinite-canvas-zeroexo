@@ -97,9 +97,75 @@ export async function generateFrame(
   }
 }
 
+/**
+ * 为指定镜头生成视频（workbench 底部生成按钮，2026-08-31 接线）
+ *
+ * - prompt = shot.videoPrompt || imagePrompt，自动追加 `@图片N` 参考图占位
+ * - params.referenceImages = 按模式筛选的 references storageKey（顺序对应占位）
+ * - 轮询 /api/ai/generations/:id 取结果 URL 作为 storageKey 落 videos
+ */
+export interface GenerateVideoOptions {
+  shot: WorkbenchShot;
+  /** 参考图 storageKey 列表（首尾帧模式只传 first/last 的图） */
+  referenceImages?: string[];
+  signal?: AbortSignal;
+}
+
+export async function generateVideo({
+  shot,
+  referenceImages = [],
+  signal,
+}: GenerateVideoOptions): Promise<{ storageKey: string }> {
+  const basePrompt = shot.videoPrompt || shot.imagePrompt || shot.description || '';
+  // 自动 @图片N 占位：有参考图且提示词未含占位时追加（zerovideoAgent 槽位语法）
+  const hasPlaceholder = /@图片\d/.test(basePrompt);
+  const prompt =
+    referenceImages.length > 0 && !hasPlaceholder
+      ? `${basePrompt} 参考图: ${referenceImages.map((_, i) => `@图片${i + 1}`).join(', ')}`
+      : basePrompt;
+
+  try {
+    const result = await apiPost<{ generationId: string }>('/ai/generate', {
+      kind: 'video',
+      prompt,
+      model: shot.model ?? '',
+      params: {
+        referenceImages,
+        ...(shot.paramValues ?? {}),
+      },
+    });
+
+    const videoUrl = await pollGeneration(result.generationId, signal);
+    return { storageKey: videoUrl };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
+    console.warn('[workbench-frame-api] 视频生成失败，使用 mock 降级:', err);
+    return mockGenerateVideo(shot, signal);
+  }
+}
+
 // ===== Mock 实现 =====
 
 let mockCounter = 0;
+
+/** 视频生成 mock 降级：返回带镜头编号的占位 storageKey（保证流程可走通） */
+async function mockGenerateVideo(
+  shot: WorkbenchShot,
+  signal?: AbortSignal,
+): Promise<{ storageKey: string }> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, 1500 + Math.random() * 1000);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  mockCounter += 1;
+  return { storageKey: `mock-video-${shot.number}-${mockCounter}` };
+}
 
 async function mockGenerateFrame(
   shot: WorkbenchShot,

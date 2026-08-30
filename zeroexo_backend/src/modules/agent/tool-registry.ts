@@ -41,6 +41,7 @@ import { aiImage, aiAudio, listExistingAssets } from './tools/generation-tools';
 import { createScriptNode, createStoryboardNode, canvasSetConfig, readContentChunked, readAssetContent, workflowGenerate, artifactLibrary, agentSelfUpgrade } from './tools/canvas-agent-tools';
 import { searchWeb, saveShotsLegacy, saveEntitiesLegacy } from './tools/legacy-tools';
 import { planReadScript, planSubmitOps } from './tools/plan-tools';
+import { qualityGateTool } from './tools/production-tools';
 
 const toolLogger = new Logger('AgentTool');
 
@@ -130,6 +131,18 @@ export function createToolsForAgentType(
     return [
       planReadScript(ctx),
       planSubmitOps(),
+    ];
+  }
+
+  // production_agent: 出片生产台 Agent（2026-08-31 新建）
+  // 面对出片工作台镜头,不操作画布;读镜头/资产 + 质量门 + 通用 CRUD
+  if (agentType === 'production_agent') {
+    return [
+      readContentChunked(ctx),
+      readAssetContent(ctx),
+      artifactLibrary(ctx),
+      qualityGateTool(),
+      ...commonTools(ctx),
     ];
   }
 

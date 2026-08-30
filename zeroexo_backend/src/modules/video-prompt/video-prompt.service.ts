@@ -101,6 +101,10 @@ export class VideoPromptService {
     // 6. 风格 + 质量后缀
     parts.push('电影级, 写实风格, 8K, 高质量, 细节丰富');
 
+    // 7. 参考图占位（@图片N 对应 referenceImages 顺序）
+    const refs = this.buildReferencePlaceholder(shot.referenceKeys);
+    if (refs) parts.push(`参考图: ${refs}`);
+
     return parts.join(', ');
   }
 
@@ -136,6 +140,10 @@ export class VideoPromptService {
     // 6. 质量后缀
     parts.push('高质量, 电影级, 细节丰富, 连贯流畅');
 
+    // 7. 参考图占位（@图片N 对应 referenceImages 顺序）
+    const refs = this.buildReferencePlaceholder(shot.referenceKeys);
+    if (refs) parts.push(`参考图: ${refs}`);
+
     return parts.join(', ');
   }
 
@@ -144,18 +152,38 @@ export class VideoPromptService {
   // ──────────────────────────────────────────────
 
   /**
-   * 构建主体描述部分
-   * 优先使用 entities 中的描述，其次从 description 提取
+   * 构建主体描述部分（zerovideoAgent 化 2026-08-31）
+   *
+   * 优先级：anchorSentence（圣经锚点句，逐字复用） > description > name；
+   * 若镜头引用的是主体某个「状态」（stateName，如 少年/白发/重伤），
+   * 在主体描述后追加 `(状态名形态)` 细分，保证状态切换正确映射。
    */
   private buildSubjectPart(shot: ShotInputDto): string {
     if (shot.entities && shot.entities.length > 0) {
       return shot.entities
-        .map((e) => e.description || e.name)
+        .map((e) => {
+          // 锚点句逐字复用（不变量铁律），缺省回落 description/name
+          const base = e.anchorSentence?.trim() || e.description?.trim() || e.name;
+          // 状态细分：镜头引用的是主体特定状态
+          const state = e.stateName?.trim();
+          return state ? `${base}(${state}状态)` : base;
+        })
         .filter(Boolean)
         .join(', ');
     }
     // 无主体时从 description 提取前 60 字作为主体描述
     return this.extractContext(shot.description, 60);
+  }
+
+  /**
+   * 参考图槽位占位（zerovideoAgent @图片N 语法）
+   *
+   * 按 referenceKeys 顺序生成 `@图片1, @图片2, ...` 占位，追加到提示词末尾，
+   * 与生成时传入的 params.referenceImages 顺序一一对应。
+   */
+  private buildReferencePlaceholder(keys?: string[]): string {
+    if (!keys || keys.length === 0) return '';
+    return keys.map((_, i) => `@图片${i + 1}`).join(', ');
   }
 
   /**

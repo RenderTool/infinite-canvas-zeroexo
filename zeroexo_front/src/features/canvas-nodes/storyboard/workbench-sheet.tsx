@@ -21,6 +21,8 @@ import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference } from './workbench-types';
 import type { StoryboardEntity } from './storyboard-types';
 import { extractExplicitMentions } from './storyboard-utils';
+import { generateVideo } from './workbench-frame-api';
+import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 
 import { StoryboardMergedTab } from './storyboard-merged-tab';
 
@@ -56,6 +58,12 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     openTab({ kind: 'workbench', id: nodeId, title: t('canvasNodes.stage.workbench') });
   }, [openTab, nodeId, t]);
   const [pps, setPps] = useState(60);
+
+  // 智能感知(2026-08-31):出片工作台激活 → Agent 自动切换为出片 Agent(production_agent);
+  // 关闭/切换其他页签 → 恢复画布 Agent
+  useEffect(() => {
+    useCanvasAgentStore.getState().setAgentTaskType(tabActive ? 'production_agent' : 'canvas_agent');
+  }, [tabActive]);
 
   // OpenCut 暗色专业剪辑风配色（Plan#53 §2 布局契约）
   // 2026-08-31：全站统一画布背景色
@@ -101,13 +109,43 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   }, [orderedShots, activeIndex]);
 
   // 当前镜头引用主体(从描述 @提及 匹配主体库) → 展示在提示词区上方
+  // 携带 anchorSentence/description,生成视频时展开进提示词(主体本质是提示词,2026-08-31)
   const shotSubjects = useMemo(() => {
     if (!currentShot) return [];
     const mentions = extractExplicitMentions(currentShot.description ?? '');
     return (data.entities ?? [])
       .filter((e) => mentions.has(e.name))
-      .map((e) => ({ id: e.id, name: e.name, kind: e.kind }));
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        kind: e.kind,
+        anchorSentence: e.anchorSentence,
+        description: e.description,
+      }));
   }, [currentShot, data.entities]);
+
+  // 智能感知(2026-08-31):当前镜头摘要注入 Agent 会话——点击时间轴片段后 Agent 自动感知镜头上下文
+  useEffect(() => {
+    if (!currentShot) {
+      useCanvasAgentStore.getState().setWorkbenchShotContext(null);
+      return;
+    }
+    const refs = (currentShot.references ?? [])
+      .map((r) => (r.slot ? `@${r.slot}` : '@图片') + `: ${r.title ?? r.kind}`)
+      .join(', ');
+    const subjects = shotSubjects.map((s) => s.name).join(', ');
+    useCanvasAgentStore.getState().setWorkbenchShotContext(
+      [
+        `【当前镜头 #${currentShot.number}】`,
+        `描述: ${currentShot.description ?? ''}`,
+        `景别/时长: ${currentShot.shotType ?? ''} / ${currentShot.duration}s`,
+        `imagePrompt: ${currentShot.imagePrompt ?? ''}`,
+        `videoPrompt: ${currentShot.videoPrompt ?? ''}`,
+        refs ? `参考素材: ${refs}` : '',
+        subjects ? `引用主体: ${subjects}` : '',
+      ].filter(Boolean).join('\n'),
+    );
+  }, [currentShot, shotSubjects]);
 
   // 当前生效视频
   const activeVideo = useMemo(() => {
@@ -369,9 +407,52 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                   items: currentShot.references ?? [],
                   onChange: (items) => onUpdateShot(currentShot.id, { references: items }),
                 } : undefined,
-                // TODO(征集 #115 后续):接入单镜视频生成链路(当前 workbench 仅有首帧/尾帧 generateFrame),
-                // UI 先按用户要求对齐 dock 同款,生成动作待下一轮接线。
-                onGenerate: () => {},
+                // 单镜视频生成(2026-08-31 接线):referenceImages 按模式筛选 + 提示词自动 @图片N 占位
+                onGenerate: () => {
+                  if (!currentShot) return;
+                  const refs = currentShot.references ?? [];
+                  const isFirstLast = (currentShot.paramValues?.mode as string) === 'image-to-video-first-last-frame';
+                  const referenceImages = refs
+                    .filter((r) => r.kind === 'image' && r.storageKey)
+                    .filter((r) => (isFirstLast ? r.slot === 'first' || r.slot === 'last' : true))
+                    .map((r) => r.storageKey!) as string[];
+                  // 主体展开关联(2026-08-31):当前镜头关联主体的锚点句/描述逐字展开进提示词
+                  const subjectText = shotSubjects
+                    .map((s) => s.anchorSentence?.trim() || s.description?.trim() || s.name)
+                    .filter(Boolean)
+                    .join(', ');
+                  const promptShot = subjectText
+                    ? { ...currentShot, videoPrompt: `${currentShot.videoPrompt || ''} ${subjectText}`.trim() }
+                    : currentShot;
+                  const baseVideos = currentShot.videos ?? [];
+                  const idx = baseVideos.length;
+                  void (async () => {
+                    // 生成中：先落 generating 占位
+                    onUpdateShot(currentShot.id, {
+                      videos: [...baseVideos, { storageKey: '', status: 'generating', source: 'generated', progress: 10, createdAt: new Date().toISOString() }],
+                    });
+                    try {
+                      const { storageKey } = await generateVideo({ shot: promptShot, referenceImages });
+                      onUpdateShot(currentShot.id, {
+                        videos: [
+                          ...baseVideos.slice(0, idx),
+                          { storageKey, status: 'done', source: 'generated', prompt: currentShot.videoPrompt, model: currentShot.model, createdAt: new Date().toISOString() },
+                          ...baseVideos.slice(idx),
+                        ],
+                        activeVideoIndex: idx,
+                        generated: true,
+                      });
+                    } catch (err) {
+                      onUpdateShot(currentShot.id, {
+                        videos: [
+                          ...baseVideos.slice(0, idx),
+                          { storageKey: '', status: 'failed', error: (err as Error)?.message, source: 'generated', createdAt: new Date().toISOString() },
+                          ...baseVideos.slice(idx),
+                        ],
+                      });
+                    }
+                  })();
+                },
                 onStop: () => {},
               }}
             />
