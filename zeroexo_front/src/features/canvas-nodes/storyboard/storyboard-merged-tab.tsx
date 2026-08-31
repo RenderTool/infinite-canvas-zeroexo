@@ -74,12 +74,14 @@ export interface StoryboardMergedTabProps {
    * 让用户一眼看到本镜关联了哪些主体。
    */
   promptSubjectChips?: Array<{ id: string; name: string; kind: string }>;
+  /** 提示词区上方的附加操作按钮（出片工作台：跨镜衔接取帧等，2026-08-31 T3） */
+  promptExtraActions?: Array<{ key: string; label: string; onClick: () => void }>;
   theme: any;
   isDark: boolean;
 }
 
 export const StoryboardMergedTab = memo(function StoryboardMergedTab({
-  entities, showAssetSidebar = true, assetPanelProps, videoStageProps, alternativeVideosProps, timelineProps, promptDockProps, promptSubjectChips,
+  entities, showAssetSidebar = true, assetPanelProps, videoStageProps, alternativeVideosProps, timelineProps, promptDockProps, promptSubjectChips, promptExtraActions,
   theme, isDark,
 }: StoryboardMergedTabProps): ReactElement {
   const { t } = useTranslation();
@@ -186,8 +188,8 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
     const startX = e.clientX;
     const startW = altWrapRef.current?.clientWidth ?? MIN_ALT_WIDTH;
     const onMove = (ev: PointerEvent) => {
-      // 分割线左移(clientX 减小) → 备选变宽
-      const w = startW + (startX - ev.clientX);
+      // 备选在左（T9,2026-08-31）：分割线右移(clientX 增大) → 备选变宽
+      const w = startW + (ev.clientX - startX);
       setAltWidth(Math.max(MIN_ALT_WIDTH, Math.min(MAX_ALT_WIDTH, w)));
     };
     const onUp = () => {
@@ -314,13 +316,28 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
 
       {/* ===== 主区：上中下布局 ===== */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, padding: 0, gap: 0, overflow: 'hidden' }}>
-        {/* 顶部行（视频舞台 + 备选视频）＝「视频预览区」，吃满剩余空间 */}
+        {/* 顶部行（备选视频 + 主视频）＝「视频预览区」，吃满剩余空间；T9:候选区左移贴合资产抽屉 */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 0, padding: '8px 8px 0 8px', overflow: 'hidden' }}>
-          {/* 中区：主视频（默认占 3 份；手动拖过备选宽度后吃掉剩余空间） */}
-          <div style={{ flex: altWidth === null ? VIDEO_FLEX : 1, minWidth: 0, minHeight: 0, marginRight: 4 }}>
-            <StoryboardVideoStage theme={theme} isDark={isDark} {...videoStageProps} />
+          {/* 左区：备选视频（默认占 1 份 / 手动拖拽后定宽；可拖入外部成品视频 T5） */}
+          <div
+            ref={altWrapRef}
+            style={{
+              ...(altWidth === null
+                ? { flex: ALT_FLEX, minWidth: MIN_ALT_WIDTH, maxWidth: MAX_ALT_WIDTH, minHeight: 0 }
+                : { width: altWidth, minWidth: MIN_ALT_WIDTH, maxWidth: MAX_ALT_WIDTH, flexShrink: 0, minHeight: 0 }),
+              marginRight: 4,
+            }}
+          >
+            <StoryboardAlternativeVideos
+              theme={theme}
+              isDark={isDark}
+              {...alternativeVideosProps}
+              videos={alternativeVideosProps?.videos ?? []}
+              activeVideoIndex={alternativeVideosProps?.activeVideoIndex ?? 0}
+              onActivate={alternativeVideosProps?.onActivate ?? (() => {})}
+            />
           </div>
-          {/* 竖直分割线（2026-08-31：主视频与备选视频之间可拖拽，默认 3:1） */}
+          {/* 竖直分割线（2026-08-31：备选(左)与主视频(右)之间可拖拽，默认 1:3） */}
           <div
             onPointerDown={startDragAlt}
             style={{
@@ -336,21 +353,9 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
           >
             <div style={{ width: 2, height: '100%', background: dividerColor, borderRadius: 1 }} />
           </div>
-          {/* 右区：备选视频（默认占 1 份 / 手动拖拽后定宽） */}
-          <div
-            ref={altWrapRef}
-            style={altWidth === null
-              ? { flex: ALT_FLEX, minWidth: MIN_ALT_WIDTH, maxWidth: MAX_ALT_WIDTH, minHeight: 0 }
-              : { width: altWidth, minWidth: MIN_ALT_WIDTH, maxWidth: MAX_ALT_WIDTH, flexShrink: 0, minHeight: 0 }}
-          >
-            <StoryboardAlternativeVideos
-              theme={theme}
-              isDark={isDark}
-              {...alternativeVideosProps}
-              videos={alternativeVideosProps?.videos ?? []}
-              activeVideoIndex={alternativeVideosProps?.activeVideoIndex ?? 0}
-              onActivate={alternativeVideosProps?.onActivate ?? (() => {})}
-            />
+          {/* 右区：主视频（默认占 3 份；手动拖过备选宽度后吃掉剩余空间） */}
+          <div style={{ flex: altWidth === null ? VIDEO_FLEX : 1, minWidth: 0, minHeight: 0 }}>
+            <StoryboardVideoStage theme={theme} isDark={isDark} {...videoStageProps} />
           </div>
         </div>
 
@@ -395,8 +400,8 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
             />
           </div>
 
-          {/* 引用主体胶囊：提示词区上方占位展示当前镜头关联主体（2026-08-31 用户需求） */}
-          {promptSubjectChips && promptSubjectChips.length > 0 && (
+          {/* 引用主体胶囊 + 附加操作（跨镜衔接取帧）：提示词区上方（2026-08-31 T3） */}
+          {((promptSubjectChips && promptSubjectChips.length > 0) || (promptExtraActions && promptExtraActions.length > 0)) && (
             <div
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
@@ -405,24 +410,47 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
                 background: isDark ? OPENCUT_BG : panelBg,
               }}
             >
-              <span style={{ fontSize: 10, color: textMuted, flexShrink: 0 }}>
-                {t('storyboard.referencedSubjects', '引用主体')}
-              </span>
-              {promptSubjectChips.map((s) => (
-                <span
-                  key={s.id}
-                  title={t('storyboard.subjectKind', { kind: s.kind })}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '1px 8px', borderRadius: 10, fontSize: 11,
-                    background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-                    color: theme.toolbar.text, border: `1px solid ${dividerColor}`,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {s.name}
-                </span>
-              ))}
+              {promptSubjectChips && promptSubjectChips.length > 0 && (
+                <>
+                  <span style={{ fontSize: 10, color: textMuted, flexShrink: 0 }}>
+                    {t('storyboard.referencedSubjects', '引用主体')}
+                  </span>
+                  {promptSubjectChips.map((s) => (
+                    <span
+                      key={s.id}
+                      title={t('storyboard.subjectKind', { kind: s.kind })}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '1px 8px', borderRadius: 10, fontSize: 11,
+                        background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                        color: theme.toolbar.text, border: `1px solid ${dividerColor}`,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {s.name}
+                    </span>
+                  ))}
+                </>
+              )}
+              {/* 跨镜衔接取帧等附加操作（右对齐） */}
+              {promptExtraActions && promptExtraActions.length > 0 && (
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {promptExtraActions.map((a) => (
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={a.onClick}
+                      style={{
+                        fontSize: 10, color: theme.toolbar.accent, background: 'transparent',
+                        border: 'none', cursor: 'pointer', padding: '1px 6px', borderRadius: 8,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

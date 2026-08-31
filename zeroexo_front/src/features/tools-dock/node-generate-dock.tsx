@@ -100,6 +100,13 @@ export interface NodeGenerateDockProps {
     items: WorkbenchShotReference[];
     onChange: (items: WorkbenchShotReference[]) => void;
   };
+  /**
+   * 受控模式从视频取帧回调（出片工作台：首尾帧槽位旁"从视频取帧"，由宿主实现抽帧+上传）。
+   * 传此回调时首帧/尾帧空槽位显示「取帧」小按钮。
+   */
+  onExtractFrame?: (slot: 'first' | 'last') => void;
+  /** 快捷询问 Agent 回调（T12,2026-08-31）：点击打开 Agent 面板并锚定当前镜头 */
+  onAskAgent?: () => void;
 }
 
 // ===== 类型 → 图标/名称(对齐生成器 NODE_TYPE_CONFIG) =====
@@ -352,6 +359,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
   mode,
   bounds,
   onUpload,
+  onExtractFrame,
 }: {
   nodeId: string;
   incomingNodes: Array<{ id: string; type: string; title: string; content?: string; storageKey?: string }>;
@@ -362,6 +370,8 @@ const DockReferencesSection = memo(function DockReferencesSection({
   bounds: VideoReferenceBounds;
   /** 受控模式上传回调（出片工作台：上传后写入镜头 references；不传则走画布节点连线链路） */
   onUpload?: (file: File) => void;
+  /** 受控模式从视频取帧回调（首尾帧空槽位旁「从视频取帧」按钮） */
+  onExtractFrame?: (slot: 'first' | 'last') => void;
 }) {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -489,7 +499,7 @@ const DockReferencesSection = memo(function DockReferencesSection({
       {isFirstLast ? (
         <>
           {/* 首尾帧模式:首帧/尾帧两个槽位(仅图片,按上传顺序),空槽位点击即上传 */}
-          {[{ slot: 'first', label: '首帧', node: imageNodes[0] }, { slot: 'last', label: '尾帧', node: imageNodes[1] }].map(({ slot, label, node }) => (
+          {[{ slot: 'first' as const, label: '首帧', node: imageNodes[0] }, { slot: 'last' as const, label: '尾帧', node: imageNodes[1] }].map(({ slot, label, node }) => (
             <div key={slot} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flexShrink: 0 }}>
               {node ? (
                 <div style={{ position: 'relative', width: 56, height: 48, borderRadius: 14, overflow: 'hidden', border: `1px solid ${navBorder}`, background: 'transparent' }}>
@@ -531,6 +541,20 @@ const DockReferencesSection = memo(function DockReferencesSection({
                 </button>
               )}
               <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1 }}>{label}</span>
+              {/* 受控模式:空槽位提供「从视频取帧」入口（出片工作台 T2,2026-08-31） */}
+              {!node && onExtractFrame && (
+                <button
+                  type="button"
+                  onClick={() => onExtractFrame(slot)}
+                  title="从当前镜头视频取帧"
+                  style={{
+                    fontSize: 9, color: theme.toolbar.accent, background: 'transparent',
+                    border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0,
+                  }}
+                >
+                  从视频取帧
+                </button>
+              )}
             </div>
           ))}
           {/* 非图片参考(视频/音频/文本)仍可小方块展示,供 @ 引用 */}
@@ -641,6 +665,7 @@ const DockFooterBar = memo(function DockFooterBar({
   onConstraintsReady,
   mentionRequired,
   dropUp = false,
+  onAskAgent,
 }: {
   nodeId: string;
   mode: GenerationMode;
@@ -655,6 +680,8 @@ const DockFooterBar = memo(function DockFooterBar({
   interruptible?: boolean;
   /** 模型下拉强制向上弹出(内嵌于底部面板时) */
   dropUp?: boolean;
+  /** 快捷询问 Agent（T12）：打开 Agent 面板并锚定当前镜头 */
+  onAskAgent?: () => void;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onParamValuesChange: (patch: Record<string, any>) => void;
@@ -710,8 +737,22 @@ const DockFooterBar = memo(function DockFooterBar({
       ) : null}
       {/* 未配置模型:直接不显示(用户拍板:不展示跳转入口,避免误导) */}
 
-      {/* 字数统计:右对齐,显示在生成按钮旁(2026-08-31 用户拍板从输入区底部移入) */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+      {/* 字数统计 + 快捷询问 Agent:右对齐,显示在生成按钮旁 */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+        {onAskAgent && (
+          <button
+            type="button"
+            onClick={onAskAgent}
+            title={t('nodeDock.askAgent', '问 Agent')}
+            style={{
+              fontSize: 10, color: theme.toolbar.accent, background: 'transparent',
+              border: `1px solid ${theme.toolbar.accent}55`, borderRadius: 10,
+              cursor: 'pointer', padding: '1px 8px', lineHeight: 1.4, whiteSpace: 'nowrap', flexShrink: 0,
+            }}
+          >
+            {t('nodeDock.askAgent', '问 Agent')}
+          </button>
+        )}
         <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
           {textLength} 字
         </span>
@@ -792,6 +833,8 @@ export function NodeGenerateDock({
   style,
   fitToHeight = false,
   controlledReferences,
+  onExtractFrame,
+  onAskAgent,
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -1319,6 +1362,7 @@ export function NodeGenerateDock({
           mode={currentVideoMode}
           bounds={refBounds}
           onUpload={controlledReferences ? handleControlledUpload : undefined}
+          onExtractFrame={onExtractFrame}
         />
       </div>
 
@@ -1353,6 +1397,7 @@ export function NodeGenerateDock({
           onConstraintsReady={handleConstraintsReady}
           mentionRequired={mentionRequired}
           dropUp={inline}
+          onAskAgent={onAskAgent}
         />
       </div>
         </div>

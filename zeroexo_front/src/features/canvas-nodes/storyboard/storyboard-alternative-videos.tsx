@@ -8,8 +8,12 @@ import { memo, useCallback, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, RefreshCw, RotateCcw } from 'lucide-react';
 import type { ShotVideo } from './storyboard-types';
+import type { Asset } from '../../asset-picker/index.js';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
 import { CANVAS_NODE_ICONS } from '../icons.js';
+
+/** 资产库卡片拖拽 MIME（与 drop-handler LIB_DRAG_MIME 一致） */
+const LIB_DRAG_MIME = 'application/x-testlib-item';
 
 export interface StoryboardAlternativeVideosProps {
   videos: ShotVideo[];
@@ -17,12 +21,14 @@ export interface StoryboardAlternativeVideosProps {
   onActivate: (index: number) => void;
   onRetry?: (index: number) => void;
   onRemove?: (index: number) => void;
+  /** 外部视频拖入（T5,2026-08-31）：资产库成品视频 → 追加为该镜头备选（source=external） */
+  onExternalVideoDrop?: (payload: { storageKey: string; url: string; title?: string }) => void;
   theme: any;
   isDark: boolean;
 }
 
 export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVideos({
-  videos, activeVideoIndex, onActivate, onRetry, onRemove, theme, isDark,
+  videos, activeVideoIndex, onActivate, onRetry, onRemove, onExternalVideoDrop, theme, isDark,
 }: StoryboardAlternativeVideosProps): ReactElement {
   const { t } = useTranslation();
   const textPrimary = theme.toolbar.text;
@@ -50,7 +56,24 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
   }, [isDark, textMuted]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: panelBg, borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}>
+    <div
+      data-drop-zone="alternative"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: panelBg, borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const libData = e.dataTransfer.getData(LIB_DRAG_MIME);
+        if (!libData || !onExternalVideoDrop) return;
+        try {
+          const item = JSON.parse(libData) as { type: string; name?: string; data: Asset };
+          const d = item.data?.data;
+          if (item.type === 'asset' && item.data?.kind === 'video' && d?.kind === 'video') {
+            onExternalVideoDrop({ storageKey: d.storageKey ?? '', url: d.url ?? '', title: item.name });
+          }
+        } catch { /* 拖拽数据解析失败忽略 */ }
+      }}
+    >
       <div style={{ padding: '8px 12px', fontSize: 12, fontWeight: 600, color: textPrimary, borderBottom: `1px solid ${cardBorder}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span>{t('storyboard.alternativeVideos', '备选视频')}</span>
         <span style={{ fontSize: 10, color: textMuted, fontWeight: 400 }}>{videos.length - 1} {t('storyboard.alternatives', '备选')}</span>

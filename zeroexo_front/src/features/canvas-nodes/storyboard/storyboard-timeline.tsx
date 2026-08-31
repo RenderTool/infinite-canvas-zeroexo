@@ -60,6 +60,8 @@ export interface StoryboardTimelineProps {
   playheadTime?: number;
   onPlayheadTimeChange?: (time: number) => void;
   onClipDoubleClick?: (shotId: string) => void;
+  /** 插入补拍镜头（T4）：null=末尾追加；否则在指定 shot 之后插入 */
+  onInsertAt?: (afterShotId: string | null) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   theme: any;
   isDark: boolean;
@@ -132,7 +134,7 @@ function timelinePalette(isDark: boolean, canvasBg: string | undefined) {
 export const StoryboardTimeline = memo(function StoryboardTimeline({
   shots, activeShotId, pixelsPerSecond, onPixelsPerSecondChange, onSelectShot, onReorder, onTrim,
   minClipDuration, maxClipDuration,
-  playheadTime = 0, onPlayheadTimeChange, onClipDoubleClick, t, theme, isDark,
+  playheadTime = 0, onPlayheadTimeChange, onClipDoubleClick, onInsertAt, t, theme, isDark,
 }: StoryboardTimelineProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -397,6 +399,11 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
         <button type="button" onClick={handleZoomOut} style={toolBtnStyle}>−</button>
         <button type="button" style={toolBtnStyle}>{zoomPercent}</button>
         <button type="button" onClick={handleZoomIn} style={toolBtnStyle}>+</button>
+        {onInsertAt && (
+          <button type="button" onClick={() => onInsertAt(activeShotId ?? null)} style={{ ...toolBtnStyle, color: C.text }}>
+            + 插入
+          </button>
+        )}
         <div style={{ margin: '0 auto', fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11 }}>{timecode}</div>
         <span style={{ fontSize: 10, color: C.muted, marginLeft: 8, whiteSpace: 'nowrap', userSelect: 'none' }}>
           {t('storyboard.timeline.wheelHint') || '滚轮缩放 · Shift+滚轮横向滚动'}

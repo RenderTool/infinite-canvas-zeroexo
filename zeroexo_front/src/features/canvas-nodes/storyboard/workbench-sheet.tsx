@@ -6,10 +6,10 @@
  * 数据写入 node.data，随画布 Yjs 同步。
  */
 
-import { memo, useState, useCallback, useMemo, useEffect, type CSSProperties, type ReactElement } from 'react';
+import { memo, useState, useCallback, useMemo, useEffect, useRef, type CSSProperties, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Film, Clapperboard, Play } from 'lucide-react';
-import { Button, Progress } from 'antd';
+import { Button, Progress, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -23,6 +23,7 @@ import type { StoryboardEntity } from './storyboard-types';
 import { extractExplicitMentions } from './storyboard-utils';
 import { generateVideo } from './workbench-frame-api';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
+import { extractVideoFirstFrame, extractVideoLastFrame, blobToFile } from '@/shared/utils/video-frame.js';
 
 import { StoryboardMergedTab } from './storyboard-merged-tab';
 
@@ -124,6 +125,21 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       }));
   }, [currentShot, data.entities]);
 
+  // T6:参考模式切换提示(2026-08-31)——多模态→首尾帧时,无 slot 的多余图片参考不可见,提示用户
+  const prevRefModeRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const mode = (currentShot?.paramValues?.mode as string) ?? 'multi-modal-reference';
+    const prev = prevRefModeRef.current;
+    prevRefModeRef.current = mode;
+    if (!prev || prev === mode) return;
+    const hiddenImages = (currentShot?.references ?? []).filter(
+      (r) => r.kind === 'image' && !r.slot,
+    ).length;
+    if (mode === 'image-to-video-first-last-frame' && hiddenImages > 0) {
+      message.info(`${hiddenImages} 张参考图在当前首尾帧模式下不可见，切回多模态即恢复`);
+    }
+  }, [currentShot]);
+
   // 智能感知(2026-08-31):当前镜头摘要注入 Agent 会话——点击时间轴片段后 Agent 自动感知镜头上下文
   useEffect(() => {
     if (!currentShot) {
@@ -173,6 +189,100 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     );
     onDataChange({ ...data, shots: updatedShots });
   }, [data, onDataChange]);
+
+  // 从视频抽帧 → 上传 → 写入当前镜头 references.slot（T2 本镜取帧 / T3 跨镜衔接共用）
+  const extractFrameIntoShot = useCallback(async (
+    videoKey: string,
+    slot: 'first' | 'last',
+    title: string,
+  ): Promise<void> => {
+    if (!currentShot) return;
+    try {
+      const blob =
+        slot === 'first'
+          ? await extractVideoFirstFrame(videoKey)
+          : await extractVideoLastFrame(videoKey);
+      const uploaded = await uploadAsset(blobToFile(blob, `shot-${currentShot.number}-${slot}.jpg`));
+      const d = uploaded.data;
+      // 类型收窄:image 分支取 storageKey/dataUrl
+      let storageKey: string | undefined;
+      let url: string | undefined;
+      if (d.kind === 'image') {
+        storageKey = d.storageKey;
+        url = d.dataUrl;
+      }
+      const ref: WorkbenchShotReference = {
+        id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: 'image',
+        title,
+        storageKey,
+        url,
+        slot,
+      };
+      const existing = currentShot.references ?? [];
+      onUpdateShot(currentShot.id, { references: [...existing.filter((r) => r.slot !== slot), ref] });
+    } catch {
+      // 抽帧失败静默(mock 视频/跨域受限)
+    }
+  }, [currentShot, onUpdateShot]);
+
+  // 上游主体参考图导入（T8,2026-08-31）：当前镜头引用主体的 referenceImages → 拷贝进 references（快照语义）
+  const importSubjectImages = useCallback(async () => {
+    if (!currentShot) return;
+    const existing = currentShot.references ?? [];
+    const newRefs = shotSubjects.flatMap((s) => {
+      const entity = (data.entities ?? []).find((e) => e.id === s.id);
+      return (entity?.referenceImages ?? []).map((img) => ({
+        id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: 'image' as const,
+        title: `${entity?.name ?? s.name}-参考`,
+        storageKey: img.storageKey,
+      }));
+    });
+    if (newRefs.length > 0) {
+      onUpdateShot(currentShot.id, { references: [...existing, ...newRefs] });
+    }
+  }, [currentShot, shotSubjects, data.entities, onUpdateShot]);
+
+  // 跨镜衔接按钮（T3）：前镜尾帧→首帧 / 后镜首帧→尾帧（相邻镜头已生成视频时显示）
+  const promptExtraActions = useMemo(() => {
+    if (!currentShot) return [];
+    const actions: Array<{ key: string; label: string; onClick: () => void }> = [];
+    const prevShot = activeIndex > 0 ? orderedShots[activeIndex - 1] : undefined;
+    const nextShot = activeIndex < orderedShots.length - 1 ? orderedShots[activeIndex + 1] : undefined;
+    if (prevShot) {
+      const done = prevShot.videos?.find((v) => v.status === 'done');
+      if (done?.storageKey) {
+        actions.push({
+          key: 'prev-tail',
+          label: `取#${prevShot.number}尾帧作首帧`,
+          onClick: () => void extractFrameIntoShot(done.storageKey!, 'first', `前镜#${prevShot.number}尾帧`),
+        });
+      }
+    }
+    if (nextShot) {
+      const done = nextShot.videos?.find((v) => v.status === 'done');
+      if (done?.storageKey) {
+        actions.push({
+          key: 'next-head',
+          label: `取#${nextShot.number}首帧作尾帧`,
+          onClick: () => void extractFrameIntoShot(done.storageKey!, 'last', `后镜#${nextShot.number}首帧`),
+        });
+      }
+    }
+    // T8:当前镜头引用主体携带 referenceImages 时,提供「导入主体参考图」(快照语义,断开上游保留)
+    const hasSubjectImages = shotSubjects.some(
+      (s) => (data.entities ?? []).find((e) => e.id === s.id)?.referenceImages?.length,
+    );
+    if (hasSubjectImages) {
+      actions.push({
+        key: 'import-subjects',
+        label: '导入主体参考图',
+        onClick: () => void importSubjectImages(),
+      });
+    }
+    return actions;
+  }, [currentShot, activeIndex, orderedShots, extractFrameIntoShot, shotSubjects, data.entities, importSubjectImages]);
 
   // 上传文件 → 追加到当前镜头 references（拖拽导入 / 外部调用共用；随 node.data 云同步）
   const uploadFileToCurrentShot = useCallback(async (file: File) => {
@@ -278,6 +388,24 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     onDataChange({ ...data, shots: reordered });
   }, [data, onDataChange]);
 
+  // 插入补拍镜头（T4,2026-08-31）：指定 shot 之后插入空镜头 + number 重编号
+  const onInsertAt = useCallback((afterShotId: string | null) => {
+    const newShot: WorkbenchShot = {
+      id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      number: 0,
+      description: '',
+      shotType: '中景',
+      duration: 5,
+      status: 'pending',
+    };
+    const idx = afterShotId ? data.shots.findIndex((s) => s.id === afterShotId) + 1 : data.shots.length;
+    const next = [...data.shots.slice(0, idx), newShot, ...data.shots.slice(idx)].map((s, i) => ({
+      ...s,
+      number: i + 1,
+    }));
+    onDataChange({ ...data, shots: next });
+  }, [data, onDataChange]);
+
   return (
     <div style={shellStyle}>
       {data.status === 'idle' ? (
@@ -344,6 +472,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
               entities={(data.entities ?? []) as StoryboardEntity[]}
               // 当前镜头引用主体 → 提示词区上方占位展示(2026-08-31 用户需求)
               promptSubjectChips={shotSubjects}
+              // 跨镜衔接取帧按钮(2026-08-31 T3)
+              promptExtraActions={promptExtraActions}
               assetPanelProps={{
                 entities: (data.entities ?? []) as StoryboardEntity[],
               }}
@@ -358,6 +488,17 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                 videos: (currentShot?.videos ?? []) as any,
                 activeVideoIndex: currentShot?.activeVideoIndex ?? 0,
                 onActivate: (idx) => currentShot && onUpdateShot(currentShot.id, { activeVideoIndex: idx }),
+                // 外部成品视频拖入候选区（T5,2026-08-31）：追加为该镜头备选（source=external）
+                onExternalVideoDrop: (payload) => {
+                  if (!currentShot || !payload.storageKey) return;
+                  onUpdateShot(currentShot.id, {
+                    videos: [
+                      ...(currentShot.videos ?? []),
+                      { storageKey: payload.storageKey, status: 'done', source: 'external', createdAt: new Date().toISOString() },
+                    ],
+                    activeVideoIndex: (currentShot.videos?.length ?? 0),
+                  });
+                },
                 onRetry: () => {},
                 onRemove: (idx) => {
                   if (!currentShot?.videos) return;
@@ -387,6 +528,7 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                 playheadTime: playhead,
                 onPlayheadTimeChange: setPlayhead,
                 onClipDoubleClick: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
+                onInsertAt,
               }}
               // 征集 #115:底部提示词栏 = 视频节点正下方同款 NodeGenerateDock(inline + 无圆角 + 常驻展开)
               promptDockProps={{
@@ -452,6 +594,21 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                       });
                     }
                   })();
+                },
+                // 首尾帧从视频取帧(2026-08-31 T2):复用 extractFrameIntoShot(抽帧→上传→写入 slot)
+                onExtractFrame: (slot) => {
+                  if (!currentShot || !activeVideo?.storageKey) return;
+                  void extractFrameIntoShot(
+                    activeVideo.storageKey,
+                    slot,
+                    `镜头${currentShot.number}${slot === 'first' ? '首帧' : '尾帧'}`,
+                  );
+                },
+                // 快捷询问 Agent（T12）：打开 Agent 面板 + 切到对话页签（镜头锚点已由 onSelectShot 注入）
+                onAskAgent: () => {
+                  const s = useCanvasAgentStore.getState();
+                  s.setDockOpen(true);
+                  s.setDockTab('chat');
                 },
                 onStop: () => {},
               }}
