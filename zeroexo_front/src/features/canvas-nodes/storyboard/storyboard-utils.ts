@@ -146,6 +146,10 @@ export interface SubjectMatchSource {
   kind: EntityKind;
   id: string;
   aliases?: string[];
+  /** 主体状态细分（@主体-状态 选择用，2026-08-31） */
+  states?: Array<{ id: string; name: string }>;
+  /** 选中时携带的状态名（popover 状态 chip 点击后追加，写入 `@主体-状态`） */
+  state?: string;
 }
 
 /**
@@ -164,7 +168,15 @@ export function collectSubjectSources(
     seen.add(s.name);
     out.push(s);
   };
-  for (const e of entities ?? []) push({ name: e.name, kind: e.kind, id: e.id, aliases: [] });
+  for (const e of entities ?? []) {
+    push({
+      name: e.name,
+      kind: e.kind,
+      id: e.id,
+      aliases: [],
+      states: (e.states ?? []).map((s) => ({ id: s.id, name: s.name })),
+    });
+  }
   for (const s of aiSubjects ?? []) push({ name: s.name, kind: s.kind ?? 'character', id: `subj-${s.name}`, aliases: s.aliases ?? [] });
   for (const it of productionItems ?? []) push({ name: it.name, kind: it.kind, id: it.id, aliases: it.aliases ?? [] });
   return out;

@@ -185,6 +185,26 @@ export const SubjectMentionPopover = memo(function SubjectMentionPopover({
                       {s.aliases.join('、')}
                     </div>
                   )}
+                  {/* 状态细分 chips（2026-08-31：@主体-状态，点状态 → 写入 @主体-状态） */}
+                  {(s.states && s.states.length > 0) && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                      {s.states.map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onSelect({ ...s, state: st.name }); }}
+                          style={{
+                            fontSize: 9, padding: '1px 6px', borderRadius: 8,
+                            background: surface2, border: `1px solid ${border}`,
+                            color: meta.color, cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1.5,
+                          }}
+                          title={t('subjectMention.stateChip', '引用该状态')}
+                        >
+                          {st.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <span style={{ fontSize: 10, color: textMuted, flexShrink: 0 }}>
                   {t(meta.labelKey)}

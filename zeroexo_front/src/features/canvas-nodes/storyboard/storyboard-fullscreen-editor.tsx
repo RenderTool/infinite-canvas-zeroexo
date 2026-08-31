@@ -18,7 +18,7 @@ import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { FullscreenDropdown } from './components/FullscreenDropdown';
 import type { Shot, StoryboardEntity, EntityKind, AiSubject, EpisodeStatus } from './storyboard-types';
 import type { ProductionItem, ProductionItemKind } from '../production-manager/production-manager-types';
-import { collectSubjectSources, extractExplicitMentions, type SubjectMatchSource } from './storyboard-utils';
+import { collectSubjectSources, extractSubjectMentions, type SubjectMatchSource } from './storyboard-utils';
 import { StoryboardTable } from './components/StoryboardTable';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import {
@@ -168,14 +168,20 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
     if (!mentionShotId) return;
     const shot = shots.find((s) => s.id === mentionShotId);
     const desc = shot?.description ?? '';
-    const nextDesc = extractExplicitMentions(desc).has(source.name) ? desc : `${desc}@${source.name}`;
+    // @主体-状态（2026-08-31）：popover 状态 chip 选中后写入 `@主体-状态`，AI 按固定规则解析状态
+    const mentionText = source.state ? `${source.name}-${source.state}` : source.name;
+    const mentioned = extractSubjectMentions(desc);
+    const already = mentioned.some(
+      (m) => m.name === source.name && (source.state ? m.state === source.state : true),
+    );
+    const nextDesc = already ? desc : `${desc}@${mentionText}`;
     // 写入 shot.entities 关联（2026-08-30 征集 #110：@ 用来关联主体，不只追加文本）
     const current = Array.isArray(shot?.entities) ? shot.entities : [];
     const existing = new Set((current as any[]).map((e) => (typeof e === 'string' ? e : (e?.mention ?? ''))));
-    if (!existing.has(source.name)) {
+    if (!existing.has(mentionText)) {
       onUpdateShot(mentionShotId, {
         description: nextDesc,
-        entities: [...current, { entityId: source.id, mention: source.name, cardId: source.id }],
+        entities: [...current, { entityId: source.id, mention: mentionText, cardId: source.id }],
       });
     } else {
       onUpdateShot(mentionShotId, { description: nextDesc });
