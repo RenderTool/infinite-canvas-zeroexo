@@ -21,7 +21,8 @@ import {
 
 const GRID_STYLE: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  // 2026-08-31 用户拍板：卡片有最小宽度，容器不足最小尺寸后降为单格（1 列）
+  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 150px), 1fr))',
   gap: 12,
   alignContent: 'start',
   padding: '0 20px 16px',

@@ -183,9 +183,9 @@ export function CategoryChips({ items, active, onChange, theme }: {
   return (
     <div style={{
       display: 'flex',
-      flexWrap: 'nowrap',
+      // 2026-08-31 用户拍板：分类标签不用水平滚动，flex 自适应换行
+      flexWrap: 'wrap',
       gap: 4,
-      overflowX: 'auto',
       flexShrink: 0,
     }}>
       {items.map((item) => {
