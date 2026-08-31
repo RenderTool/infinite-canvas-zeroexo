@@ -8,7 +8,7 @@ import { Input, Tooltip, Button } from 'antd';
 import { Trash2, Copy, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import type { Shot, StoryboardEntity, LightingDesign, EnvironmentDesign, AiSubject } from '../storyboard-types';
+import type { Shot, StoryboardEntity, AiSubject } from '../storyboard-types';
 import { formatLighting, formatEnvironment, resolveEntityKind, ENTITY_KIND_META, collectSubjectSources, type SubjectMatchSource } from '../storyboard-utils';
 import { SubjectMentionPopover } from './SubjectMentionPopover';
 import { ShotStatePicker } from './ShotStatePicker';
@@ -336,15 +336,22 @@ export const StoryboardRow = memo(function StoryboardRow({
             value={moodLocText || ''}
             onChange={(e) => {
               const val = flatten(e.target.value);
-              // Plan#20 T2: 字符串形态整体回写 lighting(保持字符串契约); 对象形态沿用 mood·loc 拆分
+              // 2026-08-31 修复退格/编辑异常：此前只回写 mood/location，重渲染时 formatLighting/formatEnvironment
+              // 会把未改动的 keyLight/colorTemp/time/weather 重新拼回 value → 删掉的内容"复活"、文本不断重复。
+              // 现在编辑即回写为 mood · location 两段，其余拼回因子清空 → value 与输入严格一致。
+              const parts = val.split(' · ');
               if (typeof shot.lighting === 'string' || typeof shot.environment === 'string') {
-                onUpdateShot(shot.id, { lighting: val });
+                // 字符串契约：parts[0] 归 lighting，其余归 environment（两端都不复活）
+                const updates: Record<string, unknown> = {};
+                if (typeof shot.lighting === 'string') updates.lighting = parts[0] || '';
+                if (typeof shot.environment === 'string') updates.environment = parts.slice(1).join(' · ');
+                onUpdateShot(shot.id, updates);
                 return;
               }
-              const parts = val.split(' · ');
+              // 对象契约：mood · location，清空拼回因子保证稳定编辑
               onUpdateShot(shot.id, {
-                lighting: { ...(shot.lighting as LightingDesign), mood: parts[0] || '' },
-                environment: { ...(shot.environment as EnvironmentDesign), location: parts[1] || '' },
+                lighting: { keyLight: '', colorTemp: '', mood: parts[0] || '' },
+                environment: { location: parts[1] || '', time: '', weather: '' },
               });
             }}
             placeholder={t('storyboardRow.placeholderLighting')}
