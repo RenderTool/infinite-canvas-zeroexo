@@ -40,7 +40,8 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
     coverUrl: undefined,
     bytes: 0,
     createdAt: v.createdAt ?? new Date().toISOString(),
-    data: { kind: 'video', url: '', storageKey: v.storageKey ?? '', durationMs: v.duration ? v.duration * 1000 : undefined },
+    // url 填 storageKey：AssetCardGrid 的 cover 取 data.url，usePreviewImage 内部按 storageKey 走授权解析，保证封面显示
+    data: { kind: 'video', url: v.storageKey ?? '', storageKey: v.storageKey ?? '', durationMs: v.duration ? v.duration * 1000 : undefined },
   }), []);
 
   return (
