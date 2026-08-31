@@ -17,11 +17,13 @@
 import { memo, useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronsUpDown, ChevronRight, ChevronLeft } from 'lucide-react';
+// 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
+import { CANVAS_NODE_ICONS } from '../icons.js';
 import { StoryboardAssetPanel, type StoryboardAssetPanelProps } from './storyboard-asset-panel';
 import { StoryboardVideoStage, type StoryboardVideoStageProps } from './storyboard-video-stage';
 import { StoryboardAlternativeVideos, type StoryboardAlternativeVideosProps } from './storyboard-alternative-videos';
 import { StoryboardTimeline, type StoryboardTimelineProps } from './storyboard-timeline';
-import { NodeGenerateDock, type NodeGenerateDockProps } from '@/features/tools-dock/node-generate-dock.js';
+import { WorkbenchPromptDock, type WorkbenchPromptDockProps } from './workbench-prompt-dock';
 import type { StoryboardEntity } from './storyboard-types';
 
 // ===== 布局常量 =====
@@ -36,8 +38,8 @@ const SIDEBAR_FOLD_BTN_WIDTH = 24;
  * 3. 提示词 dock 内部：参考素材区 + 底栏（模型输入/参数/生成）**固定可见**，仅文本输入区可压缩滚动；
  * 4. 提示词 dock 直接作为底部区域 flex 子项，不包额外 div。
  */
-/** 提示词区固定高度（上一版 285 减 50，用户拍板） */
-const PROMPT_FIXED_HEIGHT = 235;
+/** 提示词区固定高度（2026-08-31 用户明确：基础高度不可再减少 50px，恢复 285） */
+const PROMPT_FIXED_HEIGHT = 285;
 /** 导轨默认高度（参考 AI Video Studio.html 的 .timeline height:215px） */
 const TIMELINE_DEFAULT_HEIGHT = 215;
 /** 导轨最小高度（保证标尺 + 单轨 clip 可读，组件内部固定骨架 ≈ 132px） */
@@ -65,10 +67,10 @@ export interface StoryboardMergedTabProps {
   alternativeVideosProps?: Omit<StoryboardAlternativeVideosProps, 'theme' | 'isDark'>;
   timelineProps?: Omit<StoryboardTimelineProps, 'theme' | 'isDark' | 't'>;
   /**
-   * 底部提示词栏：直接复用视频节点下方同款 NodeGenerateDock(征集 #115 / 2026-08-31 用户拍板)
-   * 内联渲染 + radius 0(不要圆角) + 默认展开,故这三项由本容器锁定,不接受外部传入
+   * 底部提示词栏（2026-08-31 重构）：不再复用画布节点 NodeGenerateDock。
+   * 使用独立 WorkbenchPromptDock（数据视图分离，纯受控）。
    */
-  promptDockProps?: Omit<NodeGenerateDockProps, 'inline' | 'radius' | 'defaultCollapsed'>;
+  promptDockProps?: Omit<WorkbenchPromptDockProps, 'shotId' | 'theme' | 'isDark'> & { shotId?: string };
   /**
    * 提示词区上方展示的引用主体胶囊（出片工作台：当前镜头 @提及 匹配主体库）。
    * 让用户一眼看到本镜关联了哪些主体。
@@ -218,8 +220,8 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
         position: 'relative',
       }}
     >
-      {/* ===== 左侧边栏（出片工作台 showAssetSidebar=false 时整条不渲染） ===== */}
-      {showAssetSidebar && (
+      {/* ===== 左侧边栏 ===== */}
+      {showAssetSidebar ? (
       <div
         style={{
           display: 'flex',
@@ -294,6 +296,41 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
           </div>
         )}
       </div>
+      ) : (
+        // 2026-08-31：出片工作台（showAssetSidebar=false）补最小占位栏，避免左侧一整片空白。
+        // 64px 宽、单列、含说明文字 + 引导按钮。视觉密度对齐 OpenCut 暗色克制风。
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            width: 64,
+            minWidth: 64,
+            maxWidth: 64,
+            height: '100%',
+            padding: '10px 6px',
+            gap: 8,
+            borderRight: `1px solid ${dividerColor}`,
+            background: isDark ? OPENCUT_CARD : panelBg,
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CANVAS_NODE_ICONS.videoEmpty size={14} strokeWidth={1.5} style={{ color: textMuted, opacity: 0.6 }} />
+          </div>
+          <div
+            style={{
+              writingMode: 'vertical-rl',
+              letterSpacing: '0.18em',
+              fontSize: 10,
+              color: textMuted,
+              opacity: 0.7,
+              userSelect: 'none',
+            }}
+          >
+            {t('storyboard.workbenchSubjectsHint', '主体资产 · 从画布抽屉取')}
+          </div>
+        </div>
       )}
 
       {/* 侧边栏分隔线 */}
@@ -333,7 +370,7 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
               isDark={isDark}
               {...alternativeVideosProps}
               videos={alternativeVideosProps?.videos ?? []}
-              activeVideoIndex={alternativeVideosProps?.activeVideoIndex ?? 0}
+              activeStorageKey={alternativeVideosProps?.activeStorageKey}
               onActivate={alternativeVideosProps?.onActivate ?? (() => {})}
             />
           </div>
@@ -454,16 +491,15 @@ export const StoryboardMergedTab = memo(function StoryboardMergedTab({
             </div>
           )}
 
-          {/* 提示词区 = 视频节点正下方同款 NodeGenerateDock(征集 #115,2026-08-31 用户拍板)：
-              固定高度直接作为 flex 子项（不包额外 div）；fitToHeight 保证
-              参考素材区 + 底栏(模型输入/参数/生成)始终可见，仅文本输入区可压缩滚动 */}
+          {/* 提示词区（2026-08-31 恢复 NodeGenerateDock 同款 fitToHeight 行为）：
+              外层不包固定高 div —— 高度由 WorkbenchPromptDock 自身管理
+              （展开 285px / 折叠 34px 细条吸附底部），保证折叠能力与画布 dock 一致。 */}
           {promptDockProps && (
-            <NodeGenerateDock
-              inline
-              radius={0}
-              defaultCollapsed={false}
-              fitToHeight
-              style={{ height: PROMPT_FIXED_HEIGHT, flexShrink: 0 }}
+            <WorkbenchPromptDock
+              // 2026-08-31 重构后 shotId 仅作调试/兜底 key；
+              // 数据全部受控（value/references/model/paramValues 由宿主传入），
+              // 切换镜头 → props 更新 → 本组件 100% 跟随刷新，不再依赖内部 state 初始化。
+              shotId={promptDockProps.shotId ?? 'dock'}
               {...promptDockProps}
             />
           )}

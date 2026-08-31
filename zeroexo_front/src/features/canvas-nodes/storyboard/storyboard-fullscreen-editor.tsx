@@ -312,6 +312,8 @@ export const StoryboardFullscreenEditor = memo(function StoryboardFullscreenEdit
                 mentionShotId={mentionShotId}
                 onMentionSelect={handleTableMentionSelect}
                 onMentionOpen={(id) => { setMentionShotId(id); setMentionOpen(true); }}
+                // 2026-08-31 修复：浮层关闭（点击外部/Esc）必须复位父级状态，否则常驻弹出
+                onMentionClose={() => { setMentionOpen(false); setMentionShotId(null); }}
                 onShotTypeClick={(id) => { setPickerShotId(id); setPickerOpen(true); }}
                 subjectSources={collectSubjectSources(entities, aiSubjects, productionItems)}
                 onAutoMatchMentions={onAutoMatchMentions}

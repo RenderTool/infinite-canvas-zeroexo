@@ -35,6 +35,8 @@ export interface StoryboardRowProps {
   /** 2026-08-30 征集 #110: @ 选择主体 → 写入 shot.entities 关联（替代旧追加文本语义） */
   onMentionSelect: (source: SubjectMatchSource) => void;
   onMentionOpen: (shotId: string) => void;
+  /** 2026-08-31 修复：@ 浮层关闭必须通知父级置空 mentionOpen/mentionShotId，否则浮层常驻不消失 */
+  onMentionClose: () => void;
   onShotTypeClick: (shotId: string) => void;
   /** 2026-08-30 征集 #110: 可匹配主体集合（entities∪aiSubjects∪productionItems），供 @ 面板与自动匹配共用 */
   subjectSources?: SubjectMatchSource[];
@@ -61,6 +63,7 @@ export const StoryboardRow = memo(function StoryboardRow({
   mentionShotId,
   onMentionSelect,
   onMentionOpen,
+  onMentionClose,
   onShotTypeClick,
   subjectSources,
   onAutoMatchMentions,
@@ -298,7 +301,10 @@ export const StoryboardRow = memo(function StoryboardRow({
                   onMentionSelect(source);
                   setMentionSearch('');
                 }}
-                onClose={() => setMentionSearch('')}
+                onClose={() => {
+                  setMentionSearch('');
+                  onMentionClose();
+                }}
               />
             )}
           </div>

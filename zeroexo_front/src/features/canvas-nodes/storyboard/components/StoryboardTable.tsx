@@ -94,6 +94,8 @@ export interface StoryboardTableProps {
   mentionShotId: string | null;
   onMentionSelect: (source: SubjectMatchSource) => void;
   onMentionOpen: (shotId: string) => void;
+  /** 2026-08-31 修复：@ 浮层关闭需透传到父级，否则浮层常驻不消失 */
+  onMentionClose: () => void;
   onShotTypeClick: (shotId: string) => void;
   /** 2026-08-30 征集 #110: 可匹配主体集合（@ 面板与自动匹配共用） */
   subjectSources?: SubjectMatchSource[];
@@ -132,6 +134,7 @@ export const StoryboardTable = memo(function StoryboardTable({
   mentionShotId,
   onMentionSelect,
   onMentionOpen,
+  onMentionClose,
   onShotTypeClick,
   subjectSources,
   onAutoMatchMentions,
@@ -264,6 +267,7 @@ export const StoryboardTable = memo(function StoryboardTable({
               mentionShotId={mentionShotId}
               onMentionSelect={onMentionSelect}
               onMentionOpen={onMentionOpen}
+              onMentionClose={onMentionClose}
               onShotTypeClick={onShotTypeClick}
               subjectSources={subjectSources}
               onAutoMatchMentions={onAutoMatchMentions}

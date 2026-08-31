@@ -173,6 +173,8 @@ export interface Shot {
 /** Plan#53: 一镜多视频（首个为主视频，其余为备选） */
 export interface ShotVideo {
   storageKey: string;
+  /** 原始素材名（2026-08-31 修复：备选视频展示原始名而不是硬编码 V0/V1） */
+  title?: string;
   model?: string;
   duration?: number;
   aspectRatio?: string;
@@ -183,6 +185,8 @@ export interface ShotVideo {
   diagnosis?: Array<{ code: string; mechanism: string; fix: string }>;
   createdAt?: string;
   tags?: string[];
+  /** 来源：generated=本镜生成 / external=外部拖入（2026-08-31 全局视频池语义） */
+  source?: 'generated' | 'external';
 }
 
 // ===== 实体关联 =====

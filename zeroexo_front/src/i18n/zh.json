@@ -453,6 +453,21 @@
     "typeFix": "修复"
   },
   "changelogEntries": {
+    "v1_3_1": {
+      "title": "出片工作台生产化 + 提示词面板重构 + 时间轴打磨",
+      "body": "出片工作台完成连线/备选池/提示词/时间轴一轮生产化修复，提示词面板数据视图分离重构，修复多项交互与视觉问题。",
+      "items": [
+        "出片工作台提示词面板重构：数据视图分离，数据由宿主受控持有、切换镜头即刷新；UI 复用画布节点 dock 同款三段式（参考区/输入区/底栏），支持折叠吸附底部",
+        "出片备选区改为全局视频池：显示所有镜头生成/拖入的视频（含删除片段沉淀的素材池），不再一对一绑定当前镜头；点击可导入激活、删除仅移除引用",
+        "修复分镜→出片拖线连不上：canConnect 钩子双向调用下改用 target 端类型判定",
+        "时间轴播放头对齐：修复漏算容器 paddingLeft 导致的 14px 偏移，拖拽精准跟随",
+        "时间轴片段只显示编号/时长/状态，完整描述移至悬停提示；trim 手柄默认可见",
+        "主体参考图自动关联：镜头 @提及 / bibleRefs 双通道匹配，切换镜头自动合入参考素材",
+        "修复 @ 主体浮层常驻弹出：关闭事件贯通父级状态复位",
+        "硬编码红色全面治理：错误/删除态统一走主题色变量",
+        "时间轴与提示词 i18n key 规范化（扁平命名），三语补齐"
+      ]
+    },
     "v1_3_0": {
       "title": "层级面板资产双模式 + 画布像素预算渲染管线",
       "body": "资产库收编进层级面板（层级树 / 资产库同面板切换），画布图片渲染升级像素预算管线，素材拖拽直接导入画布，并完成数十项验收轮打磨。",
@@ -1877,10 +1892,13 @@
     "noShotType": "未设置景别",
     "imagePromptPlaceholder": "输入图片提示词...",
     "videoPromptPlaceholder": "输入视频提示词...",
-    "timeline.trim": "拖动调整时长",
-    "timeline.empty": "暂无镜头",
-    "timeline.zoom": "缩放",
-    "timeline.framePerSec": "帧级",
+    "timelineWheelHint": "滚轮滚动时间轴 · Ctrl+滚轮缩放",
+    "timelineTrim": "拖动调整时长",
+    "timelineEmpty": "暂无镜头",
+    "timelineZoom": "缩放",
+    "timelineFramePerSec": "帧级",
+    "timelineFailed": "生成失败",
+    "timelineGenerating": "生成中",
     "promptPlaceholder": "输入首帧/关键帧提示词…",
     "negativePrompt": "Negative",
     "negativePromptPlaceholder": "输入本镜负面提示词（实例式，避免范畴词）…",
@@ -1928,7 +1946,15 @@
     "generateQueuedHint": "生成任务已入队；真实视频生成链路将在 Phase 2 接入（当前为占位状态）。",
     "assembledFromBible": "已从圣经组装",
     "assembledFromBibleHint": "已将本镜引用主体的锚点句组装进 Image Prompt。",
-    "recordVoiceHint": "配音录制与音频上传将在 Phase 2 接入；当前可直接在镜头上填写音频地址（audioPreview.storageKey）后试听。"
+    "recordVoiceHint": "配音录制与音频上传将在 Phase 2 接入；当前可直接在镜头上填写音频地址（audioPreview.storageKey）后试听。",
+    "promptDock": {
+      "refHint": "参考素材：自动关联主体 / 拖入 / 上传",
+      "refUpload": "上传参考素材",
+      "refAdd": "添加",
+      "placeholder": "输入视频提示词...",
+      "extractFirst": "取首帧",
+      "extractLast": "取尾帧"
+    }
   },
   "joystickNav": {
     "title": "拖拽红点指向节点跳转"

@@ -186,10 +186,18 @@ function createCreationExtension(
   const canConnect: NodeTypeExtension['canConnect'] =
     kind === 'storyboard'
       ? (source, target) => {
+          // 2026-08-31 修复「分镜 output 拖线连不进出片」：
+          // controller 会【双向调用】本钩子（source 端 + target 端各一次）。原实现判断
+          // `source.nodeId` 的类型 —— 分镜作为 source 时 source 是自己（type=storyboard），
+          // 被误判为「非剧本连入」拒绝，导致 storyboard→workbench 永远失败。
+          // 正确语义：只有【分镜作为 target（input 接收方）】时才限制来源必须是剧本。
           if (target.direction !== 'input') return;
           const store = getStore();
           if (!store) return;
           const graph = store.getGraph();
+          const tgtNode = graph.nodes.find((n) => n.id === target.nodeId);
+          // 目标不是分镜（例如分镜 output → 出片 input）→ 放行，让出片端钩子裁决
+          if (!tgtNode || tgtNode.type !== 'storyboard') return;
           const sourceNode = graph.nodes.find((n) => n.id === source.nodeId);
           if (sourceNode && sourceNode.type !== 'script') {
             return { valid: false, reason: '分镜节点支持关联剧本节点' };

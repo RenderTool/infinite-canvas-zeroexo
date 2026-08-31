@@ -454,6 +454,21 @@
     "typeFix": "Fix"
   },
   "changelogEntries": {
+    "v1_3_1": {
+      "title": "Production Workbench Polish + Prompt Panel Refactor + Timeline Fixes",
+      "body": "Production workbench got a production-grade pass: connection/global-video-pool/prompt/timeline fixes, the prompt panel was refactored with data-view separation, and multiple interaction & visual issues were resolved.",
+      "items": [
+        "Prompt panel refactor in production workbench: data-view separation, data is host-controlled and refreshes on shot switch; UI reuses the same 3-section node-dock (references / input / footer) with bottom-pinned collapse",
+        "Alternative videos becomes a global video pool: shows all generated/imported videos across shots (incl. media pool after deleting clips), no longer 1:1 bound to the current shot; click to import & activate, delete only removes the reference",
+        "Fix storyboard→workbench connection: canConnect hook now judges by target node type under dual invocation",
+        "Timeline playhead alignment: fixed 14px offset from missing container paddingLeft; drag now tracks precisely",
+        "Timeline clips show only number/duration/status; full description moved to hover tooltip; trim handle visible by default",
+        "Subject reference auto-link: matches both @ mentions and bibleRefs ids, auto-merges reference images on shot switch",
+        "Fix @ subject popover permanently open: close now propagates to parent state",
+        "Hardcoded red audit: error/delete states unified through theme tokens",
+        "Timeline & prompt i18n keys normalized (flat naming), all three locales completed"
+      ]
+    },
     "v1_3_0": {
       "title": "Dual-Mode Hierarchy & Assets Panel + Pixel-Budget Canvas Rendering",
       "body": "The asset library is merged into the hierarchy panel (hierarchy tree / asset library toggle), canvas images render through a new pixel-budget pipeline, assets drag straight onto the canvas, plus dozens of polish rounds.",
@@ -1874,10 +1889,13 @@
     "noShotType": "No shot type",
     "imagePromptPlaceholder": "Enter image prompt...",
     "videoPromptPlaceholder": "Enter video prompt...",
-    "timeline.trim": "Drag to trim",
-    "timeline.empty": "No shots",
-    "timeline.zoom": "Zoom",
-    "timeline.framePerSec": "frame",
+    "timelineWheelHint": "Scroll timeline · Ctrl/⌘ + scroll to zoom",
+    "timelineTrim": "Drag to trim",
+    "timelineEmpty": "No shots",
+    "timelineZoom": "Zoom",
+    "timelineFramePerSec": "frame",
+    "timelineFailed": "Failed",
+    "timelineGenerating": "Generating",
     "promptPlaceholder": "Enter keyframe prompt…",
     "negativePrompt": "Negative",
     "negativePromptPlaceholder": "Enter shot-level negative prompt (instance-based, avoid category words)…",
@@ -1925,7 +1943,15 @@
     "generateQueuedHint": "Generation queued; real pipeline lands in Phase 2 (placeholder now).",
     "assembledFromBible": "Assembled from Bible",
     "assembledFromBibleHint": "Anchor sentences of referenced entities appended to Image Prompt.",
-    "recordVoiceHint": "Recording & upload land in Phase 2; set audioPreview.storageKey on the shot to audition now."
+    "recordVoiceHint": "Recording & upload land in Phase 2; set audioPreview.storageKey on the shot to audition now.",
+    "promptDock": {
+      "refHint": "References: auto-linked subjects / drop / upload",
+      "refUpload": "Upload reference",
+      "refAdd": "Add",
+      "placeholder": "Enter video prompt...",
+      "extractFirst": "First frame",
+      "extractLast": "Last frame"
+    }
   },
   "joystickNav": {
     "title": "Drag the red dot toward a node to jump"

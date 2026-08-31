@@ -40,6 +40,8 @@ export function SidebarNav({ items, active, onChange, theme }: {
           <div
             key={item.key}
             onClick={() => onChange(item.key)}
+            // 2026-08-31 用户反馈：纯图标 sidebar 无任何提示，hover 必须显示 label（原生 title，全项目 icon 按钮惯例）
+            title={item.label}
             style={{
               display: 'flex',
               alignItems: 'center',

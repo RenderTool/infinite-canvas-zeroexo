@@ -21,6 +21,10 @@ const CLIP_GAP = 2;                 // 2026-08-31 用户拍板:占位节点(clip
 const TRIM_HANDLE_WIDTH = 8;        // trim 命中区（须落在 clip 内部，clip 有 overflow:hidden）
 const CLIP_MIN_WIDTH = 10;
 const CLIP_BORDER_RADIUS = 4;
+/** 时间轴容器左侧内边距（与 scrollRef 同步 —— 标尺刻度从 paddingLeft 起开始算），
+ *  ⚠️ 用此常量计算播放头位置，绝不可裸写魔数 (2026-08-31 修复：playhead 永远左偏 14px 的根因)。
+ *  改它必须同步 scrollRef paddingLeft */
+const RULER_PADDING_LEFT = 14;
 /** clip 时长兜底边界（模型模板未命中时用；真实上限一律取模板 duration.max） */
 const DEFAULT_MIN_CLIP_DURATION = 0.5;
 const DEFAULT_MAX_CLIP_DURATION = 30;
@@ -238,8 +242,16 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   useEffect(() => () => cancelScrubRaf(), [cancelScrubRaf]);
 
   const commitPlayheadFromX = useCallback((clientX: number, rect: DOMRect) => {
+    // rect 约定 = 滚动容器自身（scrollRef/body）的视口 rect：位置固定，不随内容横向滚动。
+    // 内容坐标 = (clientX - rect.left) + scrollLeft - RULER_PADDING_LEFT：
+    //   - 容器 rect.left 不含 padding，而内容坐标 0 从 paddingLeft(14) 处开始 → 减 padding；
+    //   - scrollLeft 实时补偿横向滚动（拖动播放头 auto-scroll 时变化）。
+    // 2026-08-31 修复：内容元素(Ruler/Track)撑宽后已可横向滚动，若沿用旧公式
+    // 「clientX - 内容rect.left + scrollLeft」，内容 rect.left 已含滚动偏移会重复计入 → 偏右 S；
+    // 而「容器 rect + scrollLeft - padding」对点击（容器 rect 实时取）与拖动（容器 rect 缓存
+    // 不随滚动变、scrollLeft 实时）均正确，且不强制回流。
     const scrollLeft = scrollRef.current?.scrollLeft ?? 0;
-    const x = clientX - rect.left + scrollLeft;
+    const x = (clientX - rect.left + scrollLeft) - RULER_PADDING_LEFT;
     const time = Math.max(0, Math.min(x / pixelsPerSecond, totalDuration));
     const targetFrame = Math.round(time * FRAME_FPS);
     const nowMs = performance.now();
@@ -258,16 +270,18 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
 
   const handleRulerClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (draggingPlayheadRef.current) return;
-    commitPlayheadFromX(e.clientX, e.currentTarget.getBoundingClientRect());
+    const el = scrollRef.current;
+    if (!el) return;
+    commitPlayheadFromX(e.clientX, el.getBoundingClientRect());
   }, [commitPlayheadFromX]);
 
   const handlePlayheadDown = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    const rulerEl = scrollRef.current?.querySelector('[data-ruler]') as HTMLElement | null;
-    if (!rulerEl) return;
+    const el = scrollRef.current;
+    if (!el) return;
     draggingPlayheadRef.current = true;
-    rulerRectRef.current = rulerEl.getBoundingClientRect();
+    rulerRectRef.current = el.getBoundingClientRect();
     pendingXRef.current = e.clientX;
     scrubRafRef.current = requestAnimationFrame(runScrubLoop);
     const handleMove = (moveE: globalThis.MouseEvent) => {
@@ -349,10 +363,9 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     const handleMove = (moveE: globalThis.MouseEvent) => {
       const el = scrollRef.current;
       if (!el) return;
-      const trackEl = el.querySelector('[data-track-area]') as HTMLElement;
-      if (!trackEl) return;
-      const rect = trackEl.getBoundingClientRect();
-      const x = moveE.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
+      // 容器 rect（位置固定）+ 实时 scrollLeft - padding = 内容坐标（同 commitPlayheadFromX）
+      const rect = el.getBoundingClientRect();
+      const x = (moveE.clientX - rect.left + el.scrollLeft) - RULER_PADDING_LEFT;
       // ⚠️ 全部换算到「秒」再比较（2026-08-31 修复：此前 prevEnd 是像素、time 是秒，
       // 二者直接相减 → 右侧 trim 结果恒为负/被下限截断；左侧还把「像素-秒」当秒用且上限写死 10）
       const timeSec = Math.max(0, x / pixelsPerSecond);
@@ -466,8 +479,11 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       }
     } catch { return; }
     if (!storageKey) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
+    const el = scrollRef.current;
+      if (!el) return;
+      // 容器 rect（位置固定）+ 实时 scrollLeft - padding = 内容坐标（同 commitPlayheadFromX）
+      const rect = el.getBoundingClientRect();
+      const x = (e.clientX - rect.left + el.scrollLeft) - RULER_PADDING_LEFT;
       const time = Math.max(0, x / ppsRef.current);
       // 落在某 clip 区间内 → 其后插入；否则取 drop 位置左侧最近 clip；均未命中 → 末尾
       let afterId: string | null = null;
@@ -492,9 +508,9 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   // 2026-08-31 用户拍板：点击轨道空白（非片段）区 → 播放头精准跳到该时间
   const handleTrackClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (e.target instanceof Element && e.target.closest('[data-clip-id]')) return;
-    const rulerEl = scrollRef.current?.querySelector('[data-ruler]') as HTMLElement | null;
-    if (!rulerEl) return;
-    commitPlayheadFromX(e.clientX, rulerEl.getBoundingClientRect());
+    const el = scrollRef.current;
+    if (!el) return;
+    commitPlayheadFromX(e.clientX, el.getBoundingClientRect());
   }, [commitPlayheadFromX]);
   // ===== Delete/Backspace 删除选中片段（2026-08-31）=====
   useEffect(() => {
@@ -539,7 +555,7 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
           <button
             type="button"
             onClick={() => onDeleteShot(activeShotId)}
-            style={{ ...toolBtnStyle, color: '#ef4444' }}
+            style={{ ...toolBtnStyle, color: theme.toolbar.danger }}
             title="删除选中片段（Delete）"
           >
             <Trash2 size={15} />
@@ -550,14 +566,14 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
             key={b.key}
             type="button"
             onClick={b.onClick}
-            style={{ ...toolBtnStyle, color: b.danger ? '#ef4444' : C.text }}
+            style={{ ...toolBtnStyle, color: b.danger ? theme.toolbar.danger : C.text }}
           >
             {b.label}
           </button>
         ))}
         <div style={{ flex: 1, fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11, textAlign: 'center' }}>{timecode}</div>
         <span style={{ fontSize: 10, color: C.muted, marginRight: 4, whiteSpace: 'nowrap', userSelect: 'none' }}>
-          {t('storyboard.timeline.wheelHint') || '滚轮滚动时间轴 · Ctrl+滚轮缩放'}
+          {t('storyboard.timelineWheelHint') || '滚轮滚动时间轴 · Ctrl+滚轮缩放'}
         </span>
         <button type="button" onClick={handleZoomOut} style={toolBtnStyle} title="缩小">−</button>
         <input
@@ -577,14 +593,21 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       <div
         ref={scrollRef}
         data-timeline-body
-        style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'auto', overflowY: 'hidden', paddingLeft: 14 }}
+        style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'auto', overflowY: 'hidden', paddingLeft: RULER_PADDING_LEFT }}
       >
-        {/* Ruler */}
+        {/* Ruler
+         * ⚠️ width: max-content + minWidth:100% —— 滚动容器是 flex column，flex 子项默认被
+         * align-items:stretch 压到容器宽；若只留 overflow-x:auto，内部宽内容被 overflow:hidden
+         * 裁剪，scrollWidth==clientWidth → 横向滚动条永远不出现（2026-08-31 修复）。
+         * 子项必须显式撑开滚动宽度：max-content = 内容宽，minWidth:100% 保证不窄于容器。 */}
         <div
           data-ruler
           onClick={handleRulerClick}
-          style={{ position: 'relative', height: RULER_HEIGHT, borderBottom: `1px solid ${C.rulerLine}`, display: 'flex', alignItems: 'flexEnd', overflow: 'hidden', background: `repeating-linear-gradient(to right, transparent 0, transparent 49px, ${C.rulerLine} 50px)` }}
+          style={{ position: 'relative', height: RULER_HEIGHT, borderBottom: `1px solid ${C.rulerLine}`, display: 'flex', alignItems: 'flexEnd', overflow: 'hidden', background: `repeating-linear-gradient(to right, transparent 0, transparent 49px, ${C.rulerLine} 50px)`, width: 'max-content', minWidth: '100%' }}
         >
+          {/* 撑宽层：刻度是 absolute 定位不撑宽自身，必须用普通流元素把标尺宽度拉到与轨道一致，
+           * 标尺刻度/背景才能随横向滚动同步移动（与轨道右缘对齐）。 */}
+          <div style={{ width: totalTrackWidth, height: 0, flexShrink: 0 }} />
           {renderRuler()}
         </div>
         {/* Track area（可拖入资产；空白区点击移动播放头） */}
@@ -593,7 +616,7 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
           onDragOver={handleTrackDragOver}
           onDrop={handleTrackDrop}
           onClick={handleTrackClick}
-          style={{ position: 'relative', flex: 1, minHeight: 0, padding: '7px 10px 9px 0', overflow: 'hidden' }}
+          style={{ position: 'relative', flex: 1, minHeight: 0, padding: '7px 10px 9px 0', overflow: 'hidden', width: 'max-content', minWidth: '100%' }}
         >
           <div style={{ position: 'relative', height: TRACK_HEIGHT + 16, width: totalTrackWidth, minWidth: '100%' }}>
             {clips.map((clip) => {
@@ -665,8 +688,14 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
                       <span style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, marginRight: 6 }}>
                         #{clip.data.number}
                       </span>
+                      {/* 2026-08-31 修复：clip 上不再显示 description/提示词长文本（用户要求提示词只在底部
+                          NodeGenerateDock 输入器中）。完整描述在 hover title 里可见（见外层 title 属性）。 */}
                       <span style={{ position: 'relative', fontSize: 9, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, marginRight: 6 }}>
-                        {clip.data.label ?? ''}
+                        {clip.data.status === 'failed'
+                          ? (t('storyboard.timelineFailed') || '生成失败')
+                          : clip.data.status === 'generating'
+                            ? (t('storyboard.timelineGenerating') || '生成中')
+                            : (clip.data.hasAudio ? '♪' : '')}
                       </span>
                       <b style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{clip.data.duration}s</b>
                     </>
@@ -674,28 +703,32 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
                   {/* 右侧 trim handle
                    * ⚠️ 必须落在 clip 内部（right: 0 而非负值）：clip 有 overflow:hidden，
                    * 负偏移的 handle 会被裁掉 → 完全不可见不可点（2026-08-31 修复 trim 拖不动）。
-                   * onPointerDown 阻断冒泡：否则 clip 的拖拽排序会同时触发，trim 变成重排。 */}
+                   * onPointerDown 阻断冒泡：否则 clip 的拖拽排序会同时触发，trim 变成重排。
+                   * 默认可见度 0.25（OpenCut 同款「窄条 + 半透」），避免新手用户找不到（2026-08-31 修复）。 */}
                   <div
                     onMouseDown={(e) => handleTrimStart(e, clip.id, 'right')}
                     onPointerDown={(e) => e.stopPropagation()}
-                    style={{ position: 'absolute', right: 0, top: 0, width: TRIM_HANDLE_WIDTH, height: '100%', cursor: 'ew-resize', zIndex: 4, background: isSelected ? C.trimHandle : 'transparent', opacity: isSelected ? 0.85 : 0, borderRadius: 0 }}
-                    title={t('storyboard.timeline.trim') || '拖动调整时长'}
+                    style={{ position: 'absolute', right: 0, top: 0, width: TRIM_HANDLE_WIDTH, height: '100%', cursor: 'ew-resize', zIndex: 4, background: isSelected ? C.trimHandle : (statusColor(clip.data.status, isDark)), opacity: isSelected ? 0.95 : 0.28, borderRadius: 0, transition: 'opacity 0.12s' }}
+                    title={t('storyboard.timelineTrim') || '拖动调整时长'}
                   />
                 </div>
               );
             })}
             {shots.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.empty, fontSize: 12 }}>
-                {t('storyboard.timeline.empty') || '暂无镜头'}
+                {t('storyboard.timelineEmpty') || '暂无镜头'}
               </div>
             )}
           </div>
         </div>
-        {/* Playhead spans full body：外层加宽命中区(14px)便于精准拖动；内层才是 1px 竖线 + 大三角 */}
+        {/* Playhead spans full body：外层加宽命中区(14px)便于精准拖动；内层才是 1px 竖线 + 大三角
+         * ⚠️ left 必须 = RULER_PADDING_LEFT + t*pps - 6，才让 1px 竖线对准 t*pps 位置。
+         * 之前裸写 `playheadTime * pps - 7` 漏算 RULER_PADDING_LEFT(14) → 竖线永远左偏 14px，
+         * 用户拖动时「指针位置」和「竖线」永远对不齐（2026-08-31 修复）。 */}
         <div
           onMouseDown={handlePlayheadDown}
           title="拖动播放头"
-          style={{ position: 'absolute', zIndex: 5, left: playheadTime * pixelsPerSecond - 7, top: 0, bottom: 0, width: 14, cursor: 'ew-resize', touchAction: 'none' }}
+          style={{ position: 'absolute', zIndex: 5, left: RULER_PADDING_LEFT + playheadTime * pixelsPerSecond - 6, top: 0, bottom: 0, width: 14, cursor: 'ew-resize', touchAction: 'none' }}
         >
           <div style={{ position: 'absolute', left: 6, top: 0, bottom: 0, width: 1, background: C.playhead, pointerEvents: 'none' }} />
           <div style={{ position: 'absolute', top: -3, left: 1.5, width: 11, height: 9, background: C.playhead, clipPath: 'polygon(0 0, 100% 0, 50% 100%)', pointerEvents: 'none' }} />

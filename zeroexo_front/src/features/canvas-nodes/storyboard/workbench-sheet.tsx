@@ -12,14 +12,13 @@ import { Film, Clapperboard, Play } from 'lucide-react';
 import { Button, Progress, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
-import { useReactGraphStore } from '@zeroexo/plugin-render-react';
 import { nodeActionBus } from '@zeroexo/plugin-nodes';
 import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-tab-store.js';
 import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
 import { loadModelDurationBounds } from '@/features/generator-settings/dynamic-param-form.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference, WorkbenchMediaAsset } from './workbench-types';
-import type { StoryboardEntity } from './storyboard-types';
+import type { StoryboardEntity, ShotVideo } from './storyboard-types';
 import { extractSubjectMentions } from './storyboard-utils';
 import { generateVideo } from './workbench-frame-api';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
@@ -44,11 +43,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   const { t } = useTranslation();
   const { theme } = useTheme();
   const isDark = theme.mode === 'dark';
-  // 底部 NodeGenerateDock 依赖真实 graph store(useViewport 会用 store.subscribeViewport)。
-  // 2026-08-31 修复:store 不能靠父级透传——extensions.tsx 渲染 CreationNodeView 时并不传 store
-  // (NodeRendererProps 无此字段),透传即 undefined → dock 报 "Cannot read properties of undefined"。
-  // 一律走 CanvasView context 取,与 StoryboardSheet 同款。
-  const store = useReactGraphStore();
+  // 2026-08-31 重构：底部提示词区已换为独立 WorkbenchPromptDock（纯受控数据视图），
+  // 不再依赖 graph store（NodeGenerateDock 的 useViewport/连线推导均已移除）。
 
   // Plan#50:工作台全屏改为顶部页签承载——本地不再持有 fullscreenOpen,显示与否由 tab store 决定
   const myTabKey = buildTabKey('workbench', nodeId);
@@ -111,15 +107,23 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     return orderedShots[activeIndex] ?? orderedShots[0];
   }, [orderedShots, activeIndex]);
 
-  // 当前镜头引用主体(从描述 @主体-状态 提及匹配主体库) → 展示在提示词区上方
-  // 携带 anchorSentence/description/stateName,生成视频时展开进提示词(主体本质是提示词,2026-08-31)
+  // 当前镜头引用主体 → 展示在提示词区上方 + 生成时展开进提示词。
+  // 匹配来源（2026-08-31 修复「为何没有自动关联分镜主体参考」）：
+  //   1. 描述 @主体-状态 提及（现有）
+  //   2. bibleRefs 显式关联 id（上游分镜 shot 字段，未写入描述时兜底）
   const shotSubjects = useMemo(() => {
     if (!currentShot) return [];
     const mentions = extractSubjectMentions(currentShot.description ?? '');
+    const bibleIds = new Set([
+      ...(currentShot.bibleRefs?.characters ?? []),
+      ...(currentShot.bibleRefs?.scenes ?? []),
+      ...(currentShot.bibleRefs?.props ?? []),
+    ]);
     return (data.entities ?? []).flatMap((e) => {
       const m = mentions.find((x) => x.name === e.name);
-      if (!m) return [];
-      const state = m.state ? e.states?.find((s) => s.name === m.state) : undefined;
+      const byBible = bibleIds.has(e.id) || bibleIds.has(e.name);
+      if (!m && !byBible) return [];
+      const state = m?.state ? e.states?.find((s) => s.name === m.state) : undefined;
       return [{
         id: e.id,
         name: e.name,
@@ -127,7 +131,7 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
         anchorSentence: e.anchorSentence,
         description: e.description,
         // 状态细分:优先匹配主体已定义状态,容忍提及未收录的状态名
-        stateName: state?.name ?? m.state,
+        stateName: state?.name ?? m?.state,
       }];
     });
   }, [currentShot, data.entities]);
@@ -178,6 +182,36 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     return currentShot?.videos?.[idx];
   }, [currentShot]);
 
+  // ===== 全局视频池（2026-08-31 语义重定义） =====
+  // 备选区显示【所有】生成的/拖入使用的视频，不再一对一绑定当前镜头 videos。
+  // 来源：全部 shots[].videos（生成产物+外部拖入）+ mediaAssets（删除片段后沉淀）。
+  // 按 storageKey 去重（同一素材被多个片段引用时只显示一张卡）。
+  const globalVideoPool = useMemo<ShotVideo[]>(() => {
+    const seen = new Map<string, ShotVideo>();
+    for (const s of data.shots) {
+      for (const v of s.videos ?? []) {
+        if (!v.storageKey || seen.has(v.storageKey)) continue;
+        seen.set(v.storageKey, {
+          ...v,
+          title: v.title || s.description || `#${s.number}`,
+        });
+      }
+    }
+    for (const m of data.mediaAssets ?? []) {
+      if (!m.storageKey || seen.has(m.storageKey)) continue;
+      seen.set(m.storageKey, {
+        storageKey: m.storageKey,
+        status: 'done',
+        source: 'external',
+        title: m.title || `#${m.fromShotId ? '片段' : '素材'}`,
+        model: m.model,
+        duration: m.duration,
+        createdAt: m.createdAt,
+      });
+    }
+    return Array.from(seen.values());
+  }, [data.shots, data.mediaAssets]);
+
   // 时间轴数据映射
   const timelineData = useMemo(() => {
     return orderedShots.map((s) => ({
@@ -202,6 +236,57 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     );
     onDataChange({ ...data, shots: updatedShots });
   }, [data, onDataChange]);
+
+  // 全局池点击激活：若该视频属于当前镜头 → 直接切 activeVideoIndex；
+  // 否则（他镜/素材池）→ 导入为当前镜头外部视频并激活。
+  const handleGlobalVideoActivate = useCallback((storageKey: string) => {
+    if (!currentShot) return;
+    const localIdx = (currentShot.videos ?? []).findIndex((v) => v.storageKey === storageKey);
+    if (localIdx >= 0) {
+      onUpdateShot(currentShot.id, { activeVideoIndex: localIdx });
+      return;
+    }
+    const src = globalVideoPool.find((v) => v.storageKey === storageKey);
+    if (!src) return;
+    onUpdateShot(currentShot.id, {
+      videos: [
+        ...(currentShot.videos ?? []),
+        { storageKey, status: 'done', source: 'external', title: src.title, model: src.model, duration: src.duration, createdAt: new Date().toISOString() },
+      ],
+      activeVideoIndex: currentShot.videos?.length ?? 0,
+    });
+  }, [currentShot, globalVideoPool, onUpdateShot]);
+
+  // 全局池删除：从所有镜头 videos + mediaAssets 移除引用（云端文件不动）；
+  // 若当前镜头 activeVideoIndex 指向被删项 → 回落 0。
+  const handleGlobalVideoDelete = useCallback((storageKey: string) => {
+    if (!currentShot) return;
+    Modal.confirm({
+      title: t('workbench.deleteAltTitle', '移除视频'),
+      content: t('workbench.deleteAltConfirm', '将移除该视频（仅移除引用，云端素材文件不会删除）。'),
+      okText: t('workbench.delete', '移除'),
+      okType: 'danger',
+      cancelText: t('workbench.cancel', '取消'),
+      centered: true,
+      onOk: () => {
+        const nextShots = data.shots.map((s) => {
+          const nextVideos = (s.videos ?? []).filter((v) => v.storageKey !== storageKey);
+          if (nextVideos.length === (s.videos?.length ?? 0)) return s;
+          return {
+            ...s,
+            videos: nextVideos,
+            activeVideoIndex: (s.activeVideoIndex ?? 0) >= nextVideos.length ? 0 : (s.activeVideoIndex ?? 0),
+            generated: nextVideos.length > 0 ? s.generated : undefined,
+          };
+        });
+        onDataChange({
+          ...data,
+          shots: nextShots,
+          mediaAssets: (data.mediaAssets ?? []).filter((m) => m.storageKey !== storageKey),
+        });
+      },
+    });
+  }, [currentShot, data, onDataChange, t]);
 
   // 从视频抽帧 → 上传 → 写入当前镜头 references.slot（T2 本镜取帧 / T3 跨镜衔接共用）
   const extractFrameIntoShot = useCallback(async (
@@ -239,7 +324,44 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     }
   }, [currentShot, onUpdateShot]);
 
-  // 上游主体参考图导入（T8,2026-08-31）：当前镜头引用主体的 referenceImages → 拷贝进 references（快照语义）
+  // 上游主体参考图自动关联（2026-08-31 修复「为何没有自动关联分镜主体的参考」）：
+  // 切换镜头时，自动把当前镜头描述中 @提及 主体的 referenceImages 合入 references（快照语义）。
+  // ⚠️ 幂等去重：按 storageKey 判定；且每对 (shotId, storageKey) 只自动导入一次（autoLinkedRef 记录），
+  // 用户后续手动删除某张参考图后不会被反复自动加回。
+  const autoLinkedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentShot) return;
+    const entityRefs = shotSubjects.flatMap((s) => {
+      const entity = (data.entities ?? []).find((e) => e.id === s.id);
+      return (entity?.referenceImages ?? [])
+        .filter((img) => !!img.storageKey)
+        .map((img) => ({
+          storageKey: img.storageKey!,
+          title: `${entity?.name ?? s.name}-参考`,
+        }));
+    });
+    if (entityRefs.length === 0) return;
+    const existingKeys = new Set((currentShot.references ?? []).map((r) => r.storageKey).filter(Boolean));
+    const toAdd = entityRefs.filter((r) => {
+      const linkKey = `${currentShot.id}:${r.storageKey}`;
+      return !autoLinkedRef.current.has(linkKey) && !existingKeys.has(r.storageKey);
+    });
+    if (toAdd.length === 0) return;
+    toAdd.forEach((r) => autoLinkedRef.current.add(`${currentShot.id}:${r.storageKey}`));
+    onUpdateShot(currentShot.id, {
+      references: [
+        ...(currentShot.references ?? []),
+        ...toAdd.map((r) => ({
+          id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          kind: 'image' as const,
+          title: r.title,
+          storageKey: r.storageKey,
+        })),
+      ],
+    });
+  }, [currentShot, shotSubjects, data.entities, onUpdateShot]);
+
+  // 上游主体参考图手动导入（保留兜底入口：用户删除参考图后想手动重新拉回全部）
   const importSubjectImages = useCallback(async () => {
     if (!currentShot) return;
     const existing = currentShot.references ?? [];
@@ -372,23 +494,6 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [durationBounds, data.shots, onDataChange]);
 
-  // 底部生成参数栏（NodeGenerateDock）配置回写：模型 + 参数值 → 镜头数据
-  // duration 双向同步的关键：参数面板改时长 → 写回 shot.duration → 轨道 clip 立即变长
-  const handleDockConfigChange = useCallback((_id: string, patch: Record<string, unknown>) => {
-    if (!currentShot) return;
-    const updates: Partial<WorkbenchShot> = {};
-    if (typeof patch.model === 'string') updates.model = patch.model;
-    if (patch.paramValues && typeof patch.paramValues === 'object') {
-      const merged = { ...(currentShot.paramValues ?? {}), ...(patch.paramValues as Record<string, unknown>) };
-      updates.paramValues = merged;
-      const d = merged.duration;
-      if (typeof d === 'number' && Number.isFinite(d) && d !== currentShot.duration) {
-        updates.duration = d;
-      }
-    }
-    if (Object.keys(updates).length > 0) onUpdateShot(currentShot.id, updates);
-  }, [currentShot, onUpdateShot]);
-
   // 时间轴拖拽排序
   const onReorder = useCallback((orderedIds: string[]) => {
     const shotMap = new Map(data.shots.map((s) => [s.id, s]));
@@ -400,6 +505,60 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       .filter(Boolean) as WorkbenchShot[];
     onDataChange({ ...data, shots: reordered });
   }, [data, onDataChange]);
+
+  // 单镜视频生成（2026-08-31 提取为顶层 callback：
+  // 同时被【底部提示词栏生成按钮】和【主视频区空态/失败态"立即生成/重试"】调用，
+  // 保证两路入口走同一份生成逻辑，不会出现 UI 行为分裂）。
+  const runVideoGenerate = useCallback(() => {
+    if (!currentShot) return;
+    const refs = currentShot.references ?? [];
+    const isFirstLast = (currentShot.paramValues?.mode as string) === 'image-to-video-first-last-frame';
+    const referenceImages = refs
+      .filter((r) => r.kind === 'image' && r.storageKey)
+      .filter((r) => (isFirstLast ? r.slot === 'first' || r.slot === 'last' : true))
+      .map((r) => r.storageKey!) as string[];
+    const subjectText = shotSubjects
+      .map((s) => {
+        const base = s.anchorSentence?.trim() || s.description?.trim() || s.name;
+        return s.stateName ? `${base}(${s.stateName}状态)` : base;
+      })
+      .filter(Boolean)
+      .join(', ');
+    const promptShot = subjectText
+      ? { ...currentShot, videoPrompt: `${currentShot.videoPrompt || ''} ${subjectText}`.trim() }
+      : currentShot;
+    const baseVideos = currentShot.videos ?? [];
+    const idx = baseVideos.length;
+    void (async () => {
+      // 生成中：先落 generating 占位（2026-08-31：title 取镜头描述作为兜底名）
+      const generatedTitle = currentShot.description?.trim() || `#${currentShot.number}`;
+      onUpdateShot(currentShot.id, {
+        videos: [...baseVideos, { storageKey: '', status: 'generating', source: 'generated', progress: 10, title: generatedTitle, createdAt: new Date().toISOString() }],
+      });
+      try {
+        const { storageKey } = await generateVideo({ shot: promptShot, referenceImages });
+        onUpdateShot(currentShot.id, {
+          videos: [
+            ...baseVideos.slice(0, idx),
+            { storageKey, status: 'done', source: 'generated', title: generatedTitle, prompt: currentShot.videoPrompt, model: currentShot.model, createdAt: new Date().toISOString() },
+            ...baseVideos.slice(idx),
+          ],
+          activeVideoIndex: idx,
+          generated: true,
+        });
+      } catch (err) {
+        onUpdateShot(currentShot.id, {
+          videos: [
+            ...baseVideos.slice(0, idx),
+            { storageKey: '', status: 'failed', error: (err as Error)?.message, source: 'generated', createdAt: new Date().toISOString() },
+            ...baseVideos.slice(idx),
+          ],
+        });
+      }
+    })();
+  }, [currentShot, onUpdateShot, shotSubjects]);
+  /** 占位 stop：当前生成链路是 fire-and-forget，未实现中断通道（不破坏现有 UX）。 */
+  const runVideoStop = useCallback(() => { /* TODO: 接入生成任务取消端点 */ }, []);
 
   // 插入补拍镜头（T4,2026-08-31）：指定 shot 之后插入空镜头 + number 重编号
   // 2026-08-31 扩展：insert 来自「资产拖入轨道」，用素材标题/时长/封面/视频 key 初始化镜头
@@ -594,22 +753,30 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                 videoProgress: activeVideo?.progress ?? 0,
                 videoError: activeVideo?.error,
                 emptyLabel: t('storyboard.videoEmpty', '本镜尚无视频，点击底部「生成视频」'),
+                // 主视频空态/失败态的【立即生成 / 重试】按钮：复用顶层 runVideoGenerate
+                onGenerate: runVideoGenerate,
+                onStop: runVideoStop,
               }}
               alternativeVideosProps={{
-                videos: (currentShot?.videos ?? []) as any,
-                activeVideoIndex: currentShot?.activeVideoIndex ?? 0,
-                onActivate: (idx) => currentShot && onUpdateShot(currentShot.id, { activeVideoIndex: idx }),
-                // 外部成品视频拖入候选区（T5,2026-08-31）：追加为该镜头备选（source=external）
+                // 全局视频池（2026-08-31 语义重定义：显示所有生成的/拖入的视频，不再一对一绑当前镜头）
+                videos: globalVideoPool as any,
+                // 当前镜头激活视频的 storageKey（激活态标记）
+                activeStorageKey: activeVideo?.storageKey,
+                // 点击视频：属于当前镜头→切 activeVideoIndex；他镜/素材池→导入为当前镜头外部视频并激活
+                onActivate: handleGlobalVideoActivate,
+                // 外部成品视频拖入候选区（T5,2026-08-31）：追加为当前镜头备选（source=external）
                 onExternalVideoDrop: (payload) => {
                   if (!currentShot || !payload.storageKey) return;
                   onUpdateShot(currentShot.id, {
                     videos: [
                       ...(currentShot.videos ?? []),
-                      { storageKey: payload.storageKey, status: 'done', source: 'external', createdAt: new Date().toISOString() },
+                      { storageKey: payload.storageKey, status: 'done', source: 'external', title: payload.title, createdAt: new Date().toISOString() },
                     ],
                     activeVideoIndex: (currentShot.videos?.length ?? 0),
                   });
                 },
+                // 全局池删除（2026-08-31）：从所有镜头 videos + mediaAssets 移除引用，云端文件不动
+                onDeleteVideo: handleGlobalVideoDelete,
               }}
               timelineProps={{
                 shots: timelineData,
@@ -643,72 +810,35 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
               }}
               // 征集 #115:底部提示词栏 = 视频节点正下方同款 NodeGenerateDock(inline + 无圆角 + 常驻展开)
               promptDockProps={{
-                nodeId: currentShot ? `${nodeId}:${currentShot.id}` : nodeId,
-                nodeType: 'video',
-                store,
+                // 2026-08-31 重构：独立 WorkbenchPromptDock（数据视图分离，不复用 NodeGenerateDock）。
+                // 所有字段纯受控，切换镜头 → props 更新 → 输入区 100% 跟随刷新。
+                shotId: currentShot?.id,
+                // 提示词（受控，读写 currentShot.imagePrompt）
+                value: currentShot?.imagePrompt ?? '',
+                onValueChange: (prompt) => currentShot && onUpdateShot(currentShot.id, { imagePrompt: prompt }),
+                // 参考素材（受控，读写 currentShot.references，随 node.data 云同步）
+                references: currentShot?.references ?? [],
+                onReferencesChange: (items) => currentShot && onUpdateShot(currentShot.id, { references: items }),
                 // 模型与参数值受控于 shot 数据 → 参数面板与轨道 clip 双向同步
-                initialPrompt: currentShot?.imagePrompt ?? '',
-                isRunning: activeVideo?.status === 'generating',
                 model: currentShot?.model,
+                onModelChange: (m) => currentShot && onUpdateShot(currentShot.id, { model: m }),
                 paramValues: (currentShot?.paramValues ?? {}) as Record<string, any>,
-                onPromptChange: (_id, prompt) => currentShot && onUpdateShot(currentShot.id, { imagePrompt: prompt }),
-                // 契约参数/模型:patch 增量合并后落在当前镜头;
-                // duration 双向同步关键点——参数面板改时长 → 回写 shot.duration → 轨道 clip 立即变长
-                onConfigChange: handleDockConfigChange,
-                // 参考素材受控模式:数据存 WorkbenchShot.references(随 node.data 云同步,协作可见)
-                controlledReferences: currentShot ? {
-                  items: currentShot.references ?? [],
-                  onChange: (items) => onUpdateShot(currentShot.id, { references: items }),
-                } : undefined,
-                // 单镜视频生成(2026-08-31 接线):referenceImages 按模式筛选 + 提示词自动 @图片N 占位
-                onGenerate: () => {
+                onParamValuesChange: (patch) => {
                   if (!currentShot) return;
-                  const refs = currentShot.references ?? [];
-                  const isFirstLast = (currentShot.paramValues?.mode as string) === 'image-to-video-first-last-frame';
-                  const referenceImages = refs
-                    .filter((r) => r.kind === 'image' && r.storageKey)
-                    .filter((r) => (isFirstLast ? r.slot === 'first' || r.slot === 'last' : true))
-                    .map((r) => r.storageKey!) as string[];
-                  // 主体展开关联(2026-08-31):锚点句/描述逐字展开进提示词,引用状态时追加(状态形态)
-                  const subjectText = shotSubjects
-                    .map((s) => {
-                      const base = s.anchorSentence?.trim() || s.description?.trim() || s.name;
-                      return s.stateName ? `${base}(${s.stateName}状态)` : base;
-                    })
-                    .filter(Boolean)
-                    .join(', ');
-                  const promptShot = subjectText
-                    ? { ...currentShot, videoPrompt: `${currentShot.videoPrompt || ''} ${subjectText}`.trim() }
-                    : currentShot;
-                  const baseVideos = currentShot.videos ?? [];
-                  const idx = baseVideos.length;
-                  void (async () => {
-                    // 生成中：先落 generating 占位
-                    onUpdateShot(currentShot.id, {
-                      videos: [...baseVideos, { storageKey: '', status: 'generating', source: 'generated', progress: 10, createdAt: new Date().toISOString() }],
-                    });
-                    try {
-                      const { storageKey } = await generateVideo({ shot: promptShot, referenceImages });
-                      onUpdateShot(currentShot.id, {
-                        videos: [
-                          ...baseVideos.slice(0, idx),
-                          { storageKey, status: 'done', source: 'generated', prompt: currentShot.videoPrompt, model: currentShot.model, createdAt: new Date().toISOString() },
-                          ...baseVideos.slice(idx),
-                        ],
-                        activeVideoIndex: idx,
-                        generated: true,
-                      });
-                    } catch (err) {
-                      onUpdateShot(currentShot.id, {
-                        videos: [
-                          ...baseVideos.slice(0, idx),
-                          { storageKey: '', status: 'failed', error: (err as Error)?.message, source: 'generated', createdAt: new Date().toISOString() },
-                          ...baseVideos.slice(idx),
-                        ],
-                      });
-                    }
-                  })();
+                  const merged = { ...(currentShot.paramValues ?? {}), ...patch };
+                  const updates: Partial<WorkbenchShot> = { paramValues: merged };
+                  const d = merged.duration;
+                  if (typeof d === 'number' && Number.isFinite(d) && d !== currentShot.duration) {
+                    updates.duration = d;
+                  }
+                  onUpdateShot(currentShot.id, updates);
                 },
+                isRunning: activeVideo?.status === 'generating',
+                // 单镜视频生成（2026-08-31）：复用顶层 runVideoGenerate。
+                // 同一份逻辑被【底部提示词栏的生成按钮】与【主视频区空态/失败态的"立即生成/重试"】共用，
+                // 避免任何一处更新导致 UI 行为分裂（修一处必须修另一处）。
+                onGenerate: runVideoGenerate,
+                onStop: runVideoStop,
                 // 首尾帧从视频取帧(2026-08-31 T2):复用 extractFrameIntoShot(抽帧→上传→写入 slot)
                 onExtractFrame: (slot) => {
                   if (!currentShot || !activeVideo?.storageKey) return;
@@ -718,7 +848,6 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                     `镜头${currentShot.number}${slot === 'first' ? '首帧' : '尾帧'}`,
                   );
                 },
-                onStop: () => {},
               }}
             />
           </div>

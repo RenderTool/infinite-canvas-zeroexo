@@ -42,6 +42,8 @@ export interface WorkbenchShot {
   /** 生成产物：一镜多视频 */
   videos?: Array<{
     storageKey: string;
+    /** 原始素材名（2026-08-31 修复：备选视频展示原始名） */
+    title?: string;
     model?: string;
     duration?: number;
     aspectRatio?: string;

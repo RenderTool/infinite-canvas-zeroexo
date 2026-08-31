@@ -40,7 +40,23 @@ export interface ChangelogPanelProps {
 
 const ENTRIES: ChangelogEntry[] = [
   {
-    version: 'v1.3.0', type: 'feature', date: '2026-08-29', isNew: true,
+    version: 'v1.3.1', type: 'feature', date: '2026-08-31', isNew: true,
+    titleKey: 'changelogEntries.v1_3_1.title',
+    bodyKey: 'changelogEntries.v1_3_1.body',
+    itemKeys: [
+      'changelogEntries.v1_3_1.items.0',
+      'changelogEntries.v1_3_1.items.1',
+      'changelogEntries.v1_3_1.items.2',
+      'changelogEntries.v1_3_1.items.3',
+      'changelogEntries.v1_3_1.items.4',
+      'changelogEntries.v1_3_1.items.5',
+      'changelogEntries.v1_3_1.items.6',
+      'changelogEntries.v1_3_1.items.7',
+      'changelogEntries.v1_3_1.items.8',
+    ],
+  },
+  {
+    version: 'v1.3.0', type: 'feature', date: '2026-08-29', isNew: false,
     titleKey: 'changelogEntries.v1_3_0.title',
     bodyKey: 'changelogEntries.v1_3_0.body',
     itemKeys: [

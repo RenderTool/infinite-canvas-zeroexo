@@ -348,7 +348,11 @@ function getReferenceConfigByMode(
   }
 }
 
-const DockReferencesSection = memo(function DockReferencesSection({
+/**
+ * 2026-08-31 导出给出片工作台 WorkbenchPromptDock 复用（数据视图分离）：
+ * 参考素材区 UI 原样复用，仅由宿主提供归一化的 incomingNodes/refUrlMap。
+ */
+export const DockReferencesSection = memo(function DockReferencesSection({
   nodeId,
   incomingNodes,
   refUrlMap,
@@ -607,7 +611,8 @@ const DockReferencesSection = memo(function DockReferencesSection({
 });
 
 // ===== 输入区(memo 隔离:仅 value/引用变化时重渲染,参考区与底栏不受打字影响) =====
-const DockInputSection = memo(function DockInputSection({
+/** 2026-08-31 导出给 WorkbenchPromptDock 复用（输入区 UI 原样复用） */
+export const DockInputSection = memo(function DockInputSection({
   value,
   onChange,
   references,
@@ -647,7 +652,8 @@ const DockInputSection = memo(function DockInputSection({
 });
 
 // ===== 底栏(memo 隔离:模型/参数/生成按钮 + 字数;textLength 逐字变化驱动字数显示) =====
-const DockFooterBar = memo(function DockFooterBar({
+/** 2026-08-31 导出给 WorkbenchPromptDock 复用（底栏 UI 原样复用） */
+export const DockFooterBar = memo(function DockFooterBar({
   nodeId,
   mode,
   model,
