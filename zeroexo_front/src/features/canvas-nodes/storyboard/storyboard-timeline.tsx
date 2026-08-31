@@ -158,43 +158,47 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     [isDark, theme?.canvas?.background],
   );
 
-  // ===== 时间轴缩放（2026-08-31 重做：滚轮=横轴滚动；Ctrl/⌘+滚轮=缩放，以视口中心为锚点向外扩张）=====
+  // ===== 时间轴缩放（2026-08-31 用户最终拍板：缩放以「时间游标(播放头)」为中心，游标视觉位置永远不动；
+  // 除非内容缩得比视口还窄（不足以计算原位）才允许游标被挤压移动）=====
   // pps 用 ref 读取：监听只注册一次，避免每次缩放都重建 wheel 监听。
   const ppsRef = useRef(pixelsPerSecond);
   ppsRef.current = pixelsPerSecond;
-  /** 以视口中心为锚点缩放（2026-08-31 用户拍板：用户的时间轴放哪就固定在哪，整个时间轴向中心向外扩张；
-   * 内容缩得比视口还窄时浏览器自动 clamp 回原位——即「挤压到不足以在原位」） */
-  const zoomAtViewportCenter = useCallback((nextPps: number) => {
+  /** 以播放头为锚点缩放：播放头当前在视口内的 x 位置缩放前后不变。
+   * 用户看到的时间停在哪，放大缩小后它仍然停在那。 */
+  const zoomAroundPlayhead = useCallback((nextPps: number) => {
     const el = scrollRef.current;
+    const cur = ppsRef.current;
+    const next = Math.round(
+      Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, nextPps)) * 10,
+    ) / 10;
     if (!el) {
-      onPixelsPerSecondChange(nextPps);
+      onPixelsPerSecondChange(next);
       return;
     }
-    const viewportW = el.clientWidth;
-    const cur = ppsRef.current;
-    const anchorTime = (viewportW / 2 + el.scrollLeft) / cur;
-    onPixelsPerSecondChange(nextPps);
-    // 保持视口中心的时间点在视口中心；内容不足视口宽时 scrollLeft 被 clamp 到 0（原位铺满）
-    el.scrollLeft = Math.max(0, anchorTime * nextPps - viewportW / 2);
-  }, [onPixelsPerSecondChange]);
+    // 播放头在视口的视觉偏移 = playheadTime × pps − scrollLeft（缩放前后保持）
+    const anchorX = playheadTime * cur - el.scrollLeft;
+    onPixelsPerSecondChange(next);
+    // 内容不足视口宽时浏览器自动 clamp，播放头才可能被「挤压」移动
+    el.scrollLeft = Math.max(0, playheadTime * next - anchorX);
+  }, [onPixelsPerSecondChange, playheadTime]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
-      // Ctrl/⌘ + 滚轮 = 缩放（以视口中心为锚点向外扩张）
+      // Ctrl/⌘ + 滚轮 = 缩放（以时间游标为锚点向外扩张）
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        zoomAtViewportCenter(ppsRef.current * Math.exp(-e.deltaY * 0.0015));
+        zoomAroundPlayhead(ppsRef.current * Math.exp(-e.deltaY * 0.0015));
         return;
       }
-      // 普通滚轮 / Shift + 滚轮 = 横向滚动（查看远处片段；时间轴只有一行轨道，纵向无内容）
+      // 普通滚轮 = 水平滚动（查看远处片段；时间轴只有一行轨道，纵向无内容）
       el.scrollLeft += e.deltaY || e.deltaX || 0;
       e.preventDefault();
     };
     // passive:false 才能 preventDefault（React onWheel 为 passive，无法阻止浏览器缩放）
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomAtViewportCenter]);
+  }, [zoomAroundPlayhead]);
 
   // clip 布局：宽度 = duration × pixelsPerSecond
   const clips = useMemo(() => {
@@ -414,10 +418,10 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     return labels;
   }, [totalDuration, pixelsPerSecond, totalWidth, formatTime, C]);
 
-  // ===== 缩放控件（滑块 + 加减按钮，右侧；缩放以视口中心为锚点，用户时间轴位置不丢）=====
-  const handleZoomIn = useCallback(() => { zoomAtViewportCenter(ppsRef.current + 10); }, [zoomAtViewportCenter]);
-  const handleZoomOut = useCallback(() => { zoomAtViewportCenter(ppsRef.current - 10); }, [zoomAtViewportCenter]);
-  const handleSliderZoom = useCallback((v: number) => { zoomAtViewportCenter(v); }, [zoomAtViewportCenter]);
+  // ===== 缩放控件（滑块 + 加减按钮，右侧；缩放以时间游标为锚点，游标视觉位置不动）=====
+  const handleZoomIn = useCallback(() => { zoomAroundPlayhead(ppsRef.current + 10); }, [zoomAroundPlayhead]);
+  const handleZoomOut = useCallback(() => { zoomAroundPlayhead(ppsRef.current - 10); }, [zoomAroundPlayhead]);
+  const handleSliderZoom = useCallback((v: number) => { zoomAroundPlayhead(v); }, [zoomAroundPlayhead]);
   // ===== 资产拖入轨道（2026-08-31：HTML5 drag 拖视频素材到轨道 → 按 drop 时间插入镜头）=====
   // 兼容两种拖拽源：资产库弹窗(application/x-canvas-asset) 与 画布资产抽屉(application/x-testlib-item)
   const TRACK_DRAG_MIMES = ['application/x-canvas-asset', 'application/x-testlib-item'];
@@ -569,11 +573,11 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
         <button type="button" onClick={handleZoomIn} style={toolBtnStyle} title="放大">+</button>
         <button type="button" style={{ ...toolBtnStyle, width: 46 }}>{zoomPercent}</button>
       </div>
-      {/* Timeline body（ruler + track + playhead） */}
+      {/* Timeline body（ruler + track + playhead；2026-08-31 显示水平滚动条，滚轮水平滚动） */}
       <div
         ref={scrollRef}
         data-timeline-body
-        style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', paddingLeft: 14 }}
+        style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'auto', overflowY: 'hidden', paddingLeft: 14 }}
       >
         {/* Ruler */}
         <div
