@@ -155,52 +155,33 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     [isDark, theme?.canvas?.background],
   );
 
-  // ===== 时间轴缩放（2026-08-31 重做：滚轮=横轴滚动；Ctrl/⌘+滚轮=缩放，以鼠标所在时间(白色标尺)为锚点向外扩张）=====
+  // ===== 时间轴缩放（2026-08-31 重做：滚轮=横轴滚动；Ctrl/⌘+滚轮=缩放，以视口中心为锚点向外扩张）=====
   // pps 用 ref 读取：监听只注册一次，避免每次缩放都重建 wheel 监听。
   const ppsRef = useRef(pixelsPerSecond);
   ppsRef.current = pixelsPerSecond;
-  /** 通用缩放：将 anchorTime 这一时刻保持在视口内 anchorViewportX 像素处 */
-  const zoomAround = useCallback((anchorTime: number, anchorViewportX: number, nextPps: number) => {
-    const next = Math.round(
-      Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, nextPps)) * 10,
-    ) / 10;
-    onPixelsPerSecondChange(next);
-    const el = scrollRef.current;
-    if (!el) return;
-    // 直接设置 scrollLeft（React 不重置非受控 scrollLeft；渲染后内容变宽，锚点时间 x 位置保持）
-    el.scrollLeft = Math.max(0, anchorTime * next - anchorViewportX);
-  }, [onPixelsPerSecondChange]);
-  /** 以播放头为锚点缩放（按钮/滑块用：焦点不丢） */
-  const zoomAtPlayhead = useCallback((nextPps: number) => {
-    const el = scrollRef.current;
-    const cur = ppsRef.current;
-    const anchorX = playheadTime * cur - (el?.scrollLeft ?? 0);
-    zoomAround(playheadTime, anchorX, nextPps);
-  }, [zoomAround, playheadTime]);
-  /** 以鼠标在标尺上的位置为锚点缩放（Ctrl/⌘+滚轮：白色标尺处向外扩张）；鼠标在视口外时退回播放头锚点 */
-  const zoomAtClientX = useCallback((clientX: number, factor: number) => {
+  /** 以视口中心为锚点缩放（2026-08-31 用户拍板：用户的时间轴放哪就固定在哪，整个时间轴向中心向外扩张；
+   * 内容缩得比视口还窄时浏览器自动 clamp 回原位——即「挤压到不足以在原位」） */
+  const zoomAtViewportCenter = useCallback((nextPps: number) => {
     const el = scrollRef.current;
     if (!el) {
-      onPixelsPerSecondChange(Math.round(ppsRef.current * factor * 10) / 10);
+      onPixelsPerSecondChange(nextPps);
       return;
     }
-    const rect = el.getBoundingClientRect();
-    const localX = clientX - rect.left;
-    if (localX < 0 || localX > rect.width) {
-      zoomAtPlayhead(ppsRef.current * factor);
-      return;
-    }
-    const anchorTime = (localX + el.scrollLeft) / ppsRef.current;
-    zoomAround(anchorTime, localX, ppsRef.current * factor);
-  }, [zoomAround, zoomAtPlayhead, onPixelsPerSecondChange]);
+    const viewportW = el.clientWidth;
+    const cur = ppsRef.current;
+    const anchorTime = (viewportW / 2 + el.scrollLeft) / cur;
+    onPixelsPerSecondChange(nextPps);
+    // 保持视口中心的时间点在视口中心；内容不足视口宽时 scrollLeft 被 clamp 到 0（原位铺满）
+    el.scrollLeft = Math.max(0, anchorTime * nextPps - viewportW / 2);
+  }, [onPixelsPerSecondChange]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
-      // Ctrl/⌘ + 滚轮 = 缩放（以鼠标所在时间为锚点向外扩张）
+      // Ctrl/⌘ + 滚轮 = 缩放（以视口中心为锚点向外扩张）
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        zoomAtClientX(e.clientX, Math.exp(-e.deltaY * 0.0015));
+        zoomAtViewportCenter(ppsRef.current * Math.exp(-e.deltaY * 0.0015));
         return;
       }
       // 普通滚轮 / Shift + 滚轮 = 横向滚动（查看远处片段；时间轴只有一行轨道，纵向无内容）
@@ -210,7 +191,7 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     // passive:false 才能 preventDefault（React onWheel 为 passive，无法阻止浏览器缩放）
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomAtClientX]);
+  }, [zoomAtViewportCenter]);
 
   // clip 布局：宽度 = duration × pixelsPerSecond
   const clips = useMemo(() => {
@@ -284,6 +265,20 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     scrubRafRef.current = requestAnimationFrame(runScrubLoop);
     const handleMove = (moveE: globalThis.MouseEvent) => {
       pendingXRef.current = moveE.clientX;
+      // 2026-08-31 精准拖动：接近视口左右边缘时自动横向滚动，跟随鼠标到视口外的时间
+      const el = scrollRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const edge = 48;
+        if (moveE.clientX < rect.left + edge) {
+          el.scrollLeft = Math.max(0, el.scrollLeft - (rect.left + edge - moveE.clientX) * 0.6);
+        } else if (moveE.clientX > rect.right - edge) {
+          el.scrollLeft = Math.min(
+            el.scrollWidth - el.clientWidth,
+            el.scrollLeft + (moveE.clientX - (rect.right - edge)) * 0.6,
+          );
+        }
+      }
       if (scrubRafRef.current === null) scrubRafRef.current = requestAnimationFrame(runScrubLoop);
     };
     const handleUp = () => {
@@ -416,10 +411,10 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     return labels;
   }, [totalDuration, pixelsPerSecond, totalWidth, formatTime, C]);
 
-  // ===== 缩放控件（滑块 + 加减按钮，右侧；缩放保持播放头焦点不丢）=====
-  const handleZoomIn = useCallback(() => { zoomAtPlayhead(ppsRef.current + 10); }, [zoomAtPlayhead]);
-  const handleZoomOut = useCallback(() => { zoomAtPlayhead(ppsRef.current - 10); }, [zoomAtPlayhead]);
-  const handleSliderZoom = useCallback((v: number) => { zoomAtPlayhead(v); }, [zoomAtPlayhead]);
+  // ===== 缩放控件（滑块 + 加减按钮，右侧；缩放以视口中心为锚点，用户时间轴位置不丢）=====
+  const handleZoomIn = useCallback(() => { zoomAtViewportCenter(ppsRef.current + 10); }, [zoomAtViewportCenter]);
+  const handleZoomOut = useCallback(() => { zoomAtViewportCenter(ppsRef.current - 10); }, [zoomAtViewportCenter]);
+  const handleSliderZoom = useCallback((v: number) => { zoomAtViewportCenter(v); }, [zoomAtViewportCenter]);
   // ===== 资产拖入轨道（2026-08-31：HTML5 drag 拖视频素材到轨道 → 按 drop 时间插入镜头）=====
   const handleTrackDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
     if (Array.from(e.dataTransfer.types).includes('application/x-canvas-asset')) {
@@ -643,12 +638,14 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
             )}
           </div>
         </div>
-        {/* Playhead spans full body */}
+        {/* Playhead spans full body：外层加宽命中区(14px)便于精准拖动；内层才是 1px 竖线 + 大三角 */}
         <div
           onMouseDown={handlePlayheadDown}
-          style={{ position: 'absolute', zIndex: 5, left: playheadTime * pixelsPerSecond, top: 0, bottom: 0, width: 1, background: C.playhead, cursor: 'ew-resize' }}
+          title="拖动播放头"
+          style={{ position: 'absolute', zIndex: 5, left: playheadTime * pixelsPerSecond - 7, top: 0, bottom: 0, width: 14, cursor: 'ew-resize', touchAction: 'none' }}
         >
-          <div style={{ position: 'absolute', top: -2, left: -3, width: 7, height: 7, background: C.playhead, clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }} />
+          <div style={{ position: 'absolute', left: 6, top: 0, bottom: 0, width: 1, background: C.playhead, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: -3, left: 1.5, width: 11, height: 9, background: C.playhead, clipPath: 'polygon(0 0, 100% 0, 50% 100%)', pointerEvents: 'none' }} />
         </div>
       </div>
     </div>
