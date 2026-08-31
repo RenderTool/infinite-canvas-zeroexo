@@ -8,7 +8,7 @@
  * 验收硬标准：带间距 clip + 外部 trim handle + 拖拽排序 + 选中高亮 +
  * 帧级水平缩放看清每一帧。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactElement, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent, type ReactElement, type CSSProperties } from 'react';
 
 // ===== 常量（对齐 workbench-track 视觉层 + freecut-main MINI 几何） =====
 
@@ -60,8 +60,9 @@ export interface StoryboardTimelineProps {
   playheadTime?: number;
   onPlayheadTimeChange?: (time: number) => void;
   onClipDoubleClick?: (shotId: string) => void;
-  /** 插入补拍镜头（T4）：null=末尾追加；否则在指定 shot 之后插入 */
-  onInsertAt?: (afterShotId: string | null) => void;
+  /** 插入补拍镜头（T4）：null=末尾追加；否则在指定 shot 之后插入。
+   * 第二参 insert 来自「资产拖入轨道」：用素材标题/时长初始化新镜头（2026-08-31） */
+  onInsertAt?: (afterShotId: string | null, insert?: { title?: string; durationSec?: number }) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   theme: any;
   isDark: boolean;
@@ -146,46 +147,62 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     [isDark, theme?.canvas?.background],
   );
 
-  // ===== 滚轮缩放（2026-08-31 用户要求：轨道支持鼠标滚动缩放）=====
+  // ===== 时间轴缩放（2026-08-31 重做：滚轮=横轴滚动；Ctrl/⌘+滚轮=缩放，以鼠标所在时间(白色标尺)为锚点向外扩张）=====
   // pps 用 ref 读取：监听只注册一次，避免每次缩放都重建 wheel 监听。
   const ppsRef = useRef(pixelsPerSecond);
   ppsRef.current = pixelsPerSecond;
-  // 2026-08-31 用户反馈：缩放应以「播放头所在时间」为锚点——缩放前后播放头在视口内的 x 位置不变，
-  // 而不是缩放后选中时间发生偏移。
-  const zoomBy = useCallback((factor: number) => {
+  /** 通用缩放：将 anchorTime 这一时刻保持在视口内 anchorViewportX 像素处 */
+  const zoomAround = useCallback((anchorTime: number, anchorViewportX: number, nextPps: number) => {
+    const next = Math.round(
+      Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, nextPps)) * 10,
+    ) / 10;
+    onPixelsPerSecondChange(next);
+    const el = scrollRef.current;
+    if (!el) return;
+    // 直接设置 scrollLeft（React 不重置非受控 scrollLeft；渲染后内容变宽，锚点时间 x 位置保持）
+    el.scrollLeft = Math.max(0, anchorTime * next - anchorViewportX);
+  }, [onPixelsPerSecondChange]);
+  /** 以播放头为锚点缩放（按钮/滑块用：焦点不丢） */
+  const zoomAtPlayhead = useCallback((nextPps: number) => {
     const el = scrollRef.current;
     const cur = ppsRef.current;
-    const next = Math.round(
-      Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, cur * factor)) * 10,
-    ) / 10;
+    const anchorX = playheadTime * cur - (el?.scrollLeft ?? 0);
+    zoomAround(playheadTime, anchorX, nextPps);
+  }, [zoomAround, playheadTime]);
+  /** 以鼠标在标尺上的位置为锚点缩放（Ctrl/⌘+滚轮：白色标尺处向外扩张）；鼠标在视口外时退回播放头锚点 */
+  const zoomAtClientX = useCallback((clientX: number, factor: number) => {
+    const el = scrollRef.current;
     if (!el) {
-      onPixelsPerSecondChange(next);
+      onPixelsPerSecondChange(Math.round(ppsRef.current * factor * 10) / 10);
       return;
     }
-    // 播放头在视口内的偏移 = playheadTime × pps − scrollLeft（缩放前后保持此偏移）
-    const anchor = playheadTime * cur - el.scrollLeft;
-    onPixelsPerSecondChange(next);
-    // 直接设置 scrollLeft（React 不重置非受控 scrollLeft；渲染后内容变宽，播放头 x 位置保持）
-    el.scrollLeft = Math.max(0, playheadTime * next - anchor);
-  }, [onPixelsPerSecondChange, playheadTime]);
+    const rect = el.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    if (localX < 0 || localX > rect.width) {
+      zoomAtPlayhead(ppsRef.current * factor);
+      return;
+    }
+    const anchorTime = (localX + el.scrollLeft) / ppsRef.current;
+    zoomAround(anchorTime, localX, ppsRef.current * factor);
+  }, [zoomAround, zoomAtPlayhead, onPixelsPerSecondChange]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
-      // Shift + 滚轮 = 横向滚动（看远处镜头）；普通滚轮 / Ctrl(⌘) + 滚轮 = 缩放
-      if (e.shiftKey) {
-        el.scrollLeft += e.deltaY;
+      // Ctrl/⌘ + 滚轮 = 缩放（以鼠标所在时间为锚点向外扩张）
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        zoomAtClientX(e.clientX, Math.exp(-e.deltaY * 0.0015));
         return;
       }
-      // 必须 preventDefault：Ctrl+滚轮 默认触发浏览器整页缩放，普通滚轮会触发外层滚动
+      // 普通滚轮 / Shift + 滚轮 = 横向滚动（查看远处片段；时间轴只有一行轨道，纵向无内容）
+      el.scrollLeft += e.deltaY || e.deltaX || 0;
       e.preventDefault();
-      zoomBy(Math.exp(-e.deltaY * 0.0015));
     };
     // passive:false 才能 preventDefault（React onWheel 为 passive，无法阻止浏览器缩放）
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomBy]);
+  }, [zoomAtClientX]);
 
   // clip 布局：宽度 = duration × pixelsPerSecond
   const clips = useMemo(() => {
@@ -391,13 +408,47 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     return labels;
   }, [totalDuration, pixelsPerSecond, totalWidth, formatTime, C]);
 
-  // ===== 缩放控件（workbench-track 视觉层） =====
-  const handleZoomIn = useCallback(() => {
-    onPixelsPerSecondChange(Math.min(pixelsPerSecond + 10, MAX_PIXELS_PER_SECOND));
-  }, [pixelsPerSecond, onPixelsPerSecondChange]);
-  const handleZoomOut = useCallback(() => {
-    onPixelsPerSecondChange(Math.max(pixelsPerSecond - 10, MIN_PIXELS_PER_SECOND));
-  }, [pixelsPerSecond, onPixelsPerSecondChange]);
+  // ===== 缩放控件（滑块 + 加减按钮，右侧；缩放保持播放头焦点不丢）=====
+  const handleZoomIn = useCallback(() => { zoomAtPlayhead(ppsRef.current + 10); }, [zoomAtPlayhead]);
+  const handleZoomOut = useCallback(() => { zoomAtPlayhead(ppsRef.current - 10); }, [zoomAtPlayhead]);
+  const handleSliderZoom = useCallback((v: number) => { zoomAtPlayhead(v); }, [zoomAtPlayhead]);
+  // ===== 资产拖入轨道（2026-08-31：HTML5 drag 拖视频素材到轨道 → 按 drop 时间插入镜头）=====
+  const handleTrackDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
+    if (Array.from(e.dataTransfer.types).includes('application/x-canvas-asset')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+  const handleTrackDrop = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
+    if (!onInsertAt) return;
+    const raw = e.dataTransfer.getData('application/x-canvas-asset');
+    if (!raw) return;
+    e.preventDefault();
+    try {
+      const payload = JSON.parse(raw) as { kind?: string; title?: string; durationMs?: number };
+      if (payload.kind !== 'video') return; // 目前仅接受视频素材
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
+      const time = Math.max(0, x / ppsRef.current);
+      // 落在某 clip 区间内 → 其后插入；否则取 drop 位置左侧最近 clip；均未命中 → 末尾
+      let afterId: string | null = null;
+      for (const c of clips) {
+        const cStart = c.left / ppsRef.current;
+        const cEnd = (c.left + c.width) / ppsRef.current;
+        if (time >= cStart && time <= cEnd) { afterId = c.data.id; break; }
+      }
+      if (!afterId) {
+        for (const c of clips) {
+          if ((c.left + c.width) / ppsRef.current <= time) afterId = c.data.id;
+          else break;
+        }
+      }
+      onInsertAt(afterId, {
+        title: payload.title,
+        durationSec: payload.durationMs ? Math.max(0.5, Math.round(payload.durationMs / 1000)) : undefined,
+      });
+    } catch { /* 非资产 payload 忽略 */ }
+  }, [clips, onInsertAt]);
   // ===== 渲染（对齐 AI Video Studio.html：暗色 toolbar + 刻度 ruler + 全高 playhead + 缩略图 clip） =====
   const totalTrackWidth = Math.max(totalWidth, 200);
   const timecode = `${formatTime(playheadTime)} / ${formatTime(totalDuration)}`;
@@ -406,20 +457,30 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', background: C.bg, borderTop: `1px solid ${C.border}`, color: C.text, overflow: 'hidden', boxSizing: 'border-box' }}>
-      {/* Toolbar */}
+      {/* Toolbar：时间码居中；右侧 = 缩放提示 + 滑块 + 加减按钮 */}
       <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 10px', borderBottom: `1px solid ${C.border}` }}>
-        <button type="button" onClick={handleZoomOut} style={toolBtnStyle}>−</button>
-        <button type="button" style={toolBtnStyle}>{zoomPercent}</button>
-        <button type="button" onClick={handleZoomIn} style={toolBtnStyle}>+</button>
         {onInsertAt && (
           <button type="button" onClick={() => onInsertAt(activeShotId ?? null)} style={{ ...toolBtnStyle, color: C.text }}>
             + 插入
           </button>
         )}
-        <div style={{ margin: '0 auto', fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11 }}>{timecode}</div>
-        <span style={{ fontSize: 10, color: C.muted, marginLeft: 8, whiteSpace: 'nowrap', userSelect: 'none' }}>
-          {t('storyboard.timeline.wheelHint') || '滚轮缩放 · Shift+滚轮横向滚动'}
+        <div style={{ flex: 1, fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11, textAlign: 'center' }}>{timecode}</div>
+        <span style={{ fontSize: 10, color: C.muted, marginRight: 4, whiteSpace: 'nowrap', userSelect: 'none' }}>
+          {t('storyboard.timeline.wheelHint') || '滚轮滚动时间轴 · Ctrl+滚轮缩放'}
         </span>
+        <button type="button" onClick={handleZoomOut} style={toolBtnStyle} title="缩小">−</button>
+        <input
+          type="range"
+          min={MIN_PIXELS_PER_SECOND}
+          max={MAX_PIXELS_PER_SECOND}
+          step={1}
+          value={pixelsPerSecond}
+          onChange={(e) => handleSliderZoom(Number(e.target.value))}
+          style={{ width: 120, accentColor: '#5DDCFF', cursor: 'pointer' }}
+          title="缩放"
+        />
+        <button type="button" onClick={handleZoomIn} style={toolBtnStyle} title="放大">+</button>
+        <button type="button" style={{ ...toolBtnStyle, width: 46 }}>{zoomPercent}</button>
       </div>
       {/* Timeline body（ruler + track + playhead） */}
       <div
@@ -435,9 +496,11 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
         >
           {renderRuler()}
         </div>
-        {/* Track area */}
+        {/* Track area（可拖入资产） */}
         <div
           data-track-area
+          onDragOver={handleTrackDragOver}
+          onDrop={handleTrackDrop}
           style={{ position: 'relative', flex: 1, minHeight: 0, padding: '7px 10px 9px 0', overflow: 'hidden' }}
         >
           <div style={{ position: 'relative', height: TRACK_HEIGHT + 16, width: totalTrackWidth, minWidth: '100%' }}>

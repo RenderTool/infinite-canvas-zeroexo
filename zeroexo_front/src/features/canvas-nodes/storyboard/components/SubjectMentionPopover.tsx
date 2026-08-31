@@ -124,12 +124,14 @@ export const SubjectMentionPopover = memo(function SubjectMentionPopover({
         <input
           type="text"
           value={query}
-          onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
+          readOnly
+          // 2026-08-31 修复：不能 autoFocus/可输入——抢焦点会让描述 TextArea blur → 编辑态卸载 → 浮层瞬间消失
+          // 过滤词跟随描述输入实时更新；用户需在描述框继续输入以筛选
           placeholder={t('subjectMention.searchPlaceholder', '搜索主体…')}
-          autoFocus
+          title={t('subjectMention.continueInDesc', '在描述框中继续输入以筛选')}
           style={{
             flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none',
-            fontSize: 12, color: text, fontFamily: 'inherit',
+            fontSize: 12, color: text, fontFamily: 'inherit', cursor: 'default',
           }}
         />
       </div>

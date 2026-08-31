@@ -396,13 +396,17 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   }, [data, onDataChange]);
 
   // 插入补拍镜头（T4,2026-08-31）：指定 shot 之后插入空镜头 + number 重编号
-  const onInsertAt = useCallback((afterShotId: string | null) => {
+  // 2026-08-31 扩展：insert 来自「资产拖入轨道」，用素材标题/时长初始化镜头
+  const onInsertAt = useCallback((afterShotId: string | null, insert?: { title?: string; durationSec?: number }) => {
+    const dur = insert?.durationSec
+      ? Math.max(0.5, Math.min(30, insert.durationSec))
+      : 5;
     const newShot: WorkbenchShot = {
       id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       number: 0,
-      description: '',
+      description: insert?.title ?? '',
       shotType: '中景',
-      duration: 5,
+      duration: Math.round(dur * 10) / 10,
       status: 'pending',
     };
     const idx = afterShotId ? data.shots.findIndex((s) => s.id === afterShotId) + 1 : data.shots.length;

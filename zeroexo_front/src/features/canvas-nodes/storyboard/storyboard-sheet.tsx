@@ -19,7 +19,7 @@ import type { ProductionItem, ProductionItemKind } from '../production-manager/p
 import { createProductionItem } from '../production-manager/production-manager-types';
 import {
   createNewShot, normalizeUpdate, SAMPLE_SUBJECTS, entityDisplayName,
-  collectSubjectSources, extractExplicitMentions, type SubjectMatchSource,
+  collectSubjectSources, extractSubjectMentions, type SubjectMatchSource,
 } from './storyboard-utils';
 import { ShotSizePickerModal } from './components/ShotSizePickerModal';
 import { StoryboardAssociateModal } from './storyboard-associate-modal';
@@ -235,9 +235,24 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     if (!mentionShotId) return;
     const shot = shots.find((s) => s.id === mentionShotId);
     const desc = shot?.description ?? '';
-    // 追加 @主体 到描述末尾（未引用时）
-    const nextDesc = extractExplicitMentions(desc).has(source.name) ? desc : `${desc}@${source.name}`;
-    updateShot(mentionShotId, { description: nextDesc });
+    // @主体-状态（2026-08-31）：popover 状态 chip 选中后写入 `@主体-状态`
+    const mentionText = source.state ? `${source.name}-${source.state}` : source.name;
+    const mentioned = extractSubjectMentions(desc);
+    const already = mentioned.some(
+      (m) => m.name === source.name && (source.state ? m.state === source.state : true),
+    );
+    const nextDesc = already ? desc : `${desc}@${mentionText}`;
+    // 写入 shot.entities 关联（与全屏编辑器同款；@ 用来关联主体，不只追加文本）
+    const current = Array.isArray(shot?.entities) ? shot.entities : [];
+    const existing = new Set((current as any[]).map((e) => (typeof e === 'string' ? e : (e?.mention ?? ''))));
+    if (!existing.has(mentionText)) {
+      updateShot(mentionShotId, {
+        description: nextDesc,
+        entities: [...current, { entityId: source.id, mention: mentionText, cardId: source.id }],
+      });
+    } else {
+      updateShot(mentionShotId, { description: nextDesc });
+    }
     setMentionOpen(false); setMentionShotId(null); setMentionSearch('');
   }, [shots, updateShot, mentionShotId]);
   const handleMentionOpen = useCallback((shotId: string) => { setMentionShotId(shotId); setMentionOpen(true); setMentionSearch(''); }, []);
@@ -270,11 +285,11 @@ export const StoryboardSheet = memo(function StoryboardSheet({ nodeId, data, onD
     const target = shots.find((s) => s.id === shotId);
     if (!target) return;
     const sources = collectSubjectSources(entities, aiSubjects, data.productionItems);
-    const explicit = extractExplicitMentions(text);
+    const explicit = new Set(extractSubjectMentions(text).map((m) => m.name));
     // 扫描裸词：按主体名长度降序匹配（长名优先避免短名吞长名），已 @ 词跳过
     const sorted = [...sources].sort((a, b) => b.name.length - a.name.length);
     const matchedNames = new Set<string>();
-    let rest = text.replace(/@[\w\u4e00-\u9fa5]+/g, ' ');
+    let rest = text.replace(/@[\w\u4e00-\u9fa5]+(?:-[\w\u4e00-\u9fa5]+)?/g, ' ');
     for (const src of sorted) {
       if (explicit.has(src.name)) continue;
       if (rest.includes(src.name)) { matchedNames.add(src.name); rest = rest.split(src.name).join(' '); }
