@@ -606,12 +606,6 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                     activeVideoIndex: (currentShot.videos?.length ?? 0),
                   });
                 },
-                onRetry: () => {},
-                onRemove: (idx) => {
-                  if (!currentShot?.videos) return;
-                  const newVideos = currentShot.videos.filter((_, i) => i !== idx);
-                  onUpdateShot(currentShot.id, { videos: newVideos });
-                },
               }}
               timelineProps={{
                 shots: timelineData,
