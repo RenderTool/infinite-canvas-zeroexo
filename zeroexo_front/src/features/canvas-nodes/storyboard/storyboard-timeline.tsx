@@ -63,6 +63,10 @@ export interface StoryboardTimelineProps {
   /** 插入补拍镜头（T4）：null=末尾追加；否则在指定 shot 之后插入。
    * 第二参 insert 来自「资产拖入轨道」：用素材标题/时长初始化新镜头（2026-08-31） */
   onInsertAt?: (afterShotId: string | null, insert?: { title?: string; durationSec?: number }) => void;
+  /** 删除片段（2026-08-31）：Delete 键 / 工具栏触发，由宿主负责确认/撤销/素材沉淀 */
+  onDeleteShot?: (shotId: string) => void;
+  /** 额外工具栏按钮（2026-08-31）：如「素材池」入口，渲染在左侧按钮组 */
+  extraToolbarButtons?: Array<{ key: string; label: string; onClick: () => void; danger?: boolean }>;
   t: (key: string, options?: Record<string, unknown>) => string;
   theme: any;
   isDark: boolean;
@@ -135,9 +139,11 @@ function timelinePalette(isDark: boolean, canvasBg: string | undefined) {
 export const StoryboardTimeline = memo(function StoryboardTimeline({
   shots, activeShotId, pixelsPerSecond, onPixelsPerSecondChange, onSelectShot, onReorder, onTrim,
   minClipDuration, maxClipDuration,
-  playheadTime = 0, onPlayheadTimeChange, onClipDoubleClick, onInsertAt, t, theme, isDark,
+  playheadTime = 0, onPlayheadTimeChange, onClipDoubleClick, onInsertAt, onDeleteShot, extraToolbarButtons, t, theme, isDark,
 }: StoryboardTimelineProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** 鼠标是否悬停在时间轴区域（Delete 键删除片段仅在悬停时生效，避免与画布删除节点冲突） */
+  const [hovering, setHovering] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [, setTrimId] = useState<string | null>(null);
   const [, setTrimSide] = useState<'left' | 'right' | null>(null);
@@ -449,6 +455,21 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       });
     } catch { /* 非资产 payload 忽略 */ }
   }, [clips, onInsertAt]);
+  // ===== Delete/Backspace 删除选中片段（2026-08-31）=====
+  useEffect(() => {
+    if (!onDeleteShot) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!activeShotId || !hovering) return;
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      e.preventDefault();
+      e.stopPropagation();
+      onDeleteShot(activeShotId);
+    };
+    document.addEventListener('keydown', handleKey, true);
+    return () => document.removeEventListener('keydown', handleKey, true);
+  }, [activeShotId, hovering, onDeleteShot]);
   // ===== 渲染（对齐 AI Video Studio.html：暗色 toolbar + 刻度 ruler + 全高 playhead + 缩略图 clip） =====
   const totalTrackWidth = Math.max(totalWidth, 200);
   const timecode = `${formatTime(playheadTime)} / ${formatTime(totalDuration)}`;
@@ -456,7 +477,11 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const toolBtnStyle: CSSProperties = { height: 25, padding: '0 8px', border: 0, borderRadius: 5, background: 'transparent', color: C.muted, fontSize: 11, cursor: 'pointer' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', background: C.bg, borderTop: `1px solid ${C.border}`, color: C.text, overflow: 'hidden', boxSizing: 'border-box' }}>
+    <div
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%', background: C.bg, borderTop: `1px solid ${C.border}`, color: C.text, overflow: 'hidden', boxSizing: 'border-box' }}
+    >
       {/* Toolbar：时间码居中；右侧 = 缩放提示 + 滑块 + 加减按钮 */}
       <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 10px', borderBottom: `1px solid ${C.border}` }}>
         {onInsertAt && (
@@ -464,6 +489,26 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
             + 插入
           </button>
         )}
+        {onDeleteShot && activeShotId && (
+          <button
+            type="button"
+            onClick={() => onDeleteShot(activeShotId)}
+            style={{ ...toolBtnStyle, color: '#ef4444' }}
+            title="删除选中片段（Delete）"
+          >
+            删除
+          </button>
+        )}
+        {extraToolbarButtons?.map((b) => (
+          <button
+            key={b.key}
+            type="button"
+            onClick={b.onClick}
+            style={{ ...toolBtnStyle, color: b.danger ? '#ef4444' : C.text }}
+          >
+            {b.label}
+          </button>
+        ))}
         <div style={{ flex: 1, fontVariantNumeric: 'tabular-nums', color: C.text, fontSize: 11, textAlign: 'center' }}>{timecode}</div>
         <span style={{ fontSize: 10, color: C.muted, marginRight: 4, whiteSpace: 'nowrap', userSelect: 'none' }}>
           {t('storyboard.timeline.wheelHint') || '滚轮滚动时间轴 · Ctrl+滚轮缩放'}

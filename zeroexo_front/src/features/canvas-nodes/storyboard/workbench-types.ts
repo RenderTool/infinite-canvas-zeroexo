@@ -87,6 +87,19 @@ export interface WorkbenchShot {
   paramValues?: Record<string, unknown>;
 }
 
+/** 独立素材池条目（2026-08-31）：删除片段后产物沉淀于此，可拖回轨道新建片段 */
+export interface WorkbenchMediaAsset {
+  id: string;
+  /** 云存储 key */
+  storageKey: string;
+  title?: string;
+  model?: string;
+  duration?: number;
+  /** 来源镜头 id（仅追溯，不参与强关联） */
+  fromShotId?: string;
+  createdAt: string;
+}
+
 /** 出片镜头参考素材（存 node.data → Yjs 云同步，协作可见） */
 export interface WorkbenchShotReference {
   /** 本地唯一 id（`ref-${timestamp}-${rand}`） */
@@ -114,6 +127,10 @@ export interface WorkbenchNodeData {
   sourceStoryboardId?: string;
   /** 上游统筹节点 id */
   sourceProductionManagerId?: string;
+  /** 被本地删除的上游分镜 sourceShotId（resync 合并时跳过，避免删除复活，2026-08-31） */
+  deletedSourceShotIds?: string[];
+  /** 独立素材池（2026-08-31）：生成/导入的媒体素材独立留存，不强绑某段，删除片段不删素材 */
+  mediaAssets?: WorkbenchMediaAsset[];
   /** 上游分镜主体资产（圣经） */
   entities?: Array<{
     id: string;

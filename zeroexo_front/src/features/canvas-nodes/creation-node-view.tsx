@@ -26,6 +26,72 @@ import { useReactGraphStore, useGraph } from '@zeroexo/plugin-render-react';
 import { ScriptEditorSheet } from './storyboard/script-editor-sheet.js';
 import { StoryboardSheet } from './storyboard/storyboard-sheet.js';
 import { WorkbenchSheet } from './storyboard/workbench-sheet.js';
+import type { WorkbenchShot } from './storyboard/workbench-types.js';
+
+/**
+ * 出片节点重连分镜的合并策略（2026-08-31）：
+ * 不再全量覆盖本地 shots，而是按 sourceShotId 合并——
+ * - 本地已删除的上游镜头（deletedSourceShotIds）不复活
+ * - 上游仍存在的镜头：同步内容字段，保留本地产物（videos/activeVideoIndex/manualEdit 等）
+ * - 上游新增镜头：追加
+ * - 本地补拍/拖入的无源镜头：保留在末尾
+ */
+function buildMergedWorkbenchShots(
+  sourceShots: Array<Record<string, any>>,
+  current: WorkbenchNodeData,
+): WorkbenchShot[] {
+  const deleted = new Set(current.deletedSourceShotIds ?? []);
+  const localBySource = new Map<string, WorkbenchShot>();
+  for (const s of current.shots) {
+    if (s.sourceShotId) localBySource.set(s.sourceShotId, s);
+  }
+  const merged: WorkbenchShot[] = [];
+  for (const s of sourceShots) {
+    if (deleted.has(s.id)) continue; // 本地删除不复活
+    const prev = localBySource.get(s.id);
+    if (prev) {
+      // 保留本地产物，同步上游内容字段
+      merged.push({
+        ...prev,
+        description: s.description ?? prev.description,
+        shotType: s.shotType ?? prev.shotType,
+        duration: s.duration ?? prev.duration,
+        imagePrompt: s.imagePrompt,
+        videoPrompt: s.videoPrompt,
+        negativePrompt: s.negativePrompt,
+        quality: s.quality,
+        promptAssembly: s.promptAssembly,
+        bibleRefs: s.bibleRefs,
+      });
+    } else {
+      // 上游新增镜头
+      merged.push({
+        id: s.id,
+        number: s.number ?? 0,
+        description: s.description ?? '',
+        shotType: s.shotType ?? '',
+        duration: s.duration ?? 0,
+        imagePrompt: s.imagePrompt,
+        videoPrompt: s.videoPrompt,
+        negativePrompt: s.negativePrompt,
+        quality: s.quality,
+        promptAssembly: s.promptAssembly,
+        videos: s.videos,
+        activeVideoIndex: s.activeVideoIndex,
+        generated: s.generated,
+        manualEdit: s.manualEdit,
+        bibleRefs: s.bibleRefs,
+        audioPreview: s.audioPreview,
+        status: s.status ?? 'pending',
+        sourceShotId: s.id,
+      });
+    }
+  }
+  // 本地补拍/拖入的无源片段保留在末尾（上游无此 sourceShotId）
+  const sourceIds = new Set(sourceShots.map((s) => s.id));
+  const extras = current.shots.filter((s) => !s.sourceShotId || !sourceIds.has(s.sourceShotId));
+  return [...merged, ...extras].map((s, i) => ({ ...s, number: i + 1 }));
+}
 
 export interface CreationNodeViewProps extends NodeRendererProps {
   connectionController: ConnectionController | null;
@@ -249,28 +315,10 @@ export function CreationNodeView({
       const sourceNode = graph.nodes.find((n) => n.id === storyboardEdge.source?.nodeId);
       if (!sourceNode) return;
       const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
-      const sourceShots = (sourceData.shots ?? []) as Array<any>;
+      const sourceShots = (sourceData.shots ?? []) as Array<Record<string, any>>;
       if (!Array.isArray(sourceShots) || sourceShots.length === 0) return;
-      const wbShots = sourceShots.map((s, i) => ({
-        id: s.id,
-        number: s.number ?? i + 1,
-        description: s.description ?? '',
-        shotType: s.shotType ?? '',
-        duration: s.duration ?? 0,
-        imagePrompt: s.imagePrompt,
-        videoPrompt: s.videoPrompt,
-        negativePrompt: s.negativePrompt,
-        quality: s.quality,
-        promptAssembly: s.promptAssembly,
-        videos: s.videos,
-        activeVideoIndex: s.activeVideoIndex,
-        generated: s.generated,
-        manualEdit: s.manualEdit,
-        bibleRefs: s.bibleRefs,
-        audioPreview: s.audioPreview,
-        status: s.status ?? 'pending',
-        sourceShotId: s.id,
-      }));
+      // 2026-08-31 合并策略：本地删除不复活、保留本地产物、上游新增追加
+      const wbShots = buildMergedWorkbenchShots(sourceShots, data as WorkbenchNodeData);
       const totalDuration = wbShots.reduce((sum, s) => sum + s.duration, 0);
       const sourceEntities = (sourceData.entities ?? []) as Array<any>;
       updateNode({
@@ -324,33 +372,16 @@ export function CreationNodeView({
       const sourceNode = graph.nodes.find((n) => n.id === storyboardEdge.source?.nodeId);
       if (!sourceNode) return;
       const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
-      const sourceShots = (sourceData.shots ?? []) as Array<any>;
+      const sourceShots = (sourceData.shots ?? []) as Array<Record<string, any>>;
       if (!Array.isArray(sourceShots) || sourceShots.length === 0) return;
-      const wbShots = sourceShots.map((s, i) => ({
-        id: s.id,
-        number: s.number ?? i + 1,
-        description: s.description ?? '',
-        shotType: s.shotType ?? '',
-        duration: s.duration ?? 0,
-        imagePrompt: s.imagePrompt,
-        videoPrompt: s.videoPrompt,
-        negativePrompt: s.negativePrompt,
-        quality: s.quality,
-        promptAssembly: s.promptAssembly,
-        videos: s.videos,
-        activeVideoIndex: s.activeVideoIndex,
-        generated: s.generated,
-        manualEdit: s.manualEdit,
-        bibleRefs: s.bibleRefs,
-        audioPreview: s.audioPreview,
-        status: s.status ?? 'pending',
-        sourceShotId: s.id,
-      }));
+      // 2026-08-31 合并策略：本地删除不复活、保留本地产物、上游新增追加
+      const current = workbenchDataRef.current;
+      const wbShots = buildMergedWorkbenchShots(sourceShots, current);
       const totalDuration = wbShots.reduce((sum, s) => sum + s.duration, 0);
       const sourceEntities = (sourceData.entities ?? []) as Array<any>;
       updateNode({
         data: {
-          ...workbenchDataRef.current,
+          ...current,
           status: 'ready',
           shots: wbShots,
           totalDuration,

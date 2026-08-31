@@ -9,7 +9,7 @@
 import { memo, useState, useCallback, useMemo, useEffect, useRef, type CSSProperties, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Film, Clapperboard, Play } from 'lucide-react';
-import { Button, Progress, message } from 'antd';
+import { Button, Progress, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '@zeroexo/plugin-theme';
 import { useReactGraphStore } from '@zeroexo/plugin-render-react';
@@ -18,7 +18,7 @@ import { buildTabKey, useCanvasTabStore } from '@/features/canvas-tabs/canvas-ta
 import { CanvasTabContentBoundary } from '@/features/canvas-tabs/CanvasTabContentBoundary.js';
 import { loadModelDurationBounds } from '@/features/generator-settings/dynamic-param-form.js';
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
-import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference } from './workbench-types';
+import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference, WorkbenchMediaAsset } from './workbench-types';
 import type { StoryboardEntity } from './storyboard-types';
 import { extractSubjectMentions } from './storyboard-utils';
 import { generateVideo } from './workbench-frame-api';
@@ -96,6 +96,8 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   const [activeIndex, setActiveIndex] = useState(0);
   const [timelineOrder, _setTimelineOrder] = useState<string[] | null>(null);
   const [playhead, setPlayhead] = useState(0);
+  /** 素材池弹窗（2026-08-31）：独立素材（生成/删除沉淀）查看与移除 */
+  const [mediaOpen, setMediaOpen] = useState(false);
 
   // 按时间轴顺序排列的 shots
   const orderedShots = useMemo<WorkbenchShot[]>(() => {
@@ -417,6 +419,89 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     onDataChange({ ...data, shots: next });
   }, [data, onDataChange]);
 
+  // 删除片段（2026-08-31）：Delete 键 / 工具栏触发。
+  // - 确认弹窗提示：只删轨道片段引用，不删云端素材
+  // - 产物 videos → 沉淀进独立素材池 mediaAssets（不强绑片段）
+  // - 上游 sourceShotId 记入 deletedSourceShotIds → resync 合并时不复活
+  // - 删除后出「撤销」提示（5s 内可恢复）
+  const onDeleteShot = useCallback((shotId: string) => {
+    const target = data.shots.find((s) => s.id === shotId);
+    if (!target) return;
+    const before = data;
+    const doDelete = () => {
+      // 素材沉淀：本片段产物转为独立素材池条目（云端文件不动，只在本地改引用）
+      const assets: WorkbenchMediaAsset[] = (target.videos ?? [])
+        .map((v) => v.storageKey)
+        .filter(Boolean)
+        .map((storageKey) => ({
+          id: `media-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          storageKey,
+          title: target.description || `#${target.number}`,
+          model: target.model,
+          duration: target.duration,
+          fromShotId: shotId,
+          createdAt: new Date().toISOString(),
+        }));
+      const deletedRefs = target.sourceShotId
+        ? [...(data.deletedSourceShotIds ?? []), target.sourceShotId]
+        : (data.deletedSourceShotIds ?? []);
+      const nextShots = data.shots
+        .filter((s) => s.id !== shotId)
+        .map((s, i) => ({ ...s, number: i + 1 }));
+      onDataChange({
+        ...data,
+        shots: nextShots,
+        deletedSourceShotIds: deletedRefs,
+        mediaAssets: [...(data.mediaAssets ?? []), ...assets],
+      });
+    };
+    Modal.confirm({
+      title: t('workbench.deleteShotTitle', '删除片段'),
+      content: t(
+        'workbench.deleteShotConfirm',
+        '将从时间轴删除该片段。已生成的视频素材不会删除，会保留在素材池中。',
+      ),
+      okText: t('workbench.delete', '删除'),
+      okType: 'danger',
+      cancelText: t('workbench.cancel', '取消'),
+      centered: true,
+      onOk: () => {
+        doDelete();
+        const key = `del-shot-${shotId}`;
+        message.info({
+          key,
+          content: (
+            <span>
+              {t('workbench.deletedWithUndo', '片段已删除（视频素材已保留）')}
+              <a
+                style={{ marginLeft: 10, color: '#5DDCFF' }}
+                onClick={() => { message.destroy(key); onDataChange(before); }}
+              >
+                {t('workbench.undo', '撤销')}
+              </a>
+            </span>
+          ),
+          duration: 5,
+        });
+      },
+    });
+  }, [data, onDataChange, t]);
+
+  // 素材池：移除素材引用（仅本地引用，云端文件不删）
+  const removeMediaAsset = useCallback((assetId: string) => {
+    Modal.confirm({
+      title: t('workbench.removeAssetTitle', '移除素材引用'),
+      content: t('workbench.removeAssetConfirm', '仅移除素材池中的引用，云端文件不会被删除。'),
+      okText: t('workbench.remove', '移除'),
+      okType: 'danger',
+      cancelText: t('workbench.cancel', '取消'),
+      centered: true,
+      onOk: () => {
+        onDataChange({ ...data, mediaAssets: (data.mediaAssets ?? []).filter((m) => m.id !== assetId) });
+      },
+    });
+  }, [data, onDataChange, t]);
+
   return (
     <div style={shellStyle}>
       {data.status === 'idle' ? (
@@ -540,6 +625,12 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                 onPlayheadTimeChange: setPlayhead,
                 onClipDoubleClick: (id) => setActiveIndex(Math.max(0, orderedShots.findIndex((s) => s.id === id))),
                 onInsertAt,
+                // 删除片段（2026-08-31）：Delete 键 + 工具栏触发；确认 + 撤销 + 素材沉淀
+                onDeleteShot,
+                // 素材池入口（删除片段后的产物沉淀于此，独立留存）
+                extraToolbarButtons: (data.mediaAssets?.length ?? 0) > 0
+                  ? [{ key: 'media', label: `素材 ${data.mediaAssets!.length}`, onClick: () => setMediaOpen(true) }]
+                  : [],
               }}
               // 征集 #115:底部提示词栏 = 视频节点正下方同款 NodeGenerateDock(inline + 无圆角 + 常驻展开)
               promptDockProps={{
@@ -626,6 +717,51 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
         </CanvasTabContentBoundary>,
         tabHost,
         ) : null}
+
+      {/* 素材池（2026-08-31）：独立素材查看/移除；删除片段时产物自动沉淀于此，云端文件不动 */}
+      <Modal
+        title={t('workbench.mediaAssetsTitle', '素材池')}
+        open={mediaOpen}
+        onCancel={() => setMediaOpen(false)}
+        footer={null}
+        width={520}
+        centered
+      >
+        <div style={{ fontSize: 12, color: mutedColor, marginBottom: 12 }}>
+          {t('workbench.mediaAssetsHint', '生成的视频素材独立留存于此，不随片段删除而丢失；移除仅去掉引用，云端文件不删除。')}
+        </div>
+        {(data.mediaAssets ?? []).length === 0 ? (
+          <div style={{ textAlign: 'center', color: mutedColor, padding: 24 }}>
+            {t('workbench.mediaAssetsEmpty', '暂无独立素材')}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
+            {(data.mediaAssets ?? []).map((m) => (
+              <div
+                key={m.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                  background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', borderRadius: 8,
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+                  <span style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.title || m.storageKey}
+                  </span>
+                  <span style={{ fontSize: 10, color: mutedColor }}>
+                    {m.duration ? `${m.duration}s` : ''}
+                    {m.model ? ` · ${m.model}` : ''}
+                    {m.fromShotId ? ' · 原片段已删除' : ''}
+                  </span>
+                </span>
+                <Button size="small" danger onClick={() => removeMediaAsset(m.id)}>
+                  {t('workbench.removeAsset', '移除')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 });
