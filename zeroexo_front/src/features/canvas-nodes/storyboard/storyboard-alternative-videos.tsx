@@ -80,20 +80,17 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         {videos.map((v, idx) => {
           const isActive = idx === activeVideoIndex;
           return (
+            // 2026-08-31 用户拍板：备选视频必须与「资产抽屉」同款 AssetCardGrid（视觉/封面/悬停播放一致）。
+            // 不要任何自定义激活态描边——AssetCardGrid 自身已带 hover/click 视觉反馈。
             <div
               key={`${v.storageKey ?? idx}-${idx}`}
-              style={{
-                position: 'relative',
-                borderRadius: 12,
-                // 用 outline 不占布局空间，保证激活态不挤压卡片尺寸（与资产抽屉卡片视觉一致）
-                outline: isActive ? `2px solid ${theme.toolbar.accent ?? '#e94560'}` : 'none',
-                outlineOffset: -1,
-              }}
+              data-active={isActive ? '1' : '0'}
+              title={isActive ? t('storyboard.activeAlt', '当前备选') : undefined}
+              style={{ display: 'flex' }}
             >
-              {/* 2026-08-31 用户拍板：备选视频必须与「资产抽屉」同款 AssetCardGrid（视觉/封面/悬停播放一致） */}
               <AssetCardGrid
                 item={toCardAsset(v, idx)}
-                selected={isActive}
+                selected={false}
                 multiSelectEnabled={false}
                 onToggleSelect={() => undefined}
                 onOpen={() => v.status === 'done' && onActivate(idx)}
