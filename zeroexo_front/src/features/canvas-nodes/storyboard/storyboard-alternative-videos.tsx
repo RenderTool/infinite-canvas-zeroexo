@@ -6,7 +6,7 @@
  */
 import { memo, useCallback, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PickerCard } from '@/features/asset-picker/components/picker-card.js';
+import { AssetCardGrid } from '@/features/asset-library/cards/asset-card.js';
 import type { Asset } from '@/features/asset-picker/index.js';
 import type { ShotVideo } from './storyboard-types';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
@@ -78,16 +78,31 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         {videos.map((v, idx) => {
           const isActive = idx === activeVideoIndex;
           return (
-            <PickerCard
+            <div
               key={`${v.storageKey ?? idx}-${idx}`}
-              asset={toCardAsset(v, idx)}
-              theme={theme}
-              selected={isActive}
-              selectMode={false}
-              onClick={() => v.status === 'done' && onActivate(idx)}
-              // 备选区不向外拖拽（避免被误识别为「插入画布」素材）
-              onDragStart={() => undefined}
-            />
+              style={{
+                position: 'relative',
+                borderRadius: 12,
+                padding: 2,
+                boxSizing: 'border-box',
+                border: `1px solid ${isActive ? (theme.toolbar.accent ?? '#e94560') : 'transparent'}`,
+                boxShadow: isActive ? `0 0 0 1px ${theme.toolbar.accent ?? '#e94560'}55` : 'none',
+              }}
+            >
+              {/* 2026-08-31 用户拍板：备选视频必须与「资产抽屉」同款 AssetCardGrid（视觉/封面/悬停播放一致） */}
+              <AssetCardGrid
+                item={toCardAsset(v, idx)}
+                selected={isActive}
+                multiSelectEnabled={false}
+                onToggleSelect={() => undefined}
+                onOpen={() => v.status === 'done' && onActivate(idx)}
+                onRename={() => undefined}
+                onDelete={() => undefined}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                theme={theme}
+                t={t}
+              />
+            </div>
           );
         })}
       </div>
