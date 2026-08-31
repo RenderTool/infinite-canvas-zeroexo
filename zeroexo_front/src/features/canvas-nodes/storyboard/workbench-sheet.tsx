@@ -186,6 +186,10 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       duration: s.duration,
       status: s.status === 'pending' ? 'idle' as const : s.status,
       thumbnailUrl: s.firstFrameKey,
+      // 2026-08-31：clip 画面直接用视频渲染（帧级放大也能看清画面帧）
+      videoKey: s.videos?.[s.activeVideoIndex ?? 0]?.status === 'done'
+        ? s.videos?.[s.activeVideoIndex ?? 0]?.storageKey
+        : undefined,
       label: `#${s.number} ${s.description || s.shotType}`,
       hasAudio: !!s.audioPreview,
     }));

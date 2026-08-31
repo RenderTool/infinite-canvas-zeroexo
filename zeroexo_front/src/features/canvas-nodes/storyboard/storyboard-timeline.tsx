@@ -10,7 +10,8 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent, type ReactElement, type CSSProperties } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { AuthorizedImage } from '@/shared/components/authorized-media.js';
+import { AuthorizedImage, AuthorizedVideo } from '@/shared/components/authorized-media.js';
+import type { Asset } from '@/features/asset-picker/index.js';
 
 // ===== 常量（对齐 workbench-track 视觉层 + freecut-main MINI 几何） =====
 
@@ -34,6 +35,8 @@ export interface TimelineClipData {
   duration: number;
   status?: 'idle' | 'generating' | 'done' | 'failed';
   thumbnailUrl?: string;
+  /** 视频素材 key（2026-08-31：有视频时用 <video> 渲染 clip 画面，帧级放大也能看清每一帧） */
+  videoKey?: string;
   label?: string;
   hasAudio?: boolean;
 }
@@ -416,23 +419,50 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   const handleZoomOut = useCallback(() => { zoomAtViewportCenter(ppsRef.current - 10); }, [zoomAtViewportCenter]);
   const handleSliderZoom = useCallback((v: number) => { zoomAtViewportCenter(v); }, [zoomAtViewportCenter]);
   // ===== 资产拖入轨道（2026-08-31：HTML5 drag 拖视频素材到轨道 → 按 drop 时间插入镜头）=====
+  // 兼容两种拖拽源：资产库弹窗(application/x-canvas-asset) 与 画布资产抽屉(application/x-testlib-item)
+  const TRACK_DRAG_MIMES = ['application/x-canvas-asset', 'application/x-testlib-item'];
   const handleTrackDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
-    if (Array.from(e.dataTransfer.types).includes('application/x-canvas-asset')) {
+    const types = Array.from(e.dataTransfer.types);
+    if (TRACK_DRAG_MIMES.some((m) => types.includes(m))) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     }
   }, []);
   const handleTrackDrop = useCallback((e: ReactDragEvent<HTMLDivElement>) => {
     if (!onInsertAt) return;
-    const raw = e.dataTransfer.getData('application/x-canvas-asset');
-    if (!raw) return;
+    const rawAsset = e.dataTransfer.getData('application/x-canvas-asset');
+    const rawLib = e.dataTransfer.getData('application/x-testlib-item');
+    if (!rawAsset && !rawLib) return;
     e.preventDefault();
+    // 归一化两种 payload → { storageKey, coverUrl, title, durationMs }
+    let storageKey: string | undefined;
+    let coverUrl: string | undefined;
+    let title: string | undefined;
+    let durationMs: number | undefined;
     try {
-      const payload = JSON.parse(raw) as {
-        kind?: string; title?: string; durationMs?: number; storageKey?: string; coverUrl?: string;
-      };
-      if (payload.kind !== 'video') return; // 目前仅接受视频素材
-      const rect = e.currentTarget.getBoundingClientRect();
+      if (rawAsset) {
+        const p = JSON.parse(rawAsset) as {
+          kind?: string; title?: string; durationMs?: number; storageKey?: string; coverUrl?: string;
+        };
+        if (p.kind !== 'video') return; // 目前仅接受视频素材
+        storageKey = p.storageKey;
+        coverUrl = p.coverUrl;
+        title = p.title;
+        durationMs = p.durationMs;
+      } else {
+        // 画布资产抽屉 payload：{ type:'asset', name, data: Asset }
+        const item = JSON.parse(rawLib) as { type?: string; name?: string; data?: Asset };
+        const a = item?.data;
+        const d = a?.data;
+        if (!a || a.kind !== 'video' || !d || d.kind !== 'video') return;
+        storageKey = d.storageKey ?? (a as any).storageKey;
+        coverUrl = a.coverUrl;
+        title = item.name ?? a.title;
+        durationMs = d.durationMs;
+      }
+    } catch { return; }
+    if (!storageKey) return;
+    const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
       const time = Math.max(0, x / ppsRef.current);
       // 落在某 clip 区间内 → 其后插入；否则取 drop 位置左侧最近 clip；均未命中 → 末尾
@@ -449,13 +479,19 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
         }
       }
       onInsertAt(afterId, {
-        title: payload.title,
-        durationSec: payload.durationMs ? Math.max(0.5, Math.round(payload.durationMs / 1000)) : undefined,
-        storageKey: payload.storageKey,
-        coverUrl: payload.coverUrl,
+        title,
+        durationSec: durationMs ? Math.max(0.5, Math.round(durationMs / 1000)) : undefined,
+        storageKey,
+        coverUrl,
       });
-    } catch { /* 非资产 payload 忽略 */ }
   }, [clips, onInsertAt]);
+  // 2026-08-31 用户拍板：点击轨道空白（非片段）区 → 播放头精准跳到该时间
+  const handleTrackClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.target instanceof Element && e.target.closest('[data-clip-id]')) return;
+    const rulerEl = scrollRef.current?.querySelector('[data-ruler]') as HTMLElement | null;
+    if (!rulerEl) return;
+    commitPlayheadFromX(e.clientX, rulerEl.getBoundingClientRect());
+  }, [commitPlayheadFromX]);
   // ===== Delete/Backspace 删除选中片段（2026-08-31）=====
   useEffect(() => {
     if (!onDeleteShot) return;
@@ -547,11 +583,12 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
         >
           {renderRuler()}
         </div>
-        {/* Track area（可拖入资产） */}
+        {/* Track area（可拖入资产；空白区点击移动播放头） */}
         <div
           data-track-area
           onDragOver={handleTrackDragOver}
           onDrop={handleTrackDrop}
+          onClick={handleTrackClick}
           style={{ position: 'relative', flex: 1, minHeight: 0, padding: '7px 10px 9px 0', overflow: 'hidden' }}
         >
           <div style={{ position: 'relative', height: TRACK_HEIGHT + 16, width: totalTrackWidth, minWidth: '100%' }}>
@@ -562,7 +599,8 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
               const isDragging = draggingId === clip.id;
               const isNarrow = clip.width < 50;
               const thumbnailUrl = clip.data.thumbnailUrl;
-              const hasThumb = !!thumbnailUrl;
+              const videoKey = clip.data.videoKey;
+              const hasMedia = !!thumbnailUrl || !!videoKey;
               return (
                 <div
                   key={clip.id}
@@ -591,17 +629,28 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
                     userSelect: 'none',
                     touchAction: 'none',
                     // 有缩略图时压了深色遮罩 → 白字；无缩略图时背景是状态浅色 → 亮色主题下必须深字
-                    color: hasThumb ? '#ffffff' : C.clipText,
-                    textShadow: hasThumb ? '0 1px 2px rgba(0,0,0,0.6)' : 'none',
-                    background: hasThumb ? 'transparent' : bg,
+                    color: hasMedia ? '#ffffff' : C.clipText,
+                    textShadow: hasMedia ? '0 1px 2px rgba(0,0,0,0.6)' : 'none',
+                    background: hasMedia ? 'transparent' : bg,
                   }}
                 >
-                  {hasThumb && thumbnailUrl && (
+                  {hasMedia && (
                     <>
-                      <AuthorizedImage
-                        src={thumbnailUrl}
-                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
+                      {videoKey ? (
+                        // Opencut 同款：clip 画面直接用 <video> 渲染（首帧即清晰画面，帧级放大可看清每一帧）
+                        <AuthorizedVideo
+                          src={videoKey}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : thumbnailUrl ? (
+                        <AuthorizedImage
+                          src={thumbnailUrl}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : null}
                       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', pointerEvents: 'none' }} />
                     </>
                   )}
