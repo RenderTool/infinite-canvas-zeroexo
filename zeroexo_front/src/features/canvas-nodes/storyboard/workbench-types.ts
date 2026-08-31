@@ -122,6 +122,8 @@ export interface WorkbenchNodeData {
     description: string;
     anchorSentence?: string;
     anchorLocked?: boolean;
+    /** 主体状态细分（@主体-状态 匹配用，2026-08-31） */
+    states?: Array<{ id: string; name: string; note?: string }>;
     referenceImages?: Array<{ storageKey: string; prompt?: string; isPrimary?: boolean }>;
   }>;
 }

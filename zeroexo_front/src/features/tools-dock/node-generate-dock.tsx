@@ -105,8 +105,6 @@ export interface NodeGenerateDockProps {
    * 传此回调时首帧/尾帧空槽位显示「取帧」小按钮。
    */
   onExtractFrame?: (slot: 'first' | 'last') => void;
-  /** 快捷询问 Agent 回调（T12,2026-08-31）：点击打开 Agent 面板并锚定当前镜头 */
-  onAskAgent?: () => void;
 }
 
 // ===== 类型 → 图标/名称(对齐生成器 NODE_TYPE_CONFIG) =====
@@ -665,7 +663,6 @@ const DockFooterBar = memo(function DockFooterBar({
   onConstraintsReady,
   mentionRequired,
   dropUp = false,
-  onAskAgent,
 }: {
   nodeId: string;
   mode: GenerationMode;
@@ -680,8 +677,6 @@ const DockFooterBar = memo(function DockFooterBar({
   interruptible?: boolean;
   /** 模型下拉强制向上弹出(内嵌于底部面板时) */
   dropUp?: boolean;
-  /** 快捷询问 Agent（T12）：打开 Agent 面板并锚定当前镜头 */
-  onAskAgent?: () => void;
   onAction: () => void;
   onConfigChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onParamValuesChange: (patch: Record<string, any>) => void;
@@ -737,22 +732,8 @@ const DockFooterBar = memo(function DockFooterBar({
       ) : null}
       {/* 未配置模型:直接不显示(用户拍板:不展示跳转入口,避免误导) */}
 
-      {/* 字数统计 + 快捷询问 Agent:右对齐,显示在生成按钮旁 */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-        {onAskAgent && (
-          <button
-            type="button"
-            onClick={onAskAgent}
-            title={t('nodeDock.askAgent', '问 Agent')}
-            style={{
-              fontSize: 10, color: theme.toolbar.accent, background: 'transparent',
-              border: `1px solid ${theme.toolbar.accent}55`, borderRadius: 10,
-              cursor: 'pointer', padding: '1px 8px', lineHeight: 1.4, whiteSpace: 'nowrap', flexShrink: 0,
-            }}
-          >
-            {t('nodeDock.askAgent', '问 Agent')}
-          </button>
-        )}
+      {/* 字数统计:右对齐,显示在生成按钮旁 */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: theme.toolbar.textMuted ?? '', lineHeight: 1, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
           {textLength} 字
         </span>
@@ -834,7 +815,6 @@ export function NodeGenerateDock({
   fitToHeight = false,
   controlledReferences,
   onExtractFrame,
-  onAskAgent,
 }: NodeGenerateDockProps): React.ReactElement | null {
   const { theme } = useTheme();
   const { t } = useTranslation();
@@ -1397,7 +1377,6 @@ export function NodeGenerateDock({
           onConstraintsReady={handleConstraintsReady}
           mentionRequired={mentionRequired}
           dropUp={inline}
-          onAskAgent={onAskAgent}
         />
       </div>
         </div>

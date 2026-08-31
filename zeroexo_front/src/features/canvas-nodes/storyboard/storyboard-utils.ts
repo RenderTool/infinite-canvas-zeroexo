@@ -195,3 +195,21 @@ export function extractExplicitMentions(text: string): Set<string> {
   }
   return set;
 }
+
+/**
+ * 提取带状态的主体提及（2026-08-31 用户拍板：@主体-状态 固定语法）
+ *
+ * 例：`@老张-常态` → { name: '老张', state: '常态' }
+ *     `@古董店-被砸状态` → { name: '古董店', state: '被砸状态' }
+ *     `@小刀` → { name: '小刀', state: undefined }
+ * 规则：`@名字-状态`，名字/状态均为中文/字母/数字/下划线。
+ */
+export function extractSubjectMentions(text: string): Array<{ name: string; state?: string }> {
+  const out: Array<{ name: string; state?: string }> = [];
+  const re = /@([\w\u4e00-\u9fa5]+)(?:-([\w\u4e00-\u9fa5]+))?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) != null) {
+    if (m[1]) out.push({ name: m[1], state: m[2] || undefined });
+  }
+  return out;
+}

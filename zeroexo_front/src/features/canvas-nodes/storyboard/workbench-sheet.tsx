@@ -20,7 +20,7 @@ import { loadModelDurationBounds } from '@/features/generator-settings/dynamic-p
 import { uploadAsset } from '@/features/asset-picker/services/upload-asset.js';
 import type { WorkbenchNodeData, WorkbenchShot, WorkbenchShotReference } from './workbench-types';
 import type { StoryboardEntity } from './storyboard-types';
-import { extractExplicitMentions } from './storyboard-utils';
+import { extractSubjectMentions } from './storyboard-utils';
 import { generateVideo } from './workbench-frame-api';
 import { useCanvasAgentStore } from '@/features/canvas-agent/ui/store.js';
 import { extractVideoFirstFrame, extractVideoLastFrame, blobToFile } from '@/shared/utils/video-frame.js';
@@ -109,20 +109,25 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     return orderedShots[activeIndex] ?? orderedShots[0];
   }, [orderedShots, activeIndex]);
 
-  // 当前镜头引用主体(从描述 @提及 匹配主体库) → 展示在提示词区上方
-  // 携带 anchorSentence/description,生成视频时展开进提示词(主体本质是提示词,2026-08-31)
+  // 当前镜头引用主体(从描述 @主体-状态 提及匹配主体库) → 展示在提示词区上方
+  // 携带 anchorSentence/description/stateName,生成视频时展开进提示词(主体本质是提示词,2026-08-31)
   const shotSubjects = useMemo(() => {
     if (!currentShot) return [];
-    const mentions = extractExplicitMentions(currentShot.description ?? '');
-    return (data.entities ?? [])
-      .filter((e) => mentions.has(e.name))
-      .map((e) => ({
+    const mentions = extractSubjectMentions(currentShot.description ?? '');
+    return (data.entities ?? []).flatMap((e) => {
+      const m = mentions.find((x) => x.name === e.name);
+      if (!m) return [];
+      const state = m.state ? e.states?.find((s) => s.name === m.state) : undefined;
+      return [{
         id: e.id,
         name: e.name,
         kind: e.kind,
         anchorSentence: e.anchorSentence,
         description: e.description,
-      }));
+        // 状态细分:优先匹配主体已定义状态,容忍提及未收录的状态名
+        stateName: state?.name ?? m.state,
+      }];
+    });
   }, [currentShot, data.entities]);
 
   // T6:参考模式切换提示(2026-08-31)——多模态→首尾帧时,无 slot 的多余图片参考不可见,提示用户
@@ -149,7 +154,9 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
     const refs = (currentShot.references ?? [])
       .map((r) => (r.slot ? `@${r.slot}` : '@图片') + `: ${r.title ?? r.kind}`)
       .join(', ');
-    const subjects = shotSubjects.map((s) => s.name).join(', ');
+    const subjects = shotSubjects
+      .map((s) => (s.stateName ? `${s.name}(状态: ${s.stateName})` : s.name))
+      .join(', ');
     useCanvasAgentStore.getState().setWorkbenchShotContext(
       [
         `【当前镜头 #${currentShot.number}】`,
@@ -558,9 +565,12 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                     .filter((r) => r.kind === 'image' && r.storageKey)
                     .filter((r) => (isFirstLast ? r.slot === 'first' || r.slot === 'last' : true))
                     .map((r) => r.storageKey!) as string[];
-                  // 主体展开关联(2026-08-31):当前镜头关联主体的锚点句/描述逐字展开进提示词
+                  // 主体展开关联(2026-08-31):锚点句/描述逐字展开进提示词,引用状态时追加(状态形态)
                   const subjectText = shotSubjects
-                    .map((s) => s.anchorSentence?.trim() || s.description?.trim() || s.name)
+                    .map((s) => {
+                      const base = s.anchorSentence?.trim() || s.description?.trim() || s.name;
+                      return s.stateName ? `${base}(${s.stateName}状态)` : base;
+                    })
                     .filter(Boolean)
                     .join(', ');
                   const promptShot = subjectText
@@ -603,12 +613,6 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
                     slot,
                     `镜头${currentShot.number}${slot === 'first' ? '首帧' : '尾帧'}`,
                   );
-                },
-                // 快捷询问 Agent（T12）：打开 Agent 面板 + 切到对话页签（镜头锚点已由 onSelectShot 注入）
-                onAskAgent: () => {
-                  const s = useCanvasAgentStore.getState();
-                  s.setDockOpen(true);
-                  s.setDockTab('chat');
                 },
                 onStop: () => {},
               }}

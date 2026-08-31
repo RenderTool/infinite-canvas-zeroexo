@@ -150,12 +150,24 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
   // pps 用 ref 读取：监听只注册一次，避免每次缩放都重建 wheel 监听。
   const ppsRef = useRef(pixelsPerSecond);
   ppsRef.current = pixelsPerSecond;
+  // 2026-08-31 用户反馈：缩放应以「播放头所在时间」为锚点——缩放前后播放头在视口内的 x 位置不变，
+  // 而不是缩放后选中时间发生偏移。
   const zoomBy = useCallback((factor: number) => {
-    const next = ppsRef.current * factor;
-    onPixelsPerSecondChange(
-      Math.round(Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, next)) * 10) / 10,
-    );
-  }, [onPixelsPerSecondChange]);
+    const el = scrollRef.current;
+    const cur = ppsRef.current;
+    const next = Math.round(
+      Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, cur * factor)) * 10,
+    ) / 10;
+    if (!el) {
+      onPixelsPerSecondChange(next);
+      return;
+    }
+    // 播放头在视口内的偏移 = playheadTime × pps − scrollLeft（缩放前后保持此偏移）
+    const anchor = playheadTime * cur - el.scrollLeft;
+    onPixelsPerSecondChange(next);
+    // 直接设置 scrollLeft（React 不重置非受控 scrollLeft；渲染后内容变宽，播放头 x 位置保持）
+    el.scrollLeft = Math.max(0, playheadTime * next - anchor);
+  }, [onPixelsPerSecondChange, playheadTime]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
