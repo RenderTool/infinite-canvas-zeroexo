@@ -10,7 +10,7 @@
  * 打开性能（Plan#48-T6 重带）：动画期间延迟挂载资产库页，避免与滑入动画同帧竞争。
  */
 
-import { useState, useLayoutEffect, useEffect } from 'react';
+import { useState, useLayoutEffect, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
@@ -21,6 +21,7 @@ import type { ThemeConfig } from '@zeroexo/shared';
 // 2026-08-30 用户拍板:画布资产抽屉与主页资产库拆为两套独立架构(抽屉用 CanvasAssetsPanel)
 import { CanvasAssetsPanel } from '@/features/canvas-assets/index.js';
 import { EDITOR_ICONS } from '@/pages/editor/editor-canvas/icons.js';
+import { Z_INDEX } from '@/shared/constants/z-index.js';
 
 export interface HierarchyPanelSidebarProps {
   closing: boolean;
@@ -41,7 +42,10 @@ export interface HierarchyPanelSidebarProps {
 
 // 征集 #87 验收轮七:抽屉加宽至 450(容纳主页资产库同款卡片布局)
 // 2026-08-30 用户拍板:PC 端抽屉尺寸减少 50px(450 → 400)
+// 2026-08-31 用户拍板:PC 端抽屉支持右侧分割线拖拽调宽
 const PANEL_WIDTH = 400;
+const PANEL_MIN_WIDTH = 280;
+const PANEL_MAX_WIDTH = 640;
 // 抽屉式动画:统一 0.35s cubic-bezier(0.22, 1, 0.36, 1),展开收起同节奏
 const DRAWER_TRANSITION = '0.35s cubic-bezier(0.22, 1, 0.36, 1)';
 
@@ -72,18 +76,44 @@ export function HierarchyPanelSidebar({
     return () => window.clearTimeout(timer);
   }, [closing, expanded, contentReady]);
 
-  const width = closing ? 0 : expanded ? PANEL_WIDTH : 0;
+  // 2026-08-31 用户拍板：PC 端资产抽屉右侧分割线拖拽调宽
+  const [panelWidth, setPanelWidth] = useState(PANEL_WIDTH);
+  const [draggingWidth, setDraggingWidth] = useState(false);
+  const startDragWidth = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDraggingWidth(true);
+    const startX = e.clientX;
+    const startW = panelWidth;
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, startW + (ev.clientX - startX)));
+      setPanelWidth(w);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+      setDraggingWidth(false);
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+  }, [panelWidth]);
+
+  const width = closing ? 0 : expanded ? panelWidth : 0;
   const opacity = closing ? 0 : expanded ? 1 : 0;
   // translate3d 触发 GPU 合成层,生产环境动画更流畅
-  const translate3d = closing ? `translate3d(${-PANEL_WIDTH}px, 0, 0)` : expanded ? 'translate3d(0, 0, 0)' : `translate3d(${-PANEL_WIDTH}px, 0, 0)`;
+  const translate3d = closing ? `translate3d(${-panelWidth}px, 0, 0)` : expanded ? 'translate3d(0, 0, 0)' : `translate3d(${-panelWidth}px, 0, 0)`;
 
   // 抽屉式动画:展开收起统一节奏。
   // 外层不加 will-change:width 非合成属性,无效提示反而诱发多余分层(征集 #85/Plan#48-T6 教训)。
   const outerStyle: CSSProperties = overlay
     ? {
         // 征集 #95:覆盖模式——绝对定位于画布左缘之上(不占布局、不推开内容),移动端与 PC 同款组件
-        position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 60,
-        width: PANEL_WIDTH, maxWidth: '92vw',
+        // 2026-08-31 修复:zIndex 提到 DRAWER_OVERLAY(31000),否则会被出片工作台全屏(30000)遮挡
+        position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: Z_INDEX.DRAWER_OVERLAY,
+        width: panelWidth, maxWidth: '92vw',
         opacity: closing ? 0 : (expanded ? 1 : 0),
         pointerEvents: closing || !expanded ? 'none' : 'auto',
         transition: `opacity ${DRAWER_TRANSITION}`,
@@ -100,7 +130,8 @@ export function HierarchyPanelSidebar({
         // 会被父级 overflow 裁剪而不可见;innerStyle 自带 overflow hidden 已足够约束内容
         flexShrink: 0, width, opacity,
         pointerEvents: closing || !expanded ? 'none' : undefined,
-        transition: `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
+        // 2026-08-31 拖拽调宽期间禁用宽度动画，保证分割线实时跟随
+        transition: draggingWidth ? 'none' : `width ${DRAWER_TRANSITION}, opacity ${DRAWER_TRANSITION}`,
       };
   // 抽屉底色与画布主题色一致(征集 #92 拍板)。
   // 2026-08-31 用户拍板：PC 资产抽屉去掉 border-right，仅保留移动端同款阴影。
@@ -118,7 +149,7 @@ export function HierarchyPanelSidebar({
         willChange: 'transform',
       }
     : {
-        width: PANEL_WIDTH, height: '100%', display: 'flex', flexDirection: 'column',
+        width: panelWidth, height: '100%', display: 'flex', flexDirection: 'column',
         position: 'relative',
         // 2026-08-31：全站统一画布背景色
         overflow: 'hidden', backgroundColor: theme.canvas.background,
@@ -203,6 +234,22 @@ export function HierarchyPanelSidebar({
               }} />
             ))}
           </div>
+        )}
+        {/* 右侧分割线拖拽（2026-08-31 用户拍板：PC 资产抽屉支持拖拽调宽） */}
+        {!modal && !overlay && expanded && (
+          <div
+            onPointerDown={startDragWidth}
+            title={t('hierarchy.resize', '拖拽调整宽度')}
+            style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 5,
+              cursor: 'col-resize', zIndex: 30, touchAction: 'none',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = (theme.toolbar.accent ?? '#3b82f6') + '88';
+            }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          />
         )}
       </div>
     </div>

@@ -75,6 +75,7 @@ import { UploadQueue } from '@zeroexo/plugin-upload-queue';
 import { useEditorState } from './use-editor-state.js';
 import { useAuth } from '@/features/auth/auth-store.js';
 import { CreationSyncBadge } from '@/components/creation/CreationSyncBadge.js';
+import { Z_INDEX } from '@/shared/constants/z-index.js';
 import { useAiConfigStore } from '@/features/ai-config/use-ai-config-store.js';
 import { useEditorDialogs } from './use-editor-dialogs.js';
 import { useEditorInteractions } from './use-editor-interactions.js';
@@ -1633,9 +1634,10 @@ function layoutStyle(theme: ReturnType<typeof useTheme>['theme']): CSSProperties
 const headerStyle: CSSProperties = { minHeight: 45, background: 'transparent', padding: 0, lineHeight: '45px', position: 'relative', zIndex: 100 };
 /**
  * 资产抽屉覆盖模式（移动端 fixed 包裹层）层级。
- * 需高于顶栏 CanvasTabBar（headerStyle zIndex 100）以盖住页签条、避免双重页签。
+ * 需高于顶栏 CanvasTabBar（headerStyle zIndex 100）以盖住页签条、避免双重页签；
+ * 2026-08-31 修复：须高于出片工作台全屏（Z_INDEX.FULLSCREEN=30000），否则移动端抽屉被出片遮挡。
  */
-const HIERARCHY_OVERLAY_Z = 300;
+const HIERARCHY_OVERLAY_Z = Z_INDEX.DRAWER_OVERLAY;
 /**
  * 画布页签内容层层级：必须 **高于** HIERARCHY_OVERLAY_Z，
  * 否则移动端抽屉会盖住剧本/分镜编辑器内容（视觉上等同「内容消失」）。

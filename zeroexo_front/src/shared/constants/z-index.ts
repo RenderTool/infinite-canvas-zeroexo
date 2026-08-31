@@ -66,6 +66,9 @@ export const Z_INDEX = {
   /** 全屏覆盖层 - 全屏编辑器、全屏阅读器等 */
   FULLSCREEN: 30000,
 
+  /** 移动端抽屉覆盖层 - 画布资产抽屉(覆盖模式),须盖住出片工作台全屏(FULLSCREEN) */
+  DRAWER_OVERLAY: 31000,
+
   /** 全屏内部下拉菜单遮罩 */
   FULLSCREEN_DROPDOWN_MASK: 31000,
 
