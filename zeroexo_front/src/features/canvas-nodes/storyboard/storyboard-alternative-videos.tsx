@@ -68,9 +68,9 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         <span>{t('storyboard.alternativeVideos', '备选视频')}</span>
         <span style={{ fontSize: 10, color: textMuted, fontWeight: 400 }}>{videos.length - 1} {t('storyboard.alternatives', '备选')}</span>
       </div>
-      {/* 卡片网格：固定 2 列（与资产抽屉 2 列布局尺寸一致），卡片最小 150px 不被挤压，不足 300px 容器时横向滚动。
-         不再用 1fr 拉伸——单列会被拉成 300+px 巨型卡片，破坏视觉一致性。 */}
-      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(150px, 1fr))', gap: 12, alignContent: 'start' }}>
+      {/* 卡片网格：与主页资产库 AssetCardGrid 卡片尺寸一致——auto-fill 按容器宽度自动填列，每列 150-200px，
+         卡片最小 150px 不被挤压（容器 < 150px 时横向滚动而非压扁卡片）。 */}
+      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, alignContent: 'start' }}>
         {videos.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7, gridColumn: '1 / -1' }}>
             <CANVAS_NODE_ICONS.videoEmpty size={22} strokeWidth={1.5} />
