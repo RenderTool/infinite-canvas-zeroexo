@@ -37,6 +37,7 @@ export function toInsertPayload(asset: Asset): InsertAssetPayload {
       kind: 'video',
       url: data.url,
       storageKey: data.storageKey,
+      coverUrl: asset.coverUrl,
       title: asset.title,
       width: data.width,
       height: data.height,

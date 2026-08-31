@@ -9,6 +9,8 @@
  * 帧级水平缩放看清每一帧。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent, type ReactElement, type CSSProperties } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { AuthorizedImage } from '@/shared/components/authorized-media.js';
 
 // ===== 常量（对齐 workbench-track 视觉层 + freecut-main MINI 几何） =====
 
@@ -61,8 +63,8 @@ export interface StoryboardTimelineProps {
   onPlayheadTimeChange?: (time: number) => void;
   onClipDoubleClick?: (shotId: string) => void;
   /** 插入补拍镜头（T4）：null=末尾追加；否则在指定 shot 之后插入。
-   * 第二参 insert 来自「资产拖入轨道」：用素材标题/时长初始化新镜头（2026-08-31） */
-  onInsertAt?: (afterShotId: string | null, insert?: { title?: string; durationSec?: number }) => void;
+   * 第二参 insert 来自「资产拖入轨道」：用素材标题/时长/封面/视频 key 初始化新镜头（2026-08-31） */
+  onInsertAt?: (afterShotId: string | null, insert?: { title?: string; durationSec?: number; storageKey?: string; coverUrl?: string }) => void;
   /** 删除片段（2026-08-31）：Delete 键 / 工具栏触发，由宿主负责确认/撤销/素材沉淀 */
   onDeleteShot?: (shotId: string) => void;
   /** 额外工具栏按钮（2026-08-31）：如「素材池」入口，渲染在左侧按钮组 */
@@ -431,7 +433,9 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
     if (!raw) return;
     e.preventDefault();
     try {
-      const payload = JSON.parse(raw) as { kind?: string; title?: string; durationMs?: number };
+      const payload = JSON.parse(raw) as {
+        kind?: string; title?: string; durationMs?: number; storageKey?: string; coverUrl?: string;
+      };
       if (payload.kind !== 'video') return; // 目前仅接受视频素材
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
@@ -452,6 +456,8 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       onInsertAt(afterId, {
         title: payload.title,
         durationSec: payload.durationMs ? Math.max(0.5, Math.round(payload.durationMs / 1000)) : undefined,
+        storageKey: payload.storageKey,
+        coverUrl: payload.coverUrl,
       });
     } catch { /* 非资产 payload 忽略 */ }
   }, [clips, onInsertAt]);
@@ -485,8 +491,13 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
       {/* Toolbar：时间码居中；右侧 = 缩放提示 + 滑块 + 加减按钮 */}
       <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 10px', borderBottom: `1px solid ${C.border}` }}>
         {onInsertAt && (
-          <button type="button" onClick={() => onInsertAt(activeShotId ?? null)} style={{ ...toolBtnStyle, color: C.text }}>
-            + 插入
+          <button
+            type="button"
+            onClick={() => onInsertAt(activeShotId ?? null)}
+            style={{ ...toolBtnStyle, color: C.text }}
+            title="在选中片段后插入新片段"
+          >
+            <Plus size={15} />
           </button>
         )}
         {onDeleteShot && activeShotId && (
@@ -496,7 +507,7 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
             style={{ ...toolBtnStyle, color: '#ef4444' }}
             title="删除选中片段（Delete）"
           >
-            删除
+            <Trash2 size={15} />
           </button>
         )}
         {extraToolbarButtons?.map((b) => (
@@ -555,10 +566,8 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
               const bg = statusBgColor(clip.data.status, isDark);
               const isDragging = draggingId === clip.id;
               const isNarrow = clip.width < 50;
-              const hasThumb = !!clip.data.thumbnailUrl;
-              const thumbBg = hasThumb
-                ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)), url(${clip.data.thumbnailUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                : { background: bg };
+              const thumbnailUrl = clip.data.thumbnailUrl;
+              const hasThumb = !!thumbnailUrl;
               return (
                 <div
                   key={clip.id}
@@ -589,20 +598,29 @@ export const StoryboardTimeline = memo(function StoryboardTimeline({
                     // 有缩略图时压了深色遮罩 → 白字；无缩略图时背景是状态浅色 → 亮色主题下必须深字
                     color: hasThumb ? '#ffffff' : C.clipText,
                     textShadow: hasThumb ? '0 1px 2px rgba(0,0,0,0.6)' : 'none',
-                    ...thumbBg,
+                    background: hasThumb ? 'transparent' : bg,
                   }}
                 >
+                  {hasThumb && thumbnailUrl && (
+                    <>
+                      <AuthorizedImage
+                        src={thumbnailUrl}
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', pointerEvents: 'none' }} />
+                    </>
+                  )}
                   {isNarrow ? (
-                    <div style={{ width: 4, height: '60%', borderRadius: 2, background: color, flexShrink: 0 }} />
+                    <div style={{ position: 'relative', width: 4, height: '60%', borderRadius: 2, background: color, flexShrink: 0 }} />
                   ) : (
                     <>
-                      <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, marginRight: 6 }}>
+                      <span style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, marginRight: 6 }}>
                         #{clip.data.number}
                       </span>
-                      <span style={{ fontSize: 9, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, marginRight: 6 }}>
+                      <span style={{ position: 'relative', fontSize: 9, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, marginRight: 6 }}>
                         {clip.data.label ?? ''}
                       </span>
-                      <b style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{clip.data.duration}s</b>
+                      <b style={{ position: 'relative', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', opacity: 0.9 }}>{clip.data.duration}s</b>
                     </>
                   )}
                   {/* 右侧 trim handle

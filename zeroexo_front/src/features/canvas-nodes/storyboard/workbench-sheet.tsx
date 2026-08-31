@@ -398,11 +398,12 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
   }, [data, onDataChange]);
 
   // 插入补拍镜头（T4,2026-08-31）：指定 shot 之后插入空镜头 + number 重编号
-  // 2026-08-31 扩展：insert 来自「资产拖入轨道」，用素材标题/时长初始化镜头
-  const onInsertAt = useCallback((afterShotId: string | null, insert?: { title?: string; durationSec?: number }) => {
+  // 2026-08-31 扩展：insert 来自「资产拖入轨道」，用素材标题/时长/封面/视频 key 初始化镜头
+  const onInsertAt = useCallback((afterShotId: string | null, insert?: { title?: string; durationSec?: number; storageKey?: string; coverUrl?: string }) => {
     const dur = insert?.durationSec
       ? Math.max(0.5, Math.min(30, insert.durationSec))
       : 5;
+    const storageKey = insert?.storageKey;
     const newShot: WorkbenchShot = {
       id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       number: 0,
@@ -410,6 +411,16 @@ export const WorkbenchSheet = memo(function WorkbenchSheet({
       shotType: '中景',
       duration: Math.round(dur * 10) / 10,
       status: 'pending',
+      // 拖入视频资产：直接作为可播放备选 + 封面图
+      videos: storageKey ? [{
+        storageKey,
+        status: 'done' as const,
+        source: 'external' as const,
+        createdAt: new Date().toISOString(),
+      }] : undefined,
+      activeVideoIndex: storageKey ? 0 : undefined,
+      generated: !!storageKey,
+      firstFrameKey: insert?.coverUrl,
     };
     const idx = afterShotId ? data.shots.findIndex((s) => s.id === afterShotId) + 1 : data.shots.length;
     const next = [...data.shots.slice(0, idx), newShot, ...data.shots.slice(idx)].map((s, i) => ({

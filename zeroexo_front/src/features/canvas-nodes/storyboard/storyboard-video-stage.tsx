@@ -2,6 +2,7 @@ import { memo, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
 import { CANVAS_NODE_ICONS } from '../icons.js';
+import { AuthorizedVideo } from '@/shared/components/authorized-media.js';
 
 /**
  * StoryboardVideoStage - 中区 16:9 视频舞台（Plan#53 T6）
@@ -32,11 +33,12 @@ export const StoryboardVideoStage = memo(function StoryboardVideoStage({
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 0, background: bg, borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {videoStorageKey && videoStatus !== 'failed' ? (
-        <video
+        <AuthorizedVideo
           key={videoStorageKey}
           src={videoStorageKey}
           controls
           autoPlay={false}
+          preload="metadata"
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />
       ) : (

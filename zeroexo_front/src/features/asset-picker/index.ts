@@ -73,7 +73,7 @@ export interface Asset {
 export type InsertAssetPayload =
   | { kind: 'text'; content: string; title: string }
   | { kind: 'image'; dataUrl: string; title: string; storageKey?: string; width?: number; height?: number }
-  | { kind: 'video'; url: string; title: string; storageKey?: string; width?: number; height?: number; durationMs?: number }
+  | { kind: 'video'; url: string; title: string; storageKey?: string; coverUrl?: string; width?: number; height?: number; durationMs?: number }
   | { kind: 'audio'; url: string; title: string; storageKey?: string; durationMs?: number };
 
 export interface AssetPickerProps {

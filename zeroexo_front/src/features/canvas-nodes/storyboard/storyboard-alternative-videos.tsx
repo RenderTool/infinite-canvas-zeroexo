@@ -7,6 +7,7 @@
 import { memo, useCallback, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, RefreshCw, RotateCcw } from 'lucide-react';
+import { AuthorizedVideo } from '@/shared/components/authorized-media.js';
 import type { ShotVideo } from './storyboard-types';
 import type { Asset } from '../../asset-picker/index.js';
 // 铁律：图标一律 lucide + 模块级 icons.ts Map，禁止 emoji 字符（2026-08-31）
@@ -34,7 +35,6 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
   const textPrimary = theme.toolbar.text;
   const textMuted = theme.toolbar.textMuted;
   const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-  const panelBg = isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)';
   const accent = theme.toolbar.accent ?? '#e94560';
 
   const statusLabel = useCallback((s: ShotVideo['status']) => {
@@ -58,7 +58,7 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
   return (
     <div
       data-drop-zone="alternative"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: panelBg, borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'transparent', borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
       onDrop={(e) => {
         e.preventDefault();
@@ -78,9 +78,9 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         <span>{t('storyboard.alternativeVideos', '备选视频')}</span>
         <span style={{ fontSize: 10, color: textMuted, fontWeight: 400 }}>{videos.length - 1} {t('storyboard.alternatives', '备选')}</span>
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, alignContent: 'start' }}>
         {videos.length === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7, gridColumn: '1 / -1' }}>
             <CANVAS_NODE_ICONS.videoEmpty size={22} strokeWidth={1.5} />
             <span>{t('storyboard.noVideos', '暂无生成产物')}</span>
           </div>
@@ -94,45 +94,50 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
               key={`${v.storageKey}-${idx}`}
               onClick={() => v.status === 'done' && onActivate(idx)}
               style={{
-                display: 'flex',
-                gap: 8,
-                padding: 6,
-                borderRadius: 6,
+                position: 'relative',
+                borderRadius: 8,
+                overflow: 'hidden',
                 cursor: v.status === 'done' ? 'pointer' : 'default',
-                background: isActive ? (isDark ? 'rgba(233,69,96,0.14)' : 'rgba(233,69,96,0.08)') : 'transparent',
+                background: isActive ? (isDark ? 'rgba(233,69,96,0.08)' : 'rgba(233,69,96,0.06)') : 'transparent',
                 border: `1px solid ${isActive ? accent : cardBorder}`,
-                transition: 'background 0.1s',
+                transition: 'background 0.1s, border-color 0.1s',
               }}
             >
-              {/* 缩略区（16:9 小图） */}
-              <div style={{ position: 'relative', width: 64, height: 36, borderRadius: 4, overflow: 'hidden', background: isDark ? theme.canvas.background : '#f5f5f4', flexShrink: 0 }}>
-                {v.status === 'done' ? (
-                  <video src={v.storageKey} muted preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: color, fontSize: 14 }}>
-                    {v.status === 'generating' ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : v.status === 'failed' ? <CANVAS_NODE_ICONS.close size={12} /> : '·'}
-                  </div>
-                )}
-                {isPrimary && (
-                  <span style={{ position: 'absolute', left: 2, top: 2, fontSize: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '0 3px', borderRadius: 3 }}>
-                    {t('storyboard.main', '主')}
-                  </span>
-                )}
-                {isActive && (
-                  <span style={{ position: 'absolute', right: 2, top: 2, fontSize: 8, background: accent, color: '#fff', padding: '0 3px', borderRadius: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Check size={8} /> {t('storyboard.active', '用')}
-                  </span>
-                )}
+              {/* 16:9 缩略图区：与资产抽屉卡片同款封面 */}
+              <div style={{ position: 'relative', width: '100%', paddingTop: '56.25%', background: isDark ? theme.canvas.background : '#f5f5f4' }}>
+                <div style={{ position: 'absolute', inset: 0 }}>
+                  {v.status === 'done' ? (
+                    <AuthorizedVideo
+                      src={v.storageKey}
+                      muted
+                      preload="metadata"
+                      playsInline
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+                      {v.status === 'generating' ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : v.status === 'failed' ? <CANVAS_NODE_ICONS.close size={16} /> : '·'}
+                    </div>
+                  )}
+                  {isPrimary && (
+                    <span style={{ position: 'absolute', left: 4, top: 4, fontSize: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '0 3px', borderRadius: 3 }}>
+                      {t('storyboard.main', '主')}
+                    </span>
+                  )}
+                  {isActive && (
+                    <span style={{ position: 'absolute', right: 4, top: 4, fontSize: 8, background: accent, color: '#fff', padding: '0 3px', borderRadius: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Check size={8} /> {t('storyboard.active', '用')}
+                    </span>
+                  )}
+                </div>
               </div>
               {/* 信息区 */}
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10 }}>
-                  <span style={{ color: color, fontWeight: 600 }}>{isPrimary ? 'V0' : `V${idx}`}</span>
-                  <span style={{ color: textMuted }}>{v.model ?? ''}</span>
-                  {v.duration ? <span style={{ color: textMuted }}>{v.duration}s</span> : null}
-                  {v.aspectRatio ? <span style={{ color: textMuted }}>{v.aspectRatio}</span> : null}
+                  <span style={{ color, fontWeight: 600 }}>{isPrimary ? 'V0' : `V${idx}`}</span>
+                  <span style={{ color: textMuted, fontSize: 9 }}>{v.model ?? ''}</span>
                 </div>
-                <div style={{ fontSize: 10, color: textMuted }}>{statusLabel(v.status)}</div>
+                <div style={{ fontSize: 9, color: textMuted }}>{statusLabel(v.status)} {v.duration ? `${v.duration}s` : ''}</div>
                 {v.status === 'failed' && v.error && (
                   <div style={{ fontSize: 9, color: '#f87171', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.error}>{v.error}</div>
                 )}
@@ -143,13 +148,13 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
                 )}
               </div>
               {/* 操作 */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, justifyContent: 'center' }}>
+              <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 2 }}>
                 {v.status === 'failed' && onRetry && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onRetry(idx); }}
                     title={t('storyboard.retry', '重试')}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: textMuted, padding: 2 }}
+                    style={{ background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', padding: 2 }}
                   >
                     <RotateCcw size={11} />
                   </button>
@@ -159,7 +164,7 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onRemove(idx); }}
                     title={t('storyboard.remove', '移除')}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: textMuted, padding: 2, display: 'flex', alignItems: 'center' }}
+                    style={{ background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', padding: 2, display: 'flex', alignItems: 'center' }}
                   >
                     <CANVAS_NODE_ICONS.close size={12} />
                   </button>

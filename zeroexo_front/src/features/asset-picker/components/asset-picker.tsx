@@ -294,7 +294,7 @@ export function AssetPicker({
 
   const pickerBodyStyle: CSSProperties = { margin: -20, padding: '0 24px 24px', height: 480, display: 'flex', flexDirection: 'column', overflow: 'hidden' };
   const toolbarStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '12px 0', flexShrink: 0 };
-  const gridStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, flex: 1, overflow: 'auto', alignContent: 'start' };
+  const gridStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 140px), 1fr))', gap: 12, flex: 1, overflow: 'auto', alignContent: 'start' };
   const emptyStyle: CSSProperties = { display: 'grid', placeItems: 'center', padding: '48px 0', color: theme.toolbar.textMuted, fontSize: 13, gap: 8 };
   const pagerStyle: CSSProperties = { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 0 0' };
   const inputStyle: CSSProperties = {
@@ -490,7 +490,7 @@ export function AssetPicker({
               style={inputStyle}
             />
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {KIND_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
