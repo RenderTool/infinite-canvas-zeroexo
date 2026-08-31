@@ -68,8 +68,9 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         <span>{t('storyboard.alternativeVideos', '备选视频')}</span>
         <span style={{ fontSize: 10, color: textMuted, fontWeight: 400 }}>{videos.length - 1} {t('storyboard.alternatives', '备选')}</span>
       </div>
-      {/* 卡片网格：主页资产同款 AssetCardGrid；卡片最小 150px 不被挤压，容器不足时横向滚动（同资产抽屉） */}
-      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, alignContent: 'start' }}>
+      {/* 卡片网格：固定 2 列（与资产抽屉 2 列布局尺寸一致），卡片最小 150px 不被挤压，不足 300px 容器时横向滚动。
+         不再用 1fr 拉伸——单列会被拉成 300+px 巨型卡片，破坏视觉一致性。 */}
+      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(150px, 1fr))', gap: 12, alignContent: 'start' }}>
         {videos.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7, gridColumn: '1 / -1' }}>
             <CANVAS_NODE_ICONS.videoEmpty size={22} strokeWidth={1.5} />
@@ -84,10 +85,9 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
               style={{
                 position: 'relative',
                 borderRadius: 12,
-                padding: 2,
-                boxSizing: 'border-box',
-                border: `1px solid ${isActive ? (theme.toolbar.accent ?? '#e94560') : 'transparent'}`,
-                boxShadow: isActive ? `0 0 0 1px ${theme.toolbar.accent ?? '#e94560'}55` : 'none',
+                // 用 outline 不占布局空间，保证激活态不挤压卡片尺寸（与资产抽屉卡片视觉一致）
+                outline: isActive ? `2px solid ${theme.toolbar.accent ?? '#e94560'}` : 'none',
+                outlineOffset: -1,
               }}
             >
               {/* 2026-08-31 用户拍板：备选视频必须与「资产抽屉」同款 AssetCardGrid（视觉/封面/悬停播放一致） */}
