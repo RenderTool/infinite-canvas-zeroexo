@@ -68,8 +68,8 @@ export const StoryboardAlternativeVideos = memo(function StoryboardAlternativeVi
         <span>{t('storyboard.alternativeVideos', '备选视频')}</span>
         <span style={{ fontSize: 10, color: textMuted, fontWeight: 400 }}>{videos.length - 1} {t('storyboard.alternatives', '备选')}</span>
       </div>
-      {/* 卡片网格：与资产抽屉 PickerCard 同款，无外层卡片样式 */}
-      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12, alignContent: 'start' }}>
+      {/* 卡片网格：主页资产同款 AssetCardGrid；卡片最小 150px 不被挤压，容器不足时横向滚动（同资产抽屉） */}
+      <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, alignContent: 'start' }}>
         {videos.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, height: 100, color: textMuted, fontSize: 11, opacity: 0.7, gridColumn: '1 / -1' }}>
             <CANVAS_NODE_ICONS.videoEmpty size={22} strokeWidth={1.5} />
